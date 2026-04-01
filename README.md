@@ -38,6 +38,8 @@ ayx server
 ## What the CLI gives you
 
 - `mongo` for embedded and managed Mongo operations
+  - `mongo query` for read-only collection queries
+  - `mongo doctor` for the built-in support query suite
 - `api` for the Server web API
 - `server` for environment inspection, logs, Swagger import, and lower-level API calls
 - `server diagnose` for operator-facing Server troubleshooting flows
@@ -108,6 +110,8 @@ ayx server auth diagnose certificate
 ayx server auth diagnose ad-legacy
 ayx server auth simulate saml --metadata-file .\metadata.xml
 ayx server doctor startup --error "Failed to register Service URL"
+ayx mongo query --database AlteryxService --collection AS_Queue --filter "{}"
+ayx mongo doctor
 ```
 
 ## Development

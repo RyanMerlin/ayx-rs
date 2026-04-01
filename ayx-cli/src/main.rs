@@ -15,7 +15,10 @@ use ayx_server::logs::{
     discover_log_inventory, extract_context, parse_gallery_csv, parse_gallery_events,
     parse_service_events, recent_log_candidates, summarize_log_file, tail_log_file,
 };
-use ayx_server::mongo::{backup_envelope, inventory_envelope, restore_envelope, status_envelope};
+use ayx_server::mongo::{
+    backup_envelope, doctor_envelope as mongo_doctor_envelope, inventory_envelope,
+    query_envelope as mongo_query_envelope, restore_envelope, status_envelope, MongoQuerySpec,
+};
 use ayx_server::upgrade::{
     compute_path, run_apply, run_backup, run_bundle, run_plan, run_postcheck, run_precheck,
 };
@@ -115,6 +118,30 @@ enum MongoCommand {
         apply: bool,
         #[arg(long, default_value = "audits")]
         audit_dir: PathBuf,
+    },
+    Query {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        database: String,
+        #[arg(long)]
+        collection: String,
+        #[arg(long, default_value = "{}")]
+        filter: String,
+        #[arg(long)]
+        projection: Option<String>,
+        #[arg(long)]
+        sort: Option<String>,
+        #[arg(long, default_value_t = 25)]
+        limit: u32,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        template: Option<String>,
+    },
+    Doctor {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
     },
 }
 
@@ -1027,6 +1054,26 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Focuses on Server-side SAML configuration and common mismatch checks."],
     },
     CommandSpec {
+        name: "mongo query",
+        path: "mongo/query",
+        summary: "Run a read-only Mongo query against a Server collection.",
+        output: "mongo query envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "mongosh available on PATH"],
+        notes: &["Use for targeted inspection of Gallery and Service collections."],
+    },
+    CommandSpec {
+        name: "mongo doctor",
+        path: "mongo/doctor",
+        summary: "Run the default support query suite across critical Mongo collections.",
+        output: "mongo doctor envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "mongosh available on PATH"],
+        notes: &["Targets queue, results, users, and app info collections."],
+    },
+    CommandSpec {
         name: "server auth diagnose saml-logs",
         path: "server/auth/diagnose/saml-logs",
         summary: "Collect and summarize SAML login logs.",
@@ -1410,6 +1457,47 @@ fn execute(cli: Cli) -> Result<Envelope> {
             } => {
                 let profile = load_profile(&profile)?;
                 restore_envelope(&profile, &input_path, apply, &audit_dir)?
+            }
+            MongoCommand::Query {
+                profile,
+                database,
+                collection,
+                filter,
+                projection,
+                sort,
+                limit,
+                apply,
+                template,
+            } => {
+                let profile = load_profile(&profile)?;
+                let spec = MongoQuerySpec {
+                    database,
+                    collection,
+                    filter: serde_json::from_str(&filter)
+                        .with_context(|| format!("invalid JSON passed to --filter: {filter}"))?,
+                    projection: projection
+                        .as_deref()
+                        .map(|value| {
+                            serde_json::from_str(value).with_context(|| {
+                                format!("invalid JSON passed to --projection: {value}")
+                            })
+                        })
+                        .transpose()?,
+                    sort: sort
+                        .as_deref()
+                        .map(|value| {
+                            serde_json::from_str(value)
+                                .with_context(|| format!("invalid JSON passed to --sort: {value}"))
+                        })
+                        .transpose()?,
+                    limit: Some(limit),
+                    template_name: template,
+                };
+                mongo_query_envelope(&profile, &spec, apply)?
+            }
+            MongoCommand::Doctor { profile } => {
+                let profile = load_profile(&profile)?;
+                mongo_doctor_envelope(&profile)?
             }
         },
         Command::Api { command } => match command {

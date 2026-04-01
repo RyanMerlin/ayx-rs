@@ -10,6 +10,17 @@ use chrono::Utc;
 use roxmltree::Document;
 use serde_json::json;
 
+#[derive(Clone, Debug)]
+pub struct MongoQuerySpec {
+    pub database: String,
+    pub collection: String,
+    pub filter: serde_json::Value,
+    pub projection: Option<serde_json::Value>,
+    pub sort: Option<serde_json::Value>,
+    pub limit: Option<u32>,
+    pub template_name: Option<String>,
+}
+
 pub fn status_envelope(config: &Config) -> Result<Envelope> {
     let mode = match config.mongo.mode {
         MongoMode::Embedded => "embedded",
@@ -31,6 +42,91 @@ pub fn status_envelope(config: &Config) -> Result<Envelope> {
                 "gallery": config.mongo.databases.gallery_name,
                 "service": config.mongo.databases.service_name
             }
+        }),
+    ))
+}
+
+pub fn query_envelope(config: &Config, spec: &MongoQuerySpec, apply: bool) -> Result<Envelope> {
+    if apply {
+        anyhow::bail!("mongo query is read-only; use dedicated mutation workflows for writes");
+    }
+
+    let detail = resolve_connection_detail(config)?;
+    let execution = execute_query(config, spec)?;
+    Ok(Envelope::ok_with_data(
+        format!(
+            "mongo query executed against {}.{}",
+            spec.database, spec.collection
+        ),
+        json!({
+            "profile": config.profile_name,
+            "connection": detail,
+            "query": {
+                "database": spec.database,
+                "collection": spec.collection,
+                "filter": spec.filter,
+                "projection": spec.projection,
+                "sort": spec.sort,
+                "limit": spec.limit,
+                "template": spec.template_name,
+            },
+            "execution": execution,
+        }),
+    ))
+}
+
+pub fn doctor_envelope(config: &Config) -> Result<Envelope> {
+    let queries = mongo_doctor_queries(config)?;
+    let mut results = Vec::new();
+    for query in queries.as_array().cloned().unwrap_or_default() {
+        let spec = MongoQuerySpec {
+            database: query
+                .get("database")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            collection: query
+                .get("collection")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            filter: query.get("filter").cloned().unwrap_or_else(|| json!({})),
+            projection: None,
+            sort: None,
+            limit: query
+                .get("limit")
+                .and_then(serde_json::Value::as_u64)
+                .map(|v| v as u32),
+            template_name: query
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map(ToOwned::to_owned),
+        };
+        match execute_query(config, &spec) {
+            Ok(value) => results.push(json!({
+                "name": spec.template_name,
+                "ok": true,
+                "result": value,
+            })),
+            Err(err) => results.push(json!({
+                "name": spec.template_name,
+                "ok": false,
+                "error": err.to_string(),
+            })),
+        }
+    }
+    Ok(Envelope::ok_with_data(
+        "mongo doctor plan generated",
+        json!({
+            "profile": config.profile_name,
+            "connection": resolve_connection_detail(config)?,
+            "queries": queries,
+            "results": results,
+            "notes": [
+                "All queries are read-only and designed for support diagnostics",
+                "Use query outputs to validate queue integrity, results integrity, app bindings, and user records",
+                "For bulk updates, create a dedicated apply workflow with explicit audit and confirmation gates",
+            ],
         }),
     ))
 }
@@ -238,6 +334,141 @@ fn execute_backup(config: &Config, output_dir: &Path) -> Result<serde_json::Valu
             Ok(json!({ "mode": "managed", "runs": runs }))
         }
     }
+}
+
+fn execute_query(config: &Config, spec: &MongoQuerySpec) -> Result<serde_json::Value> {
+    let managed = config.mongo.managed.as_ref();
+    let database = &spec.database;
+    let collection = &spec.collection;
+    let filter = serde_json::to_string(&spec.filter)?;
+    let projection = match &spec.projection {
+        Some(v) => format!(", {}", serde_json::to_string(v)?),
+        None => String::new(),
+    };
+    let sort = spec.sort.as_ref().map(serde_json::to_string).transpose()?;
+    let limit = spec.limit.unwrap_or(25);
+    let sort_js = sort
+        .as_ref()
+        .map(|s| format!(".sort({s})"))
+        .unwrap_or_default();
+    let projection_js = projection;
+
+    let mut js = String::new();
+    js.push_str("const dbName = ");
+    js.push_str(&serde_json::to_string(database)?);
+    js.push_str("; const collName = ");
+    js.push_str(&serde_json::to_string(collection)?);
+    js.push_str("; const filter = ");
+    js.push_str(&filter);
+    js.push_str("; const result = db.getSiblingDB(dbName).getCollection(collName).find(filter");
+    js.push_str(&projection_js);
+    js.push_str(&sort_js);
+    js.push_str(&format!(
+        ".limit({limit}).toArray(); print(JSON.stringify(result));"
+    ));
+
+    let mongo_cmd = if cfg!(target_os = "windows") {
+        "mongosh.exe"
+    } else {
+        "mongosh"
+    };
+    ensure_tool_available(mongo_cmd)?;
+
+    let mut args: Vec<String> = vec!["--quiet".to_string(), "--eval".to_string(), js];
+    if let Some(url) = managed.and_then(|m| m.url.as_ref()) {
+        args.push("--uri".to_string());
+        args.push(url.to_string());
+    } else if let Some(m) = managed {
+        if let Some(host) = m.host.as_ref() {
+            args.push("--host".to_string());
+            args.push(host.to_string());
+        }
+        args.push("--port".to_string());
+        args.push(m.port.to_string());
+        if let Some(username) = m.username.as_ref() {
+            args.push("--username".to_string());
+            args.push(username.to_string());
+        }
+        if let Some(password) = m.password.as_ref() {
+            args.push("--password".to_string());
+            args.push(password.to_string());
+        }
+        if let Some(auth_db) = m.auth_database.as_ref() {
+            args.push("--authenticationDatabase".to_string());
+            args.push(auth_db.to_string());
+        }
+    }
+
+    if let Some(m) = managed {
+        if m.tls.enabled {
+            args.push("--tls".to_string());
+            if let Some(ca) = m.tls.ca_path.as_ref() {
+                args.push("--tlsCAFile".to_string());
+                args.push(ca.to_string());
+            }
+            if m.tls.cert_path.is_some() || m.tls.key_path.is_some() {
+                args.push("--tlsCertificateKeyFile".to_string());
+                args.push(tls_cert_key_file_arg(&m.tls)?);
+            }
+            if m.tls.allow_invalid_hostnames.unwrap_or(false) {
+                args.push("--tlsAllowInvalidHostnames".to_string());
+            }
+        }
+    }
+
+    let arg_refs: Vec<&str> = args.iter().map(|a| a.as_str()).collect();
+    let execution = run_command_capture(Path::new(mongo_cmd), &arg_refs, None)?;
+    let parsed = execution
+        .get("stdout")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .unwrap_or(serde_json::Value::Null);
+    Ok(json!({
+        "command": mongo_cmd,
+        "execution": execution,
+        "parsed": parsed,
+    }))
+}
+
+fn mongo_doctor_queries(config: &Config) -> Result<serde_json::Value> {
+    Ok(json!([
+        {
+            "name": "queue_health",
+            "database": config.mongo.databases.service_name,
+            "collection": "AS_Queue",
+            "filter": { "__Version": { "$exists": true } },
+            "limit": 10,
+            "purpose": "Inspect queued and completed jobs",
+            "kba_refs": ["AS_Queue", "job state corruption", "orphaned queue rows"],
+        },
+        {
+            "name": "results_health",
+            "database": config.mongo.databases.service_name,
+            "collection": "AS_Results",
+            "filter": { "__Version": { "$exists": true } },
+            "limit": 10,
+            "purpose": "Inspect job results and result linkage",
+            "kba_refs": ["AS_Results", "missing result rows", "workflow completion issues"],
+        },
+        {
+            "name": "gallery_users",
+            "database": config.mongo.databases.gallery_name,
+            "collection": "users",
+            "filter": { "__Version": { "$exists": true } },
+            "limit": 10,
+            "purpose": "Inspect Gallery users and email/domain state",
+            "kba_refs": ["users", "bulk email domain migration", "orphaned users"],
+        },
+        {
+            "name": "appinfos",
+            "database": config.mongo.databases.gallery_name,
+            "collection": "collections.appinfos",
+            "filter": { "__Version": { "$exists": true } },
+            "limit": 10,
+            "purpose": "Inspect gallery app metadata and ownership mappings",
+            "kba_refs": ["appinfos", "app ownership", "gallery item corruption"],
+        }
+    ]))
 }
 
 fn execute_restore(config: &Config, input_path: &Path) -> Result<serde_json::Value> {
