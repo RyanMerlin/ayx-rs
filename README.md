@@ -49,6 +49,7 @@ ayx server
 - `server auth` for SAML-first auth inspection, diagnosis, simulation, and narrow legacy AD checks
 - `server doctor` for prescriptive troubleshooting workflows built on top of diagnose
 - `workflow` for local `.yxmd`, `.yxmc`, `.yxzp`, and `.yxdb` package/XML tooling
+  - `workflow scan --rules docs/workflow-recurse.example.yaml` to preflight a migration
   - `workflow recurse --rules docs/workflow-recurse.example.yaml` for recursive migrations
   - `workflow publish` to hand a repackaged workflow back to the Server API
 - `license` for the Licensing portal and API branch

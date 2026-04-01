@@ -29,6 +29,12 @@ pub struct WorkflowRules {
     pub replacements: Vec<WorkflowReplacement>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkflowMatch {
+    pub path: String,
+    pub matches: Vec<String>,
+}
+
 fn workflow_kind(path: &Path) -> &'static str {
     match path
         .extension()
@@ -80,6 +86,16 @@ fn apply_replacements(text: &str, replacements: &[WorkflowReplacement]) -> (Stri
     (out, matches)
 }
 
+fn scan_text(text: &str, replacements: &[WorkflowReplacement]) -> Vec<String> {
+    let mut matches = Vec::new();
+    for replacement in replacements {
+        if text.contains(&replacement.find) {
+            matches.push(replacement.find.clone());
+        }
+    }
+    matches
+}
+
 pub fn load_rules(path: &Path) -> Result<WorkflowRules> {
     let text = fs::read_to_string(path)
         .with_context(|| format!("failed to read workflow rules '{}'", path.display()))?;
@@ -121,6 +137,88 @@ pub fn load_rules(path: &Path) -> Result<WorkflowRules> {
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(WorkflowRules { replacements })
+}
+
+fn scan_path(path: &Path, replacements: &[WorkflowReplacement]) -> Result<Vec<WorkflowMatch>> {
+    if path.is_dir() {
+        let mut results = Vec::new();
+        for entry in WalkDir::new(path)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+        {
+            if entry.file_type().is_file() && is_workflow_artifact(entry.path()) {
+                let text = if entry
+                    .path()
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|s| s.eq_ignore_ascii_case("yxzp"))
+                    .unwrap_or(false)
+                {
+                    continue;
+                } else {
+                    read_text(entry.path())?
+                };
+                let matches = scan_text(&text, replacements);
+                if !matches.is_empty() {
+                    results.push(WorkflowMatch {
+                        path: entry.path().display().to_string(),
+                        matches,
+                    });
+                }
+            }
+        }
+        return Ok(results);
+    }
+
+    if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|s| s.eq_ignore_ascii_case("yxzp"))
+        .unwrap_or(false)
+    {
+        let file =
+            fs::File::open(path).with_context(|| format!("failed to open '{}'", path.display()))?;
+        let mut archive = ZipArchive::new(file)
+            .with_context(|| format!("failed to read zip archive '{}'", path.display()))?;
+        let mut results = Vec::new();
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index)?;
+            let name = entry.name().to_string();
+            let entry_path = Path::new(&name);
+            if is_xml_like(entry_path) {
+                let mut buf = String::new();
+                entry.read_to_string(&mut buf)?;
+                let matches = scan_text(&buf, replacements);
+                if !matches.is_empty() {
+                    results.push(WorkflowMatch {
+                        path: name,
+                        matches,
+                    });
+                }
+            }
+        }
+        return Ok(results);
+    }
+
+    let text = read_text(path)?;
+    let matches = scan_text(&text, replacements);
+    Ok(if matches.is_empty() {
+        Vec::new()
+    } else {
+        vec![WorkflowMatch {
+            path: path.display().to_string(),
+            matches,
+        }]
+    })
+}
+
+pub fn scan(path: &Path, replacements: &[WorkflowReplacement]) -> Result<Value> {
+    let matches = scan_path(path, replacements)?;
+    Ok(json!({
+        "path": path.display().to_string(),
+        "match_count": matches.len(),
+        "matches": matches,
+    }))
 }
 
 fn read_text(path: &Path) -> Result<String> {

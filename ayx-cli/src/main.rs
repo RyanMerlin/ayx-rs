@@ -37,7 +37,8 @@ use ayx_server::{call_operation, diagnose_api, import_swagger};
 use ayx_workflow::{
     inspect as inspect_workflow, load_rules as load_workflow_rules, migrate as migrate_workflow,
     recurse as recurse_workflow, repackage_dir as repackage_workflow, replace as replace_workflow,
-    unpack_package as unpack_workflow, validate as validate_workflow, WorkflowReplacement,
+    scan as scan_workflow, unpack_package as unpack_workflow, validate as validate_workflow,
+    WorkflowReplacement,
 };
 use self_update::backends::github::Update as GitHubUpdate;
 use self_update::Status;
@@ -281,6 +282,16 @@ enum WorkflowCommand {
         replace: Vec<String>,
         #[arg(long)]
         validate: bool,
+    },
+    Scan {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        rules: Option<PathBuf>,
+        #[arg(long = "find")]
+        find: Vec<String>,
+        #[arg(long = "replace")]
+        replace: Vec<String>,
     },
     Publish {
         #[arg(long, default_value = "config.yaml")]
@@ -851,6 +862,22 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &[
             "Use --rules for YAML-driven migrations or repeat --find/--replace pairs.",
             "Recurses into packages and nested workflow artifacts.",
+        ],
+    },
+    CommandSpec {
+        name: "workflow scan",
+        path: "workflow/scan",
+        summary: "Preflight scan workflow artifacts for rule matches without rewriting.",
+        output: "workflow scan envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &[
+            "input artifact or directory",
+            "rules file or repeated find/replace pairs",
+        ],
+        notes: &[
+            "Reports candidate matches by file so migrations can be reviewed first.",
+            "Use with the same rules you plan to pass to recurse.",
         ],
     },
     CommandSpec {
@@ -2453,7 +2480,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
         },
         Command::Workflow { command } => match command {
             None => Envelope::ok(
-                "workflow commands available: inspect, unpack, validate, replace, repackage, recurse, migrate",
+                "workflow commands available: inspect, unpack, validate, replace, repackage, recurse, scan, publish, migrate",
             ),
             Some(WorkflowCommand::Inspect { input }) => {
                 let detail = inspect_workflow(&input)?;
@@ -2569,6 +2596,35 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     json!({
                         "input": input.display().to_string(),
                         "output": output.display().to_string(),
+                        "data": detail,
+                    }),
+                )
+            }
+            Some(WorkflowCommand::Scan {
+                input,
+                rules,
+                find,
+                replace,
+            }) => {
+                let replacements = if let Some(rules) = rules.as_ref() {
+                    let rules = load_workflow_rules(rules)?;
+                    rules.replacements
+                } else {
+                    if find.len() != replace.len() {
+                        bail!(
+                            "workflow scan requires the same number of --find and --replace values"
+                        );
+                    }
+                    find.into_iter()
+                        .zip(replace)
+                        .map(|(find, replace)| WorkflowReplacement { find, replace })
+                        .collect()
+                };
+                let detail = scan_workflow(&input, &replacements)?;
+                Envelope::ok_with_data(
+                    "workflow scan completed",
+                    json!({
+                        "input": input.display().to_string(),
                         "data": detail,
                     }),
                 )

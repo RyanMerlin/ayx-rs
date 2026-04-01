@@ -68,5 +68,6 @@ fn workflow_help_renders() {
     assert!(stdout.contains("inspect"));
     assert!(stdout.contains("migrate"));
     assert!(stdout.contains("recurse"));
+    assert!(stdout.contains("scan"));
     assert!(stdout.contains("publish"));
 }
