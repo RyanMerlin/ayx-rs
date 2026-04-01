@@ -463,7 +463,10 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
-        notes: &["Use this before platform, plans, auto-insights, or desktop-exec workflows."],
+        notes: &[
+            "Use this before platform, plans, auto-insights, or desktop-exec workflows.",
+            "Managed IAM lives in walter/docs/one/api/managed-iam-v1.yaml.",
+        ],
     },
     CommandSpec {
         name: "one platform inventory",
@@ -473,7 +476,10 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
-        notes: &["Use this as the first pass for platform surface discovery."],
+        notes: &[
+            "Use this as the first pass for platform surface discovery.",
+            "Start with workspace, user, role, and group operations before broader platform areas.",
+        ],
     },
     CommandSpec {
         name: "one platform api status",
@@ -483,7 +489,10 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
-        notes: &["Use this to inspect platform API posture before diagnostics."],
+        notes: &[
+            "Use this to inspect platform API posture before diagnostics.",
+            "Treat this as the One managed IAM posture check.",
+        ],
     },
     CommandSpec {
         name: "one platform api diagnose",
@@ -493,7 +502,10 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
-        notes: &["Use before future platform API call-style workflows."],
+        notes: &[
+            "Use before future platform API call-style workflows.",
+            "Route workflow guidance through Walter once the symptom is known.",
+        ],
     },
     CommandSpec {
         name: "one plans status",
@@ -503,7 +515,10 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
-        notes: &["Reserved for plan lifecycle workflows."],
+        notes: &[
+            "Reserved for plan lifecycle workflows.",
+            "Managed Plans lives in walter/docs/one/api/managed-plans-v1.yaml.",
+        ],
     },
     CommandSpec {
         name: "one auto-insights status",
@@ -513,7 +528,10 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
-        notes: &["Reserved for Auto Insights workflows."],
+        notes: &[
+            "Reserved for Auto Insights workflows.",
+            "Scheduling and run semantics may map here or to a later dedicated branch.",
+        ],
     },
     CommandSpec {
         name: "one desktop-exec status",
@@ -523,7 +541,10 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
-        notes: &["Reserved for desktop execution workflows."],
+        notes: &[
+            "Reserved for desktop execution workflows.",
+            "Keep this branch narrow until the desktop-exec surface is validated.",
+        ],
     },
     CommandSpec {
         name: "license api status",
