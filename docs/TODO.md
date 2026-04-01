@@ -51,6 +51,13 @@ This is the working plan for evolving the AYX CLI into a production-grade, agent
 - keep API-specific command trees under their product roots (`server`, `license`, `one`) while shared HTTP/auth helpers remain internal.
 - extend the Codex plugin layer as the place for API KBA playbooks and multi-step orchestration.
 
+## 8. One API hardening
+- add a shared One transport helper with retries, exponential backoff, jitter, and `Retry-After` handling.
+- normalize One API failures into structured envelopes with request ids, status codes, endpoint metadata, and parsed response bodies.
+- add structured logging for One calls so operators can debug auth, rate limiting, and transient failures without leaking secrets.
+- add ID-discovery helpers and a `one doctor` surface so workspace, plan, schedule, and billing checks can be run as a stable support suite.
+- separate safe read-only paths from mutating actions and require stronger guardrails for bulk or destructive One workflows.
+
 ## Current priority
 - finish the integration-test pass for the core workflows.
 - expand the command registry with richer command metadata and generated docs.
@@ -58,3 +65,4 @@ This is the working plan for evolving the AYX CLI into a production-grade, agent
 - finish the Mongo query registry and doctor suite before adding any Mongo remediation/mutation workflows.
 - keep Server auth focused on the SAML simulation and diagnosis primitives the KBAs actually support.
 - flesh out `one platform` workflows first, then continue expanding License where the KBA set justifies it.
+- harden One API execution before adding more mutating One workflows or bulk operations.

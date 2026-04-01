@@ -38,5 +38,5 @@ alteryx_server:
       retry_count: 2
       max_pool_size: 20
 upgrade:
-  target_version: 2025.2
+  target_version: "2025.2"
   deployment: embedded-mongo

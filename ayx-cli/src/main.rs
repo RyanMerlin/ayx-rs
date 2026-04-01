@@ -5,9 +5,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use reqwest::blocking::Client;
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER};
+use reqwest::StatusCode;
 use roxmltree::Document;
 use serde_json::{json, Value};
+use std::time::{Duration, Instant};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::envelope::Envelope;
@@ -236,6 +238,10 @@ enum OneCommand {
     Platform {
         #[command(subcommand)]
         command: Option<OnePlatformCommand>,
+    },
+    Doctor {
+        #[command(subcommand)]
+        command: Option<OneDoctorCommand>,
     },
     Status {
         #[arg(long, default_value = "config.yaml")]
@@ -486,6 +492,30 @@ enum OneBillingCommand {
 }
 
 #[derive(Subcommand, Debug)]
+enum OneDoctorCommand {
+    Auth {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Platform {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Plans {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Scheduling {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Billing {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum LicenseCommand {
     Api {
         #[command(subcommand)]
@@ -726,6 +756,56 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["config.yaml", "alteryx_one.access_token"],
         notes: &["Uses the managed IAM current workspace endpoint as the safe validation target."],
+    },
+    CommandSpec {
+        name: "one doctor auth",
+        path: "one/doctor/auth",
+        summary: "Run the One auth doctor workflow.",
+        output: "one auth doctor envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Wraps token posture and workspace probe checks."],
+    },
+    CommandSpec {
+        name: "one doctor platform",
+        path: "one/doctor/platform",
+        summary: "Run the One platform doctor workflow.",
+        output: "one platform doctor envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Wraps workspace and role discovery checks."],
+    },
+    CommandSpec {
+        name: "one doctor plans",
+        path: "one/doctor/plans",
+        summary: "Run the One plans doctor workflow.",
+        output: "one plans doctor envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Wraps list, count, and plan lookup checks."],
+    },
+    CommandSpec {
+        name: "one doctor scheduling",
+        path: "one/doctor/scheduling",
+        summary: "Run the One scheduling doctor workflow.",
+        output: "one scheduling doctor envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Wraps schedule list and count checks."],
+    },
+    CommandSpec {
+        name: "one doctor billing",
+        path: "one/doctor/billing",
+        summary: "Run the One billing doctor workflow.",
+        output: "one billing doctor envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Wraps billing account and usage export checks."],
     },
     CommandSpec {
         name: "one platform api status",
@@ -2168,6 +2248,29 @@ fn execute(cli: Cli) -> Result<Envelope> {
             None => Envelope::ok(
                 "one commands available: platform, plans, scheduling, billing, auto-insights, desktop-exec",
             ),
+            Some(OneCommand::Doctor { command }) => match command {
+                Some(OneDoctorCommand::Auth { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_platform_auth_diagnose_envelope(&config)?
+                }
+                Some(OneDoctorCommand::Platform { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_doctor_platform_envelope(&config)?
+                }
+                Some(OneDoctorCommand::Plans { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_doctor_plans_envelope(&config)?
+                }
+                Some(OneDoctorCommand::Scheduling { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_doctor_scheduling_envelope(&config)?
+                }
+                Some(OneDoctorCommand::Billing { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_doctor_billing_envelope(&config)?
+                }
+                None => Envelope::ok("one doctor commands available: auth, platform, plans, scheduling, billing"),
+            },
             Some(OneCommand::Platform { command }) => match command {
                 Some(OnePlatformCommand::Api { command }) => match command {
                     OnePlatformApiCommand::Status { profile } => {
@@ -2677,14 +2780,14 @@ fn one_api_live_request(
     mutating: bool,
     path_params: &[(&str, &str)],
 ) -> Result<Envelope> {
-    let api = config
+    let access_token = config
         .alteryx_one
         .as_ref()
         .and_then(|one| one.access_token.as_ref())
         .ok_or_else(|| anyhow!("alteryx_one.access_token is required for live one api calls"))?;
     let base_url = "https://api.us1.alteryxcloud.com";
     let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+        .timeout(Duration::from_secs(60))
         .build()
         .context("failed to build one api client")?;
 
@@ -2695,48 +2798,257 @@ fn one_api_live_request(
     let method_name = method.to_string();
     let method = reqwest::Method::from_bytes(method_name.as_bytes())
         .map_err(|_| anyhow!("unsupported one api method '{}'", method))?;
-    let mut request = client
-        .request(method, &url)
-        .header(AUTHORIZATION, format!("Bearer {}", api))
-        .header(reqwest::header::ACCEPT, "application/json");
-    if mutating {
-        request = request.header(CONTENT_TYPE, "application/json");
-    }
+    let mut attempt = 0u32;
+    let max_attempts = if mutating { 1 } else { 4 };
+    let started = Instant::now();
+    let mut last_status: Option<StatusCode> = None;
+    let mut retry_after_seconds: Option<u64> = None;
 
-    let response = request
-        .send()
-        .with_context(|| format!("failed to call one api '{} {}'", method_name, url))?;
-    let status = response.status();
-    let content_type = response
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|val| val.to_str().ok())
-        .unwrap_or_default()
-        .to_string();
-    let text = response.text().unwrap_or_else(|_| String::new());
-    let response_body = if content_type.to_lowercase().contains("json") {
-        serde_json::from_str(&text).unwrap_or_else(|_| json!({ "raw": text }))
+    loop {
+        attempt += 1;
+        let mut request = client
+            .request(method.clone(), &url)
+            .header(AUTHORIZATION, format!("Bearer {}", access_token))
+            .header(reqwest::header::ACCEPT, "application/json");
+        if mutating {
+            request = request.header(CONTENT_TYPE, "application/json");
+        }
+
+        let response = request.send();
+        match response {
+            Ok(response) => {
+                let status = response.status();
+                last_status = Some(status);
+                retry_after_seconds = parse_retry_after(response.headers().get(RETRY_AFTER));
+                if status.is_success()
+                    || !should_retry_status(status, mutating)
+                    || attempt >= max_attempts
+                {
+                    let content_type = response
+                        .headers()
+                        .get(CONTENT_TYPE)
+                        .and_then(|val| val.to_str().ok())
+                        .unwrap_or_default()
+                        .to_string();
+                    let request_id = response
+                        .headers()
+                        .get("x-request-id")
+                        .and_then(|val| val.to_str().ok())
+                        .map(ToOwned::to_owned);
+                    let text = response.text().unwrap_or_else(|_| String::new());
+                    let response_body = parse_response_text(&content_type, &text);
+                    return Ok(Envelope::ok_with_data(
+                        format!(
+                            "{} {} {}",
+                            surface,
+                            operation,
+                            if status.is_success() { "ok" } else { "failed" }
+                        ),
+                        json!({
+                            "surface": surface,
+                            "operation": operation,
+                            "method": method_name,
+                            "url": url,
+                            "attempts": attempt,
+                            "elapsed_ms": started.elapsed().as_millis(),
+                            "status_code": status.as_u16(),
+                            "ok": status.is_success(),
+                            "request_id": request_id,
+                            "retry_after_seconds": retry_after_seconds,
+                            "response": response_body,
+                        }),
+                    ));
+                }
+                let delay = retry_delay(attempt, retry_after_seconds);
+                std::thread::sleep(delay);
+                continue;
+            }
+            Err(err) => {
+                if mutating || attempt >= max_attempts {
+                    return Ok(Envelope::ok_with_data(
+                        format!("{} {} failed", surface, operation),
+                        json!({
+                            "surface": surface,
+                            "operation": operation,
+                            "method": method_name,
+                            "url": url,
+                            "attempts": attempt,
+                            "elapsed_ms": started.elapsed().as_millis(),
+                            "ok": false,
+                            "status_code": last_status.map(|s| s.as_u16()),
+                            "retry_after_seconds": retry_after_seconds,
+                            "error": err.to_string(),
+                            "response": Value::Null,
+                        }),
+                    ));
+                }
+                let delay = retry_delay(attempt, retry_after_seconds);
+                std::thread::sleep(delay);
+            }
+        }
+    }
+}
+
+fn parse_response_text(content_type: &str, text: &str) -> Value {
+    if content_type.to_lowercase().contains("application/json") {
+        serde_json::from_str(text).unwrap_or_else(|_| json!({ "raw": text }))
     } else if text.trim().is_empty() {
         Value::Null
     } else {
         json!({ "raw": text })
-    };
+    }
+}
 
+fn should_retry_status(status: StatusCode, mutating: bool) -> bool {
+    if mutating {
+        return false;
+    }
+    matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504)
+}
+
+fn parse_retry_after(header: Option<&reqwest::header::HeaderValue>) -> Option<u64> {
+    let value = header?.to_str().ok()?.trim();
+    value.parse::<u64>().ok()
+}
+
+fn retry_delay(attempt: u32, retry_after_seconds: Option<u64>) -> Duration {
+    if let Some(seconds) = retry_after_seconds {
+        return Duration::from_secs(seconds.clamp(1, 60));
+    }
+    let shift = attempt.saturating_sub(1).min(6);
+    let multiplier = 1u64 << shift;
+    let base_ms = 250u64.saturating_mul(multiplier);
+    Duration::from_millis(base_ms.min(8_000))
+}
+
+fn one_doctor_platform_envelope(config: &Config) -> Result<Envelope> {
+    let auth = one_platform_auth_status_envelope(config)?;
+    let workspace = one_api_live_request(
+        config,
+        "platform",
+        "doctor-workspace-current",
+        "GET",
+        "/iam/v1/workspaces/current",
+        false,
+        &[],
+    )?;
     Ok(Envelope::ok_with_data(
-        format!(
-            "{} {} {}",
-            surface,
-            operation,
-            if status.is_success() { "ok" } else { "failed" }
-        ),
+        "one platform doctor workflow generated",
         json!({
-            "surface": surface,
-            "operation": operation,
-            "method": method_name,
-            "url": url,
-            "status_code": status.as_u16(),
-            "ok": status.is_success(),
-            "response": response_body,
+            "profile": config.profile_name,
+            "checks": [
+                auth.data,
+                workspace.data,
+            ],
+            "recommendations": [
+                "Use one platform workspace people/admins to drill into workspace scope",
+                "Route deeper symptom handling to Walter playbooks",
+            ]
+        }),
+    ))
+}
+
+fn one_doctor_plans_envelope(config: &Config) -> Result<Envelope> {
+    let list = one_api_live_request(
+        config,
+        "plans",
+        "doctor-plans-list",
+        "GET",
+        "/plans/v1/plans",
+        false,
+        &[],
+    )?;
+    let count = one_api_live_request(
+        config,
+        "plans",
+        "doctor-plans-count",
+        "GET",
+        "/plans/v1/plans/count",
+        false,
+        &[],
+    )?;
+    Ok(Envelope::ok_with_data(
+        "one plans doctor workflow generated",
+        json!({
+            "profile": config.profile_name,
+            "checks": [
+                list.data,
+                count.data,
+            ],
+            "recommendations": [
+                "Use one plans detail/run when a specific plan id is known",
+                "Use Walter for support-case sequencing and operator guidance",
+            ]
+        }),
+    ))
+}
+
+fn one_doctor_scheduling_envelope(config: &Config) -> Result<Envelope> {
+    let list = one_api_live_request(
+        config,
+        "scheduling",
+        "doctor-schedules-list",
+        "GET",
+        "/scheduling/v1/schedules",
+        false,
+        &[],
+    )?;
+    let count = one_api_live_request(
+        config,
+        "scheduling",
+        "doctor-schedules-count",
+        "GET",
+        "/scheduling/v1/schedules/count",
+        false,
+        &[],
+    )?;
+    Ok(Envelope::ok_with_data(
+        "one scheduling doctor workflow generated",
+        json!({
+            "profile": config.profile_name,
+            "checks": [
+                list.data,
+                count.data,
+            ],
+            "recommendations": [
+                "Use one scheduling detail/enable/disable when a schedule id is known",
+                "Route operator selection and escalation guidance through Walter",
+            ]
+        }),
+    ))
+}
+
+fn one_doctor_billing_envelope(config: &Config) -> Result<Envelope> {
+    let account = one_api_live_request(
+        config,
+        "billing",
+        "doctor-billing-account",
+        "GET",
+        "/billing/v1/my/billing-accounts/current",
+        false,
+        &[],
+    )?;
+    let usage = one_api_live_request(
+        config,
+        "billing",
+        "doctor-billing-usage",
+        "GET",
+        "/billing/v1/usage/export",
+        false,
+        &[],
+    )?;
+    Ok(Envelope::ok_with_data(
+        "one billing doctor workflow generated",
+        json!({
+            "profile": config.profile_name,
+            "checks": [
+                account.data,
+                usage.data,
+            ],
+            "recommendations": [
+                "Keep billing reference-only unless a repeatable operator workflow appears",
+                "Use Walter to decide whether billing belongs in CLI or documentation only",
+            ]
         }),
     ))
 }
