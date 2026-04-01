@@ -29,7 +29,7 @@ cargo install --locked --path .
 
 ```powershell
 ayx mongo status --profile config.yaml
-ayx api status --profile config.yaml
+ayx server api status --profile config.yaml
 ayx server
 ```
 
@@ -40,7 +40,7 @@ ayx server
 - `mongo` for embedded and managed Mongo operations
   - `mongo query` for read-only collection queries
   - `mongo doctor` for the built-in support query suite
-- `api` for the Server web API
+- `server api` for the Server web API
 - `server` for environment inspection, logs, Swagger import, and lower-level API calls
 - `server diagnose` for operator-facing Server troubleshooting flows
 - `server auth` for SAML-first auth inspection, diagnosis, simulation, and narrow legacy AD checks
@@ -147,3 +147,4 @@ The old `ayxm` repo is being archived, but a few reference files are kept here s
 - `docs/legacy/mongo_schema.py`
 
 These are reference artifacts only. They are not runtime dependencies of the Rust CLI.
+
