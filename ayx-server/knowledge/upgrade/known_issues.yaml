@@ -1,1 +1,30 @@
-[]
+issues:
+  - id: "embedded-mongo-multi-hop-risk"
+    severity: "high"
+    message: "Embedded Mongo upgrades require strict incremental hops with backup validation at each hop."
+    when:
+      deployment: "embedded-mongo"
+      source_gte: "2023.1"
+      source_lte: "2025.2"
+      target_gte: "2024.1"
+      target_lte: "2025.2"
+
+  - id: "mongo-to-sql-downgrade-constraint"
+    severity: "high"
+    message: "After Mongo-to-SQL migrations, downgrade options are constrained. Validate rollback policy before cutover."
+    when:
+      deployment: "sql"
+      source_gte: "2024.1"
+      source_lte: "2025.2"
+      target_gte: "2024.1"
+      target_lte: "2025.2"
+
+  - id: "post-upgrade-migration-log-review"
+    severity: "medium"
+    message: "Review migration CSV logs after each upgrade hop and resolve warnings before proceeding."
+    when:
+      deployment: "any"
+      source_gte: "2023.1"
+      source_lte: "2025.2"
+      target_gte: "2023.2"
+      target_lte: "2025.2"

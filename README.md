@@ -13,6 +13,7 @@ The current focus is Alteryx Server and Gallery administration workflows:
 - Server API reads and controlled mutations
 - upgrade planning and post-checks
 - system discovery and log analysis helpers
+- Server diagnosis workflows for startup, runtime settings, and network triage
 
 ## Quick start
 
@@ -39,6 +40,9 @@ ayx server
 - `mongo` for embedded and managed Mongo operations
 - `api` for the Server web API
 - `server` for environment inspection, logs, Swagger import, and lower-level API calls
+- `server diagnose` for operator-facing Server troubleshooting flows
+- `server auth` for SAML-first auth inspection, diagnosis, and simulation
+- `server doctor` for prescriptive troubleshooting workflows built on top of diagnose
 - `upgrade` for upgrade path planning, prechecks, backup, apply simulation, and postchecks
 - `catalog` for machine-readable command discovery
 - `update` for GitHub release self-update
@@ -97,6 +101,10 @@ Start with:
 ```powershell
 ayx catalog list
 ayx catalog describe --command mongo/backup
+ayx server diagnose startup --error "Failed to register Service URL"
+ayx server auth status
+ayx server auth diagnose saml --metadata-url https://idp.example.com/metadata
+ayx server doctor startup --error "Failed to register Service URL"
 ```
 
 ## Development
@@ -112,3 +120,21 @@ cargo test --workspace --locked
 ## Fixtures
 
 The repository includes a `RuntimeSettings.xml` fixture for offline validation of embedded discovery paths.
+
+## Upgrade knowledge
+
+The upgrade routing and issue annotations from the archived Omni repo are preserved in:
+
+- `ayx-server/knowledge/upgrade/version_paths.yaml`
+- `ayx-server/knowledge/upgrade/known_issues.yaml`
+
+These files drive upgrade path planning and version-specific warnings in the CLI.
+
+## Preserved legacy artifacts
+
+The old `ayxm` repo is being archived, but a few reference files are kept here so the migration is auditable:
+
+- `docs/legacy/AYX_CLI_COMMANDS.yaml`
+- `docs/legacy/mongo_schema.py`
+
+These are reference artifacts only. They are not runtime dependencies of the Rust CLI.

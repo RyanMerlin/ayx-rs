@@ -783,6 +783,18 @@ enum ServerCommand {
         #[command(subcommand)]
         command: ServerLogsCommand,
     },
+    Diagnose {
+        #[command(subcommand)]
+        command: ServerDiagnoseCommand,
+    },
+    Auth {
+        #[command(subcommand)]
+        command: ServerAuthCommand,
+    },
+    Doctor {
+        #[command(subcommand)]
+        command: ServerDoctorCommand,
+    },
     BackupPlan {
         #[arg(long)]
         backup_dir: PathBuf,
@@ -969,6 +981,79 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         prerequisites: &["catalog entry name or path"],
         notes: &["Accepts either a name or a path-like catalog key."],
     },
+    CommandSpec {
+        name: "server diagnose startup",
+        path: "server/diagnose/startup",
+        summary: "Run a guided startup failure diagnosis.",
+        output: "startup diagnosis steps and evidence",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "optional startup error", "optional log file"],
+        notes: &["Wraps logs, runtime settings, and recent log candidate checks."],
+    },
+    CommandSpec {
+        name: "server diagnose tls",
+        path: "server/diagnose/tls",
+        summary: "Inspect TLS, certificate, and proxy-related Server checks.",
+        output: "tls diagnosis steps and evidence",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server.webapi_url"],
+        notes: &[
+            "Focuses on SSL/TLS, port binding, and proxy configuration.",
+            "Use this for gallery binding, controller cert, and HTTPS setup issues.",
+        ],
+    },
+    CommandSpec {
+        name: "server auth status",
+        path: "server/auth/status",
+        summary: "Summarize Server authentication configuration.",
+        output: "auth status envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server settings"],
+        notes: &["Use this before SAML diagnosis or simulation."],
+    },
+    CommandSpec {
+        name: "server auth diagnose saml",
+        path: "server/auth/diagnose/saml",
+        summary: "Inspect SAML configuration, metadata, and callback alignment.",
+        output: "saml diagnosis envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "metadata url or file when available"],
+        notes: &["Focuses on Server-side SAML configuration and common mismatch checks."],
+    },
+    CommandSpec {
+        name: "server auth diagnose saml-logs",
+        path: "server/auth/diagnose/saml-logs",
+        summary: "Collect and summarize SAML login logs.",
+        output: "saml log diagnosis envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "SAML login logs"],
+        notes: &["Targets alteryx-sso and aas log families."],
+    },
+    CommandSpec {
+        name: "server auth simulate saml",
+        path: "server/auth/simulate/saml",
+        summary: "Simulate a SAML auth flow using metadata and expected endpoints.",
+        output: "saml simulation envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "metadata url or file"],
+        notes: &["Designed as a diagnostic harness, not a full IdP emulator."],
+    },
+    CommandSpec {
+        name: "server doctor startup",
+        path: "server/doctor/startup",
+        summary: "Run a guided startup doctor workflow.",
+        output: "startup doctor steps and evidence",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "optional startup error", "optional log file"],
+        notes: &["Prescriptive version of server diagnose startup."],
+    },
 ];
 
 #[derive(Subcommand, Debug)]
@@ -989,7 +1074,7 @@ enum ServerLogsCommand {
         #[arg(long)]
         path: PathBuf,
         #[arg(long)]
-        needle: String,
+        query: String,
         #[arg(long, default_value_t = 25)]
         before: usize,
         #[arg(long, default_value_t = 25)]
@@ -1018,6 +1103,118 @@ enum ServerLogsCommand {
         profile: PathBuf,
         #[arg(long, default_value_t = 7)]
         days: i64,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ServerDiagnoseCommand {
+    Startup {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        error: Option<String>,
+        #[arg(long)]
+        log_file: Option<PathBuf>,
+    },
+    Logs {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Network {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Tls {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    RuntimeSettings {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ServerAuthCommand {
+    Status {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Diagnose {
+        #[command(subcommand)]
+        command: ServerAuthDiagnoseCommand,
+    },
+    Simulate {
+        #[command(subcommand)]
+        command: ServerAuthSimulateCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ServerAuthDiagnoseCommand {
+    Saml {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        metadata_url: Option<String>,
+        #[arg(long)]
+        metadata_file: Option<PathBuf>,
+        #[arg(long)]
+        acs_url: Option<String>,
+        #[arg(long)]
+        issuer: Option<String>,
+    },
+    SamlLogs {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long, default_value_t = 7)]
+        days: i64,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ServerAuthSimulateCommand {
+    Saml {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        metadata_url: Option<String>,
+        #[arg(long)]
+        metadata_file: Option<PathBuf>,
+        #[arg(long)]
+        acs_url: Option<String>,
+        #[arg(long)]
+        issuer: Option<String>,
+        #[arg(long)]
+        entity_id: Option<String>,
+        #[arg(long)]
+        certificate_file: Option<PathBuf>,
+        #[arg(long)]
+        prompt: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ServerDoctorCommand {
+    Startup {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        error: Option<String>,
+        #[arg(long)]
+        log_file: Option<PathBuf>,
+    },
+    Logs {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Network {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    RuntimeSettings {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
     },
 }
 
@@ -2659,11 +2856,11 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 }
                 ServerLogsCommand::Context {
                     path,
-                    needle,
+                    query,
                     before,
                     after,
                 } => {
-                    let context = extract_context(&path, &needle, before, after)?;
+                    let context = extract_context(&path, &query, before, after)?;
                     Envelope::ok_with_data("log context extracted", context)
                 }
                 ServerLogsCommand::ParseCsv { path } => {
@@ -2687,6 +2884,475 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     Envelope::ok_with_data(
                         "recent log candidates discovered",
                         recent_log_candidates(&config, days),
+                    )
+                }
+            },
+            Some(ServerCommand::Diagnose { command }) => match command {
+                ServerDiagnoseCommand::Startup { profile, error, log_file } => {
+                    let config = load_profile(&profile)?;
+                    let mut steps = vec![
+                        json!({
+                            "step": "collect_log_sources",
+                            "action": "discover available Server log sources",
+                            "status": "done",
+                            "evidence": discover_log_inventory(&config),
+                        }),
+                        json!({
+                            "step": "inspect_runtime_settings",
+                            "action": "summarize RuntimeSettings.xml and embedded Mongo settings",
+                            "status": "done",
+                            "evidence": runtime_settings_summary(
+                                &config
+                                    .mongo
+                                    .embedded
+                                    .as_ref()
+                                    .and_then(|e| e.runtime_settings_path.as_ref())
+                                    .map(PathBuf::from)
+                                    .unwrap_or_else(|| PathBuf::from(DEFAULT_RUNTIME_SETTINGS_PATH))
+                            )?,
+                        }),
+                    ];
+                    if let Some(path) = log_file {
+                        let mut evidence = json!({
+                            "log_file": path.display().to_string(),
+                            "log_summary": summarize_log_file(&path)?,
+                        });
+                        if let Some(error_text) = error.as_ref() {
+                            evidence["error_context"] = json!(extract_context(&path, error_text, 25, 25)?);
+                        }
+                        steps.push(json!({
+                            "step": "inspect_supplied_log",
+                            "action": "summarize the supplied startup log and extract error context",
+                            "status": "done",
+                            "evidence": evidence,
+                        }));
+                    } else {
+                        let evidence = json!({
+                            "error": error,
+                            "recent_candidates": recent_log_candidates(&config, 7),
+                        });
+                        steps.push(json!({
+                            "step": "find_recent_candidates",
+                            "action": "identify likely startup-related logs to inspect next",
+                            "status": "done",
+                            "evidence": evidence,
+                        }));
+                    }
+                    Envelope::ok_with_data(
+                        "server startup diagnosis generated",
+                        json!({
+                            "profile": profile.display().to_string(),
+                            "steps": steps,
+                        }),
+                    )
+                }
+                ServerDiagnoseCommand::Logs { profile } => {
+                    let config = load_profile(&profile)?;
+                    let logs = discover_log_inventory(&config);
+                    Envelope::ok_with_data(
+                        "server log diagnosis generated",
+                        json!({
+                            "profile": profile.display().to_string(),
+                            "steps": [
+                                {
+                                    "step": "discover_log_sources",
+                                    "action": "identify Service, Gallery, Engine, SSO, and config-change logs",
+                                    "status": "done",
+                                    "evidence": logs,
+                                }
+                            ]
+                        }),
+                    )
+                }
+                ServerDiagnoseCommand::Network { profile } => {
+                    let config = load_profile(&profile)?;
+                    let paths = ayx_paths();
+                    let detail = json!({
+                        "profile": profile.display().to_string(),
+                        "server": config.server.as_ref().map(|s| json!({
+                            "webapi_url": s.webapi_url,
+                            "verify_tls": s.verify_tls(),
+                        })),
+                        "paths": paths,
+                        "checks": [
+                            "Use Test-NetConnection against controller port 80/443/27018",
+                            "Use netsh winhttp show proxy for proxy state",
+                            "Use netstat -aon and tasklist for port ownership",
+                            "Use nltest /dsgetdc and /dclist for domain controller lookup",
+                        ]
+                    });
+                    Envelope::ok_with_data(
+                        "server network diagnosis generated",
+                        json!({
+                            "profile": profile.display().to_string(),
+                            "steps": [
+                                {
+                                    "step": "check_local_paths",
+                                    "action": "resolve Server-related filesystem paths",
+                                    "status": "done",
+                                    "evidence": paths,
+                                },
+                                {
+                                    "step": "review_network_checks",
+                                    "action": "follow the standard port, proxy, and domain controller checks",
+                                    "status": "done",
+                                    "evidence": detail,
+                                }
+                            ]
+                        }),
+                    )
+                }
+                ServerDiagnoseCommand::Tls { profile } => {
+                    let config = load_profile(&profile)?;
+                    let detail = json!({
+                        "profile": profile.display().to_string(),
+                        "server": config.server.as_ref().map(|s| json!({
+                            "webapi_url": s.webapi_url,
+                            "verify_tls": s.verify_tls(),
+                        })),
+                        "checks": [
+                            {
+                                "name": "https_endpoint",
+                                "action": "verify the Server web API URL is https and reachable",
+                                "evidence": config.server.as_ref().map(|s| s.webapi_url.clone()),
+                            },
+                            {
+                                "name": "certificate_binding",
+                                "action": "confirm the HTTPS port has a valid certificate binding",
+                                "evidence": "Use netsh http show sslcert and compare the certificate subject and thumbprint",
+                            },
+                            {
+                                "name": "proxy_configuration",
+                                "action": "inspect WinHTTP proxy configuration and browser proxy dependencies",
+                                "evidence": "Use netsh winhttp show proxy and validate any required proxy exceptions",
+                            },
+                            {
+                                "name": "port_binding",
+                                "action": "check whether 443 is already owned by another process or service",
+                                "evidence": "Use netstat -aon and tasklist to map port 443 to a PID and process name",
+                            },
+                            {
+                                "name": "controller_worker_tls",
+                                "action": "verify TLS between nodes when worker/controller communication depends on HTTPS",
+                                "evidence": "Confirm the controller certificate is trusted by workers and that the configured port matches the TLS setup",
+                            }
+                        ],
+                        "related_commands": [
+                            "ayx server diagnose network",
+                            "ayx server doctor network",
+                            "ayx server logs context --query \"SSL\"",
+                        ],
+                    });
+                    Envelope::ok_with_data("server tls diagnosis generated", detail)
+                }
+                ServerDiagnoseCommand::RuntimeSettings { profile } => {
+                    let config = load_profile(&profile)?;
+                    let path = config
+                        .mongo
+                        .embedded
+                        .as_ref()
+                        .and_then(|e| e.runtime_settings_path.as_ref())
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from(DEFAULT_RUNTIME_SETTINGS_PATH));
+                    let summary = runtime_settings_summary(&path)?;
+                    Envelope::ok_with_data(
+                        "server runtime settings diagnosis generated",
+                        json!({
+                            "profile": profile.display().to_string(),
+                            "steps": [
+                                {
+                                    "step": "load_runtime_settings",
+                                    "action": "read and summarize RuntimeSettings.xml",
+                                    "status": "done",
+                                    "evidence": {
+                                        "path": path.display().to_string(),
+                                        "data": summary,
+                                    }
+                                }
+                            ]
+                        }),
+                    )
+                }
+            },
+            Some(ServerCommand::Auth { command }) => match command {
+                ServerAuthCommand::Status { profile } => {
+                    let config = load_profile(&profile)?;
+                    Envelope::ok_with_data(
+                        "server auth status generated",
+                        json!({
+                            "profile": profile.display().to_string(),
+                            "status": build_auth_status(&config, None, None, None, None),
+                        }),
+                    )
+                }
+                ServerAuthCommand::Diagnose { command } => match command {
+                    ServerAuthDiagnoseCommand::Saml {
+                        profile,
+                        metadata_url,
+                        metadata_file,
+                        acs_url,
+                        issuer,
+                    } => {
+                        let config = load_profile(&profile)?;
+                        let status = build_auth_status(
+                            &config,
+                            metadata_url.as_deref(),
+                            metadata_file.as_deref(),
+                            acs_url.as_deref(),
+                            issuer.as_deref(),
+                        );
+                        Envelope::ok_with_data(
+                            "server saml diagnosis generated",
+                            json!({
+                                "profile": profile.display().to_string(),
+                                "status": status,
+                                "checks": [
+                                    "Confirm the auth type is SAML",
+                                    "Verify metadata URL or file availability",
+                                    "Compare issuer / entity ID / ACS URL expectations",
+                                    "Confirm TLS certificate trust and signing posture",
+                                    "Review recent SSO/AAS logs for the exact failure",
+                                ]
+                            }),
+                        )
+                    }
+                    ServerAuthDiagnoseCommand::SamlLogs { profile, days } => {
+                        let config = load_profile(&profile)?;
+                        let logs = recent_log_candidates(&config, days);
+                        let detail = json!({
+                            "profile": profile.display().to_string(),
+                            "log_families": discover_log_inventory(&config),
+                            "recent_candidates": logs,
+                            "targets": [
+                                "alteryx-sso-YYYYMMDD.log",
+                                "aas-log-YYYYMMDD.log",
+                            ],
+                            "checks": [
+                                "Look for login failures and redirect/callback errors",
+                                "Correlate successful and unsuccessful login attempts",
+                                "Check for SAML assertion or signature failures",
+                            ],
+                        });
+                        Envelope::ok_with_data("server saml log diagnosis generated", detail)
+                    }
+                },
+                ServerAuthCommand::Simulate { command } => match command {
+                    ServerAuthSimulateCommand::Saml {
+                        profile,
+                        metadata_url,
+                        metadata_file,
+                        acs_url,
+                        issuer,
+                        entity_id,
+                        certificate_file,
+                        prompt,
+                    } => {
+                        let config = load_profile(&profile)?;
+                        let status = build_auth_status(
+                            &config,
+                            metadata_url.as_deref(),
+                            metadata_file.as_deref(),
+                            acs_url.as_deref(),
+                            issuer.as_deref(),
+                        );
+                        let detail = json!({
+                            "profile": profile.display().to_string(),
+                            "prompt_mode": prompt,
+                            "inputs": {
+                                "metadata_url": metadata_url,
+                                "metadata_file": metadata_file.as_ref().map(|p| p.display().to_string()),
+                                "acs_url": acs_url,
+                                "issuer": issuer,
+                                "entity_id": entity_id,
+                                "certificate_file": certificate_file.as_ref().map(|p| p.display().to_string()),
+                            },
+                            "simulation": {
+                                "auth": status,
+                                "outcomes": [
+                                    "metadata fetch / parse",
+                                    "issuer alignment",
+                                    "acs / callback alignment",
+                                    "certificate trust validation",
+                                    "clock skew / validity window check",
+                                ],
+                            },
+                            "next_steps": [
+                                "Use server auth diagnose saml for exact mismatch analysis",
+                                "Use server auth diagnose saml-logs for login trace review",
+                            ]
+                        });
+                        Envelope::ok_with_data("server saml simulation generated", detail)
+                    }
+                },
+            },
+            Some(ServerCommand::Doctor { command }) => match command {
+                ServerDoctorCommand::Startup { profile, error, log_file } => {
+                    let config = load_profile(&profile)?;
+                    let runtime_path = config
+                        .mongo
+                        .embedded
+                        .as_ref()
+                        .and_then(|e| e.runtime_settings_path.as_ref())
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from(DEFAULT_RUNTIME_SETTINGS_PATH));
+                    let mut steps = vec![
+                        json!({
+                            "step": "verify_runtime_settings",
+                            "action": "confirm runtime settings and embedded Mongo configuration",
+                            "status": "done",
+                            "evidence": runtime_settings_summary(&runtime_path)?,
+                        }),
+                        json!({
+                            "step": "discover_recent_logs",
+                            "action": "identify likely startup-related logs",
+                            "status": "done",
+                            "evidence": recent_log_candidates(&config, 7),
+                        }),
+                    ];
+                    if let Some(path) = log_file {
+                        let mut evidence = json!({
+                            "log_file": path.display().to_string(),
+                            "summary": summarize_log_file(&path)?,
+                        });
+                        if let Some(error_text) = error.as_ref() {
+                            evidence["error_context"] = json!(extract_context(&path, error_text, 25, 25)?);
+                        }
+                        steps.push(json!({
+                            "step": "pinpoint_error",
+                            "action": "extract the exact failure context from the supplied log",
+                            "status": "done",
+                            "evidence": evidence,
+                        }));
+                    }
+                    Envelope::ok_with_data(
+                        "server startup doctor workflow generated",
+                        json!({
+                            "profile": profile.display().to_string(),
+                            "steps": steps,
+                            "recommendations": [
+                                "Use server diagnose startup to inspect a specific failure",
+                                "Use server logs summary or context for raw log follow-up",
+                                "If the issue is network-related, proceed to server doctor network",
+                            ]
+                        }),
+                    )
+                }
+                ServerDoctorCommand::Logs { profile } => {
+                    let config = load_profile(&profile)?;
+                    Envelope::ok_with_data(
+                        "server log doctor workflow generated",
+                        json!({
+                            "profile": profile.display().to_string(),
+                            "steps": [
+                                {
+                                    "step": "discover_log_sources",
+                                    "action": "enumerate Server log families and file locations",
+                                    "status": "done",
+                                    "evidence": discover_log_inventory(&config),
+                                },
+                                {
+                                    "step": "select_log_family",
+                                    "action": "choose the relevant log family by symptom",
+                                    "status": "done",
+                                    "evidence": {
+                                        "families": [
+                                            "service",
+                                            "gallery",
+                                            "engine",
+                                            "aas",
+                                            "config_changes",
+                                        ]
+                                    }
+                                }
+                            ],
+                            "recommendations": [
+                                "Use server logs summary on the selected file",
+                                "Use server logs context with a symptom-specific query",
+                                "Use server diagnose startup when the service will not start",
+                            ]
+                        }),
+                    )
+                }
+                ServerDoctorCommand::Network { profile } => {
+                    let config = load_profile(&profile)?;
+                    Envelope::ok_with_data(
+                        "server network doctor workflow generated",
+                        json!({
+                            "profile": profile.display().to_string(),
+                            "steps": [
+                                {
+                                    "step": "resolve_paths",
+                                    "action": "identify the Server filesystem paths and runtime settings location",
+                                    "status": "done",
+                                    "evidence": ayx_paths(),
+                                },
+                                {
+                                    "step": "inspect_server_config",
+                                    "action": "confirm web API URL and TLS behavior",
+                                    "status": "done",
+                                    "evidence": config.server.as_ref().map(|s| json!({
+                                        "webapi_url": s.webapi_url,
+                                        "verify_tls": s.verify_tls(),
+                                    })),
+                                },
+                                {
+                                    "step": "follow_standard_network_checks",
+                                    "action": "run port, proxy, domain controller, and DNS checks",
+                                    "status": "done",
+                                    "evidence": [
+                                        "Test-NetConnection on 80, 443, and 27018",
+                                        "netsh winhttp show proxy",
+                                        "netstat -aon plus tasklist to identify port owners",
+                                        "nltest /dsgetdc and /dclist",
+                                        "nslookup and ping for name resolution",
+                                    ]
+                                }
+                            ],
+                            "recommendations": [
+                                "Run ayx server diagnose tls for TLS and certificate validation",
+                                "If SSL binding is the problem, inspect the 443 reservation and cert binding",
+                                "If workers are missing, validate controller-to-worker connectivity on the configured port",
+                            ]
+                        }),
+                    )
+                }
+                ServerDoctorCommand::RuntimeSettings { profile } => {
+                    let config = load_profile(&profile)?;
+                    let path = config
+                        .mongo
+                        .embedded
+                        .as_ref()
+                        .and_then(|e| e.runtime_settings_path.as_ref())
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from(DEFAULT_RUNTIME_SETTINGS_PATH));
+                    let summary = runtime_settings_summary(&path)?;
+                    Envelope::ok_with_data(
+                        "server runtime settings doctor workflow generated",
+                        json!({
+                            "profile": profile.display().to_string(),
+                            "steps": [
+                                {
+                                    "step": "read_runtime_settings",
+                                    "action": "summarize the effective Server runtime settings",
+                                    "status": "done",
+                                    "evidence": {
+                                        "path": path.display().to_string(),
+                                        "data": summary,
+                                    }
+                                },
+                                {
+                                    "step": "derive_action_items",
+                                    "action": "translate the settings into validation checkpoints",
+                                    "status": "done",
+                                    "evidence": [
+                                        "Confirm embedded Mongo root path",
+                                        "Confirm gallery logging path",
+                                        "Confirm engine log file path",
+                                        "Confirm auth type and Mongo host/port"
+                                    ]
+                                }
+                            ]
+                        }),
                     )
                 }
             },
@@ -2940,6 +3606,31 @@ fn catalog_describe_envelope(command: &str) -> Result<Envelope> {
             "notes": spec.notes,
         }),
     ))
+}
+
+fn build_auth_status(
+    config: &Config,
+    metadata_url: Option<&str>,
+    metadata_file: Option<&Path>,
+    acs_url: Option<&str>,
+    issuer: Option<&str>,
+) -> Value {
+    json!({
+        "server_profile": config.profile_name,
+        "server": config.server.as_ref().map(|s| json!({
+            "webapi_url": s.webapi_url,
+            "verify_tls": s.verify_tls(),
+        })),
+        "metadata": {
+            "url": metadata_url,
+            "file": metadata_file.map(|p| p.display().to_string()),
+        },
+        "expected_endpoints": {
+            "acs_url": acs_url,
+            "issuer": issuer,
+        },
+        "log_families": discover_log_inventory(config),
+    })
 }
 
 #[cfg(test)]

@@ -1,0 +1,81 @@
+## CLI Commands
+numberofcores: wmic cpu get numberofcores,numberoflogicalprocessors
+
+app_location: "%Program Files%\Alteryx\bin\AlteryxService.exe"
+
+# TODO
+Server Backup
+Get passwords/token
+run workflow
+
+Logs?
+
+# List Licenses on machine
+AlteryxActivateLicenseKeyCmd.exe list
+
+# Activate a license key on a machine
+AlteryxActivateLicenseKeyCmd.exe [license key] [email address]
+
+# ALTERYX SERVICE
+D:\Program Files\Alteryx\bin> .\AlteryxService.exe
+
+#Starts the service (requires admin)
+start
+
+#Stops the service (requires admin)
+stop
+
+#Runs the service interactively
+test|testdebug
+
+#Not supported on Alteryx Server. This command is for the desktop scheduler only.
+#Queues workflow from path "path" to run from disk, add 'true' to run from db
+addtoqueue=path,host[:port],secret[,true]
+
+#Creates a MongoDB backup dump into the specified folder (requires admin)
+emongodump=path
+
+#Restores a MongoDB backup from "sourcePath" to "targetPath" (requires admin)
+emongorestore=sourcepath,targetpath
+
+#Sets a new password for MongoDB. If the password field is empty a password is generated. (requires admin)
+setemongopassword=password
+
+#Sets a new password for MongoDB. If the password field is empty password is generated. (requires admin)
+setemongoadminpassword=password
+
+#Returns Embedded MongoDB password (requires admin)
+getemongopassword[=host[:port],secret]
+
+#Returns the server secret (requires admin)
+getsecret|getserversecret
+
+#Returns the current version of service
+getversion
+
+#Runs as current user using supplied secret (40-character hex) and optional port
+runlocal=session_secret[,port]
+
+#Sets the execution user for Alteryx Engine (requires admin)
+setexecuteuser=name,domain,password
+
+#Sets the MongoDB connection password (requires admin)
+setmongopassword=value
+
+#Sets the worker remote server secret (requires admin)
+setremotesecret=value
+
+#Sets the master server secret (requires admin)
+setserversecret=value
+
+#Sets the SMTP password for Server (requires admin)
+setsmtppassword=value
+
+#Overrides default setting with root "root" and name "name" with new value
+setting=root,name,value
+
+#Overrides default settings with contents of settings file from path "path"
+settingfile=path
+
+#Verifies settings from path "path", writes results to file or stdout
+verifysettingfile=path[,outputpath]
