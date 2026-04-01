@@ -136,15 +136,15 @@ mod tests {
 
     #[test]
     fn inventory_envelope_includes_product() {
-        let env = api_inventory_envelope(&config(), "cloud").expect("inventory envelope");
+        let env = api_inventory_envelope(&config(), "one").expect("inventory envelope");
         assert!(env.ok);
-        assert_eq!(env.data["product"], "cloud");
+        assert_eq!(env.data["product"], "one");
     }
 
     #[test]
     fn diagnose_envelope_includes_checks() {
-        let env = api_diagnose_envelope(&config(), "cloud").expect("diagnose envelope");
+        let env = api_diagnose_envelope(&config(), "one").expect("diagnose envelope");
         assert!(env.ok);
-        assert_eq!(env.data["product"], "cloud");
+        assert_eq!(env.data["product"], "one");
     }
 }

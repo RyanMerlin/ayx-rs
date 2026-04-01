@@ -153,9 +153,9 @@ The CLI is intentionally product-first:
 
 - `ayx server api`
 - `ayx license api`
-- `ayx cloud api`
+- `ayx one platform api`
 
-`server` is the mature branch today. `license` and `cloud` are being introduced as separate product roots so each Alteryx surface can grow independently.
+`server` is the mature branch today. `license` and `one` are being introduced as separate product roots so each Alteryx surface can grow independently.
 
 Mutating commands (`schedule-create`, `schedule-update`, `schedule-patch`, `schedule-delete`, `collection-create`, `collection-update`, `collection-delete`, any collection membership mutation or permission update, `credential-add`, `credential-update`, `credential-delete`, `credential-share-user`, `credential-share-user-group`, `credential-unshare-*`, `subscription-create`, `subscription-update`, `subscription-delete`, `subscription-change-users`, `user-update`, `user-delete`, `user-transfer-assets`, `user-deactivate`, `user-password-reset`, `workflow-version-upload`, `usergroup-create`, `usergroup-update`, `usergroup-delete`, `usergroup-*` membership moves, and all DCM admin mutators) require `--apply` before they invoke the live API to avoid accidental writes; when that flag is omitted the CLI returns a dry-run envelope with guidance to provide the safety gate.
 

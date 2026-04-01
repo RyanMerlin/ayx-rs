@@ -8,10 +8,10 @@ use reqwest::blocking::Client;
 use roxmltree::Document;
 use serde_json::{json, Value};
 
-use ayx_cloud::{api_diagnose_envelope, api_status_envelope};
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::envelope::Envelope;
 use ayx_core::profile::{Config, ServerProfile};
+use ayx_one::{api_diagnose_envelope, api_inventory_envelope, api_status_envelope};
 use ayx_server::logs::{
     discover_log_inventory, extract_context, parse_gallery_csv, parse_gallery_events,
     parse_service_events, recent_log_candidates, summarize_log_file, tail_log_file,
@@ -64,9 +64,9 @@ enum Command {
         #[command(subcommand)]
         command: Option<WorkflowCommand>,
     },
-    Cloud {
+    One {
         #[command(subcommand)]
-        command: Option<CloudCommand>,
+        command: Option<OneCommand>,
     },
     License {
         #[command(subcommand)]
@@ -231,17 +231,64 @@ enum WorkflowCommand {
 }
 
 #[derive(Subcommand, Debug)]
-enum CloudCommand {
-    Api {
+enum OneCommand {
+    Platform {
         #[command(subcommand)]
-        command: CloudApiCommand,
+        command: Option<OnePlatformCommand>,
     },
-    Status,
-    Inventory,
+    Status {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Inventory {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Plans {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    AutoInsights {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    DesktopExec {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
 }
 
 #[derive(Subcommand, Debug)]
-enum CloudApiCommand {
+enum OnePlatformCommand {
+    Api {
+        #[command(subcommand)]
+        command: OnePlatformApiCommand,
+    },
+    Status {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Inventory {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Workspace,
+    Role,
+    User,
+    Group,
+    Sso,
+    Audit,
+    Session,
+    Token,
+    OauthClient,
+    EnvParam,
+    Pdh,
+    App,
+    Health,
+}
+
+#[derive(Subcommand, Debug)]
+enum OnePlatformApiCommand {
     Status {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
@@ -258,8 +305,14 @@ enum LicenseCommand {
         #[command(subcommand)]
         command: LicenseApiCommand,
     },
-    Status,
-    Inventory,
+    Status {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Inventory {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -403,24 +456,74 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Product branch ready; API subcommands are the primary entry point."],
     },
     CommandSpec {
-        name: "cloud status",
-        path: "cloud/status",
-        summary: "Summarize the Cloud branch posture.",
-        output: "cloud status envelope",
+        name: "one platform status",
+        path: "one/platform/status",
+        summary: "Summarize the Alteryx One platform posture.",
+        output: "one platform status envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
-        notes: &["Product branch ready; API subcommands are the primary entry point."],
+        notes: &["Use this before platform, plans, auto-insights, or desktop-exec workflows."],
     },
     CommandSpec {
-        name: "cloud inventory",
-        path: "cloud/inventory",
-        summary: "Summarize Cloud branch inventory candidates.",
-        output: "cloud inventory envelope",
+        name: "one platform inventory",
+        path: "one/platform/inventory",
+        summary: "Summarize One platform inventory candidates.",
+        output: "one platform inventory envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
-        notes: &["Product branch ready; API subcommands are the primary entry point."],
+        notes: &["Use this as the first pass for platform surface discovery."],
+    },
+    CommandSpec {
+        name: "one platform api status",
+        path: "one/platform/api/status",
+        summary: "Summarize the Alteryx One platform API posture.",
+        output: "one platform api status envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Use this to inspect platform API posture before diagnostics."],
+    },
+    CommandSpec {
+        name: "one platform api diagnose",
+        path: "one/platform/api/diagnose",
+        summary: "Validate One platform API reachability and auth posture.",
+        output: "one platform api diagnostic envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Use before future platform API call-style workflows."],
+    },
+    CommandSpec {
+        name: "one plans status",
+        path: "one/plans/status",
+        summary: "Summarize the Alteryx One plans posture.",
+        output: "one plans status envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Reserved for plan lifecycle workflows."],
+    },
+    CommandSpec {
+        name: "one auto-insights status",
+        path: "one/auto-insights/status",
+        summary: "Summarize the Alteryx One Auto Insights posture.",
+        output: "one auto-insights status envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Reserved for Auto Insights workflows."],
+    },
+    CommandSpec {
+        name: "one desktop-exec status",
+        path: "one/desktop-exec/status",
+        summary: "Summarize the Alteryx One desktop execution posture.",
+        output: "one desktop-exec status envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Reserved for desktop execution workflows."],
     },
     CommandSpec {
         name: "license api status",
@@ -441,26 +544,6 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
         notes: &["Use before future license api call-style workflows."],
-    },
-    CommandSpec {
-        name: "cloud api status",
-        path: "cloud/api/status",
-        summary: "Summarize the Alteryx Cloud API posture.",
-        output: "cloud api status envelope",
-        safety: "read-only",
-        mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
-        notes: &["Use to inspect cloud API posture before diagnostics."],
-    },
-    CommandSpec {
-        name: "cloud api diagnose",
-        path: "cloud/api/diagnose",
-        summary: "Validate Cloud API reachability and auth posture.",
-        output: "cloud api diagnostic envelope",
-        safety: "read-only",
-        mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
-        notes: &["Use before future cloud api call-style workflows."],
     },
     CommandSpec {
         name: "upgrade plan",
@@ -1774,32 +1857,153 @@ fn execute(cli: Cli) -> Result<Envelope> {
             }
             Some(WorkflowCommand::Logs) => bail!("workflow logs are not yet implemented"),
         },
-        Command::Cloud { command } => match command {
-            None => Envelope::ok("cloud commands available: api, status, inventory"),
-            Some(CloudCommand::Api { command }) => match command {
-                CloudApiCommand::Status { profile } => {
+        Command::One { command } => match command {
+            None => Envelope::ok("one commands available: platform, plans, auto-insights, desktop-exec"),
+            Some(OneCommand::Platform { command }) => match command {
+                Some(OnePlatformCommand::Api { command }) => match command {
+                    OnePlatformApiCommand::Status { profile } => {
+                        let config = load_profile(&profile)?;
+                        api_status_envelope(&config, "one platform")?
+                    }
+                    OnePlatformApiCommand::Diagnose { profile } => {
+                        let config = load_profile(&profile)?;
+                        api_diagnose_envelope(&config, "one platform")?
+                    }
+                },
+                Some(OnePlatformCommand::Status { profile }) => {
                     let config = load_profile(&profile)?;
-                    api_status_envelope(&config, "cloud")?
+                    api_status_envelope(&config, "one platform")?
                 }
-                CloudApiCommand::Diagnose { profile } => {
+                Some(OnePlatformCommand::Inventory { profile }) => {
                     let config = load_profile(&profile)?;
-                    api_diagnose_envelope(&config, "cloud")?
+                    api_inventory_envelope(&config, "one platform")?
                 }
+                Some(OnePlatformCommand::Workspace) => Envelope::ok_with_data(
+                    "one platform workspace",
+                    json!({
+                        "product": "one",
+                        "surface": "platform",
+                        "message": "workspace workflow scaffolded",
+                    }),
+                ),
+                Some(OnePlatformCommand::Role) => Envelope::ok_with_data(
+                    "one platform role",
+                    json!({
+                        "product": "one",
+                        "surface": "platform",
+                        "message": "role workflow scaffolded",
+                    }),
+                ),
+                Some(OnePlatformCommand::User) => Envelope::ok_with_data(
+                    "one platform user",
+                    json!({
+                        "product": "one",
+                        "surface": "platform",
+                        "message": "user workflow scaffolded",
+                    }),
+                ),
+                Some(OnePlatformCommand::Group) => Envelope::ok_with_data(
+                    "one platform group",
+                    json!({
+                        "product": "one",
+                        "surface": "platform",
+                        "message": "group workflow scaffolded",
+                    }),
+                ),
+                Some(OnePlatformCommand::Sso) => Envelope::ok_with_data(
+                    "one platform sso",
+                    json!({
+                        "product": "one",
+                        "surface": "platform",
+                        "message": "sso workflow scaffolded",
+                    }),
+                ),
+                Some(OnePlatformCommand::Audit) => Envelope::ok_with_data(
+                    "one platform audit",
+                    json!({
+                        "product": "one",
+                        "surface": "platform",
+                        "message": "audit workflow scaffolded",
+                    }),
+                ),
+                Some(OnePlatformCommand::Session) => Envelope::ok_with_data(
+                    "one platform session",
+                    json!({
+                        "product": "one",
+                        "surface": "platform",
+                        "message": "session workflow scaffolded",
+                    }),
+                ),
+                Some(OnePlatformCommand::Token) => Envelope::ok_with_data(
+                    "one platform token",
+                    json!({
+                        "product": "one",
+                        "surface": "platform",
+                        "message": "token workflow scaffolded",
+                    }),
+                ),
+                Some(OnePlatformCommand::OauthClient) => Envelope::ok_with_data(
+                    "one platform oauth-client",
+                    json!({
+                        "product": "one",
+                        "surface": "platform",
+                        "message": "oauth-client workflow scaffolded",
+                    }),
+                ),
+                Some(OnePlatformCommand::EnvParam) => Envelope::ok_with_data(
+                    "one platform env-param",
+                    json!({
+                        "product": "one",
+                        "surface": "platform",
+                        "message": "env-param workflow scaffolded",
+                    }),
+                ),
+                Some(OnePlatformCommand::Pdh) => Envelope::ok_with_data(
+                    "one platform pdh",
+                    json!({
+                        "product": "one",
+                        "surface": "platform",
+                        "message": "pdh workflow scaffolded",
+                    }),
+                ),
+                Some(OnePlatformCommand::App) => Envelope::ok_with_data(
+                    "one platform app",
+                    json!({
+                        "product": "one",
+                        "surface": "platform",
+                        "message": "app workflow scaffolded",
+                    }),
+                ),
+                Some(OnePlatformCommand::Health) => Envelope::ok_with_data(
+                    "one platform health",
+                    json!({
+                        "product": "one",
+                        "surface": "platform",
+                        "message": "health workflow scaffolded",
+                    }),
+                ),
+                None => Envelope::ok("one platform commands available: api, status, inventory, workspace, role, user, group, sso, audit, session, token, oauth-client, env-param, pdh, app, health"),
             },
-            Some(CloudCommand::Status) => Envelope::ok_with_data(
-                "cloud status",
-                json!({
-                    "product": "cloud",
-                    "message": "cloud branch ready",
-                }),
-            ),
-            Some(CloudCommand::Inventory) => Envelope::ok_with_data(
-                "cloud inventory",
-                json!({
-                    "product": "cloud",
-                    "message": "cloud branch ready",
-                }),
-            ),
+            Some(OneCommand::Status { profile }) => {
+                let config = load_profile(&profile)?;
+                api_status_envelope(&config, "one")?
+            }
+            Some(OneCommand::Inventory { profile }) => {
+                let config = load_profile(&profile)?;
+                api_inventory_envelope(&config, "one")?
+            }
+            Some(OneCommand::Plans { profile }) => {
+                let config = load_profile(&profile)?;
+                api_status_envelope(&config, "one plans")?
+            }
+            Some(OneCommand::AutoInsights { profile }) => {
+                let config = load_profile(&profile)?;
+                api_diagnose_envelope(&config, "one auto-insights")?
+            }
+            Some(OneCommand::DesktopExec { profile }) => {
+                let config = load_profile(&profile)?;
+                api_status_envelope(&config, "one desktop-exec")?
+            }
         },
         Command::License { command } => match command {
             None => Envelope::ok("license commands available: api, status, inventory"),
@@ -1813,20 +2017,14 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     api_diagnose_envelope(&config, "license")?
                 }
             },
-            Some(LicenseCommand::Status) => Envelope::ok_with_data(
-                "license status",
-                json!({
-                    "product": "license",
-                    "message": "license branch ready",
-                }),
-            ),
-            Some(LicenseCommand::Inventory) => Envelope::ok_with_data(
-                "license inventory",
-                json!({
-                    "product": "license",
-                    "message": "license branch ready",
-                }),
-            ),
+            Some(LicenseCommand::Status { profile }) => {
+                let config = load_profile(&profile)?;
+                api_status_envelope(&config, "license")?
+            }
+            Some(LicenseCommand::Inventory { profile }) => {
+                let config = load_profile(&profile)?;
+                api_inventory_envelope(&config, "license")?
+            }
         },
         Command::Catalog { command } => match command {
             CatalogCommand::List => catalog_list_envelope()?,
@@ -1924,7 +2122,7 @@ fn main() -> Result<()> {
 
 fn print_help() {
     println!(
-    "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help       Print this help message\n    --output     Output format: text or json\n\nCOMMANDS:\n    mongo         Mongo inventory, backup, restore, query, and doctor helpers\n    server api    Server API operations\n    server        Server discovery, logs, auth, diagnose, doctor, and low-level API calls\n    upgrade       Upgrade planning and execution helpers\n    catalog       Machine-readable command registry\n    license       Licensing portal branch and API surface\n    cloud         Alteryx Cloud branch and API surface\n    sqlserver     SQL Server command family (stubbed)\n    workflow      Workflow command family (stubbed)\n    update        Self-update from GitHub releases\n"
+    "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help       Print this help message\n    --output     Output format: text or json\n\nCOMMANDS:\n    mongo         Mongo inventory, backup, restore, query, and doctor helpers\n    server api    Server API operations\n    server        Server discovery, logs, auth, diagnose, doctor, and low-level API calls\n    upgrade       Upgrade planning and execution helpers\n    catalog       Machine-readable command registry\n    license       Licensing portal branch and API surface\n    one           Alteryx One platform branch and API surface\n    sqlserver     SQL Server command family (stubbed)\n    workflow      Workflow command family (stubbed)\n    update        Self-update from GitHub releases\n"
     );
 }
 
@@ -2077,9 +2275,12 @@ mod tests {
         assert!(names.contains(&"mongo status"));
         assert!(names.contains(&"catalog list"));
         assert!(names.contains(&"license api status"));
-        assert!(names.contains(&"cloud api status"));
         assert!(names.contains(&"license status"));
-        assert!(names.contains(&"cloud status"));
+        assert!(names.contains(&"one platform status"));
+        assert!(names.contains(&"one platform api status"));
+        assert!(names.contains(&"one plans status"));
+        assert!(names.contains(&"one auto-insights status"));
+        assert!(names.contains(&"one desktop-exec status"));
     }
 
     #[test]
@@ -2096,7 +2297,16 @@ mod tests {
             .expect("catalog describe should work for license");
         assert_eq!(env.data["path"], "license/api/diagnose");
 
-        let env = catalog_describe_envelope("cloud status").expect("catalog describe should work");
-        assert_eq!(env.data["name"], "cloud status");
+        let env =
+            catalog_describe_envelope("one platform status").expect("catalog describe should work");
+        assert_eq!(env.data["name"], "one platform status");
+
+        let env = catalog_describe_envelope("one platform api diagnose")
+            .expect("catalog describe should work for one platform api");
+        assert_eq!(env.data["path"], "one/platform/api/diagnose");
+
+        let env = catalog_describe_envelope("one auto-insights status")
+            .expect("catalog describe should work for auto-insights");
+        assert_eq!(env.data["path"], "one/auto-insights/status");
     }
 }

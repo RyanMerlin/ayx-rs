@@ -13,7 +13,7 @@ roxmltree.workspace = true
 serde_json.workspace = true
 ayx-api = { path = "../ayx-api" }
 ayx-core = { path = "../ayx-core" }
-ayx-cloud = { path = "../ayx-cloud" }
+ayx-one = { path = "../ayx-one" }
 ayx-server = { path = "../ayx-server" }
 self_update = "0.43.1"
 
