@@ -121,6 +121,7 @@ pub struct UpgradeProfile {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AlteryxOneProfile {
     pub account_email: String,
+    pub api_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -296,6 +297,13 @@ impl Config {
                 return Err(ProfileError::Invalid(
                     "alteryx_one.account_email must be a valid email".to_string(),
                 ));
+            }
+            if let Some(token) = &one.api_token {
+                if token.trim().is_empty() {
+                    return Err(ProfileError::Invalid(
+                        "alteryx_one.api_token cannot be empty when set".to_string(),
+                    ));
+                }
             }
         }
 

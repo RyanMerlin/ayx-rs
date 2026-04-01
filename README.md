@@ -74,6 +74,7 @@ Minimum expectations:
 - `mongo.databases.service_name`
 - `server_api.base_url`, `server_api.client_id`, and `server_api.client_secret`
 - `alteryx_one.account_email` when using ownership-transfer and related automation
+- `alteryx_one.api_token` when using One API commands
 
 Sensitive values live in `.env` and are expanded automatically from `config.yaml`.
 Use `.env.example` as the shareable template.

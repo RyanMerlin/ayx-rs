@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use reqwest::blocking::Client;
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use roxmltree::Document;
 use serde_json::{json, Value};
 
@@ -304,21 +305,60 @@ enum OnePlatformCommand {
 #[derive(Subcommand, Debug)]
 enum OneWorkspaceCommand {
     Current,
-    Configuration,
-    People,
-    Admins,
-    InviteUsers,
-    RemoveUser,
-    SuspendUsers,
-    UnsuspendUsers,
-    Transfer,
+    Configuration {
+        #[arg(long)]
+        workspace_id: String,
+    },
+    People {
+        #[arg(long)]
+        workspace_id: String,
+    },
+    Admins {
+        #[arg(long)]
+        workspace_id: String,
+    },
+    InviteUsers {
+        #[arg(long)]
+        workspace_id: String,
+    },
+    RemoveUser {
+        #[arg(long)]
+        workspace_id: String,
+        #[arg(long)]
+        person_id: String,
+    },
+    SuspendUsers {
+        #[arg(long)]
+        workspace_id: String,
+    },
+    UnsuspendUsers {
+        #[arg(long)]
+        workspace_id: String,
+    },
+    Transfer {
+        #[arg(long)]
+        workspace_id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
 enum OneRoleCommand {
-    ListAssignments,
-    Assign,
-    Unassign,
+    ListAssignments {
+        #[arg(long)]
+        role_id: String,
+    },
+    Assign {
+        #[arg(long)]
+        role_id: String,
+        #[arg(long)]
+        subject_id: String,
+    },
+    Unassign {
+        #[arg(long)]
+        role_id: String,
+        #[arg(long)]
+        subject_id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -342,10 +382,14 @@ enum OnePlansCommand {
     Detail {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        plan_id: Option<String>,
     },
     Run {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        plan_id: Option<String>,
     },
     Count {
         #[arg(long, default_value = "config.yaml")]
@@ -354,14 +398,20 @@ enum OnePlansCommand {
     RunParameters {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        plan_id: Option<String>,
     },
     Schedules {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        plan_id: Option<String>,
     },
     Export {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        plan_id: Option<String>,
     },
     Import {
         #[arg(long, default_value = "config.yaml")]
@@ -370,6 +420,10 @@ enum OnePlansCommand {
     Permissions {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        plan_id: Option<String>,
+        #[arg(long)]
+        subject_id: Option<String>,
     },
 }
 
@@ -382,14 +436,20 @@ enum OneSchedulingCommand {
     Detail {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        schedule_id: Option<String>,
     },
     Enable {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        schedule_id: Option<String>,
     },
     Disable {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        schedule_id: Option<String>,
     },
     Count {
         #[arg(long, default_value = "config.yaml")]
@@ -2093,152 +2153,152 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 }
                 Some(OnePlatformCommand::Workspace { command }) => match command {
                     OneWorkspaceCommand::Current => {
-                        one_api_action_envelope_from_profile(
-                            &load_profile(&PathBuf::from("config.yaml"))?,
-                            "one",
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
                             "platform",
                             "workspace-current",
                             "GET",
                             "/iam/v1/workspaces/current",
-                            "managed-iam-v1.yaml",
                             false,
+                            &[],
                         )?
                     }
-                    OneWorkspaceCommand::Configuration => {
-                        one_api_action_envelope_from_profile(
-                            &load_profile(&PathBuf::from("config.yaml"))?,
-                            "one",
+                    OneWorkspaceCommand::Configuration { workspace_id } => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
                             "platform",
                             "workspace-configuration",
                             "GET",
                             "/iam/v1/workspaces/{id}/configuration",
-                            "managed-iam-v1.yaml",
                             false,
+                            &[("id", &workspace_id)],
                         )?
                     }
-                    OneWorkspaceCommand::People => {
-                        one_api_action_envelope_from_profile(
-                            &load_profile(&PathBuf::from("config.yaml"))?,
-                            "one",
+                    OneWorkspaceCommand::People { workspace_id } => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
                             "platform",
                             "workspace-people",
                             "GET",
                             "/iam/v1/workspaces/{id}/people",
-                            "managed-iam-v1.yaml",
                             false,
+                            &[("id", &workspace_id)],
                         )?
                     }
-                    OneWorkspaceCommand::Admins => {
-                        one_api_action_envelope_from_profile(
-                            &load_profile(&PathBuf::from("config.yaml"))?,
-                            "one",
+                    OneWorkspaceCommand::Admins { workspace_id } => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
                             "platform",
                             "workspace-admins",
                             "GET",
                             "/iam/v1/workspaces/{workspaceId}/admins",
-                            "managed-iam-v1.yaml",
                             false,
+                            &[("workspaceId", &workspace_id)],
                         )?
                     }
-                    OneWorkspaceCommand::InviteUsers => {
-                        one_api_action_envelope_from_profile(
-                            &load_profile(&PathBuf::from("config.yaml"))?,
-                            "one",
+                    OneWorkspaceCommand::InviteUsers { workspace_id } => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
                             "platform",
                             "workspace-invite-users",
                             "POST",
                             "/iam/v1/workspaces/{id}/people/batch",
-                            "managed-iam-v1.yaml",
                             true,
+                            &[("id", &workspace_id)],
                         )?
                     }
-                    OneWorkspaceCommand::RemoveUser => {
-                        one_api_action_envelope_from_profile(
-                            &load_profile(&PathBuf::from("config.yaml"))?,
-                            "one",
+                    OneWorkspaceCommand::RemoveUser {
+                        workspace_id,
+                        person_id,
+                    } => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
                             "platform",
                             "workspace-remove-user",
                             "DELETE",
                             "/iam/v1/workspaces/{id}/people/{personId}",
-                            "managed-iam-v1.yaml",
                             true,
+                            &[("id", &workspace_id), ("personId", &person_id)],
                         )?
                     }
-                    OneWorkspaceCommand::SuspendUsers => {
-                        one_api_action_envelope_from_profile(
-                            &load_profile(&PathBuf::from("config.yaml"))?,
-                            "one",
+                    OneWorkspaceCommand::SuspendUsers { workspace_id } => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
                             "platform",
                             "workspace-suspend-users",
                             "POST",
                             "/iam/v1/workspaces/{id}/people/suspend",
-                            "managed-iam-v1.yaml",
                             true,
+                            &[("id", &workspace_id)],
                         )?
                     }
-                    OneWorkspaceCommand::UnsuspendUsers => {
-                        one_api_action_envelope_from_profile(
-                            &load_profile(&PathBuf::from("config.yaml"))?,
-                            "one",
+                    OneWorkspaceCommand::UnsuspendUsers { workspace_id } => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
                             "platform",
                             "workspace-unsuspend-users",
                             "POST",
                             "/iam/v1/workspaces/{id}/people/unsuspend",
-                            "managed-iam-v1.yaml",
                             true,
+                            &[("id", &workspace_id)],
                         )?
                     }
-                    OneWorkspaceCommand::Transfer => {
-                        one_api_action_envelope_from_profile(
-                            &load_profile(&PathBuf::from("config.yaml"))?,
-                            "one",
+                    OneWorkspaceCommand::Transfer { workspace_id } => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
                             "platform",
                             "workspace-transfer",
                             "POST",
                             "/iam/v1/workspaces/{id}/transfer",
-                            "managed-iam-v1.yaml",
                             true,
+                            &[("id", &workspace_id)],
                         )?
                     }
                 },
                 Some(OnePlatformCommand::Role { command }) => match command {
-                    OneRoleCommand::ListAssignments => {
+                    OneRoleCommand::ListAssignments { role_id } => {
                         let config = load_profile(&PathBuf::from("config.yaml"))?;
-                        one_api_action_envelope(
+                        one_api_live_request(
                             &config,
-                            "one",
                             "platform",
                             "role-list-assignments",
                             "GET",
                             "/iam/v1/authorization/roles/{id}/people",
-                            "managed-iam-v1.yaml",
                             false,
+                            &[("id", &role_id)],
                         )?
                     }
-                    OneRoleCommand::Assign => {
+                    OneRoleCommand::Assign { role_id, subject_id } => {
                         let config = load_profile(&PathBuf::from("config.yaml"))?;
-                        one_api_action_envelope(
+                        one_api_live_request(
                             &config,
-                            "one",
                             "platform",
                             "role-assign",
                             "POST",
                             "/iam/v1/authorization/roles/{id}/people/{subjectId}",
-                            "managed-iam-v1.yaml",
                             true,
+                            &[("id", &role_id), ("subjectId", &subject_id)],
                         )?
                     }
-                    OneRoleCommand::Unassign => {
+                    OneRoleCommand::Unassign { role_id, subject_id } => {
                         let config = load_profile(&PathBuf::from("config.yaml"))?;
-                        one_api_action_envelope(
+                        one_api_live_request(
                             &config,
-                            "one",
                             "platform",
                             "role-unassign",
                             "DELETE",
                             "/iam/v1/authorization/roles/{id}/people/{subjectId}",
-                            "managed-iam-v1.yaml",
                             true,
+                            &[("id", &role_id), ("subjectId", &subject_id)],
                         )?
                     }
                 },
@@ -2346,120 +2406,106 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 ),
                 Some(OnePlansCommand::List { profile }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
-                        &config,
-                        "one",
-                        "plans",
-                        "list",
-                        "GET",
-                        "/plans/v1/plans",
-                        "managed-plans-v1.yaml",
-                        false,
-                    )?
+                    one_api_live_request(&config, "plans", "list", "GET", "/plans/v1/plans", false, &[])?
                 }
-                Some(OnePlansCommand::Detail { profile }) => {
+                Some(OnePlansCommand::Detail { profile, plan_id }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
+                    let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
+                    one_api_live_request(
                         &config,
-                        "one",
                         "plans",
                         "detail",
                         "GET",
                         "/plans/v1/plans/{id}",
-                        "managed-plans-v1.yaml",
                         false,
+                        &[("id", plan_id.as_str())],
                     )?
                 }
-                Some(OnePlansCommand::Run { profile }) => {
+                Some(OnePlansCommand::Run { profile, plan_id }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
+                    let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
+                    one_api_live_request(
                         &config,
-                        "one",
                         "plans",
                         "run",
                         "POST",
                         "/plans/v1/plans/{id}/run",
-                        "managed-plans-v1.yaml",
                         true,
+                        &[("id", plan_id.as_str())],
                     )?
                 }
                 Some(OnePlansCommand::Count { profile }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
-                        &config,
-                        "one",
-                        "plans",
-                        "count",
-                        "GET",
-                        "/plans/v1/plans/count",
-                        "managed-plans-v1.yaml",
-                        false,
-                    )?
+                    one_api_live_request(&config, "plans", "count", "GET", "/plans/v1/plans/count", false, &[])?
                 }
-                Some(OnePlansCommand::RunParameters { profile }) => {
+                Some(OnePlansCommand::RunParameters { profile, plan_id }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
+                    let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
+                    one_api_live_request(
                         &config,
-                        "one",
                         "plans",
                         "run-parameters",
                         "GET",
                         "/plans/v1/plans/{id}/runParameters",
-                        "managed-plans-v1.yaml",
                         false,
+                        &[("id", plan_id.as_str())],
                     )?
                 }
-                Some(OnePlansCommand::Schedules { profile }) => {
+                Some(OnePlansCommand::Schedules { profile, plan_id }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
+                    let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
+                    one_api_live_request(
                         &config,
-                        "one",
                         "plans",
                         "schedules",
                         "GET",
                         "/plans/v1/plans/{id}/schedules",
-                        "managed-plans-v1.yaml",
                         false,
+                        &[("id", plan_id.as_str())],
                     )?
                 }
-                Some(OnePlansCommand::Export { profile }) => {
+                Some(OnePlansCommand::Export { profile, plan_id }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
+                    let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
+                    one_api_live_request(
                         &config,
-                        "one",
                         "plans",
                         "export",
                         "GET",
                         "/plans/v1/plans/{id}/package",
-                        "managed-plans-v1.yaml",
                         false,
+                        &[("id", plan_id.as_str())],
                     )?
                 }
                 Some(OnePlansCommand::Import { profile }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
-                        &config,
-                        "one",
-                        "plans",
-                        "import",
-                        "POST",
-                        "/plans/v1/plans/package",
-                        "managed-plans-v1.yaml",
-                        true,
-                    )?
+                    one_api_live_request(&config, "plans", "import", "POST", "/plans/v1/plans/package", true, &[])?
                 }
-                Some(OnePlansCommand::Permissions { profile }) => {
+                Some(OnePlansCommand::Permissions { profile, plan_id, subject_id }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
-                        &config,
-                        "one",
-                        "plans",
-                        "permissions",
-                        "GET",
-                        "/plans/v1/plans/{id}/permissions",
-                        "managed-plans-v1.yaml",
-                        false,
-                    )?
+                    let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
+                    let subject_id = subject_id.unwrap_or_default();
+                    if subject_id.is_empty() {
+                        one_api_live_request(
+                            &config,
+                            "plans",
+                            "permissions",
+                            "GET",
+                            "/plans/v1/plans/{id}/permissions",
+                            false,
+                            &[("id", plan_id.as_str())],
+                        )?
+                    } else {
+                        one_api_live_request(
+                            &config,
+                            "plans",
+                            "permissions",
+                            "DELETE",
+                            "/plans/v1/plans/{id}/permissions/{subjectId}",
+                            true,
+                            &[("id", plan_id.as_str()), ("subjectId", subject_id.as_str())],
+                        )?
+                    }
                 }
             },
             Some(OneCommand::Scheduling { command }) => match command {
@@ -2468,97 +2514,61 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 ),
                 Some(OneSchedulingCommand::List { profile }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
-                        &config,
-                        "one",
-                        "scheduling",
-                        "list",
-                        "GET",
-                        "/scheduling/v1/schedules",
-                        "managed-scheduling-v1.yaml",
-                        false,
-                    )?
+                    one_api_live_request(&config, "scheduling", "list", "GET", "/scheduling/v1/schedules", false, &[])?
                 }
-                Some(OneSchedulingCommand::Detail { profile }) => {
+                Some(OneSchedulingCommand::Detail { profile, schedule_id }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
+                    let schedule_id = schedule_id.ok_or_else(|| anyhow!("--schedule-id is required"))?;
+                    one_api_live_request(
                         &config,
-                        "one",
                         "scheduling",
                         "detail",
                         "GET",
                         "/scheduling/v1/schedules/{id}",
-                        "managed-scheduling-v1.yaml",
                         false,
+                        &[("id", schedule_id.as_str())],
                     )?
                 }
-                Some(OneSchedulingCommand::Enable { profile }) => {
+                Some(OneSchedulingCommand::Enable { profile, schedule_id }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
+                    let schedule_id = schedule_id.ok_or_else(|| anyhow!("--schedule-id is required"))?;
+                    one_api_live_request(
                         &config,
-                        "one",
                         "scheduling",
                         "enable",
                         "POST",
                         "/scheduling/v1/schedules/{id}/enable",
-                        "managed-scheduling-v1.yaml",
                         true,
+                        &[("id", schedule_id.as_str())],
                     )?
                 }
-                Some(OneSchedulingCommand::Disable { profile }) => {
+                Some(OneSchedulingCommand::Disable { profile, schedule_id }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
+                    let schedule_id = schedule_id.ok_or_else(|| anyhow!("--schedule-id is required"))?;
+                    one_api_live_request(
                         &config,
-                        "one",
                         "scheduling",
                         "disable",
                         "POST",
                         "/scheduling/v1/schedules/{id}/disable",
-                        "managed-scheduling-v1.yaml",
                         true,
+                        &[("id", schedule_id.as_str())],
                     )?
                 }
                 Some(OneSchedulingCommand::Count { profile }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
-                        &config,
-                        "one",
-                        "scheduling",
-                        "count",
-                        "GET",
-                        "/scheduling/v1/schedules/count",
-                        "managed-scheduling-v1.yaml",
-                        false,
-                    )?
+                    one_api_live_request(&config, "scheduling", "count", "GET", "/scheduling/v1/schedules/count", false, &[])?
                 }
             },
             Some(OneCommand::Billing { command }) => match command {
                 None => Envelope::ok("one billing commands available: current-account, usage-export"),
                 Some(OneBillingCommand::CurrentAccount { profile }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
-                        &config,
-                        "one",
-                        "billing",
-                        "current-account",
-                        "GET",
-                        "/billing/v1/my/billing-accounts/current",
-                        "managed-billing-v1.yaml",
-                        false,
-                    )?
+                    one_api_live_request(&config, "billing", "current-account", "GET", "/billing/v1/my/billing-accounts/current", false, &[])?
                 }
                 Some(OneBillingCommand::UsageExport { profile }) => {
                     let config = load_profile(&profile)?;
-                    one_api_action_envelope(
-                        &config,
-                        "one",
-                        "billing",
-                        "usage-export",
-                        "GET",
-                        "/billing/v1/usage/export",
-                        "managed-billing-v1.yaml",
-                        false,
-                    )?
+                    one_api_live_request(&config, "billing", "usage-export", "GET", "/billing/v1/usage/export", false, &[])?
                 }
             },
             Some(OneCommand::AutoInsights { profile }) => {
@@ -2612,56 +2622,77 @@ fn execute(cli: Cli) -> Result<Envelope> {
     Ok(envelope)
 }
 
-fn one_api_action_envelope(
+fn one_api_live_request(
     config: &Config,
-    product: &str,
     surface: &str,
     operation: &str,
     method: &str,
     endpoint: &str,
-    spec_file: &str,
     mutating: bool,
+    path_params: &[(&str, &str)],
 ) -> Result<Envelope> {
     let api = config
-        .api
+        .alteryx_one
         .as_ref()
-        .ok_or_else(|| anyhow!("config missing api/server_api section"))?;
+        .and_then(|one| one.api_token.as_ref())
+        .ok_or_else(|| anyhow!("alteryx_one.api_token is required for live one api calls"))?;
+    let base_url = "https://api.us1.alteryxcloud.com";
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .context("failed to build one api client")?;
+
+    let mut url = format!("{}{}", base_url, endpoint);
+    for (key, value) in path_params {
+        url = url.replace(&format!("{{{}}}", key), value);
+    }
+    let method_name = method.to_string();
+    let method = reqwest::Method::from_bytes(method_name.as_bytes())
+        .map_err(|_| anyhow!("unsupported one api method '{}'", method))?;
+    let mut request = client
+        .request(method, &url)
+        .header(AUTHORIZATION, format!("Bearer {}", api))
+        .header(reqwest::header::ACCEPT, "application/json");
+    if mutating {
+        request = request.header(CONTENT_TYPE, "application/json");
+    }
+
+    let response = request
+        .send()
+        .with_context(|| format!("failed to call one api '{} {}'", method_name, url))?;
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|val| val.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let text = response.text().unwrap_or_else(|_| String::new());
+    let response_body = if content_type.to_lowercase().contains("json") {
+        serde_json::from_str(&text).unwrap_or_else(|_| json!({ "raw": text }))
+    } else if text.trim().is_empty() {
+        Value::Null
+    } else {
+        json!({ "raw": text })
+    };
 
     Ok(Envelope::ok_with_data(
-        format!("{} {} {}", product, surface, operation),
+        format!(
+            "{} {} {}",
+            surface,
+            operation,
+            if status.is_success() { "ok" } else { "failed" }
+        ),
         json!({
-            "product": product,
             "surface": surface,
             "operation": operation,
-            "method": method,
-            "endpoint": endpoint,
-            "spec_file": spec_file,
-            "base_url": api.base_url,
-            "profile": config.profile_name,
-            "auth_mode": format!("{:?}", api.auth.mode),
-            "has_credentials": {
-                "client_id": api.auth.client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
-                "client_secret": api.auth.client_secret.as_ref().is_some_and(|v| !v.trim().is_empty()),
-            },
-            "mutating": mutating,
-            "message": "spec-backed One API surface scaffolded",
+            "method": method_name,
+            "url": url,
+            "status_code": status.as_u16(),
+            "ok": status.is_success(),
+            "response": response_body,
         }),
     ))
-}
-
-fn one_api_action_envelope_from_profile(
-    config: &Config,
-    product: &str,
-    surface: &str,
-    operation: &str,
-    method: &str,
-    endpoint: &str,
-    spec_file: &str,
-    mutating: bool,
-) -> Result<Envelope> {
-    one_api_action_envelope(
-        config, product, surface, operation, method, endpoint, spec_file, mutating,
-    )
 }
 
 fn perform_self_update(

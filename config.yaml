@@ -2,6 +2,7 @@ profile_name: local-dev
 
 alteryx_one:
   account_email: ${AYX_ACCOUNT_EMAIL}  # used for gallery automation and workflow transfers
+  api_token: ${AYX_ONE_API_TOKEN}
 
 alteryx_server:
   server_api:
