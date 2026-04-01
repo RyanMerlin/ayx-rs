@@ -24,6 +24,7 @@ fn test_profile() -> Config {
 
     Config {
         profile_name: "test".to_string(),
+        server_api: None,
         mongo: MongoProfile {
             mode: MongoMode::Embedded,
             databases: MongoDatabases {

@@ -1,6 +1,6 @@
 profile_name: local-dev
 alteryx_one:
-  account_email: your.name@company.com  # used for gallery automation and workflow transfers
+  account_email: ${AYX_ACCOUNT_EMAIL}  # used for gallery automation and workflow transfers
 mongo:
   mode: embedded  # switch to 'managed' and fill mongo.managed.* when targeting an external MongoDB.
   databases:
@@ -16,7 +16,7 @@ mongo:
     port: 27017
     auth_database: admin
     username: mongo_user
-    password: REPLACE_WITH_SECRET
+    password: ${AYX_MONGO_MANAGED_PASSWORD}
     tls:
       enabled: false
       ca_path: null
@@ -26,20 +26,10 @@ mongo:
     timeout_ms: 15000
     retry_count: 2
     max_pool_size: 20
-api:
+server_api:
   base_url: http://172.27.171.32/webapi/
-  auth:
-    mode: oauth2_client_credentials
-    client_id: 8DC1ED3149EBEDD9a9a0c6ad83958e1ed7ac47bb5554e21855628fca658a90fcbcccc28ad6e9375
-    client_secret: 80b3006ffedb5ed5a5a858d5a4d054caf1f589ccfa552dbaf7d96cc186754f34
-    scope: ""
-    # token requests automatically target ${api.base_url}oauth2/token
-  timeout_ms: 15000
-server:
-  webapi_url: http://localhost/webapi/
-  curator_api_key: YOUR_CURATOR_API_KEY
-  curator_api_secret: YOUR_CURATOR_API_SECRET
-  verify_tls: true
+  client_id: ${AYX_SERVER_API_KEY}
+  client_secret: ${AYX_SERVER_API_SECRET}
 upgrade:
   current_version: 2024.1
   deployment: embedded-mongo

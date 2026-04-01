@@ -1832,6 +1832,7 @@ mod tests {
     fn transfer_dry_run_writes_audit() {
         let profile = Config {
             profile_name: "test".to_string(),
+            server_api: None,
             mongo: MongoProfile {
                 mode: MongoMode::Embedded,
                 databases: MongoDatabases {

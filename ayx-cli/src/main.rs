@@ -135,6 +135,8 @@ enum MongoCommand {
         #[arg(long, default_value_t = 25)]
         limit: u32,
         #[arg(long)]
+        print: bool,
+        #[arg(long)]
         apply: bool,
         #[arg(long)]
         template: Option<String>,
@@ -1466,6 +1468,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 projection,
                 sort,
                 limit,
+                print,
                 apply,
                 template,
             } => {
@@ -1493,7 +1496,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     limit: Some(limit),
                     template_name: template,
                 };
-                mongo_query_envelope(&profile, &spec, apply)?
+                mongo_query_envelope(&profile, &spec, print, apply)?
             }
             MongoCommand::Doctor { profile } => {
                 let profile = load_profile(&profile)?;

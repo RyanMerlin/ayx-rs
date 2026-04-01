@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -26,8 +27,11 @@ pub enum ProfileError {
 pub struct Config {
     pub profile_name: String,
     pub mongo: MongoProfile,
-    pub api: Option<ApiProfile>,
     pub alteryx_one: Option<AlteryxOneProfile>,
+    #[serde(default)]
+    pub server_api: Option<ServerApiProfile>,
+    #[serde(default)]
+    pub api: Option<ApiProfile>,
     #[serde(default)]
     pub server: Option<ServerProfile>,
     #[serde(default)]
@@ -127,6 +131,13 @@ pub struct ServerProfile {
     pub verify_tls: Option<bool>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ServerApiProfile {
+    pub base_url: String,
+    pub client_id: String,
+    pub client_secret: String,
+}
+
 impl ServerProfile {
     pub fn verify_tls(&self) -> bool {
         self.verify_tls.unwrap_or(true)
@@ -140,15 +151,54 @@ impl Config {
             path: path_str.clone(),
             source,
         })?;
+        let env_path = path
+            .parent()
+            .map(|parent| parent.join(".env"))
+            .unwrap_or_else(|| Path::new(".env").to_path_buf());
+        let env_values =
+            read_env_file_if_present(&env_path).map_err(|source| ProfileError::Read {
+                path: env_path.display().to_string(),
+                source,
+            })?;
+        let expanded = expand_env_placeholders(&content, &env_values);
 
         let config: Self =
-            serde_yaml::from_str(&content).map_err(|source| ProfileError::Parse {
+            serde_yaml::from_str(&expanded).map_err(|source| ProfileError::Parse {
                 path: path_str,
                 source,
             })?;
-
+        let config = config.with_server_api_overrides()?;
         config.validate()?;
         Ok(config)
+    }
+
+    fn with_server_api_overrides(mut self) -> Result<Self, ProfileError> {
+        if let Some(shared) = &self.server_api {
+            if self.api.is_none() {
+                self.api = Some(ApiProfile {
+                    base_url: shared.base_url.clone(),
+                    auth: ApiAuth {
+                        mode: ApiAuthMode::Oauth2ClientCredentials,
+                        pat: None,
+                        client_id: Some(shared.client_id.clone()),
+                        client_secret: Some(shared.client_secret.clone()),
+                        scope: Some(String::new()),
+                    },
+                    timeout_ms: None,
+                });
+            }
+
+            if self.server.is_none() {
+                self.server = Some(ServerProfile {
+                    webapi_url: shared.base_url.clone(),
+                    curator_api_key: shared.client_id.clone(),
+                    curator_api_secret: shared.client_secret.clone(),
+                    verify_tls: None,
+                });
+            }
+        }
+
+        Ok(self)
     }
 
     fn validate(&self) -> Result<(), ProfileError> {
@@ -263,4 +313,61 @@ impl Config {
 
         Ok(())
     }
+}
+
+fn read_env_file_if_present(path: &Path) -> std::io::Result<HashMap<String, String>> {
+    let mut values = HashMap::new();
+    if !path.exists() {
+        return Ok(values);
+    }
+
+    let content = fs::read_to_string(path)?;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let trimmed = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+        let mut parts = trimmed.splitn(2, '=');
+        let key = parts.next().unwrap_or("").trim();
+        let value = parts.next().unwrap_or("").trim();
+        if key.is_empty() {
+            continue;
+        }
+        values.insert(
+            key.to_string(),
+            value.trim_matches('"').trim_matches('\'').to_string(),
+        );
+    }
+    Ok(values)
+}
+
+fn expand_env_placeholders(input: &str, env_values: &HashMap<String, String>) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '$' && chars.peek() == Some(&'{') {
+            let _ = chars.next();
+            let mut name = String::new();
+            while let Some(&c) = chars.peek() {
+                chars.next();
+                if c == '}' {
+                    break;
+                }
+                name.push(c);
+            }
+            if let Some(value) = env_values.get(&name) {
+                out.push_str(value);
+            } else if let Ok(value) = std::env::var(&name) {
+                out.push_str(&value);
+            } else {
+                out.push_str("${");
+                out.push_str(&name);
+                out.push('}');
+            }
+            continue;
+        }
+        out.push(ch);
+    }
+    out
 }

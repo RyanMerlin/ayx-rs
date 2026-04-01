@@ -21,6 +21,18 @@ pub struct MongoQuerySpec {
     pub template_name: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct MongoQueryPlan {
+    pub mongosh: String,
+    pub database: String,
+    pub collection: String,
+    pub filter: serde_json::Value,
+    pub projection: Option<serde_json::Value>,
+    pub sort: Option<serde_json::Value>,
+    pub limit: Option<u32>,
+    pub template_name: Option<String>,
+}
+
 pub fn status_envelope(config: &Config) -> Result<Envelope> {
     let mode = match config.mongo.mode {
         MongoMode::Embedded => "embedded",
@@ -46,29 +58,56 @@ pub fn status_envelope(config: &Config) -> Result<Envelope> {
     ))
 }
 
-pub fn query_envelope(config: &Config, spec: &MongoQuerySpec, apply: bool) -> Result<Envelope> {
+pub fn query_envelope(
+    config: &Config,
+    spec: &MongoQuerySpec,
+    print_query: bool,
+    apply: bool,
+) -> Result<Envelope> {
+    let plan = build_query_plan(config, spec)?;
+    if print_query {
+        return Ok(Envelope::ok_with_data(
+            "mongo query plan generated",
+            json!({
+                "profile": config.profile_name,
+                "connection": resolve_connection_detail(config)?,
+                "query": {
+                    "database": plan.database,
+                    "collection": plan.collection,
+                    "filter": plan.filter,
+                    "projection": plan.projection,
+                    "sort": plan.sort,
+                    "limit": plan.limit,
+                    "template": plan.template_name,
+                },
+                "mongosh": plan.mongosh,
+                "copy_paste": plan.mongosh,
+            }),
+        ));
+    }
+
     if apply {
         anyhow::bail!("mongo query is read-only; use dedicated mutation workflows for writes");
     }
 
     let detail = resolve_connection_detail(config)?;
-    let execution = execute_query(config, spec)?;
+    let execution = execute_query_spec(config, spec)?;
     Ok(Envelope::ok_with_data(
         format!(
             "mongo query executed against {}.{}",
-            spec.database, spec.collection
+            plan.database, plan.collection
         ),
         json!({
             "profile": config.profile_name,
             "connection": detail,
             "query": {
-                "database": spec.database,
-                "collection": spec.collection,
-                "filter": spec.filter,
-                "projection": spec.projection,
-                "sort": spec.sort,
-                "limit": spec.limit,
-                "template": spec.template_name,
+                "database": plan.database,
+                "collection": plan.collection,
+                "filter": plan.filter,
+                "projection": plan.projection,
+                "sort": plan.sort,
+                "limit": plan.limit,
+                "template": plan.template_name,
             },
             "execution": execution,
         }),
@@ -102,7 +141,7 @@ pub fn doctor_envelope(config: &Config) -> Result<Envelope> {
                 .and_then(serde_json::Value::as_str)
                 .map(ToOwned::to_owned),
         };
-        match execute_query(config, &spec) {
+        match execute_query_spec(config, &spec) {
             Ok(value) => results.push(json!({
                 "name": spec.template_name,
                 "ok": true,
@@ -336,8 +375,25 @@ fn execute_backup(config: &Config, output_dir: &Path) -> Result<serde_json::Valu
     }
 }
 
-fn execute_query(config: &Config, spec: &MongoQuerySpec) -> Result<serde_json::Value> {
-    let managed = config.mongo.managed.as_ref();
+fn execute_query_spec(config: &Config, spec: &MongoQuerySpec) -> Result<serde_json::Value> {
+    let plan = build_query_plan(config, spec)?;
+    execute_query_plan(&plan)
+}
+
+fn build_query_plan(config: &Config, spec: &MongoQuerySpec) -> Result<MongoQueryPlan> {
+    Ok(MongoQueryPlan {
+        mongosh: build_mongosh_eval(config, spec)?,
+        database: spec.database.clone(),
+        collection: spec.collection.clone(),
+        filter: spec.filter.clone(),
+        projection: spec.projection.clone(),
+        sort: spec.sort.clone(),
+        limit: spec.limit,
+        template_name: spec.template_name.clone(),
+    })
+}
+
+fn build_mongosh_eval(config: &Config, spec: &MongoQuerySpec) -> Result<String> {
     let database = &spec.database;
     let collection = &spec.collection;
     let filter = serde_json::to_string(&spec.filter)?;
@@ -351,8 +407,6 @@ fn execute_query(config: &Config, spec: &MongoQuerySpec) -> Result<serde_json::V
         .as_ref()
         .map(|s| format!(".sort({s})"))
         .unwrap_or_default();
-    let projection_js = projection;
-
     let mut js = String::new();
     js.push_str("const dbName = ");
     js.push_str(&serde_json::to_string(database)?);
@@ -361,20 +415,34 @@ fn execute_query(config: &Config, spec: &MongoQuerySpec) -> Result<serde_json::V
     js.push_str("; const filter = ");
     js.push_str(&filter);
     js.push_str("; const result = db.getSiblingDB(dbName).getCollection(collName).find(filter");
-    js.push_str(&projection_js);
+    js.push_str(&projection);
     js.push_str(&sort_js);
     js.push_str(&format!(
         ".limit({limit}).toArray(); print(JSON.stringify(result));"
     ));
-
-    let mongo_cmd = if cfg!(target_os = "windows") {
+    let mut args: Vec<String> = vec!["--quiet".to_string(), "--eval".to_string(), js];
+    attach_connection_args(config, &mut args)?;
+    let cmd = if cfg!(target_os = "windows") {
         "mongosh.exe"
     } else {
         "mongosh"
     };
-    ensure_tool_available(mongo_cmd)?;
+    let quoted = args
+        .into_iter()
+        .map(|a| {
+            if a.contains(' ') {
+                format!("\"{a}\"")
+            } else {
+                a
+            }
+        })
+        .collect::<Vec<String>>()
+        .join(" ");
+    Ok(format!("{cmd} {quoted}"))
+}
 
-    let mut args: Vec<String> = vec!["--quiet".to_string(), "--eval".to_string(), js];
+fn attach_connection_args(config: &Config, args: &mut Vec<String>) -> Result<()> {
+    let managed = config.mongo.managed.as_ref();
     if let Some(url) = managed.and_then(|m| m.url.as_ref()) {
         args.push("--uri".to_string());
         args.push(url.to_string());
@@ -397,9 +465,6 @@ fn execute_query(config: &Config, spec: &MongoQuerySpec) -> Result<serde_json::V
             args.push("--authenticationDatabase".to_string());
             args.push(auth_db.to_string());
         }
-    }
-
-    if let Some(m) = managed {
         if m.tls.enabled {
             args.push("--tls".to_string());
             if let Some(ca) = m.tls.ca_path.as_ref() {
@@ -415,8 +480,22 @@ fn execute_query(config: &Config, spec: &MongoQuerySpec) -> Result<serde_json::V
             }
         }
     }
+    Ok(())
+}
 
+fn execute_query_plan(plan: &MongoQueryPlan) -> Result<serde_json::Value> {
+    let args: Vec<String> = vec![
+        "--quiet".to_string(),
+        "--eval".to_string(),
+        plan.mongosh.clone(),
+    ];
     let arg_refs: Vec<&str> = args.iter().map(|a| a.as_str()).collect();
+    let mongo_cmd = if cfg!(target_os = "windows") {
+        "mongosh.exe"
+    } else {
+        "mongosh"
+    };
+    ensure_tool_available(mongo_cmd)?;
     let execution = run_command_capture(Path::new(mongo_cmd), &arg_refs, None)?;
     let parsed = execution
         .get("stdout")

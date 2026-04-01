@@ -4,6 +4,8 @@ Cargo.lock
 .cargo/
 .idea/
 .vscode/
+.env
+.env.local
 .DS_Store
 *.log
 *.tmp

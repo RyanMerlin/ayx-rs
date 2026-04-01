@@ -1,0 +1,56 @@
+queries:
+  - name: queue_health
+    database: AlteryxService
+    collection: AS_Queue
+    filter:
+      __Version:
+        $exists: true
+    limit: 10
+    purpose: Inspect queued and completed jobs
+    kba_refs:
+      - AS_Queue
+      - job state corruption
+      - orphaned queue rows
+    read_only: true
+
+  - name: results_health
+    database: AlteryxService
+    collection: AS_Results
+    filter:
+      __Version:
+        $exists: true
+    limit: 10
+    purpose: Inspect job results and result linkage
+    kba_refs:
+      - AS_Results
+      - missing result rows
+      - workflow completion issues
+    read_only: true
+
+  - name: gallery_users
+    database: AlteryxGallery
+    collection: users
+    filter:
+      __Version:
+        $exists: true
+    limit: 10
+    purpose: Inspect Gallery users and email/domain state
+    kba_refs:
+      - users
+      - bulk email domain migration
+      - orphaned users
+    read_only: true
+
+  - name: appinfos
+    database: AlteryxGallery
+    collection: collections.appinfos
+    filter:
+      __Version:
+        $exists: true
+    limit: 10
+    purpose: Inspect gallery app metadata and ownership mappings
+    kba_refs:
+      - appinfos
+      - app ownership
+      - gallery item corruption
+    read_only: true

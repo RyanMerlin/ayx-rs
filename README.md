@@ -67,9 +67,11 @@ Minimum expectations:
 - `mongo.mode`
 - `mongo.databases.gallery_name`
 - `mongo.databases.service_name`
-- `api.base_url` plus auth settings when using API commands
-- `server.webapi_url`, `server.curator_api_key`, and `server.curator_api_secret` when using Server API commands
+- `server_api.base_url`, `server_api.client_id`, and `server_api.client_secret`
 - `alteryx_one.account_email` when using ownership-transfer and related automation
+
+Sensitive values live in `.env` and are expanded automatically from `config.yaml`.
+Use `.env.example` as the shareable template.
 
 Embedded Mongo discovery looks for `RuntimeSettings.xml` in the standard Alteryx locations first, then falls back to the configured path if provided.
 
