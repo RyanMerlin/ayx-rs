@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
+use chrono::Utc;
 use clap::{Parser, Subcommand};
 use reqwest::blocking::Client;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER};
@@ -11,6 +12,7 @@ use roxmltree::Document;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
+use ayx_api::workflow_version_upload_envelope;
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::envelope::Envelope;
 use ayx_core::observability::{record_api_event, response_shape, ApiEvent};
@@ -279,6 +281,36 @@ enum WorkflowCommand {
         replace: Vec<String>,
         #[arg(long)]
         validate: bool,
+    },
+    Publish {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        workflow_id: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        owner_id: String,
+        #[arg(long, default_value_t = true)]
+        others_may_download: bool,
+        #[arg(long, default_value_t = true)]
+        others_can_execute: bool,
+        #[arg(long, default_value = "Standard")]
+        execution_mode: String,
+        #[arg(long, default_value_t = false)]
+        has_private_data_exemption: bool,
+        #[arg(long)]
+        comments: Option<String>,
+        #[arg(long, default_value_t = true)]
+        make_published: bool,
+        #[arg(long, default_value = "Default")]
+        workflow_credential_type: String,
+        #[arg(long)]
+        credential_id: Option<String>,
+        #[arg(long, default_value_t = false)]
+        bypass_workflow_version_check: bool,
     },
     Migrate {
         #[arg(long)]
@@ -819,6 +851,19 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &[
             "Use --rules for YAML-driven migrations or repeat --find/--replace pairs.",
             "Recurses into packages and nested workflow artifacts.",
+        ],
+    },
+    CommandSpec {
+        name: "workflow publish",
+        path: "workflow/publish",
+        summary: "Republish a workflow package through the Server API.",
+        output: "workflow publish envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "workflow package"],
+        notes: &[
+            "Uses the Server workflow upload API for the actual publish step.",
+            "Accepts a ready .yxzp or a directory that can be repackaged first.",
         ],
     },
     CommandSpec {
@@ -2524,6 +2569,66 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     json!({
                         "input": input.display().to_string(),
                         "output": output.display().to_string(),
+                        "data": detail,
+                    }),
+                )
+            }
+            Some(WorkflowCommand::Publish {
+                profile,
+                input,
+                workflow_id,
+                name,
+                owner_id,
+                others_may_download,
+                others_can_execute,
+                execution_mode,
+                has_private_data_exemption,
+                comments,
+                make_published,
+                workflow_credential_type,
+                credential_id,
+                bypass_workflow_version_check,
+            }) => {
+                let config = load_profile(&profile)?;
+                let package_path = if input
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|s| s.eq_ignore_ascii_case("yxzp"))
+                    .unwrap_or(false)
+                {
+                    input.clone()
+                } else if input.is_dir() {
+                    let temp_package = std::env::temp_dir().join(format!(
+                        "ayx-workflow-publish-{}-{}.yxzp",
+                        std::process::id(),
+                        Utc::now().timestamp_nanos_opt().unwrap_or_default()
+                    ));
+                    repackage_workflow(&input, &temp_package)?;
+                    temp_package
+                } else {
+                    bail!("workflow publish expects a .yxzp package or directory");
+                };
+                let detail = workflow_version_upload_envelope(
+                    &config,
+                    &workflow_id,
+                    &name,
+                    &owner_id,
+                    &package_path,
+                    others_may_download,
+                    others_can_execute,
+                    &execution_mode,
+                    has_private_data_exemption,
+                    comments.as_deref(),
+                    make_published,
+                    &workflow_credential_type,
+                    credential_id.as_deref(),
+                    bypass_workflow_version_check,
+                )?;
+                Envelope::ok_with_data(
+                    "workflow publish requested",
+                    json!({
+                        "input": input.display().to_string(),
+                        "package_path": package_path.display().to_string(),
                         "data": detail,
                     }),
                 )

@@ -1,0 +1,7 @@
+replacements:
+  - find: old.domain.com
+    replace: new.domain.com
+  - find: C:\\OldPath\\
+    replace: D:\\NewPath\\
+  - find: server-a
+    replace: server-b

@@ -48,6 +48,9 @@ ayx server
 - `server diagnose` for operator-facing Server troubleshooting flows
 - `server auth` for SAML-first auth inspection, diagnosis, simulation, and narrow legacy AD checks
 - `server doctor` for prescriptive troubleshooting workflows built on top of diagnose
+- `workflow` for local `.yxmd`, `.yxmc`, `.yxzp`, and `.yxdb` package/XML tooling
+  - `workflow recurse --rules docs/workflow-recurse.example.yaml` for recursive migrations
+  - `workflow publish` to hand a repackaged workflow back to the Server API
 - `license` for the Licensing portal and API branch
 - `one` for the Alteryx One platform branch
 - `upgrade` for upgrade path planning, prechecks, backup, apply simulation, and postchecks
