@@ -245,8 +245,16 @@ enum OneCommand {
         profile: PathBuf,
     },
     Plans {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[command(subcommand)]
+        command: Option<OnePlansCommand>,
+    },
+    Scheduling {
+        #[command(subcommand)]
+        command: Option<OneSchedulingCommand>,
+    },
+    Billing {
+        #[command(subcommand)]
+        command: Option<OneBillingCommand>,
     },
     AutoInsights {
         #[arg(long, default_value = "config.yaml")]
@@ -272,8 +280,14 @@ enum OnePlatformCommand {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
     },
-    Workspace,
-    Role,
+    Workspace {
+        #[command(subcommand)]
+        command: OneWorkspaceCommand,
+    },
+    Role {
+        #[command(subcommand)]
+        command: OneRoleCommand,
+    },
     User,
     Group,
     Sso,
@@ -288,12 +302,108 @@ enum OnePlatformCommand {
 }
 
 #[derive(Subcommand, Debug)]
+enum OneWorkspaceCommand {
+    Current,
+    Configuration,
+    People,
+    Admins,
+    InviteUsers,
+    RemoveUser,
+    SuspendUsers,
+    UnsuspendUsers,
+    Transfer,
+}
+
+#[derive(Subcommand, Debug)]
+enum OneRoleCommand {
+    ListAssignments,
+    Assign,
+    Unassign,
+}
+
+#[derive(Subcommand, Debug)]
 enum OnePlatformApiCommand {
     Status {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
     },
     Diagnose {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OnePlansCommand {
+    List {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Detail {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Run {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Count {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    RunParameters {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Schedules {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Export {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Import {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Permissions {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OneSchedulingCommand {
+    List {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Detail {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Enable {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Disable {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Count {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OneBillingCommand {
+    CurrentAccount {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    UsageExport {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
     },
@@ -482,6 +592,46 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
+        name: "one platform workspace current",
+        path: "one/platform/workspace/current",
+        summary: "Inspect the current One workspace posture.",
+        output: "one platform workspace current envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /iam/v1/workspaces/current in managed-iam-v1.yaml."],
+    },
+    CommandSpec {
+        name: "one platform workspace people",
+        path: "one/platform/workspace/people",
+        summary: "List people in the current One workspace.",
+        output: "one platform workspace people envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /iam/v1/workspaces/{id}/people in managed-iam-v1.yaml."],
+    },
+    CommandSpec {
+        name: "one platform workspace admins",
+        path: "one/platform/workspace/admins",
+        summary: "List workspace admins.",
+        output: "one platform workspace admins envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /iam/v1/workspaces/{workspaceId}/admins in managed-iam-v1.yaml."],
+    },
+    CommandSpec {
+        name: "one platform role list-assignments",
+        path: "one/platform/role/list-assignments",
+        summary: "Inspect role assignments for One managed IAM.",
+        output: "one platform role assignments envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /iam/v1/authorization/roles/{id}/people in managed-iam-v1.yaml."],
+    },
+    CommandSpec {
         name: "one platform api status",
         path: "one/platform/api/status",
         summary: "Summarize the Alteryx One platform API posture.",
@@ -519,6 +669,46 @@ const COMMAND_SPECS: &[CommandSpec] = &[
             "Reserved for plan lifecycle workflows.",
             "Managed Plans lives in walter/docs/one/api/managed-plans-v1.yaml.",
         ],
+    },
+    CommandSpec {
+        name: "one plans list",
+        path: "one/plans/list",
+        summary: "List One plans.",
+        output: "one plans list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /plans/v1/plans in managed-plans-v1.yaml."],
+    },
+    CommandSpec {
+        name: "one plans run",
+        path: "one/plans/run",
+        summary: "Run a One plan.",
+        output: "one plans run envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to POST /plans/v1/plans/{id}/run in managed-plans-v1.yaml."],
+    },
+    CommandSpec {
+        name: "one scheduling list",
+        path: "one/scheduling/list",
+        summary: "List One schedules.",
+        output: "one scheduling list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /scheduling/v1/schedules in managed-scheduling-v1.yaml."],
+    },
+    CommandSpec {
+        name: "one billing current-account",
+        path: "one/billing/current-account",
+        summary: "Inspect the current One billing account.",
+        output: "one billing current-account envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /billing/v1/my/billing-accounts/current in managed-billing-v1.yaml."],
     },
     CommandSpec {
         name: "one auto-insights status",
@@ -1879,7 +2069,9 @@ fn execute(cli: Cli) -> Result<Envelope> {
             Some(WorkflowCommand::Logs) => bail!("workflow logs are not yet implemented"),
         },
         Command::One { command } => match command {
-            None => Envelope::ok("one commands available: platform, plans, auto-insights, desktop-exec"),
+            None => Envelope::ok(
+                "one commands available: platform, plans, scheduling, billing, auto-insights, desktop-exec",
+            ),
             Some(OneCommand::Platform { command }) => match command {
                 Some(OnePlatformCommand::Api { command }) => match command {
                     OnePlatformApiCommand::Status { profile } => {
@@ -1899,22 +2091,157 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     let config = load_profile(&profile)?;
                     api_inventory_envelope(&config, "one platform")?
                 }
-                Some(OnePlatformCommand::Workspace) => Envelope::ok_with_data(
-                    "one platform workspace",
-                    json!({
-                        "product": "one",
-                        "surface": "platform",
-                        "message": "workspace workflow scaffolded",
-                    }),
-                ),
-                Some(OnePlatformCommand::Role) => Envelope::ok_with_data(
-                    "one platform role",
-                    json!({
-                        "product": "one",
-                        "surface": "platform",
-                        "message": "role workflow scaffolded",
-                    }),
-                ),
+                Some(OnePlatformCommand::Workspace { command }) => match command {
+                    OneWorkspaceCommand::Current => {
+                        one_api_action_envelope_from_profile(
+                            &load_profile(&PathBuf::from("config.yaml"))?,
+                            "one",
+                            "platform",
+                            "workspace-current",
+                            "GET",
+                            "/iam/v1/workspaces/current",
+                            "managed-iam-v1.yaml",
+                            false,
+                        )?
+                    }
+                    OneWorkspaceCommand::Configuration => {
+                        one_api_action_envelope_from_profile(
+                            &load_profile(&PathBuf::from("config.yaml"))?,
+                            "one",
+                            "platform",
+                            "workspace-configuration",
+                            "GET",
+                            "/iam/v1/workspaces/{id}/configuration",
+                            "managed-iam-v1.yaml",
+                            false,
+                        )?
+                    }
+                    OneWorkspaceCommand::People => {
+                        one_api_action_envelope_from_profile(
+                            &load_profile(&PathBuf::from("config.yaml"))?,
+                            "one",
+                            "platform",
+                            "workspace-people",
+                            "GET",
+                            "/iam/v1/workspaces/{id}/people",
+                            "managed-iam-v1.yaml",
+                            false,
+                        )?
+                    }
+                    OneWorkspaceCommand::Admins => {
+                        one_api_action_envelope_from_profile(
+                            &load_profile(&PathBuf::from("config.yaml"))?,
+                            "one",
+                            "platform",
+                            "workspace-admins",
+                            "GET",
+                            "/iam/v1/workspaces/{workspaceId}/admins",
+                            "managed-iam-v1.yaml",
+                            false,
+                        )?
+                    }
+                    OneWorkspaceCommand::InviteUsers => {
+                        one_api_action_envelope_from_profile(
+                            &load_profile(&PathBuf::from("config.yaml"))?,
+                            "one",
+                            "platform",
+                            "workspace-invite-users",
+                            "POST",
+                            "/iam/v1/workspaces/{id}/people/batch",
+                            "managed-iam-v1.yaml",
+                            true,
+                        )?
+                    }
+                    OneWorkspaceCommand::RemoveUser => {
+                        one_api_action_envelope_from_profile(
+                            &load_profile(&PathBuf::from("config.yaml"))?,
+                            "one",
+                            "platform",
+                            "workspace-remove-user",
+                            "DELETE",
+                            "/iam/v1/workspaces/{id}/people/{personId}",
+                            "managed-iam-v1.yaml",
+                            true,
+                        )?
+                    }
+                    OneWorkspaceCommand::SuspendUsers => {
+                        one_api_action_envelope_from_profile(
+                            &load_profile(&PathBuf::from("config.yaml"))?,
+                            "one",
+                            "platform",
+                            "workspace-suspend-users",
+                            "POST",
+                            "/iam/v1/workspaces/{id}/people/suspend",
+                            "managed-iam-v1.yaml",
+                            true,
+                        )?
+                    }
+                    OneWorkspaceCommand::UnsuspendUsers => {
+                        one_api_action_envelope_from_profile(
+                            &load_profile(&PathBuf::from("config.yaml"))?,
+                            "one",
+                            "platform",
+                            "workspace-unsuspend-users",
+                            "POST",
+                            "/iam/v1/workspaces/{id}/people/unsuspend",
+                            "managed-iam-v1.yaml",
+                            true,
+                        )?
+                    }
+                    OneWorkspaceCommand::Transfer => {
+                        one_api_action_envelope_from_profile(
+                            &load_profile(&PathBuf::from("config.yaml"))?,
+                            "one",
+                            "platform",
+                            "workspace-transfer",
+                            "POST",
+                            "/iam/v1/workspaces/{id}/transfer",
+                            "managed-iam-v1.yaml",
+                            true,
+                        )?
+                    }
+                },
+                Some(OnePlatformCommand::Role { command }) => match command {
+                    OneRoleCommand::ListAssignments => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_action_envelope(
+                            &config,
+                            "one",
+                            "platform",
+                            "role-list-assignments",
+                            "GET",
+                            "/iam/v1/authorization/roles/{id}/people",
+                            "managed-iam-v1.yaml",
+                            false,
+                        )?
+                    }
+                    OneRoleCommand::Assign => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_action_envelope(
+                            &config,
+                            "one",
+                            "platform",
+                            "role-assign",
+                            "POST",
+                            "/iam/v1/authorization/roles/{id}/people/{subjectId}",
+                            "managed-iam-v1.yaml",
+                            true,
+                        )?
+                    }
+                    OneRoleCommand::Unassign => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_action_envelope(
+                            &config,
+                            "one",
+                            "platform",
+                            "role-unassign",
+                            "DELETE",
+                            "/iam/v1/authorization/roles/{id}/people/{subjectId}",
+                            "managed-iam-v1.yaml",
+                            true,
+                        )?
+                    }
+                },
                 Some(OnePlatformCommand::User) => Envelope::ok_with_data(
                     "one platform user",
                     json!({
@@ -2013,10 +2340,227 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 let config = load_profile(&profile)?;
                 api_inventory_envelope(&config, "one")?
             }
-            Some(OneCommand::Plans { profile }) => {
-                let config = load_profile(&profile)?;
-                api_status_envelope(&config, "one plans")?
-            }
+            Some(OneCommand::Plans { command }) => match command {
+                None => Envelope::ok(
+                    "one plans commands available: list, detail, run, count, run-parameters, schedules, export, import, permissions",
+                ),
+                Some(OnePlansCommand::List { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "plans",
+                        "list",
+                        "GET",
+                        "/plans/v1/plans",
+                        "managed-plans-v1.yaml",
+                        false,
+                    )?
+                }
+                Some(OnePlansCommand::Detail { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "plans",
+                        "detail",
+                        "GET",
+                        "/plans/v1/plans/{id}",
+                        "managed-plans-v1.yaml",
+                        false,
+                    )?
+                }
+                Some(OnePlansCommand::Run { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "plans",
+                        "run",
+                        "POST",
+                        "/plans/v1/plans/{id}/run",
+                        "managed-plans-v1.yaml",
+                        true,
+                    )?
+                }
+                Some(OnePlansCommand::Count { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "plans",
+                        "count",
+                        "GET",
+                        "/plans/v1/plans/count",
+                        "managed-plans-v1.yaml",
+                        false,
+                    )?
+                }
+                Some(OnePlansCommand::RunParameters { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "plans",
+                        "run-parameters",
+                        "GET",
+                        "/plans/v1/plans/{id}/runParameters",
+                        "managed-plans-v1.yaml",
+                        false,
+                    )?
+                }
+                Some(OnePlansCommand::Schedules { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "plans",
+                        "schedules",
+                        "GET",
+                        "/plans/v1/plans/{id}/schedules",
+                        "managed-plans-v1.yaml",
+                        false,
+                    )?
+                }
+                Some(OnePlansCommand::Export { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "plans",
+                        "export",
+                        "GET",
+                        "/plans/v1/plans/{id}/package",
+                        "managed-plans-v1.yaml",
+                        false,
+                    )?
+                }
+                Some(OnePlansCommand::Import { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "plans",
+                        "import",
+                        "POST",
+                        "/plans/v1/plans/package",
+                        "managed-plans-v1.yaml",
+                        true,
+                    )?
+                }
+                Some(OnePlansCommand::Permissions { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "plans",
+                        "permissions",
+                        "GET",
+                        "/plans/v1/plans/{id}/permissions",
+                        "managed-plans-v1.yaml",
+                        false,
+                    )?
+                }
+            },
+            Some(OneCommand::Scheduling { command }) => match command {
+                None => Envelope::ok(
+                    "one scheduling commands available: list, detail, enable, disable, count",
+                ),
+                Some(OneSchedulingCommand::List { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "scheduling",
+                        "list",
+                        "GET",
+                        "/scheduling/v1/schedules",
+                        "managed-scheduling-v1.yaml",
+                        false,
+                    )?
+                }
+                Some(OneSchedulingCommand::Detail { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "scheduling",
+                        "detail",
+                        "GET",
+                        "/scheduling/v1/schedules/{id}",
+                        "managed-scheduling-v1.yaml",
+                        false,
+                    )?
+                }
+                Some(OneSchedulingCommand::Enable { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "scheduling",
+                        "enable",
+                        "POST",
+                        "/scheduling/v1/schedules/{id}/enable",
+                        "managed-scheduling-v1.yaml",
+                        true,
+                    )?
+                }
+                Some(OneSchedulingCommand::Disable { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "scheduling",
+                        "disable",
+                        "POST",
+                        "/scheduling/v1/schedules/{id}/disable",
+                        "managed-scheduling-v1.yaml",
+                        true,
+                    )?
+                }
+                Some(OneSchedulingCommand::Count { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "scheduling",
+                        "count",
+                        "GET",
+                        "/scheduling/v1/schedules/count",
+                        "managed-scheduling-v1.yaml",
+                        false,
+                    )?
+                }
+            },
+            Some(OneCommand::Billing { command }) => match command {
+                None => Envelope::ok("one billing commands available: current-account, usage-export"),
+                Some(OneBillingCommand::CurrentAccount { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "billing",
+                        "current-account",
+                        "GET",
+                        "/billing/v1/my/billing-accounts/current",
+                        "managed-billing-v1.yaml",
+                        false,
+                    )?
+                }
+                Some(OneBillingCommand::UsageExport { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_action_envelope(
+                        &config,
+                        "one",
+                        "billing",
+                        "usage-export",
+                        "GET",
+                        "/billing/v1/usage/export",
+                        "managed-billing-v1.yaml",
+                        false,
+                    )?
+                }
+            },
             Some(OneCommand::AutoInsights { profile }) => {
                 let config = load_profile(&profile)?;
                 api_diagnose_envelope(&config, "one auto-insights")?
@@ -2066,6 +2610,58 @@ fn execute(cli: Cli) -> Result<Envelope> {
         )?,
     };
     Ok(envelope)
+}
+
+fn one_api_action_envelope(
+    config: &Config,
+    product: &str,
+    surface: &str,
+    operation: &str,
+    method: &str,
+    endpoint: &str,
+    spec_file: &str,
+    mutating: bool,
+) -> Result<Envelope> {
+    let api = config
+        .api
+        .as_ref()
+        .ok_or_else(|| anyhow!("config missing api/server_api section"))?;
+
+    Ok(Envelope::ok_with_data(
+        format!("{} {} {}", product, surface, operation),
+        json!({
+            "product": product,
+            "surface": surface,
+            "operation": operation,
+            "method": method,
+            "endpoint": endpoint,
+            "spec_file": spec_file,
+            "base_url": api.base_url,
+            "profile": config.profile_name,
+            "auth_mode": format!("{:?}", api.auth.mode),
+            "has_credentials": {
+                "client_id": api.auth.client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
+                "client_secret": api.auth.client_secret.as_ref().is_some_and(|v| !v.trim().is_empty()),
+            },
+            "mutating": mutating,
+            "message": "spec-backed One API surface scaffolded",
+        }),
+    ))
+}
+
+fn one_api_action_envelope_from_profile(
+    config: &Config,
+    product: &str,
+    surface: &str,
+    operation: &str,
+    method: &str,
+    endpoint: &str,
+    spec_file: &str,
+    mutating: bool,
+) -> Result<Envelope> {
+    one_api_action_envelope(
+        config, product, surface, operation, method, endpoint, spec_file, mutating,
+    )
 }
 
 fn perform_self_update(
@@ -2299,7 +2895,12 @@ mod tests {
         assert!(names.contains(&"license status"));
         assert!(names.contains(&"one platform status"));
         assert!(names.contains(&"one platform api status"));
+        assert!(names.contains(&"one platform workspace current"));
+        assert!(names.contains(&"one platform role list-assignments"));
         assert!(names.contains(&"one plans status"));
+        assert!(names.contains(&"one plans list"));
+        assert!(names.contains(&"one scheduling list"));
+        assert!(names.contains(&"one billing current-account"));
         assert!(names.contains(&"one auto-insights status"));
         assert!(names.contains(&"one desktop-exec status"));
     }
@@ -2329,5 +2930,9 @@ mod tests {
         let env = catalog_describe_envelope("one auto-insights status")
             .expect("catalog describe should work for auto-insights");
         assert_eq!(env.data["path"], "one/auto-insights/status");
+
+        let env = catalog_describe_envelope("one plans list")
+            .expect("catalog describe should work for one plans list");
+        assert_eq!(env.data["path"], "one/plans/list");
     }
 }

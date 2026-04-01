@@ -155,10 +155,12 @@ The CLI is intentionally product-first:
 - `ayx license api`
 - `ayx one platform api`
 - `ayx one plans`
+- `ayx one scheduling`
+- `ayx one billing`
 - `ayx one auto-insights`
 - `ayx one desktop-exec`
 
-`server` is the mature branch today. `license` and `one` are separate product roots so each Alteryx surface can grow independently. `one platform` is the managed IAM / workspace-admin entry point, `one plans` is the managed plans entry point, and the remaining `one` branches stay reserved until their KBA sets justify more deterministic commands.
+`server` is the mature branch today. `license` and `one` are separate product roots so each Alteryx surface can grow independently. `one platform` is the managed IAM / workspace-admin entry point, `one plans` is the managed plans entry point, `one scheduling` covers schedule lifecycle, and `one billing` covers billing posture / usage export. The remaining `one` branches stay reserved until their KBA sets justify more deterministic commands.
 
 Mutating commands (`schedule-create`, `schedule-update`, `schedule-patch`, `schedule-delete`, `collection-create`, `collection-update`, `collection-delete`, any collection membership mutation or permission update, `credential-add`, `credential-update`, `credential-delete`, `credential-share-user`, `credential-share-user-group`, `credential-unshare-*`, `subscription-create`, `subscription-update`, `subscription-delete`, `subscription-change-users`, `user-update`, `user-delete`, `user-transfer-assets`, `user-deactivate`, `user-password-reset`, `workflow-version-upload`, `usergroup-create`, `usergroup-update`, `usergroup-delete`, `usergroup-*` membership moves, and all DCM admin mutators) require `--apply` before they invoke the live API to avoid accidental writes; when that flag is omitted the CLI returns a dry-run envelope with guidance to provide the safety gate.
 

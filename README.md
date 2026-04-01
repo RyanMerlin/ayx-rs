@@ -111,7 +111,9 @@ Start with:
 ayx catalog list
 ayx catalog describe --command mongo/backup
 ayx license api status
-ayx one platform api status
+ayx one platform workspace current
+ayx one plans list
+ayx one scheduling list
 ayx server diagnose startup --error "Failed to register Service URL"
 ayx server auth status
 ayx server auth diagnose saml --metadata-url https://idp.example.com/metadata
