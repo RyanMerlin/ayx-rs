@@ -498,6 +498,10 @@ enum OneDoctorCommand {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
     },
+    Discover {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
     Platform {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
@@ -767,6 +771,16 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["config.yaml", "alteryx_one.access_token"],
         notes: &["Wraps token posture and workspace probe checks."],
+    },
+    CommandSpec {
+        name: "one doctor discover",
+        path: "one/doctor/discover",
+        summary: "Run the One discovery doctor workflow.",
+        output: "one discovery doctor envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Surfaces workspace, plan, schedule, and billing discovery data."],
     },
     CommandSpec {
         name: "one doctor platform",
@@ -2264,6 +2278,10 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     let config = load_profile(&profile)?;
                     one_platform_auth_diagnose_envelope(&config)?
                 }
+                Some(OneDoctorCommand::Discover { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_doctor_discover_envelope(&config)?
+                }
                 Some(OneDoctorCommand::Platform { profile }) => {
                     let config = load_profile(&profile)?;
                     one_doctor_platform_envelope(&config)?
@@ -2280,7 +2298,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     let config = load_profile(&profile)?;
                     one_doctor_billing_envelope(&config)?
                 }
-                None => Envelope::ok("one doctor commands available: auth, platform, plans, scheduling, billing"),
+                None => Envelope::ok("one doctor commands available: auth, discover, platform, plans, scheduling, billing"),
             },
             Some(OneCommand::Platform { command }) => match command {
                 Some(OnePlatformCommand::Api { command }) => match command {
@@ -2791,17 +2809,13 @@ fn one_api_live_request(
     mutating: bool,
     path_params: &[(&str, &str)],
 ) -> Result<Envelope> {
-    let access_token = config
-        .alteryx_one
-        .as_ref()
-        .and_then(|one| one.access_token.as_ref())
-        .ok_or_else(|| anyhow!("alteryx_one.access_token is required for live one api calls"))?;
     let observability = config.observability.as_ref();
     let base_url = "https://api.us1.alteryxcloud.com";
     let client = Client::builder()
         .timeout(Duration::from_secs(60))
         .build()
         .context("failed to build one api client")?;
+    let mut access_token = resolve_one_access_token(config, &client)?;
 
     let mut url = format!("{}{}", base_url, endpoint);
     for (key, value) in path_params {
@@ -2815,6 +2829,7 @@ fn one_api_live_request(
     let started = Instant::now();
     let mut last_status: Option<StatusCode> = None;
     let mut retry_after_seconds: Option<u64> = None;
+    let mut refreshed_once = false;
 
     loop {
         attempt += 1;
@@ -2832,6 +2847,11 @@ fn one_api_live_request(
                 let status = response.status();
                 last_status = Some(status);
                 retry_after_seconds = parse_retry_after(response.headers().get(RETRY_AFTER));
+                if status == StatusCode::UNAUTHORIZED && !refreshed_once {
+                    access_token = refresh_one_access_token(config, &client)?;
+                    refreshed_once = true;
+                    continue;
+                }
                 if status.is_success()
                     || !should_retry_status(status, mutating)
                     || attempt >= max_attempts
@@ -2967,6 +2987,72 @@ fn parse_retry_after(header: Option<&reqwest::header::HeaderValue>) -> Option<u6
     value.parse::<u64>().ok()
 }
 
+fn resolve_one_access_token(config: &Config, client: &Client) -> Result<String> {
+    if let Some(access_token) = config
+        .alteryx_one
+        .as_ref()
+        .and_then(|one| one.access_token.as_ref())
+        .filter(|token| !token.trim().is_empty())
+    {
+        return Ok(access_token.clone());
+    }
+
+    refresh_one_access_token(config, client)
+}
+
+fn refresh_one_access_token(config: &Config, client: &Client) -> Result<String> {
+    let one = config
+        .alteryx_one
+        .as_ref()
+        .ok_or_else(|| anyhow!("config missing alteryx_one section"))?;
+    let client_id = one
+        .oauth_client_id
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            anyhow!("alteryx_one.oauth_client_id is required for refresh_token support")
+        })?;
+    let refresh_token = one
+        .refresh_token
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow!("alteryx_one.refresh_token is required to refresh access tokens"))?;
+    let token_endpoint_url = one
+        .token_endpoint_url
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            anyhow!("alteryx_one.token_endpoint_url is required to refresh access tokens")
+        })?;
+
+    let response = client
+        .post(token_endpoint_url)
+        .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", client_id),
+            ("refresh_token", refresh_token),
+        ])
+        .send()
+        .with_context(|| format!("refresh token request to '{}' failed", token_endpoint_url))?
+        .error_for_status()
+        .context("refresh token request returned error status")?;
+
+    let token_json: Value = response
+        .json()
+        .context("failed to parse refresh token response")?;
+    let token_type = token_json
+        .get("token_type")
+        .and_then(Value::as_str)
+        .unwrap_or("Bearer");
+    let access_token = token_json
+        .get("access_token")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("refresh token response missing access_token"))?;
+
+    Ok(format!("{token_type} {access_token}"))
+}
+
 fn retry_delay(attempt: u32, retry_after_seconds: Option<u64>) -> Duration {
     if let Some(seconds) = retry_after_seconds {
         return Duration::from_secs(seconds.clamp(1, 60));
@@ -2999,6 +3085,64 @@ fn one_doctor_platform_envelope(config: &Config) -> Result<Envelope> {
             "recommendations": [
                 "Use one platform workspace people/admins to drill into workspace scope",
                 "Route deeper symptom handling to Walter playbooks",
+            ]
+        }),
+    ))
+}
+
+fn one_doctor_discover_envelope(config: &Config) -> Result<Envelope> {
+    let workspace = one_api_live_request(
+        config,
+        "platform",
+        "discover-workspace-current",
+        "GET",
+        "/iam/v1/workspaces/current",
+        false,
+        &[],
+    )?;
+    let plans = one_api_live_request(
+        config,
+        "plans",
+        "discover-plans-list",
+        "GET",
+        "/plans/v1/plans",
+        false,
+        &[],
+    )?;
+    let schedules = one_api_live_request(
+        config,
+        "scheduling",
+        "discover-schedules-list",
+        "GET",
+        "/scheduling/v1/schedules",
+        false,
+        &[],
+    )?;
+    let billing = one_api_live_request(
+        config,
+        "billing",
+        "discover-billing-account",
+        "GET",
+        "/billing/v1/my/billing-accounts/current",
+        false,
+        &[],
+    )?;
+
+    Ok(Envelope::ok_with_data(
+        "one discovery doctor workflow generated",
+        json!({
+            "profile": config.profile_name,
+            "checks": [
+                workspace.data,
+                plans.data,
+                schedules.data,
+                billing.data,
+            ],
+            "recommendations": [
+                "Use one platform workspace current to identify the workspace context",
+                "Use one plans list/detail/run to resolve plan ids",
+                "Use one scheduling list/detail/enable/disable to resolve schedule ids",
+                "Use Walter to decide whether a symptom belongs to platform, plans, scheduling, or billing",
             ]
         }),
     ))
