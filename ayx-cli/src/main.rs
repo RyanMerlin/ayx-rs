@@ -273,6 +273,10 @@ enum OnePlatformCommand {
         #[command(subcommand)]
         command: OnePlatformApiCommand,
     },
+    Auth {
+        #[command(subcommand)]
+        command: OnePlatformAuthCommand,
+    },
     Status {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
@@ -363,6 +367,18 @@ enum OneRoleCommand {
 
 #[derive(Subcommand, Debug)]
 enum OnePlatformApiCommand {
+    Status {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Diagnose {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OnePlatformAuthCommand {
     Status {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
@@ -690,6 +706,26 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
         notes: &["Maps to GET /iam/v1/authorization/roles/{id}/people in managed-iam-v1.yaml."],
+    },
+    CommandSpec {
+        name: "one platform auth status",
+        path: "one/platform/auth/status",
+        summary: "Summarize One API token posture for managed IAM.",
+        output: "one platform auth status envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.api_token"],
+        notes: &["Confirms token presence and whether a safe workspace endpoint is reachable."],
+    },
+    CommandSpec {
+        name: "one platform auth diagnose",
+        path: "one/platform/auth/diagnose",
+        summary: "Validate One API token reachability and workspace scope.",
+        output: "one platform auth diagnostic envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.api_token"],
+        notes: &["Uses the managed IAM current workspace endpoint as the safe validation target."],
     },
     CommandSpec {
         name: "one platform api status",
@@ -2302,6 +2338,16 @@ fn execute(cli: Cli) -> Result<Envelope> {
                         )?
                     }
                 },
+                Some(OnePlatformCommand::Auth { command }) => match command {
+                    OnePlatformAuthCommand::Status { profile } => {
+                        let config = load_profile(&profile)?;
+                        one_platform_auth_status_envelope(&config)?
+                    }
+                    OnePlatformAuthCommand::Diagnose { profile } => {
+                        let config = load_profile(&profile)?;
+                        one_platform_auth_diagnose_envelope(&config)?
+                    }
+                },
                 Some(OnePlatformCommand::User) => Envelope::ok_with_data(
                     "one platform user",
                     json!({
@@ -2695,6 +2741,84 @@ fn one_api_live_request(
     ))
 }
 
+fn one_platform_auth_status_envelope(config: &Config) -> Result<Envelope> {
+    let one = config
+        .alteryx_one
+        .as_ref()
+        .ok_or_else(|| anyhow!("config missing alteryx_one section"))?;
+
+    Ok(Envelope::ok_with_data(
+        "one platform auth status",
+        json!({
+            "product": "one",
+            "surface": "platform",
+            "profile": config.profile_name,
+            "token_present": one.api_token.as_ref().is_some_and(|v| !v.trim().is_empty()),
+            "token_source": if one.api_token.as_ref().is_some_and(|v| !v.trim().is_empty()) {
+                "config/env"
+            } else {
+                "missing"
+            },
+            "validation_target": "/iam/v1/workspaces/current",
+            "message": "One API token posture captured",
+        }),
+    ))
+}
+
+fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Envelope> {
+    let one = config
+        .alteryx_one
+        .as_ref()
+        .ok_or_else(|| anyhow!("config missing alteryx_one section"))?;
+    let has_token = one.api_token.as_ref().is_some_and(|v| !v.trim().is_empty());
+    let workspace_probe = if has_token {
+        one_api_live_request(
+            config,
+            "platform",
+            "auth-diagnose",
+            "GET",
+            "/iam/v1/workspaces/current",
+            false,
+            &[],
+        )?
+    } else {
+        Envelope::ok_with_data(
+            "one platform auth diagnose",
+            json!({
+                "product": "one",
+                "surface": "platform",
+                "profile": config.profile_name,
+                "token_present": false,
+                "diagnosis": "alteryx_one.api_token is missing",
+                "recommendations": [
+                    "Set AYX_ONE_API_TOKEN in .env",
+                    "Populate alteryx_one.api_token in config.yaml if you prefer config-based storage"
+                ],
+            }),
+        )
+    };
+
+    if has_token {
+        Ok(Envelope::ok_with_data(
+            "one platform auth diagnose",
+            json!({
+                "product": "one",
+                "surface": "platform",
+                "profile": config.profile_name,
+                "token_present": true,
+                "diagnosis": "token present and workspace probe executed",
+                "workspace_probe": workspace_probe.data,
+                "recommendations": [
+                    "Use one platform workspace current or people for evidence",
+                    "Route any failing symptoms into Walter playbooks",
+                ],
+            }),
+        ))
+    } else {
+        Ok(workspace_probe)
+    }
+}
+
 fn perform_self_update(
     repo_owner: &str,
     repo_name: &str,
@@ -2926,6 +3050,7 @@ mod tests {
         assert!(names.contains(&"license status"));
         assert!(names.contains(&"one platform status"));
         assert!(names.contains(&"one platform api status"));
+        assert!(names.contains(&"one platform auth status"));
         assert!(names.contains(&"one platform workspace current"));
         assert!(names.contains(&"one platform role list-assignments"));
         assert!(names.contains(&"one plans status"));
@@ -2957,6 +3082,10 @@ mod tests {
         let env = catalog_describe_envelope("one platform api diagnose")
             .expect("catalog describe should work for one platform api");
         assert_eq!(env.data["path"], "one/platform/api/diagnose");
+
+        let env = catalog_describe_envelope("one platform auth diagnose")
+            .expect("catalog describe should work for one platform auth");
+        assert_eq!(env.data["path"], "one/platform/auth/diagnose");
 
         let env = catalog_describe_envelope("one auto-insights status")
             .expect("catalog describe should work for auto-insights");
