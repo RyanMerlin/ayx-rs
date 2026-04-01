@@ -7,6 +7,14 @@ alteryx_one:
   access_token: ${AYX_ONE_API_ACCESS_TOKEN}
   refresh_token: ${AYX_ONE_API_REFRESH_TOKEN}
 
+observability:
+  api_logging:
+    enabled: false  # enable when you want shared JSONL API request logging across server, license, and one.
+    path: logs/api-events.jsonl
+    redact_bodies: true
+    log_requests: false
+    log_responses: false
+
 alteryx_server:
   server_api:
     base_url: ${AYX_SERVER_BASE_URL}

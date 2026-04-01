@@ -106,6 +106,7 @@ mod tests {
                 managed: None,
             },
             alteryx_one: None,
+            observability: None,
             server_api: Some(ServerApiProfile {
                 base_url: "http://localhost/webapi/".to_string(),
                 client_id: "cid".to_string(),

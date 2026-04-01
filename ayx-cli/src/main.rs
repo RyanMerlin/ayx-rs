@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::envelope::Envelope;
+use ayx_core::observability::{record_api_event, response_shape, ApiEvent};
 use ayx_core::profile::{Config, ServerProfile};
 use ayx_one::{api_diagnose_envelope, api_inventory_envelope, api_status_envelope};
 use ayx_server::logs::{
@@ -1478,12 +1479,22 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 ServerApiCommand::Status { profile } => {
                     let config = load_profile(&profile)?;
                     let server = server_profile(&config)?;
+                    let api_logging = config.observability.as_ref().and_then(|obs| {
+                        obs.api_logging.as_ref().map(|logging| json!({
+                            "enabled": logging.enabled,
+                            "path": logging.path,
+                            "redact_bodies": logging.redact_bodies,
+                            "log_requests": logging.log_requests,
+                            "log_responses": logging.log_responses,
+                        }))
+                    });
                     Envelope::ok_with_data(
                         "server api status",
                         json!({
                             "profile": config.profile_name,
                             "base_url": server.webapi_url,
                             "verify_tls": server.verify_tls(),
+                            "observability": api_logging,
                             "has_credentials": {
                                 "curator_api_key": !server.curator_api_key.is_empty(),
                                 "curator_api_secret": !server.curator_api_secret.is_empty()
@@ -1494,7 +1505,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 ServerApiCommand::Diagnose { profile } => {
                     let config = load_profile(&profile)?;
                     let server = server_profile(&config)?;
-                    diagnose_api(server)?
+                    diagnose_api(server, config.observability.as_ref())?
                 }
                 ServerApiCommand::ImportSwagger {
                     profile,
@@ -1505,7 +1516,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     let config = load_profile(&profile)?;
                     let server = server_profile(&config)?;
                     let cache_name = format!("{}_swagger_v{}.json", config.profile_name, version);
-                    import_swagger(server, &url, &cache_dir, &cache_name)?
+                    import_swagger(server, config.observability.as_ref(), &url, &cache_dir, &cache_name)?
                 }
                 ServerApiCommand::Call {
                     profile,
@@ -1533,7 +1544,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                         Some(path) => Some(load_payload(&path)?),
                         None => None,
                     };
-                    call_operation(server, &operation_id, &params, payload, &swagger_path)?
+                    call_operation(server, config.observability.as_ref(), &operation_id, &params, payload, &swagger_path)?
                 }
             },
             Some(ServerCommand::SystemInfo { output }) => {
@@ -2785,6 +2796,7 @@ fn one_api_live_request(
         .as_ref()
         .and_then(|one| one.access_token.as_ref())
         .ok_or_else(|| anyhow!("alteryx_one.access_token is required for live one api calls"))?;
+    let observability = config.observability.as_ref();
     let base_url = "https://api.us1.alteryxcloud.com";
     let client = Client::builder()
         .timeout(Duration::from_secs(60))
@@ -2837,7 +2849,7 @@ fn one_api_live_request(
                         .map(ToOwned::to_owned);
                     let text = response.text().unwrap_or_else(|_| String::new());
                     let response_body = parse_response_text(&content_type, &text);
-                    return Ok(Envelope::ok_with_data(
+                    let envelope = Envelope::ok_with_data(
                         format!(
                             "{} {} {}",
                             surface,
@@ -2857,7 +2869,29 @@ fn one_api_live_request(
                             "retry_after_seconds": retry_after_seconds,
                             "response": response_body,
                         }),
-                    ));
+                    );
+                    let _ = record_api_event(
+                        observability,
+                        ApiEvent {
+                            product: "one",
+                            surface,
+                            operation,
+                            method: &method_name,
+                            endpoint_template: endpoint,
+                            resolved_url: &url,
+                            status_code: Some(status.as_u16()),
+                            duration_ms: started.elapsed().as_millis(),
+                            attempt,
+                            retry_after_seconds,
+                            request_id: request_id.as_deref(),
+                            ok: status.is_success(),
+                            error_class: None,
+                            response_shape: Some(response_shape(&response_body)),
+                            mutating,
+                            dry_run: false,
+                        },
+                    );
+                    return Ok(envelope);
                 }
                 let delay = retry_delay(attempt, retry_after_seconds);
                 std::thread::sleep(delay);
@@ -2865,7 +2899,7 @@ fn one_api_live_request(
             }
             Err(err) => {
                 if mutating || attempt >= max_attempts {
-                    return Ok(Envelope::ok_with_data(
+                    let envelope = Envelope::ok_with_data(
                         format!("{} {} failed", surface, operation),
                         json!({
                             "surface": surface,
@@ -2880,7 +2914,29 @@ fn one_api_live_request(
                             "error": err.to_string(),
                             "response": Value::Null,
                         }),
-                    ));
+                    );
+                    let _ = record_api_event(
+                        observability,
+                        ApiEvent {
+                            product: "one",
+                            surface,
+                            operation,
+                            method: &method_name,
+                            endpoint_template: endpoint,
+                            resolved_url: &url,
+                            status_code: last_status.map(|s| s.as_u16()),
+                            duration_ms: started.elapsed().as_millis(),
+                            attempt,
+                            retry_after_seconds,
+                            request_id: None,
+                            ok: false,
+                            error_class: Some("transport"),
+                            response_shape: Some("null"),
+                            mutating,
+                            dry_run: false,
+                        },
+                    );
+                    return Ok(envelope);
                 }
                 let delay = retry_delay(attempt, retry_after_seconds);
                 std::thread::sleep(delay);
@@ -3058,6 +3114,17 @@ fn one_platform_auth_status_envelope(config: &Config) -> Result<Envelope> {
         .alteryx_one
         .as_ref()
         .ok_or_else(|| anyhow!("config missing alteryx_one section"))?;
+    let api_logging = config.observability.as_ref().and_then(|obs| {
+        obs.api_logging.as_ref().map(|logging| {
+            json!({
+                "enabled": logging.enabled,
+                "path": logging.path,
+                "redact_bodies": logging.redact_bodies,
+                "log_requests": logging.log_requests,
+                "log_responses": logging.log_responses,
+            })
+        })
+    });
 
     Ok(Envelope::ok_with_data(
         "one platform auth status",
@@ -3065,10 +3132,11 @@ fn one_platform_auth_status_envelope(config: &Config) -> Result<Envelope> {
             "product": "one",
                 "surface": "platform",
                 "profile": config.profile_name,
-                "oauth_client_id_present": one.oauth_client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
-                "token_endpoint_url": one.token_endpoint_url.clone(),
-                "access_token_present": one.access_token.as_ref().is_some_and(|v| !v.trim().is_empty()),
-                "refresh_token_present": one.refresh_token.as_ref().is_some_and(|v| !v.trim().is_empty()),
+            "oauth_client_id_present": one.oauth_client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
+            "token_endpoint_url": one.token_endpoint_url.clone(),
+            "access_token_present": one.access_token.as_ref().is_some_and(|v| !v.trim().is_empty()),
+            "refresh_token_present": one.refresh_token.as_ref().is_some_and(|v| !v.trim().is_empty()),
+            "observability": api_logging,
             "token_source": if one.access_token.as_ref().is_some_and(|v| !v.trim().is_empty()) {
                 "config/env"
             } else {

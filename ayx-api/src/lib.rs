@@ -1858,6 +1858,7 @@ mod tests {
                 timeout_ms: Some(1000),
             }),
             alteryx_one: None,
+            observability: None,
             server: Some(ServerProfile {
                 webapi_url: "http://localhost/webapi/".to_string(),
                 curator_api_key: "abc".to_string(),

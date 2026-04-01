@@ -58,6 +58,12 @@ This is the working plan for evolving the AYX CLI into a production-grade, agent
 - add ID-discovery helpers and a `one doctor` surface so workspace, plan, schedule, and billing checks can be run as a stable support suite.
 - separate safe read-only paths from mutating actions and require stronger guardrails for bulk or destructive One workflows.
 
+## 9. Shared API observability
+- standardize a single JSONL API event log across Server, License, and One.
+- make API request logging opt-in through `config.yaml` so operators can enable it only when needed.
+- keep secrets, request bodies, and raw response bodies redacted by default.
+- make Walter read the same event schema instead of inventing a second logging model.
+
 ## Current priority
 - finish the integration-test pass for the core workflows.
 - expand the command registry with richer command metadata and generated docs.

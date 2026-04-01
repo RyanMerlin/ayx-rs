@@ -8,7 +8,8 @@ use std::{collections::HashMap, fs, path::Path, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
 use ayx_core::envelope::Envelope;
-use ayx_core::profile::ServerProfile;
+use ayx_core::observability::{record_api_event, response_shape, ApiEvent};
+use ayx_core::profile::{ObservabilityProfile, ServerProfile};
 use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::Method;
@@ -17,10 +18,12 @@ use url::form_urlencoded;
 
 pub fn import_swagger(
     profile: &ServerProfile,
+    observability: Option<&ObservabilityProfile>,
     url: &str,
     cache_dir: &Path,
     cache_name: &str,
 ) -> Result<Envelope> {
+    let started = std::time::Instant::now();
     let client = build_client(profile.verify_tls())?;
     let response = client
         .get(url)
@@ -53,8 +56,8 @@ pub fn import_swagger(
         .and_then(Value::as_object)
         .map(|map| map.len())
         .unwrap_or(0);
-
-    Ok(Envelope::ok_with_data(
+    let response_shape_name = "object";
+    let envelope = Envelope::ok_with_data(
         "swagger imported",
         json!({
             "ok": true,
@@ -62,16 +65,41 @@ pub fn import_swagger(
             "cached_to": cache_path.display().to_string(),
             "path_count": path_count,
         }),
-    ))
+    );
+    let _ = record_api_event(
+        observability,
+        ApiEvent {
+            product: "server",
+            surface: "api",
+            operation: "import-swagger",
+            method: "GET",
+            endpoint_template: url,
+            resolved_url: url,
+            status_code: Some(200),
+            duration_ms: started.elapsed().as_millis(),
+            attempt: 1,
+            retry_after_seconds: None,
+            request_id: None,
+            ok: true,
+            error_class: None,
+            response_shape: Some(response_shape_name),
+            mutating: false,
+            dry_run: false,
+        },
+    );
+
+    Ok(envelope)
 }
 
 pub fn call_operation(
     profile: &ServerProfile,
+    observability: Option<&ObservabilityProfile>,
     operation_id: &str,
     params: &HashMap<String, String>,
     body: Option<Value>,
     swagger_path: &Path,
 ) -> Result<Envelope> {
+    let started = std::time::Instant::now();
     let spec = read_json(swagger_path)?;
     let (method, raw_path, operation) = find_operation(&spec, operation_id)?;
     let (resolved_path, query) = resolve_parameters(raw_path, operation.get("parameters"), params)?;
@@ -80,7 +108,7 @@ pub fn call_operation(
     let client = build_client(profile.verify_tls())?;
     let token = fetch_token(profile, &client)?;
 
-    let mut request_builder = client.request(method, &url);
+    let mut request_builder = client.request(method.clone(), &url);
     request_builder = request_builder
         .header(AUTHORIZATION, token)
         .header(ACCEPT, "application/json");
@@ -104,8 +132,7 @@ pub fn call_operation(
         .to_string();
     let text = response.text().unwrap_or_else(|_| "".to_string());
     let response_body = parse_response_text(&content_type, &text);
-
-    Ok(Envelope::ok_with_data(
+    let envelope = Envelope::ok_with_data(
         "server API call executed",
         json!({
             "operation_id": operation_id,
@@ -114,10 +141,36 @@ pub fn call_operation(
             "ok": status.is_success(),
             "response": response_body,
         }),
-    ))
+    );
+    let _ = record_api_event(
+        observability,
+        ApiEvent {
+            product: "server",
+            surface: "api",
+            operation: operation_id,
+            method: method.as_str(),
+            endpoint_template: &resolved_path,
+            resolved_url: &url,
+            status_code: Some(status.as_u16()),
+            duration_ms: started.elapsed().as_millis(),
+            attempt: 1,
+            retry_after_seconds: None,
+            request_id: None,
+            ok: status.is_success(),
+            error_class: None,
+            response_shape: Some(response_shape(&response_body)),
+            mutating: !matches!(method, Method::GET),
+            dry_run: false,
+        },
+    );
+    Ok(envelope)
 }
 
-pub fn diagnose_api(profile: &ServerProfile) -> Result<Envelope> {
+pub fn diagnose_api(
+    profile: &ServerProfile,
+    observability: Option<&ObservabilityProfile>,
+) -> Result<Envelope> {
+    let started = std::time::Instant::now();
     let client = build_client(profile.verify_tls())?;
     let token_url = format!(
         "{}/webapi/oauth2/token",
@@ -131,7 +184,7 @@ pub fn diagnose_api(profile: &ServerProfile) -> Result<Envelope> {
         .and_then(|resp| resp.error_for_status())
         .map(|resp| resp.status().as_u16());
 
-    Ok(Envelope::ok_with_data(
+    let envelope = Envelope::ok_with_data(
         "server API diagnostics generated",
         json!({
             "base_url": profile.webapi_url,
@@ -139,7 +192,7 @@ pub fn diagnose_api(profile: &ServerProfile) -> Result<Envelope> {
             "token_url": token_url,
             "token_endpoint": match token_result {
                 Ok(status) => json!({ "ok": true, "status_code": status }),
-                Err(err) => json!({ "ok": false, "error": err.to_string() }),
+                Err(ref err) => json!({ "ok": false, "error": err.to_string() }),
             },
             "recommendations": [
                 "Use server api import-swagger to cache the current Swagger spec",
@@ -147,7 +200,29 @@ pub fn diagnose_api(profile: &ServerProfile) -> Result<Envelope> {
                 "If token acquisition fails, verify client_id/client_secret and base_url"
             ]
         }),
-    ))
+    );
+    let _ = record_api_event(
+        observability,
+        ApiEvent {
+            product: "server",
+            surface: "api",
+            operation: "diagnose",
+            method: "POST",
+            endpoint_template: &token_url,
+            resolved_url: &token_url,
+            status_code: token_result.as_ref().ok().copied(),
+            duration_ms: started.elapsed().as_millis(),
+            attempt: 1,
+            retry_after_seconds: None,
+            request_id: None,
+            ok: token_result.is_ok(),
+            error_class: token_result.as_ref().err().map(|_| "auth"),
+            response_shape: Some("object"),
+            mutating: false,
+            dry_run: false,
+        },
+    );
+    Ok(envelope)
 }
 
 fn build_client(verify_tls: bool) -> Result<Client> {

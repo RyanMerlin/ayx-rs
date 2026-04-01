@@ -77,6 +77,9 @@ Minimum expectations:
 - `alteryx_one.oauth_client_id` and `alteryx_one.token_endpoint_url` for One OAuth token posture
 - `alteryx_one.access_token` when using One API commands
 - `alteryx_one.refresh_token` when you want to keep the token pair together locally
+- `observability.api_logging.enabled` when you want shared JSONL API request logging across Server, License, and One
+- `observability.api_logging.path` to control where the shared API event log is written
+- `observability.api_logging.redact_bodies` stays on by default so secrets are not written to the log
 
 Sensitive values live in `.env` and are expanded automatically from `config.yaml`.
 Use `.env.example` as the shareable template.

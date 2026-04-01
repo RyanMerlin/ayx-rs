@@ -29,6 +29,8 @@ pub struct Config {
     pub mongo: MongoProfile,
     pub alteryx_one: Option<AlteryxOneProfile>,
     #[serde(default)]
+    pub observability: Option<ObservabilityProfile>,
+    #[serde(default)]
     pub server_api: Option<ServerApiProfile>,
     #[serde(default)]
     pub api: Option<ApiProfile>,
@@ -116,6 +118,20 @@ pub enum ApiAuthMode {
 pub struct UpgradeProfile {
     pub target_version: Option<String>,
     pub deployment: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ObservabilityProfile {
+    pub api_logging: Option<ApiLoggingProfile>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ApiLoggingProfile {
+    pub enabled: bool,
+    pub path: Option<String>,
+    pub redact_bodies: Option<bool>,
+    pub log_requests: Option<bool>,
+    pub log_responses: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -326,6 +342,21 @@ impl Config {
                 if token.trim().is_empty() {
                     return Err(ProfileError::Invalid(
                         "alteryx_one.refresh_token cannot be empty when set".to_string(),
+                    ));
+                }
+            }
+        }
+
+        if let Some(observability) = &self.observability {
+            if let Some(api_logging) = &observability.api_logging {
+                if api_logging.enabled
+                    && api_logging
+                        .path
+                        .as_ref()
+                        .is_some_and(|path| path.trim().is_empty())
+                {
+                    return Err(ProfileError::Invalid(
+                        "observability.api_logging.path cannot be empty when enabled".to_string(),
                     ));
                 }
             }
