@@ -14,7 +14,7 @@ serde_json.workspace = true
 ayx-api = { path = "../ayx-api" }
 ayx-core = { path = "../ayx-core" }
 ayx-server = { path = "../ayx-server" }
-self_update = "0.17"
+self_update = "0.43.1"
 
 [[bin]]
 name = "ayx"
