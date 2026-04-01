@@ -57,4 +57,4 @@ This is the working plan for evolving the AYX CLI into a production-grade, agent
 - keep the higher-order tactics and workflow registry in follow-up work until the command catalog is available.
 - finish the Mongo query registry and doctor suite before adding any Mongo remediation/mutation workflows.
 - keep Server auth focused on the SAML simulation and diagnosis primitives the KBAs actually support.
-- flesh out `license api` scaffolding before turning to the broader Cloud surface.
+- flesh out `license api` workflows before turning to the broader Cloud surface.

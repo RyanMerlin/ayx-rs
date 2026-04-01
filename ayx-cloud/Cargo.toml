@@ -6,3 +6,6 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+anyhow.workspace = true
+ayx-core = { path = "../ayx-core" }
+serde_json.workspace = true

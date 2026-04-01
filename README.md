@@ -15,8 +15,8 @@ Licensing and Cloud surfaces being added in product-scoped branches:
 - upgrade planning and post-checks
 - system discovery and log analysis helpers
 - Server diagnosis workflows for startup, runtime settings, and network triage
-- Licensing portal diagnostics and API scaffolding
-- Cloud API scaffolding for the next product branch
+- Licensing portal diagnostics and API surface
+- Cloud API surface for the next product branch
 
 ## Quick start
 
@@ -48,8 +48,8 @@ ayx server
 - `server diagnose` for operator-facing Server troubleshooting flows
 - `server auth` for SAML-first auth inspection, diagnosis, simulation, and narrow legacy AD checks
 - `server doctor` for prescriptive troubleshooting workflows built on top of diagnose
-- `license` for the Licensing portal and API branch scaffold
-- `cloud` for the Alteryx Cloud API branch scaffold
+- `license` for the Licensing portal and API branch
+- `cloud` for the Alteryx Cloud API branch
 - `upgrade` for upgrade path planning, prechecks, backup, apply simulation, and postchecks
 - `catalog` for machine-readable command discovery
 - `update` for GitHub release self-update

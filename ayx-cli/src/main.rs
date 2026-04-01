@@ -8,6 +8,7 @@ use reqwest::blocking::Client;
 use roxmltree::Document;
 use serde_json::{json, Value};
 
+use ayx_cloud::{api_diagnose_envelope, api_status_envelope};
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::envelope::Envelope;
 use ayx_core::profile::{Config, ServerProfile};
@@ -241,8 +242,14 @@ enum CloudCommand {
 
 #[derive(Subcommand, Debug)]
 enum CloudApiCommand {
-    Status,
-    Diagnose,
+    Status {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Diagnose {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -257,8 +264,14 @@ enum LicenseCommand {
 
 #[derive(Subcommand, Debug)]
 enum LicenseApiCommand {
-    Status,
-    Diagnose,
+    Status {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Diagnose {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -370,14 +383,54 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Operation behavior depends on the selected endpoint."],
     },
     CommandSpec {
+        name: "license status",
+        path: "license/status",
+        summary: "Summarize the Licensing branch posture.",
+        output: "license status envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Product branch ready; API subcommands are the primary entry point."],
+    },
+    CommandSpec {
+        name: "license inventory",
+        path: "license/inventory",
+        summary: "Summarize Licensing branch inventory candidates.",
+        output: "license inventory envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Product branch ready; API subcommands are the primary entry point."],
+    },
+    CommandSpec {
+        name: "cloud status",
+        path: "cloud/status",
+        summary: "Summarize the Cloud branch posture.",
+        output: "cloud status envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Product branch ready; API subcommands are the primary entry point."],
+    },
+    CommandSpec {
+        name: "cloud inventory",
+        path: "cloud/inventory",
+        summary: "Summarize Cloud branch inventory candidates.",
+        output: "cloud inventory envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Product branch ready; API subcommands are the primary entry point."],
+    },
+    CommandSpec {
         name: "license api status",
         path: "license/api/status",
         summary: "Summarize the Licensing portal API posture.",
         output: "license api status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "license_api"],
-        notes: &["First-pass scaffold for the product-scoped Licensing API surface."],
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Use to inspect licensing API posture before diagnostics."],
     },
     CommandSpec {
         name: "license api diagnose",
@@ -386,7 +439,7 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         output: "license api diagnostic envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "license_api"],
+        prerequisites: &["config.yaml", "server_api"],
         notes: &["Use before future license api call-style workflows."],
     },
     CommandSpec {
@@ -396,8 +449,8 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         output: "cloud api status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "cloud_api"],
-        notes: &["First-pass scaffold for the product-scoped Cloud API surface."],
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Use to inspect cloud API posture before diagnostics."],
     },
     CommandSpec {
         name: "cloud api diagnose",
@@ -406,7 +459,7 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         output: "cloud api diagnostic envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "cloud_api"],
+        prerequisites: &["config.yaml", "server_api"],
         notes: &["Use before future cloud api call-style workflows."],
     },
     CommandSpec {
@@ -1722,46 +1775,58 @@ fn execute(cli: Cli) -> Result<Envelope> {
             Some(WorkflowCommand::Logs) => bail!("workflow logs are not yet implemented"),
         },
         Command::Cloud { command } => match command {
-            None => Envelope::ok("cloud commands are not yet implemented"),
+            None => Envelope::ok("cloud commands available: api, status, inventory"),
             Some(CloudCommand::Api { command }) => match command {
-                CloudApiCommand::Status => Envelope::ok_with_data(
-                    "cloud api status",
-                    json!({
-                        "message": "cloud api surface scaffolded",
-                        "next_step": "add cloud-specific auth and API diagnostics",
-                    }),
-                ),
-                CloudApiCommand::Diagnose => Envelope::ok_with_data(
-                    "cloud api diagnose",
-                    json!({
-                        "message": "cloud api diagnostics scaffolded",
-                        "next_step": "add Cloud API reachability and auth checks",
-                    }),
-                ),
+                CloudApiCommand::Status { profile } => {
+                    let config = load_profile(&profile)?;
+                    api_status_envelope(&config, "cloud")?
+                }
+                CloudApiCommand::Diagnose { profile } => {
+                    let config = load_profile(&profile)?;
+                    api_diagnose_envelope(&config, "cloud")?
+                }
             },
-            Some(CloudCommand::Status) => bail!("cloud status is not yet implemented"),
-            Some(CloudCommand::Inventory) => bail!("cloud inventory is not yet implemented"),
+            Some(CloudCommand::Status) => Envelope::ok_with_data(
+                "cloud status",
+                json!({
+                    "product": "cloud",
+                    "message": "cloud branch ready",
+                }),
+            ),
+            Some(CloudCommand::Inventory) => Envelope::ok_with_data(
+                "cloud inventory",
+                json!({
+                    "product": "cloud",
+                    "message": "cloud branch ready",
+                }),
+            ),
         },
         Command::License { command } => match command {
-            None => Envelope::ok("license commands are not yet implemented"),
+            None => Envelope::ok("license commands available: api, status, inventory"),
             Some(LicenseCommand::Api { command }) => match command {
-                LicenseApiCommand::Status => Envelope::ok_with_data(
-                    "license api status",
-                    json!({
-                        "message": "license api surface scaffolded",
-                        "next_step": "add licensing portal auth and inventory checks",
-                    }),
-                ),
-                LicenseApiCommand::Diagnose => Envelope::ok_with_data(
-                    "license api diagnose",
-                    json!({
-                        "message": "license api diagnostics scaffolded",
-                        "next_step": "add licensing portal reachability and auth checks",
-                    }),
-                ),
+                LicenseApiCommand::Status { profile } => {
+                    let config = load_profile(&profile)?;
+                    api_status_envelope(&config, "license")?
+                }
+                LicenseApiCommand::Diagnose { profile } => {
+                    let config = load_profile(&profile)?;
+                    api_diagnose_envelope(&config, "license")?
+                }
             },
-            Some(LicenseCommand::Status) => bail!("license status is not yet implemented"),
-            Some(LicenseCommand::Inventory) => bail!("license inventory is not yet implemented"),
+            Some(LicenseCommand::Status) => Envelope::ok_with_data(
+                "license status",
+                json!({
+                    "product": "license",
+                    "message": "license branch ready",
+                }),
+            ),
+            Some(LicenseCommand::Inventory) => Envelope::ok_with_data(
+                "license inventory",
+                json!({
+                    "product": "license",
+                    "message": "license branch ready",
+                }),
+            ),
         },
         Command::Catalog { command } => match command {
             CatalogCommand::List => catalog_list_envelope()?,
@@ -1859,7 +1924,7 @@ fn main() -> Result<()> {
 
 fn print_help() {
     println!(
-        "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help       Print this help message\n    --output     Output format: text or json\n\nCOMMANDS:\n    mongo         Mongo inventory, backup, restore, query, and doctor helpers\n    server api    Server API operations\n    server        Server discovery, logs, auth, diagnose, doctor, and low-level API calls\n    upgrade       Upgrade planning and execution helpers\n    catalog       Machine-readable command registry\n    license       Licensing portal and API surface scaffold\n    cloud         Alteryx Cloud API surface scaffold\n    sqlserver     SQL Server command family (stubbed)\n    workflow      Workflow command family (stubbed)\n    update        Self-update from GitHub releases\n"
+    "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help       Print this help message\n    --output     Output format: text or json\n\nCOMMANDS:\n    mongo         Mongo inventory, backup, restore, query, and doctor helpers\n    server api    Server API operations\n    server        Server discovery, logs, auth, diagnose, doctor, and low-level API calls\n    upgrade       Upgrade planning and execution helpers\n    catalog       Machine-readable command registry\n    license       Licensing portal branch and API surface\n    cloud         Alteryx Cloud branch and API surface\n    sqlserver     SQL Server command family (stubbed)\n    workflow      Workflow command family (stubbed)\n    update        Self-update from GitHub releases\n"
     );
 }
 
@@ -2013,6 +2078,8 @@ mod tests {
         assert!(names.contains(&"catalog list"));
         assert!(names.contains(&"license api status"));
         assert!(names.contains(&"cloud api status"));
+        assert!(names.contains(&"license status"));
+        assert!(names.contains(&"cloud status"));
     }
 
     #[test]
@@ -2028,5 +2095,8 @@ mod tests {
         let env = catalog_describe_envelope("license api diagnose")
             .expect("catalog describe should work for license");
         assert_eq!(env.data["path"], "license/api/diagnose");
+
+        let env = catalog_describe_envelope("cloud status").expect("catalog describe should work");
+        assert_eq!(env.data["name"], "cloud status");
     }
 }
