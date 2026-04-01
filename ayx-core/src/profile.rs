@@ -121,7 +121,10 @@ pub struct UpgradeProfile {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AlteryxOneProfile {
     pub account_email: String,
-    pub api_token: Option<String>,
+    pub oauth_client_id: Option<String>,
+    pub token_endpoint_url: Option<String>,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -298,10 +301,31 @@ impl Config {
                     "alteryx_one.account_email must be a valid email".to_string(),
                 ));
             }
-            if let Some(token) = &one.api_token {
+            if let Some(client_id) = &one.oauth_client_id {
+                if client_id.trim().is_empty() {
+                    return Err(ProfileError::Invalid(
+                        "alteryx_one.oauth_client_id cannot be empty when set".to_string(),
+                    ));
+                }
+            }
+            if let Some(url) = &one.token_endpoint_url {
+                if url.trim().is_empty() {
+                    return Err(ProfileError::Invalid(
+                        "alteryx_one.token_endpoint_url cannot be empty when set".to_string(),
+                    ));
+                }
+            }
+            if let Some(token) = &one.access_token {
                 if token.trim().is_empty() {
                     return Err(ProfileError::Invalid(
-                        "alteryx_one.api_token cannot be empty when set".to_string(),
+                        "alteryx_one.access_token cannot be empty when set".to_string(),
+                    ));
+                }
+            }
+            if let Some(token) = &one.refresh_token {
+                if token.trim().is_empty() {
+                    return Err(ProfileError::Invalid(
+                        "alteryx_one.refresh_token cannot be empty when set".to_string(),
                     ));
                 }
             }

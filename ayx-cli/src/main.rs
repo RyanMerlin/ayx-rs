@@ -714,8 +714,8 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform auth status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.api_token"],
-        notes: &["Confirms token presence and whether a safe workspace endpoint is reachable."],
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Confirms OAuth client ID, token endpoint, access token presence, refresh token presence, and whether a safe workspace endpoint is reachable."],
     },
     CommandSpec {
         name: "one platform auth diagnose",
@@ -724,7 +724,7 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform auth diagnostic envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.api_token"],
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
         notes: &["Uses the managed IAM current workspace endpoint as the safe validation target."],
     },
     CommandSpec {
@@ -2680,8 +2680,8 @@ fn one_api_live_request(
     let api = config
         .alteryx_one
         .as_ref()
-        .and_then(|one| one.api_token.as_ref())
-        .ok_or_else(|| anyhow!("alteryx_one.api_token is required for live one api calls"))?;
+        .and_then(|one| one.access_token.as_ref())
+        .ok_or_else(|| anyhow!("alteryx_one.access_token is required for live one api calls"))?;
     let base_url = "https://api.us1.alteryxcloud.com";
     let client = Client::builder()
         .timeout(std::time::Duration::from_secs(60))
@@ -2751,10 +2751,13 @@ fn one_platform_auth_status_envelope(config: &Config) -> Result<Envelope> {
         "one platform auth status",
         json!({
             "product": "one",
-            "surface": "platform",
-            "profile": config.profile_name,
-            "token_present": one.api_token.as_ref().is_some_and(|v| !v.trim().is_empty()),
-            "token_source": if one.api_token.as_ref().is_some_and(|v| !v.trim().is_empty()) {
+                "surface": "platform",
+                "profile": config.profile_name,
+                "oauth_client_id_present": one.oauth_client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
+                "token_endpoint_url": one.token_endpoint_url.clone(),
+                "access_token_present": one.access_token.as_ref().is_some_and(|v| !v.trim().is_empty()),
+                "refresh_token_present": one.refresh_token.as_ref().is_some_and(|v| !v.trim().is_empty()),
+            "token_source": if one.access_token.as_ref().is_some_and(|v| !v.trim().is_empty()) {
                 "config/env"
             } else {
                 "missing"
@@ -2770,7 +2773,14 @@ fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Envelope> {
         .alteryx_one
         .as_ref()
         .ok_or_else(|| anyhow!("config missing alteryx_one section"))?;
-    let has_token = one.api_token.as_ref().is_some_and(|v| !v.trim().is_empty());
+    let has_token = one
+        .access_token
+        .as_ref()
+        .is_some_and(|v| !v.trim().is_empty());
+    let has_refresh_token = one
+        .refresh_token
+        .as_ref()
+        .is_some_and(|v| !v.trim().is_empty());
     let workspace_probe = if has_token {
         one_api_live_request(
             config,
@@ -2788,11 +2798,14 @@ fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Envelope> {
                 "product": "one",
                 "surface": "platform",
                 "profile": config.profile_name,
-                "token_present": false,
-                "diagnosis": "alteryx_one.api_token is missing",
+                "oauth_client_id_present": one.oauth_client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
+                "token_endpoint_url": one.token_endpoint_url.clone(),
+                "access_token_present": false,
+                "refresh_token_present": has_refresh_token,
+                "diagnosis": "alteryx_one.access_token is missing",
                 "recommendations": [
-                    "Set AYX_ONE_API_TOKEN in .env",
-                    "Populate alteryx_one.api_token in config.yaml if you prefer config-based storage"
+                    "Set AYX_ONE_API_ACCESS_TOKEN in .env",
+                    "Populate alteryx_one.access_token in config.yaml if you prefer config-based storage"
                 ],
             }),
         )
@@ -2805,7 +2818,10 @@ fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Envelope> {
                 "product": "one",
                 "surface": "platform",
                 "profile": config.profile_name,
-                "token_present": true,
+                "oauth_client_id_present": one.oauth_client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
+                "token_endpoint_url": one.token_endpoint_url.clone(),
+                "access_token_present": true,
+                "refresh_token_present": has_refresh_token,
                 "diagnosis": "token present and workspace probe executed",
                 "workspace_probe": workspace_probe.data,
                 "recommendations": [
