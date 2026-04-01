@@ -3575,6 +3575,41 @@ fn parse_saml_metadata_source(input: &str) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::Duration;
+
+    fn sample_config_for_refresh(server_url: String, access_token: Option<String>) -> Config {
+        Config {
+            profile_name: "test".to_string(),
+            mongo: ayx_core::profile::MongoProfile {
+                mode: ayx_core::profile::MongoMode::Embedded,
+                databases: ayx_core::profile::MongoDatabases {
+                    gallery_name: "AlteryxGallery".to_string(),
+                    service_name: "AlteryxService".to_string(),
+                },
+                embedded: Some(ayx_core::profile::MongoEmbedded {
+                    runtime_settings_path: None,
+                    alteryx_service_path: None,
+                    restore_target_path: None,
+                }),
+                managed: None,
+            },
+            alteryx_one: Some(ayx_core::profile::AlteryxOneProfile {
+                account_email: "test@example.com".to_string(),
+                oauth_client_id: Some("client-123".to_string()),
+                token_endpoint_url: Some(server_url),
+                access_token,
+                refresh_token: Some("refresh-abc".to_string()),
+            }),
+            observability: None,
+            server_api: None,
+            api: None,
+            server: None,
+            upgrade: None,
+        }
+    }
 
     #[test]
     fn catalog_list_includes_core_commands() {
@@ -3634,5 +3669,38 @@ mod tests {
         let env = catalog_describe_envelope("one plans list")
             .expect("catalog describe should work for one plans list");
         assert_eq!(env.data["path"], "one/plans/list");
+    }
+
+    #[test]
+    fn one_refresh_token_path_resolves_access_token() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let addr = listener.local_addr().expect("listener addr");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("connection should arrive");
+            let mut buf = [0u8; 2048];
+            let _ = stream.read(&mut buf).expect("request should be readable");
+            let response = concat!(
+                "HTTP/1.1 200 OK\r\n",
+                "Content-Type: application/json\r\n",
+                "Connection: close\r\n",
+                "\r\n",
+                r#"{"token_type":"Bearer","access_token":"fresh-token"}"#
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("response should write");
+        });
+
+        let client = Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("client should build");
+        let config = sample_config_for_refresh(
+            format!("http://{}/token", addr),
+            Some("existing-token".to_string()),
+        );
+        let token = refresh_one_access_token(&config, &client).expect("refresh should succeed");
+        assert_eq!(token, "Bearer fresh-token");
+        server.join().expect("server should join");
     }
 }
