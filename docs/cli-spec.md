@@ -16,8 +16,9 @@
 - `mongo.databases.gallery_name` and `mongo.databases.service_name`: required database names so every operation knows which namespaces to touch.
 - For embedded mode, `mongo.embedded.runtime_settings_path` may remain null; runtime discovery handles the default Server layout.
 - In managed mode, provide `mongo.managed.url` or `mongo.managed.host` plus `mongo.managed.port`. TLS (`mongo.managed.tls`) and credentials (`username`, `password`, `auth_database`) control how `mongodump/mongorestore` authenticate.
-- `api.base_url` plus either OAuth2 credentials (`api.auth.client_id`, `api.auth.client_secret`, optional `scope`) or a PAT (`api.auth.pat`). Token requests automatically target `${base_url}oauth2/token`.
-- `api.timeout_ms` keeps HTTP calls responsive while staying within the shared envelope contract.
+- `server_api.base_url` plus OAuth2 client-credential inputs (`server_api.client_id`, `server_api.client_secret`) for the Server API surface.
+- `server_api` keeps the public config model product-scoped instead of using a generic top-level `api` section.
+- future product API branches will carry their own config blocks under the product root.
 - `alteryx_one.account_email` is the Alteryx One identity used throughout owner-transfer and gallery operations.
 
 ## Embedded RuntimeSettings Discovery
@@ -71,11 +72,11 @@ Upgrade commands rely on the optional `upgrade` block in `config.yaml`, for exam
 
 ```
 upgrade:
-  current_version: 2024.1
+  target_version: 2024.1
   deployment: embedded-mongo
 ```
 
-`precheck` validates runtime/service expectations and curator access before evaluating the supported path between the configured `current_version` and the CLI `--target`. `backup` captures runtime/service files, writes `backup_results.csv`, and records instructions for embedded Mongo. `plan` writes `upgrade_plan.json` plus the hashed `plan_manifest.json` and a run manifest describing each hop. `apply` replays the plan manifest with simulated steps (`execution_audit.csv`), while `postcheck` verifies migration logs and the manifest hash. `bundle` zips an input directory for sharing with operations or support.
+`precheck` validates runtime/service expectations and curator access before evaluating the supported path between the configured `target_version` and the CLI `--target`. `backup` captures runtime/service files, writes `backup_results.csv`, and records instructions for embedded Mongo. `plan` writes `upgrade_plan.json` plus the hashed `plan_manifest.json` and a run manifest describing each hop. `apply` replays the plan manifest with simulated steps (`execution_audit.csv`), while `postcheck` verifies migration logs and the manifest hash. `bundle` zips an input directory for sharing with operations or support.
 
 ## Update Command
 - `ayx update [--repo-owner <owner>] [--repo-name <repo>] [--bin-name <name>] [--target-version <tag>] [--skip-confirm]`
@@ -144,7 +145,17 @@ upgrade:
 - `ayx server api import-swagger --profile <path> --url <url> [--version 3] [--cache-dir .omni/swagger]`
 - `ayx server api call --profile <path> --operation-id <id> [--version 3] [--cache-dir .omni/swagger] [--swagger <path>] [--param KEY=VALUE ...] [--body <path>]`
 
-Server commands reuse `config.yaml` but require the `server` section illustrated above (`webapi_url`, `curator_api_key`, `curator_api_secret`, `verify_tls`). `import-swagger` downloads the OpenAPI document for the requested version and caches it under `cache-dir/<profile>_swagger_v<version>.json`. `call` loads the cached Swagger, resolves the `operationId`, substitutes path/query parameters supplied via `--param`, and exchanges JSON payloads with the Server API using the curator credentials so automation can inspect `status_code`, `url`, and the parsed response.
+Server commands reuse `config.yaml` but require the `alteryx_server.server_api` block illustrated above (`base_url`, `client_id`, `client_secret`) in addition to the Server-specific settings already flattened by the config loader. `import-swagger` downloads the OpenAPI document for the requested version and caches it under `cache-dir/<profile>_swagger_v<version>.json`. `call` loads the cached Swagger, resolves the `operationId`, substitutes path/query parameters supplied via `--param`, and exchanges JSON payloads with the Server API using the curator credentials so automation can inspect `status_code`, `url`, and the parsed response.
+
+## Product-Scoped API Branches
+
+The CLI is intentionally product-first:
+
+- `ayx server api`
+- `ayx license api`
+- `ayx cloud api`
+
+`server` is the mature branch today. `license` and `cloud` are being introduced as separate product roots so each Alteryx surface can grow independently.
 
 Mutating commands (`schedule-create`, `schedule-update`, `schedule-patch`, `schedule-delete`, `collection-create`, `collection-update`, `collection-delete`, any collection membership mutation or permission update, `credential-add`, `credential-update`, `credential-delete`, `credential-share-user`, `credential-share-user-group`, `credential-unshare-*`, `subscription-create`, `subscription-update`, `subscription-delete`, `subscription-change-users`, `user-update`, `user-delete`, `user-transfer-assets`, `user-deactivate`, `user-password-reset`, `workflow-version-upload`, `usergroup-create`, `usergroup-update`, `usergroup-delete`, `usergroup-*` membership moves, and all DCM admin mutators) require `--apply` before they invoke the live API to avoid accidental writes; when that flag is omitted the CLI returns a dry-run envelope with guidance to provide the safety gate.
 

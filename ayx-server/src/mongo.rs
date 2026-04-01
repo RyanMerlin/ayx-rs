@@ -180,6 +180,7 @@ pub fn doctor_envelope(config: &Config) -> Result<Envelope> {
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn mutate_envelope(
     config: &Config,
     database: Option<&str>,
@@ -230,6 +231,7 @@ pub fn mutate_envelope(
     anyhow::bail!("mongo mutate execution is not yet enabled; preview only");
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn resolve_query_spec(
     config: &Config,
     database: Option<&str>,

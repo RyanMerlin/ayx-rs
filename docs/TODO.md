@@ -45,9 +45,16 @@ This is the working plan for evolving the AYX CLI into a production-grade, agent
 - add targeted helpers for certificate validation, callback/redirect checks, and legacy AD only where it still matters operationally.
 - keep the auth surface focused on evidence, simulation, and guided diagnosis rather than embedding every IdP-specific KBA procedure.
 
+## 7. Product-scoped API branches
+- keep the public CLI product-first instead of reintroducing a generic top-level `api`.
+- add Licensing as the next product branch, then expand Cloud under its own branch.
+- keep API-specific command trees under their product roots (`server`, `license`, `cloud`) while shared HTTP/auth helpers remain internal.
+- extend the Codex plugin layer as the place for API KBA playbooks and multi-step orchestration.
+
 ## Current priority
 - finish the integration-test pass for the core workflows.
 - expand the command registry with richer command metadata and generated docs.
 - keep the higher-order tactics and workflow registry in follow-up work until the command catalog is available.
 - finish the Mongo query registry and doctor suite before adding any Mongo remediation/mutation workflows.
 - keep Server auth focused on the SAML simulation and diagnosis primitives the KBAs actually support.
+- flesh out `license api` scaffolding before turning to the broader Cloud surface.

@@ -8,12 +8,15 @@ It is designed to be:
 - portable: Windows, Linux, and macOS release targets
 - agent-friendly: structured envelopes, predictable command output, and a future command/tactics/workflow registry for tools like Codex or Claude
 
-The current focus is Alteryx Server and Gallery administration workflows:
+The current focus is Alteryx Server and Gallery administration workflows, with
+Licensing and Cloud surfaces being added in product-scoped branches:
 - Mongo inventory, backup, and restore
 - Server API reads and controlled mutations
 - upgrade planning and post-checks
 - system discovery and log analysis helpers
 - Server diagnosis workflows for startup, runtime settings, and network triage
+- Licensing portal diagnostics and API scaffolding
+- Cloud API scaffolding for the next product branch
 
 ## Quick start
 
@@ -45,6 +48,8 @@ ayx server
 - `server diagnose` for operator-facing Server troubleshooting flows
 - `server auth` for SAML-first auth inspection, diagnosis, simulation, and narrow legacy AD checks
 - `server doctor` for prescriptive troubleshooting workflows built on top of diagnose
+- `license` for the Licensing portal and API branch scaffold
+- `cloud` for the Alteryx Cloud API branch scaffold
 - `upgrade` for upgrade path planning, prechecks, backup, apply simulation, and postchecks
 - `catalog` for machine-readable command discovery
 - `update` for GitHub release self-update
@@ -105,6 +110,8 @@ Start with:
 ```powershell
 ayx catalog list
 ayx catalog describe --command mongo/backup
+ayx license api status
+ayx cloud api status
 ayx server diagnose startup --error "Failed to register Service URL"
 ayx server auth status
 ayx server auth diagnose saml --metadata-url https://idp.example.com/metadata
