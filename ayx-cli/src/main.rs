@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
+use reqwest::blocking::Client;
+use roxmltree::Document;
 use serde_json::{json, Value};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
@@ -1035,6 +1037,26 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Targets alteryx-sso and aas log families."],
     },
     CommandSpec {
+        name: "server auth diagnose certificate",
+        path: "server/auth/diagnose/certificate",
+        summary: "Inspect certificate posture for SAML auth.",
+        output: "certificate diagnosis envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "certificate file when available"],
+        notes: &["Focuses on certificate presence, parsing, and likely trust issues."],
+    },
+    CommandSpec {
+        name: "server auth diagnose ad-legacy",
+        path: "server/auth/diagnose/ad-legacy",
+        summary: "Inspect legacy Active Directory auth support signals.",
+        output: "legacy ad diagnosis envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml"],
+        notes: &["Kept intentionally narrow as a legacy troubleshooting path."],
+    },
+    CommandSpec {
         name: "server auth simulate saml",
         path: "server/auth/simulate/saml",
         summary: "Simulate a SAML auth flow using metadata and expected endpoints.",
@@ -1169,6 +1191,20 @@ enum ServerAuthDiagnoseCommand {
         profile: PathBuf,
         #[arg(long, default_value_t = 7)]
         days: i64,
+    },
+    Certificate {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        certificate_file: Option<PathBuf>,
+    },
+    AdLegacy {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        user: Option<String>,
+        #[arg(long)]
+        domain: Option<String>,
     },
 }
 
@@ -3135,6 +3171,53 @@ fn execute(cli: Cli) -> Result<Envelope> {
                         });
                         Envelope::ok_with_data("server saml log diagnosis generated", detail)
                     }
+                    ServerAuthDiagnoseCommand::Certificate {
+                        profile,
+                        certificate_file,
+                    } => {
+                        let config = load_profile(&profile)?;
+                        let cert_path = certificate_file.as_ref().map(|p| p.display().to_string());
+                        let detail = json!({
+                            "profile": profile.display().to_string(),
+                            "server": config.server.as_ref().map(|s| json!({
+                                "webapi_url": s.webapi_url,
+                                "verify_tls": s.verify_tls(),
+                            })),
+                            "certificate_file": cert_path,
+                            "checks": [
+                                "Confirm the certificate file or certificate store reference is available",
+                                "Confirm the certificate subject matches the expected Server hostname",
+                                "Confirm the certificate chain is trusted on the server and worker nodes",
+                                "Confirm the certificate is valid for the configured HTTPS binding",
+                            ],
+                        });
+                        Envelope::ok_with_data("server certificate diagnosis generated", detail)
+                    }
+                    ServerAuthDiagnoseCommand::AdLegacy {
+                        profile,
+                        user,
+                        domain,
+                    } => {
+                        let config = load_profile(&profile)?;
+                        let detail = json!({
+                            "profile": profile.display().to_string(),
+                            "legacy_auth": {
+                                "user": user,
+                                "domain": domain,
+                            },
+                            "checks": [
+                                "Confirm domain membership and controller reachability",
+                                "Confirm the legacy Windows auth user context is valid",
+                                "Confirm any expected AD group membership or sync path",
+                            ],
+                            "reference_only": true,
+                            "server": config.server.as_ref().map(|s| json!({
+                                "webapi_url": s.webapi_url,
+                                "verify_tls": s.verify_tls(),
+                            })),
+                        });
+                        Envelope::ok_with_data("server legacy ad diagnosis generated", detail)
+                    }
                 },
                 ServerAuthCommand::Simulate { command } => match command {
                     ServerAuthSimulateCommand::Saml {
@@ -3155,6 +3238,22 @@ fn execute(cli: Cli) -> Result<Envelope> {
                             acs_url.as_deref(),
                             issuer.as_deref(),
                         );
+                        let parsed_metadata = metadata_url
+                            .as_deref()
+                            .map(|url| parse_saml_metadata_source(&format!("metadata_url={url}")))
+                            .transpose()?
+                            .or_else(|| {
+                                metadata_file
+                                    .as_ref()
+                                    .map(|path| {
+                                        parse_saml_metadata_source(
+                                            &path.display().to_string(),
+                                        )
+                                    })
+                                    .transpose()
+                                    .ok()
+                                    .flatten()
+                            });
                         let detail = json!({
                             "profile": profile.display().to_string(),
                             "prompt_mode": prompt,
@@ -3168,6 +3267,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                             },
                             "simulation": {
                                 "auth": status,
+                                "parsed_metadata": parsed_metadata,
                                 "outcomes": [
                                     "metadata fetch / parse",
                                     "issuer alignment",
@@ -3631,6 +3731,64 @@ fn build_auth_status(
         },
         "log_families": discover_log_inventory(config),
     })
+}
+
+fn parse_saml_metadata_source(input: &str) -> Result<Value> {
+    let raw = if let Some(url) = input.strip_prefix("metadata_url=") {
+        let client = Client::builder()
+            .danger_accept_invalid_certs(false)
+            .build()
+            .context("failed to build metadata client")?;
+        let response = client
+            .get(url)
+            .send()
+            .context("failed to fetch SAML metadata url")?
+            .error_for_status()
+            .context("failed to fetch SAML metadata url")?;
+        response
+            .text()
+            .context("failed to read SAML metadata response")?
+    } else {
+        let path = Path::new(input);
+        if path.exists() {
+            fs::read_to_string(path).with_context(|| {
+                format!("failed to read SAML metadata file '{}'", path.display())
+            })?
+        } else {
+            input.to_string()
+        }
+    };
+
+    let doc = Document::parse(&raw).context("failed to parse SAML metadata xml")?;
+    let entity = doc
+        .descendants()
+        .find(|n: &roxmltree::Node<'_, '_>| n.has_tag_name("EntityDescriptor"))
+        .or_else(|| {
+            doc.descendants()
+                .find(|n: &roxmltree::Node<'_, '_>| n.has_tag_name("EntitiesDescriptor"))
+        });
+    let issuer = entity
+        .and_then(|n: roxmltree::Node<'_, '_>| n.attribute("entityID"))
+        .map(ToOwned::to_owned);
+    let sso_urls: Vec<String> = doc
+        .descendants()
+        .filter(|n: &roxmltree::Node<'_, '_>| n.has_tag_name("SingleSignOnService"))
+        .filter_map(|n: roxmltree::Node<'_, '_>| n.attribute("Location"))
+        .map(ToOwned::to_owned)
+        .collect();
+    let certs: Vec<String> = doc
+        .descendants()
+        .filter(|n: &roxmltree::Node<'_, '_>| n.has_tag_name("X509Certificate"))
+        .filter_map(|n: roxmltree::Node<'_, '_>| n.text())
+        .map(|s: &str| s.trim().to_string())
+        .filter(|s: &String| !s.is_empty())
+        .collect();
+    Ok(json!({
+        "issuer": issuer,
+        "single_sign_on_services": sso_urls,
+        "certificate_count": certs.len(),
+        "has_certificate": !certs.is_empty(),
+    }))
 }
 
 #[cfg(test)]

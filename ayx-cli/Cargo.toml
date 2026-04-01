@@ -8,6 +8,8 @@ authors.workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+reqwest.workspace = true
+roxmltree.workspace = true
 serde_json.workspace = true
 ayx-api = { path = "../ayx-api" }
 ayx-core = { path = "../ayx-core" }

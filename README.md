@@ -41,7 +41,7 @@ ayx server
 - `api` for the Server web API
 - `server` for environment inspection, logs, Swagger import, and lower-level API calls
 - `server diagnose` for operator-facing Server troubleshooting flows
-- `server auth` for SAML-first auth inspection, diagnosis, and simulation
+- `server auth` for SAML-first auth inspection, diagnosis, simulation, and narrow legacy AD checks
 - `server doctor` for prescriptive troubleshooting workflows built on top of diagnose
 - `upgrade` for upgrade path planning, prechecks, backup, apply simulation, and postchecks
 - `catalog` for machine-readable command discovery
@@ -104,6 +104,9 @@ ayx catalog describe --command mongo/backup
 ayx server diagnose startup --error "Failed to register Service URL"
 ayx server auth status
 ayx server auth diagnose saml --metadata-url https://idp.example.com/metadata
+ayx server auth diagnose certificate
+ayx server auth diagnose ad-legacy
+ayx server auth simulate saml --metadata-file .\metadata.xml
 ayx server doctor startup --error "Failed to register Service URL"
 ```
 
