@@ -54,3 +54,19 @@ queries:
       - app ownership
       - gallery item corruption
     read_only: true
+
+  - name: user_email_domain_migration
+    database: AlteryxGallery
+    collection: users
+    filter:
+      email:
+        $regex: "@companyA\\.com$"
+    update:
+      $set:
+        email: "${new_email}"
+    purpose: Bulk update Gallery user email domains during company migration
+    kba_refs:
+      - users
+      - bulk email domain migration
+      - user remediation
+    read_only: false

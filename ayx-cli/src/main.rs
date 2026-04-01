@@ -159,7 +159,7 @@ enum MongoCommand {
         #[arg(long)]
         apply: bool,
         #[arg(long)]
-        yes: bool,
+        accept_mutation_risk: bool,
     },
     Doctor {
         #[arg(long, default_value = "config.yaml")]
@@ -1518,7 +1518,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 template,
                 print,
                 apply,
-                yes,
+                accept_mutation_risk,
             } => {
                 let profile = load_profile(&profile)?;
                 ayx_server::mongo::mutate_envelope(
@@ -1530,7 +1530,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     template.as_deref(),
                     print,
                     apply,
-                    yes,
+                    accept_mutation_risk,
                 )?
             }
         },

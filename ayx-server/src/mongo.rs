@@ -21,6 +21,8 @@ pub struct MongoQueryTemplate {
     #[serde(default)]
     pub projection: Option<Value>,
     #[serde(default)]
+    pub update: Option<Value>,
+    #[serde(default)]
     pub sort: Option<Value>,
     #[serde(default)]
     pub limit: Option<u32>,
@@ -38,6 +40,7 @@ pub struct MongoQuerySpec {
     pub collection: String,
     pub filter: serde_json::Value,
     pub projection: Option<serde_json::Value>,
+    pub update: Option<serde_json::Value>,
     pub sort: Option<serde_json::Value>,
     pub limit: Option<u32>,
     pub template_name: Option<String>,
@@ -50,6 +53,7 @@ pub struct MongoQueryPlan {
     pub collection: String,
     pub filter: serde_json::Value,
     pub projection: Option<serde_json::Value>,
+    pub update: Option<serde_json::Value>,
     pub sort: Option<serde_json::Value>,
     pub limit: Option<u32>,
     pub template_name: Option<String>,
@@ -185,13 +189,13 @@ pub fn mutate_envelope(
     template: Option<&str>,
     print_query: bool,
     apply: bool,
-    yes: bool,
+    accept_mutation_risk: bool,
 ) -> Result<Envelope> {
     let spec = resolve_mutation_spec(config, database, collection, filter, update, template)?;
     let plan = build_query_plan(config, &spec)?;
     let safety_gate = json!({
         "apply": apply,
-        "yes": yes,
+        "accept_mutation_risk": accept_mutation_risk,
         "read_only": false,
     });
 
@@ -205,7 +209,7 @@ pub fn mutate_envelope(
                     "database": plan.database,
                     "collection": plan.collection,
                     "filter": plan.filter,
-                    "update": update.map(|v| serde_json::from_str::<Value>(v).unwrap_or_else(|_| json!(v))),
+                    "update": plan.update,
                     "template": plan.template_name,
                 },
                 "mongosh": build_mongosh_mutation_eval(config, &spec)?,
@@ -219,8 +223,8 @@ pub fn mutate_envelope(
         ));
     }
 
-    if !yes {
-        anyhow::bail!("mongo mutate requires --yes when --apply is set");
+    if !accept_mutation_risk {
+        anyhow::bail!("mongo mutate requires --accept-mutation-risk when --apply is set");
     }
 
     anyhow::bail!("mongo mutate execution is not yet enabled; preview only");
@@ -244,6 +248,7 @@ pub fn resolve_query_spec(
             collection: String::new(),
             filter: json!({}),
             projection: None,
+            update: None,
             sort: None,
             limit: None,
             template_name: None,
@@ -501,6 +506,7 @@ fn build_query_plan(config: &Config, spec: &MongoQuerySpec) -> Result<MongoQuery
         collection: spec.collection.clone(),
         filter: spec.filter.clone(),
         projection: spec.projection.clone(),
+        update: spec.update.clone(),
         sort: spec.sort.clone(),
         limit: spec.limit,
         template_name: spec.template_name.clone(),
@@ -669,7 +675,7 @@ fn resolve_mutation_spec(
         config, database, collection, filter, None, None, None, template,
     )?;
     if let Some(value) = update {
-        spec.projection = Some(
+        spec.update = Some(
             serde_json::from_str(value)
                 .with_context(|| format!("invalid JSON passed to --update: {value}"))?,
         );
@@ -681,10 +687,7 @@ fn build_mongosh_mutation_eval(config: &Config, spec: &MongoQuerySpec) -> Result
     let database = &spec.database;
     let collection = &spec.collection;
     let filter = serde_json::to_string(&spec.filter)?;
-    let update = match &spec.projection {
-        Some(v) => serde_json::to_string(v)?,
-        None => "{}".to_string(),
-    };
+    let update = serde_json::to_string(spec.update.as_ref().unwrap_or(&json!({})))?;
     let mut js = String::new();
     js.push_str("const dbName = ");
     js.push_str(&serde_json::to_string(database)?);
@@ -722,6 +725,7 @@ fn mongo_query_spec_from_template(template: &MongoQueryTemplate) -> Result<Mongo
         collection: template.collection.clone(),
         filter: template.filter.clone(),
         projection: template.projection.clone(),
+        update: template.update.clone(),
         sort: template.sort.clone(),
         limit: template.limit,
         template_name: Some(template.name.clone()),
