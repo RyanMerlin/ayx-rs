@@ -17,7 +17,7 @@ use ayx_server::logs::{
 };
 use ayx_server::mongo::{
     backup_envelope, doctor_envelope as mongo_doctor_envelope, inventory_envelope,
-    query_envelope as mongo_query_envelope, restore_envelope, status_envelope, MongoQuerySpec,
+    query_envelope as mongo_query_envelope, restore_envelope, status_envelope,
 };
 use ayx_server::upgrade::{
     compute_path, run_apply, run_backup, run_bundle, run_plan, run_postcheck, run_precheck,
@@ -123,23 +123,43 @@ enum MongoCommand {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
         #[arg(long)]
-        database: String,
+        database: Option<String>,
         #[arg(long)]
-        collection: String,
-        #[arg(long, default_value = "{}")]
-        filter: String,
+        collection: Option<String>,
+        #[arg(long)]
+        filter: Option<String>,
         #[arg(long)]
         projection: Option<String>,
         #[arg(long)]
         sort: Option<String>,
-        #[arg(long, default_value_t = 25)]
-        limit: u32,
+        #[arg(long)]
+        limit: Option<u32>,
         #[arg(long)]
         print: bool,
         #[arg(long)]
         apply: bool,
         #[arg(long)]
         template: Option<String>,
+    },
+    Mutate {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        database: Option<String>,
+        #[arg(long)]
+        collection: Option<String>,
+        #[arg(long)]
+        filter: Option<String>,
+        #[arg(long)]
+        update: Option<String>,
+        #[arg(long)]
+        template: Option<String>,
+        #[arg(long)]
+        print: bool,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        yes: bool,
     },
     Doctor {
         #[arg(long, default_value = "config.yaml")]
@@ -1473,34 +1493,45 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 template,
             } => {
                 let profile = load_profile(&profile)?;
-                let spec = MongoQuerySpec {
-                    database,
-                    collection,
-                    filter: serde_json::from_str(&filter)
-                        .with_context(|| format!("invalid JSON passed to --filter: {filter}"))?,
-                    projection: projection
-                        .as_deref()
-                        .map(|value| {
-                            serde_json::from_str(value).with_context(|| {
-                                format!("invalid JSON passed to --projection: {value}")
-                            })
-                        })
-                        .transpose()?,
-                    sort: sort
-                        .as_deref()
-                        .map(|value| {
-                            serde_json::from_str(value)
-                                .with_context(|| format!("invalid JSON passed to --sort: {value}"))
-                        })
-                        .transpose()?,
-                    limit: Some(limit),
-                    template_name: template,
-                };
+                let spec = ayx_server::mongo::resolve_query_spec(
+                    &profile,
+                    database.as_deref(),
+                    collection.as_deref(),
+                    filter.as_deref(),
+                    projection.as_deref(),
+                    sort.as_deref(),
+                    limit,
+                    template.as_deref(),
+                )?;
                 mongo_query_envelope(&profile, &spec, print, apply)?
             }
             MongoCommand::Doctor { profile } => {
                 let profile = load_profile(&profile)?;
                 mongo_doctor_envelope(&profile)?
+            }
+            MongoCommand::Mutate {
+                profile,
+                database,
+                collection,
+                filter,
+                update,
+                template,
+                print,
+                apply,
+                yes,
+            } => {
+                let profile = load_profile(&profile)?;
+                ayx_server::mongo::mutate_envelope(
+                    &profile,
+                    database.as_deref(),
+                    collection.as_deref(),
+                    filter.as_deref(),
+                    update.as_deref(),
+                    template.as_deref(),
+                    print,
+                    apply,
+                    yes,
+                )?
             }
         },
         Command::Api { command } => match command {

@@ -114,7 +114,7 @@ pub enum ApiAuthMode {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpgradeProfile {
-    pub current_version: Option<String>,
+    pub target_version: Option<String>,
     pub deployment: Option<String>,
 }
 
@@ -162,8 +162,14 @@ impl Config {
             })?;
         let expanded = expand_env_placeholders(&content, &env_values);
 
-        let config: Self =
+        let config_value: serde_yaml::Value =
             serde_yaml::from_str(&expanded).map_err(|source| ProfileError::Parse {
+                path: path_str.clone(),
+                source,
+            })?;
+        let config_value = flatten_alteryx_server_block(config_value);
+        let config: Self =
+            serde_yaml::from_value(config_value).map_err(|source| ProfileError::Parse {
                 path: path_str,
                 source,
             })?;
@@ -370,4 +376,31 @@ fn expand_env_placeholders(input: &str, env_values: &HashMap<String, String>) ->
         out.push(ch);
     }
     out
+}
+
+fn flatten_alteryx_server_block(value: serde_yaml::Value) -> serde_yaml::Value {
+    let Some(root) = value.as_mapping() else {
+        return value;
+    };
+
+    let alteryx_server_key = serde_yaml::Value::String("alteryx_server".to_string());
+    let Some(alteryx_server_value) = root.get(&alteryx_server_key) else {
+        return value;
+    };
+    let Some(alteryx_server_map) = alteryx_server_value.as_mapping() else {
+        return value;
+    };
+
+    let mut merged = root.clone();
+    for key in ["server_api", "mongo"] {
+        let key_value = serde_yaml::Value::String(key.to_string());
+        if merged.contains_key(&key_value) {
+            continue;
+        }
+        if let Some(child) = alteryx_server_map.get(&key_value) {
+            merged.insert(key_value, child.clone());
+        }
+    }
+
+    serde_yaml::Value::Mapping(merged)
 }

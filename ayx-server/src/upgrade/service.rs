@@ -190,15 +190,8 @@ pub fn run_precheck(
     ));
 
     let rules = rules::UpgradeRules::new();
-    let path_eval = compute_path(
-        config
-            .upgrade
-            .as_ref()
-            .and_then(|u| u.current_version.as_deref())
-            .unwrap_or(""),
-        target_version,
-        deployment,
-    );
+    let current_version = current_version_from_runtime(&runtime_data).unwrap_or_default();
+    let path_eval = compute_path(&current_version, target_version, deployment);
     let path_ok = path_eval
         .get("ok")
         .and_then(Value::as_bool)
@@ -210,24 +203,10 @@ pub fn run_precheck(
         if path_ok { "info" } else { "high" },
     ));
 
-    let issues = if !config
-        .upgrade
-        .as_ref()
-        .and_then(|u| u.current_version.as_deref())
-        .unwrap_or("")
-        .is_empty()
-    {
-        rules.matching_issues(
-            config
-                .upgrade
-                .as_ref()
-                .and_then(|u| u.current_version.as_deref())
-                .unwrap_or(""),
-            target_version,
-            deployment,
-        )
-    } else {
+    let issues = if current_version.is_empty() {
         Vec::new()
+    } else {
+        rules.matching_issues(&current_version, target_version, deployment)
     };
     for issue in &issues {
         checks.push(check_entry(
@@ -319,6 +298,15 @@ fn read_runtime(path: &Path) -> Value {
     };
     let document = Document::parse(&content).ok();
     if let Some(doc) = document {
+        let version = doc
+            .descendants()
+            .find(|n| n.has_tag_name("ProductVersion"))
+            .or_else(|| doc.descendants().find(|n| n.has_tag_name("Version")))
+            .or_else(|| doc.descendants().find(|n| n.has_tag_name("BuildVersion")))
+            .and_then(|n| n.text())
+            .unwrap_or_default()
+            .trim()
+            .to_string();
         let auth = doc
             .descendants()
             .find(|n| n.has_tag_name("AuthenticationType"))
@@ -341,12 +329,21 @@ fn read_runtime(path: &Path) -> Value {
             .trim()
             .to_string();
         return json!({
+            "version": version,
             "authentication_type": auth,
             "embedded_mongo_enabled": enabled,
             "embedded_mongo_path": path,
         });
     }
     json!({})
+}
+
+fn current_version_from_runtime(runtime_data: &Value) -> Option<String> {
+    runtime_data
+        .get("version")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .filter(|s| !s.trim().is_empty())
 }
 
 fn validate_token_endpoint(server: &ServerProfile) -> Result<String> {

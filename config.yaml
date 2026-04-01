@@ -1,35 +1,38 @@
 profile_name: local-dev
+
 alteryx_one:
   account_email: ${AYX_ACCOUNT_EMAIL}  # used for gallery automation and workflow transfers
-mongo:
-  mode: embedded  # switch to 'managed' and fill mongo.managed.* when targeting an external MongoDB.
-  databases:
-    gallery_name: AlteryxGallery
-    service_name: AlteryxService
-  embedded:
-    runtime_settings_path: null     # auto-discovered from ProgramData/ProgramFiles when null; set explicitly to override.
-    alteryx_service_path: null     # auto-resolves from RuntimeSettings install paths but can be pinned.
-    restore_target_path: null      # derived from RuntimeSettings when available.
-  managed:
-    url: null                      # prefer a MongoDB URI when hitting a managed cluster.
-    host: localhost
-    port: 27017
-    auth_database: admin
-    username: mongo_user
-    password: ${AYX_MONGO_MANAGED_PASSWORD}
-    tls:
-      enabled: false
-      ca_path: null
-      cert_path: null
-      key_path: null
-      allow_invalid_hostnames: false
-    timeout_ms: 15000
-    retry_count: 2
-    max_pool_size: 20
-server_api:
-  base_url: http://172.27.171.32/webapi/
-  client_id: ${AYX_SERVER_API_KEY}
-  client_secret: ${AYX_SERVER_API_SECRET}
+
+alteryx_server:
+  server_api:
+    base_url: ${AYX_SERVER_BASE_URL}
+    client_id: ${AYX_SERVER_API_KEY}
+    client_secret: ${AYX_SERVER_API_SECRET}
+  mongo:
+    mode: embedded  # switch to 'managed' and fill mongo.managed.* when targeting an external MongoDB.
+    databases:
+      gallery_name: AlteryxGallery
+      service_name: AlteryxService
+    embedded:
+      runtime_settings_path: null     # auto-discovered from ProgramData/ProgramFiles when null; set explicitly to override.
+      alteryx_service_path: null     # auto-resolves from RuntimeSettings install paths but can be pinned.
+      restore_target_path: null      # derived from RuntimeSettings when available.
+    managed:
+      url: null                      # prefer a MongoDB URI when hitting a managed cluster.
+      host: localhost
+      port: 27017
+      auth_database: admin
+      username: user
+      password: ${AYX_MONGO_MANAGED_PASSWORD}
+      tls:
+        enabled: false
+        ca_path: null
+        cert_path: null
+        key_path: null
+        allow_invalid_hostnames: false
+      timeout_ms: 15000
+      retry_count: 2
+      max_pool_size: 20
 upgrade:
-  current_version: 2024.1
+  target_version: 2025.2
   deployment: embedded-mongo

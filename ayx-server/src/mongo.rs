@@ -8,7 +8,29 @@ use ayx_core::envelope::Envelope;
 use ayx_core::profile::{Config, MongoMode};
 use chrono::Utc;
 use roxmltree::Document;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct MongoQueryTemplate {
+    pub name: String,
+    pub database: String,
+    pub collection: String,
+    #[serde(default)]
+    pub filter: Value,
+    #[serde(default)]
+    pub projection: Option<Value>,
+    #[serde(default)]
+    pub sort: Option<Value>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub purpose: Option<String>,
+    #[serde(default)]
+    pub kba_refs: Vec<String>,
+    #[serde(default = "default_true")]
+    pub read_only: bool,
+}
 
 #[derive(Clone, Debug)]
 pub struct MongoQuerySpec {
@@ -31,6 +53,12 @@ pub struct MongoQueryPlan {
     pub sort: Option<serde_json::Value>,
     pub limit: Option<u32>,
     pub template_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MongoQueryRegistry {
+    #[serde(default)]
+    queries: Vec<MongoQueryTemplate>,
 }
 
 pub fn status_envelope(config: &Config) -> Result<Envelope> {
@@ -117,30 +145,8 @@ pub fn query_envelope(
 pub fn doctor_envelope(config: &Config) -> Result<Envelope> {
     let queries = mongo_doctor_queries(config)?;
     let mut results = Vec::new();
-    for query in queries.as_array().cloned().unwrap_or_default() {
-        let spec = MongoQuerySpec {
-            database: query
-                .get("database")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            collection: query
-                .get("collection")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            filter: query.get("filter").cloned().unwrap_or_else(|| json!({})),
-            projection: None,
-            sort: None,
-            limit: query
-                .get("limit")
-                .and_then(serde_json::Value::as_u64)
-                .map(|v| v as u32),
-            template_name: query
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(ToOwned::to_owned),
-        };
+    for query in &queries {
+        let spec = mongo_query_spec_from_template(query)?;
         match execute_query_spec(config, &spec) {
             Ok(value) => results.push(json!({
                 "name": spec.template_name,
@@ -168,6 +174,114 @@ pub fn doctor_envelope(config: &Config) -> Result<Envelope> {
             ],
         }),
     ))
+}
+
+pub fn mutate_envelope(
+    config: &Config,
+    database: Option<&str>,
+    collection: Option<&str>,
+    filter: Option<&str>,
+    update: Option<&str>,
+    template: Option<&str>,
+    print_query: bool,
+    apply: bool,
+    yes: bool,
+) -> Result<Envelope> {
+    let spec = resolve_mutation_spec(config, database, collection, filter, update, template)?;
+    let plan = build_query_plan(config, &spec)?;
+    let safety_gate = json!({
+        "apply": apply,
+        "yes": yes,
+        "read_only": false,
+    });
+
+    if print_query || !apply {
+        return Ok(Envelope::ok_with_data(
+            "mongo mutation plan generated",
+            json!({
+                "profile": config.profile_name,
+                "connection": resolve_connection_detail(config)?,
+                "mutation": {
+                    "database": plan.database,
+                    "collection": plan.collection,
+                    "filter": plan.filter,
+                    "update": update.map(|v| serde_json::from_str::<Value>(v).unwrap_or_else(|_| json!(v))),
+                    "template": plan.template_name,
+                },
+                "mongosh": build_mongosh_mutation_eval(config, &spec)?,
+                "copy_paste": build_mongosh_mutation_eval(config, &spec)?,
+                "safety_gate": safety_gate,
+                "notes": [
+                    "This command is preview-first and requires explicit confirmation for execution",
+                    "Use named mutation templates for repeated bulk updates such as email-domain changes",
+                ],
+            }),
+        ));
+    }
+
+    if !yes {
+        anyhow::bail!("mongo mutate requires --yes when --apply is set");
+    }
+
+    anyhow::bail!("mongo mutate execution is not yet enabled; preview only");
+}
+
+pub fn resolve_query_spec(
+    config: &Config,
+    database: Option<&str>,
+    collection: Option<&str>,
+    filter: Option<&str>,
+    projection: Option<&str>,
+    sort: Option<&str>,
+    limit: Option<u32>,
+    template: Option<&str>,
+) -> Result<MongoQuerySpec> {
+    let mut spec = if let Some(template_name) = template {
+        mongo_query_spec_from_name(template_name)?
+    } else {
+        MongoQuerySpec {
+            database: String::new(),
+            collection: String::new(),
+            filter: json!({}),
+            projection: None,
+            sort: None,
+            limit: None,
+            template_name: None,
+        }
+    };
+
+    if let Some(value) = database {
+        spec.database = value.to_string();
+    }
+    if let Some(value) = collection {
+        spec.collection = value.to_string();
+    }
+    if let Some(value) = filter {
+        spec.filter = serde_json::from_str(value)
+            .with_context(|| format!("invalid JSON passed to --filter: {value}"))?;
+    }
+    if let Some(value) = projection {
+        spec.projection = Some(
+            serde_json::from_str(value)
+                .with_context(|| format!("invalid JSON passed to --projection: {value}"))?,
+        );
+    }
+    if let Some(value) = sort {
+        spec.sort = Some(
+            serde_json::from_str(value)
+                .with_context(|| format!("invalid JSON passed to --sort: {value}"))?,
+        );
+    }
+    if let Some(value) = limit {
+        spec.limit = Some(value);
+    }
+
+    if spec.database.trim().is_empty() || spec.collection.trim().is_empty() {
+        anyhow::bail!("mongo query requires either --template or both --database and --collection");
+    }
+
+    let _ = config;
+    Ok(spec)
 }
 
 pub fn inventory_envelope(config: &Config) -> Result<Envelope> {
@@ -509,45 +623,119 @@ fn execute_query_plan(plan: &MongoQueryPlan) -> Result<serde_json::Value> {
     }))
 }
 
-fn mongo_doctor_queries(config: &Config) -> Result<serde_json::Value> {
-    Ok(json!([
-        {
-            "name": "queue_health",
-            "database": config.mongo.databases.service_name,
-            "collection": "AS_Queue",
-            "filter": { "__Version": { "$exists": true } },
-            "limit": 10,
-            "purpose": "Inspect queued and completed jobs",
-            "kba_refs": ["AS_Queue", "job state corruption", "orphaned queue rows"],
-        },
-        {
-            "name": "results_health",
-            "database": config.mongo.databases.service_name,
-            "collection": "AS_Results",
-            "filter": { "__Version": { "$exists": true } },
-            "limit": 10,
-            "purpose": "Inspect job results and result linkage",
-            "kba_refs": ["AS_Results", "missing result rows", "workflow completion issues"],
-        },
-        {
-            "name": "gallery_users",
-            "database": config.mongo.databases.gallery_name,
-            "collection": "users",
-            "filter": { "__Version": { "$exists": true } },
-            "limit": 10,
-            "purpose": "Inspect Gallery users and email/domain state",
-            "kba_refs": ["users", "bulk email domain migration", "orphaned users"],
-        },
-        {
-            "name": "appinfos",
-            "database": config.mongo.databases.gallery_name,
-            "collection": "collections.appinfos",
-            "filter": { "__Version": { "$exists": true } },
-            "limit": 10,
-            "purpose": "Inspect gallery app metadata and ownership mappings",
-            "kba_refs": ["appinfos", "app ownership", "gallery item corruption"],
-        }
-    ]))
+fn mongo_doctor_queries(config: &Config) -> Result<Vec<MongoQueryTemplate>> {
+    let templates = mongo_query_templates()?;
+    let mut queries = Vec::new();
+    for name in [
+        "queue_health",
+        "results_health",
+        "gallery_users",
+        "appinfos",
+    ] {
+        let template = templates
+            .iter()
+            .find(|q| q.name == name)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("missing mongo query template: {name}"))?;
+        let mut spec = mongo_query_spec_from_template(&template)?;
+        spec.database = match name {
+            "queue_health" | "results_health" => config.mongo.databases.service_name.clone(),
+            _ => config.mongo.databases.gallery_name.clone(),
+        };
+        let mut adjusted = template.clone();
+        adjusted.database = spec.database;
+        queries.push(adjusted);
+    }
+    Ok(queries)
+}
+
+fn mongo_query_spec_from_name(name: &str) -> Result<MongoQuerySpec> {
+    let template = mongo_query_templates()?
+        .into_iter()
+        .find(|query| query.name == name)
+        .ok_or_else(|| anyhow::anyhow!("unknown mongo query template '{}'", name))?;
+    mongo_query_spec_from_template(&template)
+}
+
+fn resolve_mutation_spec(
+    config: &Config,
+    database: Option<&str>,
+    collection: Option<&str>,
+    filter: Option<&str>,
+    update: Option<&str>,
+    template: Option<&str>,
+) -> Result<MongoQuerySpec> {
+    let mut spec = resolve_query_spec(
+        config, database, collection, filter, None, None, None, template,
+    )?;
+    if let Some(value) = update {
+        spec.projection = Some(
+            serde_json::from_str(value)
+                .with_context(|| format!("invalid JSON passed to --update: {value}"))?,
+        );
+    }
+    Ok(spec)
+}
+
+fn build_mongosh_mutation_eval(config: &Config, spec: &MongoQuerySpec) -> Result<String> {
+    let database = &spec.database;
+    let collection = &spec.collection;
+    let filter = serde_json::to_string(&spec.filter)?;
+    let update = match &spec.projection {
+        Some(v) => serde_json::to_string(v)?,
+        None => "{}".to_string(),
+    };
+    let mut js = String::new();
+    js.push_str("const dbName = ");
+    js.push_str(&serde_json::to_string(database)?);
+    js.push_str("; const collName = ");
+    js.push_str(&serde_json::to_string(collection)?);
+    js.push_str("; const filter = ");
+    js.push_str(&filter);
+    js.push_str("; const update = ");
+    js.push_str(&update);
+    js.push_str("; const result = db.getSiblingDB(dbName).getCollection(collName).updateMany(filter, update); print(JSON.stringify(result));");
+    let mut args: Vec<String> = vec!["--quiet".to_string(), "--eval".to_string(), js];
+    attach_connection_args(config, &mut args)?;
+    let cmd = if cfg!(target_os = "windows") {
+        "mongosh.exe"
+    } else {
+        "mongosh"
+    };
+    let quoted = args
+        .into_iter()
+        .map(|a| {
+            if a.contains(' ') {
+                format!("\"{a}\"")
+            } else {
+                a
+            }
+        })
+        .collect::<Vec<String>>()
+        .join(" ");
+    Ok(format!("{cmd} {quoted}"))
+}
+
+fn mongo_query_spec_from_template(template: &MongoQueryTemplate) -> Result<MongoQuerySpec> {
+    Ok(MongoQuerySpec {
+        database: template.database.clone(),
+        collection: template.collection.clone(),
+        filter: template.filter.clone(),
+        projection: template.projection.clone(),
+        sort: template.sort.clone(),
+        limit: template.limit,
+        template_name: Some(template.name.clone()),
+    })
+}
+
+fn mongo_query_templates() -> Result<Vec<MongoQueryTemplate>> {
+    let registry: MongoQueryRegistry =
+        serde_yaml::from_str(include_str!("../knowledge/mongo/queries.yaml"))?;
+    Ok(registry.queries)
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn execute_restore(config: &Config, input_path: &Path) -> Result<serde_json::Value> {
