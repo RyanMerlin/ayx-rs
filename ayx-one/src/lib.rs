@@ -129,23 +129,34 @@ mod tests {
     }
 
     #[test]
-    fn status_envelope_includes_product() {
-        let env = api_status_envelope(&config(), "license").expect("status envelope");
+    fn status_envelope_includes_base_url_and_product() {
+        let env = api_status_envelope(&config(), "one").expect("status envelope");
         assert!(env.ok);
-        assert_eq!(env.data["product"], "license");
+        assert_eq!(env.data["product"], "one");
+        assert_eq!(env.data["base_url"], "http://localhost/webapi/");
     }
 
     #[test]
-    fn inventory_envelope_includes_product() {
+    fn inventory_envelope_includes_product_and_inventory() {
         let env = api_inventory_envelope(&config(), "one").expect("inventory envelope");
         assert!(env.ok);
         assert_eq!(env.data["product"], "one");
+        assert!(env.data["inventory"].is_array());
     }
 
     #[test]
-    fn diagnose_envelope_includes_checks() {
+    fn diagnose_envelope_includes_checks_and_next_step() {
         let env = api_diagnose_envelope(&config(), "one").expect("diagnose envelope");
         assert!(env.ok);
         assert_eq!(env.data["product"], "one");
+        assert!(env.data["checks"].is_array());
+        assert!(env.data["next_step"].is_string());
+    }
+
+    #[test]
+    fn status_envelope_can_be_reused_for_license() {
+        let env = api_status_envelope(&config(), "license").expect("status envelope");
+        assert!(env.ok);
+        assert_eq!(env.data["product"], "license");
     }
 }
