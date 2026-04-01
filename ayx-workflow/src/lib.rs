@@ -6,6 +6,7 @@ use anyhow::{bail, Context, Result};
 use roxmltree::Document;
 use serde::Serialize;
 use serde_json::{json, Value};
+use serde_yaml::Value as YamlValue;
 use walkdir::WalkDir;
 use zip::read::ZipArchive;
 use zip::write::FileOptions;
@@ -21,6 +22,11 @@ pub struct WorkflowReplacement {
 pub struct WorkflowIssue {
     pub path: String,
     pub issue: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkflowRules {
+    pub replacements: Vec<WorkflowReplacement>,
 }
 
 fn workflow_kind(path: &Path) -> &'static str {
@@ -72,6 +78,49 @@ fn apply_replacements(text: &str, replacements: &[WorkflowReplacement]) -> (Stri
         }
     }
     (out, matches)
+}
+
+pub fn load_rules(path: &Path) -> Result<WorkflowRules> {
+    let text = fs::read_to_string(path)
+        .with_context(|| format!("failed to read workflow rules '{}'", path.display()))?;
+    let yaml: YamlValue = serde_yaml::from_str(&text)
+        .with_context(|| format!("failed to parse workflow rules '{}'", path.display()))?;
+    let replacements = yaml
+        .get("replacements")
+        .and_then(|value| value.as_sequence())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "workflow rules '{}' missing replacements array",
+                path.display()
+            )
+        })?
+        .iter()
+        .map(|item| {
+            let find = item
+                .get("find")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "workflow rules '{}' replacement missing find",
+                        path.display()
+                    )
+                })?;
+            let replace = item
+                .get("replace")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "workflow rules '{}' replacement missing replace",
+                        path.display()
+                    )
+                })?;
+            Ok(WorkflowReplacement {
+                find: find.to_string(),
+                replace: replace.to_string(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(WorkflowRules { replacements })
 }
 
 fn read_text(path: &Path) -> Result<String> {
@@ -401,6 +450,182 @@ pub fn migrate(
     replacements: &[WorkflowReplacement],
     validate_after: bool,
 ) -> Result<Value> {
+    replace(input, output, replacements, validate_after)
+}
+
+fn recurse_directory(
+    input_dir: &Path,
+    output_dir: &Path,
+    replacements: &[WorkflowReplacement],
+    validate_after: bool,
+) -> Result<Value> {
+    if input_dir == output_dir {
+        let mut touched = Vec::new();
+        let mut nested = Vec::new();
+        for entry in WalkDir::new(input_dir)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|s| s.eq_ignore_ascii_case("yxzp"))
+                .unwrap_or(false)
+            {
+                let unpack_dir = path.with_extension("unpacked");
+                if unpack_dir.exists() {
+                    fs::remove_dir_all(&unpack_dir)?;
+                }
+                unpack_package(path, &unpack_dir)?;
+                let nested_result =
+                    recurse_directory(&unpack_dir, &unpack_dir, replacements, validate_after)?;
+                repackage_dir(&unpack_dir, path)?;
+                nested.push(json!({
+                    "package": path.display().to_string(),
+                    "result": nested_result,
+                }));
+                continue;
+            }
+            if is_workflow_artifact(path) {
+                let text = read_text(path)?;
+                let (replaced, found) = apply_replacements(&text, replacements);
+                if validate_after && is_xml_like(path) {
+                    validate_xml_text(&replaced)?;
+                }
+                write_text(path, &replaced)?;
+                let rel = path.strip_prefix(input_dir).unwrap_or(path);
+                touched.push(json!({
+                    "path": rel.to_string_lossy(),
+                    "matches": found,
+                }));
+            }
+        }
+        let validation = if validate_after {
+            Some(validate(input_dir)?)
+        } else {
+            None
+        };
+        return Ok(json!({
+            "input": input_dir.display().to_string(),
+            "output": output_dir.display().to_string(),
+            "mode": "directory",
+            "touched": touched,
+            "nested_packages": nested,
+            "validation": validation,
+        }));
+    }
+
+    fs::create_dir_all(output_dir)
+        .with_context(|| format!("failed to create '{}'", output_dir.display()))?;
+    let mut touched = Vec::new();
+    let mut nested = Vec::new();
+    for entry in WalkDir::new(input_dir)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let rel = entry
+            .path()
+            .strip_prefix(input_dir)
+            .with_context(|| format!("failed to strip prefix '{}'", input_dir.display()))?;
+        let out_path = output_dir.join(rel);
+        if entry
+            .path()
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|s| s.eq_ignore_ascii_case("yxzp"))
+            .unwrap_or(false)
+        {
+            let nested_unpack = out_path.with_extension("unpacked");
+            if nested_unpack.exists() {
+                fs::remove_dir_all(&nested_unpack)?;
+            }
+            unpack_package(entry.path(), &nested_unpack)?;
+            let nested_result =
+                recurse_directory(&nested_unpack, &nested_unpack, replacements, validate_after)?;
+            repackage_dir(&nested_unpack, &out_path)?;
+            nested.push(json!({
+                "package": rel.to_string_lossy(),
+                "result": nested_result,
+            }));
+            continue;
+        }
+        if is_workflow_artifact(entry.path()) {
+            if let Some(parent) = out_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let text = read_text(entry.path())?;
+            let (replaced, found) = apply_replacements(&text, replacements);
+            if validate_after && is_xml_like(entry.path()) {
+                validate_xml_text(&replaced)?;
+            }
+            write_text(&out_path, &replaced)?;
+            touched.push(json!({
+                "path": rel.to_string_lossy(),
+                "matches": found,
+            }));
+        }
+    }
+    let validation = if validate_after {
+        Some(validate(output_dir)?)
+    } else {
+        None
+    };
+    Ok(json!({
+        "input": input_dir.display().to_string(),
+        "output": output_dir.display().to_string(),
+        "mode": "directory",
+        "touched": touched,
+        "nested_packages": nested,
+        "validation": validation,
+    }))
+}
+
+pub fn recurse(
+    input: &Path,
+    output: &Path,
+    replacements: &[WorkflowReplacement],
+    validate_after: bool,
+) -> Result<Value> {
+    if input
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|s| s.eq_ignore_ascii_case("yxzp"))
+        .unwrap_or(false)
+    {
+        let unpack_dir = output.with_extension("unpacked");
+        if unpack_dir.exists() {
+            fs::remove_dir_all(&unpack_dir)?;
+        }
+        unpack_package(input, &unpack_dir)?;
+        let result = recurse_directory(&unpack_dir, &unpack_dir, replacements, validate_after)?;
+        if output
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|s| s.eq_ignore_ascii_case("yxzp"))
+            .unwrap_or(false)
+        {
+            repackage_dir(&unpack_dir, output)?;
+        }
+        return Ok(json!({
+            "input": input.display().to_string(),
+            "output": output.display().to_string(),
+            "mode": "package",
+            "unpacked_dir": unpack_dir.display().to_string(),
+            "result": result,
+        }));
+    }
+
+    if input.is_dir() {
+        return recurse_directory(input, output, replacements, validate_after);
+    }
+
     replace(input, output, replacements, validate_after)
 }
 

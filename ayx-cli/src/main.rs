@@ -33,9 +33,9 @@ use ayx_server::util::{
 };
 use ayx_server::{call_operation, diagnose_api, import_swagger};
 use ayx_workflow::{
-    inspect as inspect_workflow, migrate as migrate_workflow, repackage_dir as repackage_workflow,
-    replace as replace_workflow, unpack_package as unpack_workflow, validate as validate_workflow,
-    WorkflowReplacement,
+    inspect as inspect_workflow, load_rules as load_workflow_rules, migrate as migrate_workflow,
+    recurse as recurse_workflow, repackage_dir as repackage_workflow, replace as replace_workflow,
+    unpack_package as unpack_workflow, validate as validate_workflow, WorkflowReplacement,
 };
 use self_update::backends::github::Update as GitHubUpdate;
 use self_update::Status;
@@ -265,6 +265,20 @@ enum WorkflowCommand {
         input_dir: PathBuf,
         #[arg(long)]
         output: PathBuf,
+    },
+    Recurse {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        rules: Option<PathBuf>,
+        #[arg(long = "find")]
+        find: Vec<String>,
+        #[arg(long = "replace")]
+        replace: Vec<String>,
+        #[arg(long)]
+        validate: bool,
     },
     Migrate {
         #[arg(long)]
@@ -789,6 +803,22 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &[
             "Combines inspect, replace, validate, and repackaging into one flow.",
             "Use this for NFS-style migration and other recursive XML updates.",
+        ],
+    },
+    CommandSpec {
+        name: "workflow recurse",
+        path: "workflow/recurse",
+        summary: "Recursively apply XML replacement rules across workflow artifacts.",
+        output: "workflow recurse envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &[
+            "input artifact or directory",
+            "rules file or repeated find/replace pairs",
+        ],
+        notes: &[
+            "Use --rules for YAML-driven migrations or repeat --find/--replace pairs.",
+            "Recurses into packages and nested workflow artifacts.",
         ],
     },
     CommandSpec {
@@ -2378,7 +2408,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
         },
         Command::Workflow { command } => match command {
             None => Envelope::ok(
-                "workflow commands available: inspect, unpack, validate, replace, repackage, migrate",
+                "workflow commands available: inspect, unpack, validate, replace, repackage, recurse, migrate",
             ),
             Some(WorkflowCommand::Inspect { input }) => {
                 let detail = inspect_workflow(&input)?;
@@ -2439,6 +2469,38 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     "workflow package rebuilt",
                     json!({
                         "input_dir": input_dir.display().to_string(),
+                        "output": output.display().to_string(),
+                        "data": detail,
+                    }),
+                )
+            }
+            Some(WorkflowCommand::Recurse {
+                input,
+                output,
+                rules,
+                find,
+                replace,
+                validate,
+            }) => {
+                let replacements = if let Some(rules) = rules.as_ref() {
+                    let rules = load_workflow_rules(rules)?;
+                    rules.replacements
+                } else {
+                    if find.len() != replace.len() {
+                        bail!(
+                            "workflow recurse requires the same number of --find and --replace values"
+                        );
+                    }
+                    find.into_iter()
+                        .zip(replace)
+                        .map(|(find, replace)| WorkflowReplacement { find, replace })
+                        .collect()
+                };
+                let detail = recurse_workflow(&input, &output, &replacements, validate)?;
+                Envelope::ok_with_data(
+                    "workflow recursion completed",
+                    json!({
+                        "input": input.display().to_string(),
                         "output": output.display().to_string(),
                         "data": detail,
                     }),
