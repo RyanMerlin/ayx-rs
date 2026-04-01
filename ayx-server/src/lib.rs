@@ -117,6 +117,39 @@ pub fn call_operation(
     ))
 }
 
+pub fn diagnose_api(profile: &ServerProfile) -> Result<Envelope> {
+    let client = build_client(profile.verify_tls())?;
+    let token_url = format!(
+        "{}/webapi/oauth2/token",
+        profile.webapi_url.trim_end_matches('/')
+    );
+    let token_result = client
+        .post(&token_url)
+        .basic_auth(&profile.curator_api_key, Some(&profile.curator_api_secret))
+        .form(&[("grant_type", "client_credentials"), ("scope", "admin")])
+        .send()
+        .and_then(|resp| resp.error_for_status())
+        .map(|resp| resp.status().as_u16());
+
+    Ok(Envelope::ok_with_data(
+        "server API diagnostics generated",
+        json!({
+            "base_url": profile.webapi_url,
+            "verify_tls": profile.verify_tls(),
+            "token_url": token_url,
+            "token_endpoint": match token_result {
+                Ok(status) => json!({ "ok": true, "status_code": status }),
+                Err(err) => json!({ "ok": false, "error": err.to_string() }),
+            },
+            "recommendations": [
+                "Use server api import-swagger to cache the current Swagger spec",
+                "Use server api call to validate a known operationId",
+                "If token acquisition fails, verify client_id/client_secret and base_url"
+            ]
+        }),
+    ))
+}
+
 fn build_client(verify_tls: bool) -> Result<Client> {
     Client::builder()
         .timeout(Duration::from_secs(60))

@@ -26,7 +26,7 @@ use ayx_server::util::{
     ayx_paths, backup_plan, capture_system_info, run_server_backup, runtime_settings_summary,
     write_runtime_settings_json,
 };
-use ayx_server::{call_operation, import_swagger};
+use ayx_server::{call_operation, diagnose_api, import_swagger};
 use self_update::backends::github::Update as GitHubUpdate;
 use self_update::Status;
 
@@ -993,6 +993,26 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Use before server api call."],
     },
     CommandSpec {
+        name: "server api status",
+        path: "server/api/status",
+        summary: "Summarize Server API credentials and base URL posture.",
+        output: "server api status envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Useful before diagnostics, import, or call."],
+    },
+    CommandSpec {
+        name: "server api diagnose",
+        path: "server/api/diagnose",
+        summary: "Validate token acquisition and API reachability for Server.",
+        output: "diagnostic envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Use before server api import-swagger or server api call."],
+    },
+    CommandSpec {
         name: "server api call",
         path: "server/api/call",
         summary: "Invoke a Server API operation by operationId.",
@@ -1325,6 +1345,14 @@ enum ServerDoctorCommand {
 
 #[derive(Subcommand, Debug)]
 enum ServerApiCommand {
+    Status {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Diagnose {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
     ImportSwagger {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
@@ -2926,6 +2954,27 @@ fn execute(cli: Cli) -> Result<Envelope> {
         Command::Server { command } => match command {
             None => Envelope::ok("server commands: api, system-info, runtime-settings, ayx-paths, server-logs, backup-plan, backup"),
             Some(ServerCommand::Api { command }) => match command {
+                ServerApiCommand::Status { profile } => {
+                    let config = load_profile(&profile)?;
+                    let server = server_profile(&config)?;
+                    Envelope::ok_with_data(
+                        "server api status",
+                        json!({
+                            "profile": config.profile_name,
+                            "base_url": server.webapi_url,
+                            "verify_tls": server.verify_tls(),
+                            "has_credentials": {
+                                "curator_api_key": !server.curator_api_key.is_empty(),
+                                "curator_api_secret": !server.curator_api_secret.is_empty()
+                            }
+                        }),
+                    )
+                }
+                ServerApiCommand::Diagnose { profile } => {
+                    let config = load_profile(&profile)?;
+                    let server = server_profile(&config)?;
+                    diagnose_api(server)?
+                }
                 ServerApiCommand::ImportSwagger {
                     profile,
                     version,
