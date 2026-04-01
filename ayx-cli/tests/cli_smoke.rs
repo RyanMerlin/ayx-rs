@@ -25,7 +25,8 @@ fn server_help_renders() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("server"));
-    assert!(stdout.contains("upgrade"));
+    assert!(stdout.contains("diagnose"));
+    assert!(stdout.contains("api"));
 }
 
 #[test]
@@ -52,4 +53,18 @@ fn one_doctor_help_renders() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("discover"));
     assert!(stdout.contains("platform"));
+}
+
+#[test]
+fn workflow_help_renders() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["workflow", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("workflow"));
+    assert!(stdout.contains("inspect"));
+    assert!(stdout.contains("migrate"));
 }

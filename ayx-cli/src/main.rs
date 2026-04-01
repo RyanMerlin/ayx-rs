@@ -32,6 +32,11 @@ use ayx_server::util::{
     write_runtime_settings_json,
 };
 use ayx_server::{call_operation, diagnose_api, import_swagger};
+use ayx_workflow::{
+    inspect as inspect_workflow, migrate as migrate_workflow, repackage_dir as repackage_workflow,
+    replace as replace_workflow, unpack_package as unpack_workflow, validate as validate_workflow,
+    WorkflowReplacement,
+};
 use self_update::backends::github::Update as GitHubUpdate;
 use self_update::Status;
 
@@ -229,9 +234,50 @@ enum SqlserverCommand {
 
 #[derive(Subcommand, Debug)]
 enum WorkflowCommand {
-    Status,
-    Inventory,
-    Logs,
+    Inspect {
+        #[arg(long)]
+        input: PathBuf,
+    },
+    Unpack {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output_dir: PathBuf,
+    },
+    Validate {
+        #[arg(long)]
+        input: PathBuf,
+    },
+    Replace {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        find: String,
+        #[arg(long)]
+        replace: String,
+        #[arg(long)]
+        validate: bool,
+    },
+    Repackage {
+        #[arg(long)]
+        input_dir: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    Migrate {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        find: String,
+        #[arg(long)]
+        replace: String,
+        #[arg(long)]
+        validate: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -675,6 +721,75 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
         notes: &["Product branch ready; API subcommands are the primary entry point."],
+    },
+    CommandSpec {
+        name: "workflow inspect",
+        path: "workflow/inspect",
+        summary: "Inspect Alteryx workflow, macro, package, or data artifacts.",
+        output: "workflow inspection envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["workflow artifact path"],
+        notes: &[
+            "Use this to inspect .yxmd, .yxmc, .yxzp, or .yxdb files and directories.",
+            "Recursive directory inspection is supported.",
+        ],
+    },
+    CommandSpec {
+        name: "workflow unpack",
+        path: "workflow/unpack",
+        summary: "Unpack a .yxzp workflow package.",
+        output: "workflow unpack envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["input .yxzp package", "output directory"],
+        notes: &["Preserves the archive contents in a directory tree for XML-level edits."],
+    },
+    CommandSpec {
+        name: "workflow validate",
+        path: "workflow/validate",
+        summary: "Validate workflow and macro XML structures.",
+        output: "workflow validation envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["workflow artifact path"],
+        notes: &["Validates .yxmd, .yxmc, .yxzp, or directories of workflow artifacts."],
+    },
+    CommandSpec {
+        name: "workflow replace",
+        path: "workflow/replace",
+        summary: "Find and replace text in workflow XML or packages.",
+        output: "workflow replacement envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["input artifact", "output path", "find/replace values"],
+        notes: &[
+            "Use --validate to check the rewritten XML after replacement.",
+            "Package inputs are unpacked, rewritten, and re-packed.",
+        ],
+    },
+    CommandSpec {
+        name: "workflow repackage",
+        path: "workflow/repackage",
+        summary: "Rebuild a .yxzp package from a directory tree.",
+        output: "workflow repackage envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["input directory", "output package path"],
+        notes: &["Useful after XML-level edits to workflow package contents."],
+    },
+    CommandSpec {
+        name: "workflow migrate",
+        path: "workflow/migrate",
+        summary: "Perform an end-to-end workflow XML migration pass.",
+        output: "workflow migration envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["input artifact", "output path", "find/replace values"],
+        notes: &[
+            "Combines inspect, replace, validate, and repackaging into one flow.",
+            "Use this for NFS-style migration and other recursive XML updates.",
+        ],
     },
     CommandSpec {
         name: "one platform status",
@@ -2262,12 +2377,95 @@ fn execute(cli: Cli) -> Result<Envelope> {
             }
         },
         Command::Workflow { command } => match command {
-            None => Envelope::ok("workflow commands are not yet implemented"),
-            Some(WorkflowCommand::Status) => bail!("workflow status is not yet implemented"),
-            Some(WorkflowCommand::Inventory) => {
-                bail!("workflow inventory is not yet implemented")
+            None => Envelope::ok(
+                "workflow commands available: inspect, unpack, validate, replace, repackage, migrate",
+            ),
+            Some(WorkflowCommand::Inspect { input }) => {
+                let detail = inspect_workflow(&input)?;
+                Envelope::ok_with_data(
+                    "workflow inspection completed",
+                    json!({
+                        "input": input.display().to_string(),
+                        "data": detail,
+                    }),
+                )
             }
-            Some(WorkflowCommand::Logs) => bail!("workflow logs are not yet implemented"),
+            Some(WorkflowCommand::Unpack { input, output_dir }) => {
+                let detail = unpack_workflow(&input, &output_dir)?;
+                Envelope::ok_with_data(
+                    "workflow package unpacked",
+                    json!({
+                        "input": input.display().to_string(),
+                        "output_dir": output_dir.display().to_string(),
+                        "data": detail,
+                    }),
+                )
+            }
+            Some(WorkflowCommand::Validate { input }) => {
+                let detail = validate_workflow(&input)?;
+                Envelope::ok_with_data(
+                    "workflow validation completed",
+                    json!({
+                        "input": input.display().to_string(),
+                        "data": detail,
+                    }),
+                )
+            }
+            Some(WorkflowCommand::Replace {
+                input,
+                output,
+                find,
+                replace,
+                validate,
+            }) => {
+                let detail = replace_workflow(
+                    &input,
+                    &output,
+                    &[WorkflowReplacement { find, replace }],
+                    validate,
+                )?;
+                Envelope::ok_with_data(
+                    "workflow replacement completed",
+                    json!({
+                        "input": input.display().to_string(),
+                        "output": output.display().to_string(),
+                        "data": detail,
+                    }),
+                )
+            }
+            Some(WorkflowCommand::Repackage { input_dir, output }) => {
+                let detail = repackage_workflow(&input_dir, &output)?;
+                Envelope::ok_with_data(
+                    "workflow package rebuilt",
+                    json!({
+                        "input_dir": input_dir.display().to_string(),
+                        "output": output.display().to_string(),
+                        "data": detail,
+                    }),
+                )
+            }
+            Some(WorkflowCommand::Migrate {
+                input,
+                output,
+                find,
+                replace,
+                validate,
+            }) => {
+                let detail = migrate_workflow(
+                    &input,
+                    &output,
+                    &[WorkflowReplacement { find, replace }],
+                    validate,
+                )?;
+                Envelope::ok_with_data(
+                    "workflow migration completed",
+                    json!({
+                        "input": input.display().to_string(),
+                        "output": output.display().to_string(),
+                        "data": detail,
+                    }),
+                )
+            }
         },
         Command::One { command } => match command {
             None => Envelope::ok(
@@ -3434,14 +3632,16 @@ fn main() -> Result<()> {
 
 fn print_help() {
     println!(
-    "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help       Print this help message\n    --output     Output format: text or json\n\nCOMMANDS:\n    mongo         Mongo inventory, backup, restore, query, and doctor helpers\n    server api    Server API operations\n    server        Server discovery, logs, auth, diagnose, doctor, and low-level API calls\n    upgrade       Upgrade planning and execution helpers\n    catalog       Machine-readable command registry\n    license       Licensing portal branch and API surface\n    one           Alteryx One platform branch and API surface\n    sqlserver     SQL Server command family (stubbed)\n    workflow      Workflow command family (stubbed)\n    update        Self-update from GitHub releases\n"
+    "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help       Print this help message\n    --output     Output format: text or json\n\nCOMMANDS:\n    mongo         Mongo inventory, backup, restore, query, and doctor helpers\n    server api    Server API operations\n    server        Server discovery, logs, auth, diagnose, doctor, and low-level API calls\n    upgrade       Upgrade planning and execution helpers\n    catalog       Machine-readable command registry\n    license       Licensing portal branch and API surface\n    one           Alteryx One platform branch and API surface\n    sqlserver     SQL Server command family (stubbed)\n    workflow      Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb\n    update        Self-update from GitHub releases\n"
     );
 }
 
 fn wants_help() -> bool {
-    std::env::args()
-        .skip(1)
-        .any(|arg| arg == "--help" || arg == "-h")
+    let mut args = std::env::args().skip(1);
+    matches!(
+        (args.next(), args.next()),
+        (Some(flag), None) if flag == "--help" || flag == "-h"
+    )
 }
 
 fn catalog_list_envelope() -> Result<Envelope> {
