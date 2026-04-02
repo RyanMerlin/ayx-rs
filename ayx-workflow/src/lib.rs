@@ -86,15 +86,6 @@ impl ByteCursor {
         Ok(value)
     }
 
-    fn read_u16_le(&mut self) -> Result<u16> {
-        if self.pos + 2 > self.data.len() {
-            bail!("unexpected end of YXDB data");
-        }
-        let value = u16::from_le_bytes(self.data[self.pos..self.pos + 2].try_into().unwrap());
-        self.pos += 2;
-        Ok(value)
-    }
-
     fn read_exact(&mut self, len: usize) -> Result<&[u8]> {
         if self.pos + len > self.data.len() {
             bail!("unexpected end of YXDB data");
@@ -200,17 +191,6 @@ fn read_lzf_block(cursor: &mut ByteCursor) -> Result<Vec<u8>> {
     decode_lzf(input)
 }
 
-fn read_lzf_block_u16(cursor: &mut ByteCursor) -> Result<Vec<u8>> {
-    let mut block_len = cursor.read_u16_le()? as usize;
-    if block_len & 0x8000 != 0 {
-        block_len &= 0x7fff;
-        let bytes = cursor.read_exact(block_len)?.to_vec();
-        return Ok(bytes);
-    }
-    let input = cursor.read_exact(block_len)?;
-    decode_lzf(input)
-}
-
 fn decode_lzf(input: &[u8]) -> Result<Vec<u8>> {
     let mut out = vec![0u8; 0x40000];
     let mut iidx = 0usize;
@@ -274,15 +254,6 @@ fn read_record_stream(cursor: &mut ByteCursor) -> Result<Vec<u8>> {
     let mut data = Vec::new();
     while cursor.pos < cursor.data.len() {
         let block = read_lzf_block(cursor)?;
-        data.extend_from_slice(&block);
-    }
-    Ok(data)
-}
-
-fn read_record_stream_u16(cursor: &mut ByteCursor) -> Result<Vec<u8>> {
-    let mut data = Vec::new();
-    while cursor.pos < cursor.data.len() {
-        let block = read_lzf_block_u16(cursor)?;
         data.extend_from_slice(&block);
     }
     Ok(data)
