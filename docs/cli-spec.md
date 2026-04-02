@@ -6,6 +6,24 @@
 - Default config file: `config.yaml`
 - Envelope root fields: `ok`, `message`, `timestamp_utc`, `data`
 
+## First Run
+
+The fastest path from zero to useful output is:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash
+```
+
+Then create a small `config.yaml` with your Server and One credentials, and start with:
+
+```powershell
+ayx server api status --profile config.yaml
+ayx mongo status --profile config.yaml
+ayx catalog list
+```
+
+If you want the command to feed another tool, add `--output json`.
+
 ## Configuration
 
 `ayx` reads JSON/YAML profiles through `ayx-core::profile::Config`. The default `config.yaml` sample in the repo demonstrates both embedded and managed Mongo scenarios, OAuth2, the shared API observability toggle, and the required Alteryx One email. Replace the placeholders before committing the file for production usage. When pointing at a live Server, make sure the Mongo connection string, database names, TLS artifacts, observability path, and Alteryx One email are accurate for that environment.

@@ -20,23 +20,54 @@ Licensing and Alteryx One surfaces being added in product-scoped branches:
 
 ## Quick start
 
-1. Install Rust, then build the CLI from source:
+1. Install the binary with a one-liner:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash
+```
+
+On Windows PowerShell, use:
+
+```powershell
+iwr https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.ps1 | iex
+```
+
+2. Create `config.yaml` and set the minimum credentials:
+
+```yaml
+profile_name: demo
+mongo:
+  mode: embedded
+server_api:
+  base_url: https://your-server.example.com
+  client_id: your-client-id
+  client_secret: your-client-secret
+alteryx_one:
+  account_email: you@example.com
+```
+
+3. Run a first quick query:
+
+```powershell
+ayx server api status --profile config.yaml
+ayx mongo status --profile config.yaml
+ayx catalog list
+```
+
+4. Build from source if you want to hack on it locally:
 
 ```powershell
 cargo install --locked --path .
 ```
 
-2. Create or copy `config.yaml` into the working directory.
+5. Use `--output json` when another tool should consume the result.
 
-3. Validate the environment:
+If you want the shortest path from zero to useful output, start with:
 
 ```powershell
-ayx mongo status --profile config.yaml
-ayx server api status --profile config.yaml
-ayx server
+ayx server api status --profile config.yaml --output json
+ayx mongo inventory --profile config.yaml --output json
 ```
-
-4. Use `--output json` when another tool should consume the result.
 
 ## What the CLI gives you
 
@@ -111,7 +142,7 @@ Install scripts:
 
 ## Vision
 
-The long-term goal is not just a CLI. It is a secure, portable operator for the Alteryx ecosystem that can also serve as a tool and skill substrate for agents.
+The long-term goal is not just a CLI. It is a secure, portable operator for the Alteryx ecosystem that can also serve as a tool and skill substrate for agents and non-technical operators.
 
 That means:
 - a stable command catalog
