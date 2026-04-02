@@ -11,97 +11,90 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: ayx-x86_64-pc-windows-msvc.zip
-            bin_name: ayx.exe
-            shell: pwsh
-            package_ext: zip
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: ayx-x86_64-unknown-linux-gnu.tar.gz
-            bin_name: ayx
-            shell: bash
-            package_ext: targz
-          - os: macos-13
-            target: x86_64-apple-darwin
-            artifact: ayx-x86_64-apple-darwin.tar.gz
-            bin_name: ayx
-            shell: bash
-            package_ext: targz
-          - os: macos-14
-            target: aarch64-apple-darwin
-            artifact: ayx-aarch64-apple-darwin.tar.gz
-            bin_name: ayx
-            shell: bash
-            package_ext: targz
-    runs-on: ${{ matrix.os }}
-
+  build-windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
           components: rustfmt, clippy
-
       - name: Check formatting
         run: cargo fmt --check
-        shell: ${{ matrix.shell }}
-        env:
-          CARGO_TERM_COLOR: always
-
+        shell: pwsh
       - name: Run clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-        shell: ${{ matrix.shell }}
-        env:
-          CARGO_TERM_COLOR: always
-
+        shell: pwsh
       - name: Run tests
         run: cargo test --workspace --locked
-        shell: ${{ matrix.shell }}
-        env:
-          CARGO_TERM_COLOR: always
-
+        shell: pwsh
       - name: Build release
-        run: cargo build --release --locked --target ${{ matrix.target }}
-        shell: ${{ matrix.shell }}
-        env:
-          CARGO_TERM_COLOR: always
-
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+        shell: pwsh
       - name: Package Windows release
-        if: matrix.package_ext == 'zip'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $artifactDir = Join-Path "${{ github.workspace }}" "dist"
           New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
-          $packageRoot = Join-Path $artifactDir "ayx-${{ matrix.target }}"
+          $packageRoot = Join-Path $artifactDir "ayx-x86_64-pc-windows-msvc"
           New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
-          Copy-Item (Join-Path "${{ github.workspace }}" "target/${{ matrix.target }}/release/${{ matrix.bin_name }}") -Destination (Join-Path $packageRoot "ayx.exe")
+          Copy-Item (Join-Path "${{ github.workspace }}" "target/x86_64-pc-windows-msvc/release/ayx.exe") -Destination (Join-Path $packageRoot "ayx.exe")
           Copy-Item "README.md" -Destination $packageRoot
           Copy-Item "scripts/install.ps1" -Destination $packageRoot
-          Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath (Join-Path $artifactDir "${{ matrix.artifact }}") -Force
+          Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath (Join-Path $artifactDir "ayx-x86_64-pc-windows-msvc.zip") -Force
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: dist/ayx-x86_64-pc-windows-msvc.zip
 
+  build-unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: ayx-x86_64-unknown-linux-gnu.tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact: ayx-x86_64-apple-darwin.tar.gz
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact: ayx-aarch64-apple-darwin.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+      - name: Check formatting
+        run: cargo fmt --check
+        shell: bash
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        shell: bash
+      - name: Run tests
+        run: cargo test --workspace --locked
+        shell: bash
+      - name: Build release
+        run: cargo build --release --locked --target ${{ matrix.target }}
+        shell: bash
       - name: Package Unix release
-        if: matrix.package_ext == 'targz'
         shell: bash
         run: |
           set -euo pipefail
           artifact_dir="${GITHUB_WORKSPACE}/dist"
           package_root="${artifact_dir}/ayx-${{ matrix.target }}"
           mkdir -p "$package_root"
-          cp "${GITHUB_WORKSPACE}/target/${{ matrix.target }}/release/${{ matrix.bin_name }}" "$package_root/ayx"
+          cp "${GITHUB_WORKSPACE}/target/${{ matrix.target }}/release/ayx" "$package_root/ayx"
           cp README.md "$package_root/"
           cp scripts/install.sh "$package_root/"
           tar -czf "${artifact_dir}/${{ matrix.artifact }}" -C "$artifact_dir" "ayx-${{ matrix.target }}"
-
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/v')
