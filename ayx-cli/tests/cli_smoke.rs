@@ -71,4 +71,18 @@ fn workflow_help_renders() {
     assert!(stdout.contains("recurse"));
     assert!(stdout.contains("scan"));
     assert!(stdout.contains("publish"));
+    assert!(stdout.contains("yxdb"));
+}
+
+#[test]
+fn workflow_yxdb_help_renders() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["workflow", "yxdb", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("yxdb"));
+    assert!(stdout.contains("--csv"));
 }

@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ayx_workflow::{
-    inspect, load_rules, package_summary, recurse, repackage_dir, scan, unpack_package, validate,
+    inspect, load_rules, package_summary, read_yxdb, recurse, repackage_dir, scan, unpack_package,
+    validate,
 };
 
 fn temp_path(name: &str) -> PathBuf {
@@ -26,6 +27,16 @@ fn fixture_dir() -> PathBuf {
         .join("tests")
         .join("fixtures")
         .join("workflow-canary")
+}
+
+fn yxdb_fixture() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("ayx-cli")
+        .join("tests")
+        .join("fixtures")
+        .join("yxdb")
+        .join("RuntimeSettings.yxdb")
 }
 
 fn copy_dir(src: &Path, dst: &Path) {
@@ -111,4 +122,17 @@ fn workflow_fixture_scan_and_recurse_round_trip() {
 fn workflow_fixture_rules_load() {
     let rules = load_rules(&fixture_dir().join("rules.yaml")).unwrap();
     assert_eq!(rules.replacements.len(), 3);
+}
+
+#[test]
+fn yxdb_fixture_reads_and_exports_csv() {
+    let fixture = yxdb_fixture();
+    let out_csv = temp_path("runtime-settings.csv");
+    let result = read_yxdb(&fixture, Some(&out_csv)).unwrap();
+    assert!(result["field_count"].as_u64().unwrap() > 0);
+    assert!(result["row_count"].as_u64().unwrap() > 0);
+    assert!(out_csv.exists());
+    let csv = fs::read_to_string(&out_csv).unwrap();
+    assert!(csv.lines().count() > 1);
+    let _ = fs::remove_file(&out_csv);
 }

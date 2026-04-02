@@ -36,8 +36,9 @@ use ayx_server::util::{
 use ayx_server::{call_operation, diagnose_api, import_swagger};
 use ayx_workflow::{
     inspect as inspect_workflow, load_rules as load_workflow_rules, migrate as migrate_workflow,
-    recurse as recurse_workflow, repackage_dir as repackage_workflow, replace as replace_workflow,
-    scan as scan_workflow, unpack_package as unpack_workflow, validate as validate_workflow,
+    read_yxdb as read_yxdb_workflow, recurse as recurse_workflow,
+    repackage_dir as repackage_workflow, replace as replace_workflow, scan as scan_workflow,
+    unpack_package as unpack_workflow, validate as validate_workflow,
     WorkflowReplacement,
 };
 use self_update::backends::github::Update as GitHubUpdate;
@@ -347,6 +348,12 @@ enum WorkflowCommand {
         replace: String,
         #[arg(long)]
         validate: bool,
+    },
+    Yxdb {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        csv: Option<PathBuf>,
     },
 }
 
@@ -2499,7 +2506,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
         },
         Command::Workflow { command } => match command {
             None => Envelope::ok(
-                "workflow commands available: inspect, unpack, validate, replace, repackage, recurse, scan, publish, migrate",
+                "workflow commands available: inspect, unpack, validate, replace, repackage, recurse, scan, publish, migrate, yxdb",
             ),
             Some(WorkflowCommand::Inspect { input }) => {
                 let detail = inspect_workflow(&input)?;
@@ -2615,6 +2622,17 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     json!({
                         "input": input.display().to_string(),
                         "output": output.display().to_string(),
+                    "data": detail,
+                }),
+                )
+            }
+            Some(WorkflowCommand::Yxdb { input, csv }) => {
+                let detail = read_yxdb_workflow(&input, csv.as_deref())?;
+                Envelope::ok_with_data(
+                    "workflow yxdb read completed",
+                    json!({
+                        "input": input.display().to_string(),
+                        "csv": csv.as_ref().map(|path| path.display().to_string()),
                         "data": detail,
                     }),
                 )

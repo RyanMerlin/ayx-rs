@@ -1,5 +1,7 @@
 use std::fs;
 use std::io::Read;
+use std::io::Seek;
+use std::io::Write;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -35,6 +37,91 @@ pub struct WorkflowMatch {
     pub matches: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+struct MetaInfoField {
+    name: String,
+    data_type: String,
+    size: usize,
+}
+
+#[derive(Debug, Clone)]
+enum YxdbValue {
+    Null,
+    Bool(bool),
+    I64(i64),
+    F64(f64),
+    String(String),
+    Bytes(Vec<u8>),
+}
+
+impl YxdbValue {
+    fn to_json(&self) -> Value {
+        match self {
+            YxdbValue::Null => Value::Null,
+            YxdbValue::Bool(v) => json!(v),
+            YxdbValue::I64(v) => json!(v),
+            YxdbValue::F64(v) => json!(v),
+            YxdbValue::String(v) => json!(v),
+            YxdbValue::Bytes(v) => json!(base64_encode(v)),
+        }
+    }
+}
+
+struct ByteCursor {
+    data: Vec<u8>,
+    pos: usize,
+}
+
+impl ByteCursor {
+    fn new(data: Vec<u8>) -> Self {
+        Self { data, pos: 0 }
+    }
+
+    fn read_u32_le(&mut self) -> Result<u32> {
+        if self.pos + 4 > self.data.len() {
+            bail!("unexpected end of YXDB data");
+        }
+        let value = u32::from_le_bytes(self.data[self.pos..self.pos + 4].try_into().unwrap());
+        self.pos += 4;
+        Ok(value)
+    }
+
+    fn read_exact(&mut self, len: usize) -> Result<&[u8]> {
+        if self.pos + len > self.data.len() {
+            bail!("unexpected end of YXDB data");
+        }
+        let start = self.pos;
+        self.pos += len;
+        Ok(&self.data[start..start + len])
+    }
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b0 = bytes[i];
+        let b1 = if i + 1 < bytes.len() { bytes[i + 1] } else { 0 };
+        let b2 = if i + 2 < bytes.len() { bytes[i + 2] } else { 0 };
+        let triple = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
+        out.push(TABLE[((triple >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((triple >> 12) & 0x3f) as usize] as char);
+        if i + 1 < bytes.len() {
+            out.push(TABLE[((triple >> 6) & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if i + 2 < bytes.len() {
+            out.push(TABLE[(triple & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        i += 3;
+    }
+    out
+}
+
 fn workflow_kind(path: &Path) -> &'static str {
     match path
         .extension()
@@ -48,6 +135,391 @@ fn workflow_kind(path: &Path) -> &'static str {
         Some(ext) if ext == "xml" => "xml",
         _ => "other",
     }
+}
+
+fn csv_escape(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+fn render_json_cell(value: &Value) -> String {
+    match value {
+        Value::Null => String::new(),
+        Value::Bool(v) => v.to_string(),
+        Value::Number(v) => v.to_string(),
+        Value::String(v) => v.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn parse_meta_info(xml: &str) -> Result<Vec<MetaInfoField>> {
+    let doc = roxmltree::Document::parse(xml).context("YXDB metadata is invalid")?;
+    let record_info = doc
+        .descendants()
+        .find(|node| node.has_tag_name("RecordInfo"))
+        .ok_or_else(|| anyhow::anyhow!("YXDB metadata is invalid"))?;
+    let mut fields = Vec::new();
+    for field in record_info.children().filter(|node| node.has_tag_name("Field")) {
+        let name = field
+            .attribute("name")
+            .ok_or_else(|| anyhow::anyhow!("YXDB metadata is invalid"))?
+            .to_string();
+        let data_type = field
+            .attribute("type")
+            .ok_or_else(|| anyhow::anyhow!("YXDB metadata is invalid"))?
+            .to_string();
+        let size = field
+            .attribute("size")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0);
+        fields.push(MetaInfoField { name, data_type, size });
+    }
+    Ok(fields)
+}
+
+fn read_lzf_block(cursor: &mut ByteCursor) -> Result<Vec<u8>> {
+    let mut block_len = cursor.read_u32_le()? as usize;
+    if block_len & 0x8000_0000 != 0 {
+        block_len &= 0x7fff_ffff;
+        let bytes = cursor.read_exact(block_len)?.to_vec();
+        return Ok(bytes);
+    }
+    let input = cursor.read_exact(block_len)?;
+    let output = lzf::decompress(input, 0x40000)
+        .map_err(|_| anyhow::anyhow!("yxdb lzf decode failed"))?;
+    Ok(output)
+}
+
+fn read_record_stream(cursor: &mut ByteCursor) -> Result<Vec<u8>> {
+    let mut data = Vec::new();
+    while cursor.pos < cursor.data.len() {
+        let block = read_lzf_block(cursor)?;
+        data.extend_from_slice(&block);
+    }
+    Ok(data)
+}
+
+fn parse_bool(value: u8) -> Option<bool> {
+    match value {
+        1 => Some(true),
+        0 => Some(false),
+        2 => None,
+        _ => Some(value != 0),
+    }
+}
+
+fn read_fixed_record(fields: &[MetaInfoField], record: &[u8]) -> Result<Vec<(String, YxdbValue)>> {
+    let mut values = Vec::with_capacity(fields.len());
+    let mut start_at = 0usize;
+    for field in fields {
+        let name = field.name.clone();
+        match field.data_type.as_str() {
+            "Int16" => {
+                let val = i16::from_le_bytes(record[start_at..start_at + 2].try_into().unwrap());
+                let null = record[start_at + 2] == 1;
+                values.push((name, if null { YxdbValue::Null } else { YxdbValue::I64(val as i64) }));
+                start_at += 3;
+            }
+            "Int32" => {
+                let val = i32::from_le_bytes(record[start_at..start_at + 4].try_into().unwrap());
+                let null = record[start_at + 4] == 1;
+                values.push((name, if null { YxdbValue::Null } else { YxdbValue::I64(val as i64) }));
+                start_at += 5;
+            }
+            "Int64" => {
+                let val = i64::from_le_bytes(record[start_at..start_at + 8].try_into().unwrap());
+                let null = record[start_at + 8] == 1;
+                values.push((name, if null { YxdbValue::Null } else { YxdbValue::I64(val) }));
+                start_at += 9;
+            }
+            "Float" => {
+                let val = f32::from_le_bytes(record[start_at..start_at + 4].try_into().unwrap()) as f64;
+                let null = record[start_at + 4] == 1;
+                values.push((name, if null { YxdbValue::Null } else { YxdbValue::F64(val) }));
+                start_at += 5;
+            }
+            "Double" => {
+                let val = f64::from_le_bytes(record[start_at..start_at + 8].try_into().unwrap());
+                let null = record[start_at + 8] == 1;
+                values.push((name, if null { YxdbValue::Null } else { YxdbValue::F64(val) }));
+                start_at += 9;
+            }
+            "FixedDecimal" => {
+                let len = field.size;
+                let null = record[start_at + len] == 1;
+                let text = String::from_utf8_lossy(&record[start_at..start_at + len]).to_string();
+                let val = text.trim_matches('\0').trim().parse::<f64>().ok();
+                values.push((name, if null { YxdbValue::Null } else { val.map(YxdbValue::F64).unwrap_or(YxdbValue::String(text)) }));
+                start_at += len + 1;
+            }
+            "String" => {
+                let len = field.size;
+                let null = record[start_at + len] == 1;
+                let text = String::from_utf8_lossy(&record[start_at..start_at + len])
+                    .trim_end_matches('\0')
+                    .to_string();
+                values.push((name, if null { YxdbValue::Null } else { YxdbValue::String(text) }));
+                start_at += len + 1;
+            }
+            "WString" => {
+                let len = field.size * 2;
+                let null = record[start_at + len] == 1;
+                let mut utf16 = Vec::new();
+                for chunk in record[start_at..start_at + len].chunks_exact(2) {
+                    let word = u16::from_le_bytes([chunk[0], chunk[1]]);
+                    if word == 0 {
+                        break;
+                    }
+                    utf16.push(word);
+                }
+                let text = String::from_utf16_lossy(&utf16);
+                values.push((name, if null { YxdbValue::Null } else { YxdbValue::String(text) }));
+                start_at += len + 1;
+            }
+            "V_String" => {
+                let fixed = u32::from_le_bytes(record[start_at..start_at + 4].try_into().unwrap());
+                let val = parse_blob(record, start_at, fixed, false, &name)?;
+                values.push((name, val));
+                start_at += 4;
+            }
+            "V_WString" => {
+                let fixed = u32::from_le_bytes(record[start_at..start_at + 4].try_into().unwrap());
+                let val = parse_blob(record, start_at, fixed, true, &name)?;
+                values.push((name, val));
+                start_at += 4;
+            }
+            "Date" => {
+                let text = String::from_utf8_lossy(&record[start_at..start_at + 10]).to_string();
+                let null = record[start_at + 10] == 1;
+                values.push((name, if null { YxdbValue::Null } else { YxdbValue::String(text) }));
+                start_at += 11;
+            }
+            "DateTime" => {
+                let text = String::from_utf8_lossy(&record[start_at..start_at + 19]).to_string();
+                let null = record[start_at + 19] == 1;
+                values.push((name, if null { YxdbValue::Null } else { YxdbValue::String(text) }));
+                start_at += 20;
+            }
+            "Bool" => {
+                let val = parse_bool(record[start_at]);
+                values.push((name, val.map(YxdbValue::Bool).unwrap_or(YxdbValue::Null)));
+                start_at += 1;
+            }
+            "Byte" => {
+                let null = record[start_at + 1] == 1;
+                values.push((name, if null { YxdbValue::Null } else { YxdbValue::I64(record[start_at] as i64) }));
+                start_at += 2;
+            }
+            "Blob" | "SpatialObj" => {
+                let fixed = u32::from_le_bytes(record[start_at..start_at + 4].try_into().unwrap());
+                let val = parse_blob(record, start_at, fixed, false, &name)?;
+                values.push((name, val));
+                start_at += 4;
+            }
+            _ => bail!("unsupported YXDB field type '{}'", field.data_type),
+        }
+    }
+    Ok(values)
+}
+
+fn parse_blob(
+    record: &[u8],
+    start: usize,
+    fixed_portion: u32,
+    wstring: bool,
+    field_name: &str,
+) -> Result<YxdbValue> {
+    if fixed_portion == 0 {
+        return Ok(if wstring {
+            YxdbValue::String(String::new())
+        } else {
+            YxdbValue::Bytes(Vec::new())
+        });
+    }
+    if fixed_portion == 1 {
+        return Ok(YxdbValue::Null);
+    }
+    if fixed_portion & 0x8000_0000 == 0 && fixed_portion & 0x3000_0000 != 0 {
+        let length = (fixed_portion >> 28) as usize;
+        let inline = fixed_portion.to_le_bytes();
+        let bytes = &inline[..length.min(3)];
+        return if wstring {
+            let utf16 = bytes
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .take_while(|v| *v != 0)
+                .collect::<Vec<_>>();
+            Ok(YxdbValue::String(String::from_utf16_lossy(&utf16)))
+        } else {
+            Ok(YxdbValue::String(String::from_utf8_lossy(bytes).to_string()))
+        };
+    }
+    let block_start = start + (fixed_portion & 0x7fff_ffff) as usize;
+    if block_start + 4 > record.len() {
+        bail!("yxdb var-data offset out of range for field '{}' at offset {} in record len {} (pointer {})", field_name, start, record.len(), fixed_portion);
+    }
+    let first_byte = record[block_start];
+    if first_byte & 1 == 1 {
+        let len = (first_byte >> 1) as usize;
+        let end = block_start + 1 + len;
+        if end > record.len() {
+            bail!("yxdb var-data out of range for field '{}' at offset {} in record len {} (pointer {})", field_name, start, record.len(), fixed_portion);
+        }
+        let bytes = record[block_start + 1..end].to_vec();
+        return if wstring {
+            Ok(YxdbValue::String(String::from_utf16_lossy(
+                &bytes
+                    .chunks_exact(2)
+                    .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                    .take_while(|v| *v != 0)
+                    .collect::<Vec<_>>(),
+            )))
+        } else {
+            Ok(YxdbValue::String(String::from_utf8_lossy(&bytes).to_string()))
+        };
+    }
+    let blob_len = u32::from_le_bytes(record[block_start..block_start + 4].try_into().unwrap());
+    let len = (blob_len / 2) as usize;
+    let end = block_start + 4 + len;
+    if end > record.len() {
+        bail!("yxdb var-data out of range for field '{}' at offset {} in record len {} (pointer {})", field_name, start, record.len(), fixed_portion);
+    }
+    let bytes = record[block_start + 4..end].to_vec();
+    Ok(if wstring {
+        let utf16 = bytes
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .take_while(|v| *v != 0)
+            .collect::<Vec<_>>();
+        YxdbValue::String(String::from_utf16_lossy(&utf16))
+    } else {
+        YxdbValue::Bytes(bytes)
+    })
+}
+pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
+    let mut file = fs::File::open(path)
+        .with_context(|| format!("failed to open '{}'", path.display()))?;
+    let mut header = [0u8; 512];
+    file.read_exact(&mut header)
+        .with_context(|| format!("failed to read YXDB header '{}'", path.display()))?;
+
+    let file_type = String::from_utf8_lossy(&header[0..21]).to_string();
+    if file_type != "Alteryx Database File" {
+        bail!("file is not a valid YXDB format");
+    }
+
+    let meta_size = u32::from_le_bytes(header[80..84].try_into().unwrap()) as usize;
+    let num_records = u32::from_le_bytes(header[104..108].try_into().unwrap()) as usize;
+    let meta_len = meta_size
+        .checked_mul(2)
+        .and_then(|v| v.checked_sub(2))
+        .ok_or_else(|| anyhow::anyhow!("YXDB metadata is invalid"))?;
+    let mut meta_bytes = vec![0u8; meta_len];
+    file.read_exact(&mut meta_bytes)
+        .with_context(|| format!("failed to read YXDB metadata '{}'", path.display()))?;
+    let mut terminator = [0u8; 2];
+    file.read_exact(&mut terminator)
+        .with_context(|| format!("failed to read YXDB metadata terminator '{}'", path.display()))?;
+    let meta_xml = String::from_utf16_lossy(
+        &meta_bytes
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect::<Vec<_>>(),
+    );
+    let record_block_index_pos = u64::from_le_bytes(header[96..104].try_into().unwrap());
+    let fields = parse_meta_info(&meta_xml)?;
+    let fixed_size = fields.iter().fold(0usize, |acc, field| {
+        acc + match field.data_type.as_str() {
+            "Int16" => 3,
+            "Int32" => 5,
+            "Int64" => 9,
+            "Float" => 5,
+            "Double" => 9,
+            "FixedDecimal" => field.size + 1,
+            "String" => field.size + 1,
+            "WString" => field.size * 2 + 1,
+            "V_String" | "V_WString" => 4,
+            "Date" => 11,
+            "DateTime" => 20,
+            "Bool" => 1,
+            "Byte" => 2,
+            "Blob" | "SpatialObj" => 4,
+            other => {
+                panic!("unsupported YXDB field type {}", other)
+            }
+        }
+    });
+    let has_var = fields.iter().any(|field| matches!(field.data_type.as_str(), "V_String" | "V_WString" | "Blob" | "SpatialObj"));
+
+    let record_data_end = record_block_index_pos;
+    let record_data_start = file
+        .stream_position()
+        .with_context(|| format!("failed to query YXDB position '{}'", path.display()))?;
+    if record_data_end < record_data_start {
+        bail!("YXDB block index position precedes record data");
+    }
+    let record_data_len = (record_data_end - record_data_start) as usize;
+    let mut rest = vec![0u8; record_data_len];
+    file.read_exact(&mut rest)
+        .with_context(|| format!("failed to read YXDB records '{}'", path.display()))?;
+    let mut cursor = ByteCursor::new(rest);
+    let stream = read_record_stream(&mut cursor)?;
+    let mut record_cursor = ByteCursor::new(stream);
+
+    let mut rows = Vec::with_capacity(num_records);
+    for _ in 0..num_records {
+        let record_len = if has_var {
+            let fixed_and_len = fixed_size + 4;
+            let prefix = record_cursor.read_exact(fixed_and_len)?.to_vec();
+            let var_len = u32::from_le_bytes(prefix[fixed_size..fixed_size + 4].try_into().unwrap()) as usize;
+            let var_bytes = record_cursor.read_exact(var_len)?.to_vec();
+            let mut record = prefix;
+            record.extend_from_slice(&var_bytes);
+            record
+        } else {
+            record_cursor.read_exact(fixed_size)?.to_vec()
+        };
+        let parsed = read_fixed_record(&fields, &record_len)?;
+        let mut row = serde_json::Map::new();
+        for (name, value) in parsed {
+            row.insert(name, value.to_json());
+        }
+        rows.push(Value::Object(row));
+    }
+
+    if let Some(csv_path) = csv_output {
+        if let Some(parent) = csv_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create '{}'", parent.display()))?;
+        }
+        let mut writer = fs::File::create(csv_path)
+            .with_context(|| format!("failed to create '{}'", csv_path.display()))?;
+        let headers: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+        writer.write_all(format!("{}\n", headers.iter().map(|h| csv_escape(h)).collect::<Vec<_>>().join(",")).as_bytes())?;
+        for row in &rows {
+            let obj = row.as_object().unwrap();
+            let line = headers
+                .iter()
+                .map(|h| csv_escape(obj.get(h).map(render_json_cell).as_deref().unwrap_or("")))
+                .collect::<Vec<_>>()
+                .join(",");
+            writer.write_all(format!("{}\n", line).as_bytes())?;
+        }
+    }
+
+    let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+    Ok(json!({
+        "path": path.display().to_string(),
+        "field_count": field_names.len(),
+        "fields": field_names,
+        "row_count": rows.len(),
+        "rows": rows,
+        "csv_written": csv_output.is_some(),
+        "csv_path": csv_output.map(|p| p.display().to_string()),
+    }))
 }
 
 fn is_xml_like(path: &Path) -> bool {

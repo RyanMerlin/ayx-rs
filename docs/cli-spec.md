@@ -192,6 +192,8 @@ Ownership transfer is API-first through `PUT /v3/workflows/{workflowId}/transfer
 - `collection-add-user-group` expects `AddUserGroupContract`.
 - `collection-update-user-permissions` expects `UpdatePermissionsContract`.
 - `collection-update-user-group-permissions` expects `UpdatePermissionsContract`.
+- `workflow yxdb --input <file>` reads `.yxdb` files and can export the full result set to CSV with `--csv <path>`.
+- `workflow yxdb --input <file> --output json` returns a structured JSON envelope with path, field, row, and CSV metadata.
 - `workflow-package` saves the yxzp to the filesystem (default `<workflowId>.yxzp`) and accepts an optional `versionId`.
 - Payload files are supplied via `--payload-file <path>` and only evaluated when `--apply` is supplied; otherwise the CLI emits a dry-run envelope pointing to the payload file.
 

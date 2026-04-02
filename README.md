@@ -51,6 +51,8 @@ ayx server
 - `workflow` for local `.yxmd`, `.yxmc`, `.yxzp`, and `.yxdb` package/XML tooling
   - `workflow scan --rules docs/workflow-recurse.example.yaml` to preflight a migration
   - `workflow recurse --rules docs/workflow-recurse.example.yaml` for recursive migrations
+  - `workflow yxdb --input <file> [--csv <path>]` to inspect and export YXDB data
+  - `workflow yxdb --input <file> --output json` to return a structured JSON envelope
   - `workflow publish` to hand a repackaged workflow back to the Server API
 - `tools` as a placeholder branch for future integration and orchestration workflows
 - `license` for the Licensing portal and API branch
