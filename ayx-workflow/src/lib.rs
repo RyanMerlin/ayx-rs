@@ -86,6 +86,15 @@ impl ByteCursor {
         Ok(value)
     }
 
+    fn read_u16_le(&mut self) -> Result<u16> {
+        if self.pos + 2 > self.data.len() {
+            bail!("unexpected end of YXDB data");
+        }
+        let value = u16::from_le_bytes(self.data[self.pos..self.pos + 2].try_into().unwrap());
+        self.pos += 2;
+        Ok(value)
+    }
+
     fn read_exact(&mut self, len: usize) -> Result<&[u8]> {
         if self.pos + len > self.data.len() {
             bail!("unexpected end of YXDB data");
@@ -188,9 +197,77 @@ fn read_lzf_block(cursor: &mut ByteCursor) -> Result<Vec<u8>> {
         return Ok(bytes);
     }
     let input = cursor.read_exact(block_len)?;
-    let output = lzf::decompress(input, 0x40000)
-        .map_err(|_| anyhow::anyhow!("yxdb lzf decode failed"))?;
-    Ok(output)
+    decode_lzf(input)
+}
+
+fn read_lzf_block_u16(cursor: &mut ByteCursor) -> Result<Vec<u8>> {
+    let mut block_len = cursor.read_u16_le()? as usize;
+    if block_len & 0x8000 != 0 {
+        block_len &= 0x7fff;
+        let bytes = cursor.read_exact(block_len)?.to_vec();
+        return Ok(bytes);
+    }
+    let input = cursor.read_exact(block_len)?;
+    decode_lzf(input)
+}
+
+fn decode_lzf(input: &[u8]) -> Result<Vec<u8>> {
+    let mut out = vec![0u8; 0x40000];
+    let mut iidx = 0usize;
+    let mut oidx = 0usize;
+
+    while iidx < input.len() {
+        let ctrl = input[iidx];
+        iidx += 1;
+
+        if ctrl < 32 {
+            let len = ctrl as usize + 1;
+            if oidx + len > out.len() || iidx + len > input.len() {
+                bail!("yxdb lzf decode failed");
+            }
+            out[oidx..oidx + len].copy_from_slice(&input[iidx..iidx + len]);
+            oidx += len;
+            iidx += len;
+            continue;
+        }
+
+        let mut len = (ctrl >> 5) as usize;
+        let mut reference = oidx as isize - (((ctrl & 0x1f) as isize) << 8) - 1;
+        if len == 7 {
+            if iidx >= input.len() {
+                bail!("yxdb lzf decode failed");
+            }
+            len += input[iidx] as usize;
+            iidx += 1;
+        }
+        if iidx >= input.len() {
+            bail!("yxdb lzf decode failed");
+        }
+        reference -= input[iidx] as isize;
+        iidx += 1;
+        len += 2;
+
+        while len > 0 {
+            let available = oidx as isize - reference;
+            if available <= 0 || oidx + len > out.len() {
+                bail!("yxdb lzf decode failed");
+            }
+            let size = (available as usize).min(len);
+            let src_start = reference as usize;
+            let src_end = src_start + size;
+            if src_end > out.len() {
+                bail!("yxdb lzf decode failed");
+            }
+            let chunk: Vec<u8> = out[src_start..src_end].to_vec();
+            out[oidx..oidx + size].copy_from_slice(&chunk);
+            oidx += size;
+            reference += size as isize;
+            len -= size;
+        }
+    }
+
+    out.truncate(oidx);
+    Ok(out)
 }
 
 fn read_record_stream(cursor: &mut ByteCursor) -> Result<Vec<u8>> {
@@ -200,6 +277,56 @@ fn read_record_stream(cursor: &mut ByteCursor) -> Result<Vec<u8>> {
         data.extend_from_slice(&block);
     }
     Ok(data)
+}
+
+fn read_record_stream_u16(cursor: &mut ByteCursor) -> Result<Vec<u8>> {
+    let mut data = Vec::new();
+    while cursor.pos < cursor.data.len() {
+        let block = read_lzf_block_u16(cursor)?;
+        data.extend_from_slice(&block);
+    }
+    Ok(data)
+}
+
+fn find_ascii_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn parse_amp_meta_and_records(
+    header: &[u8; 512],
+    file: &mut fs::File,
+    meta_len: usize,
+) -> Result<(Vec<MetaInfoField>, Vec<u8>)> {
+    let mut rest = Vec::new();
+    file.read_to_end(&mut rest)
+        .context("failed to read AMP YXDB payload")?;
+    let meta_start = 100usize;
+    let header_tail = &header[meta_start..];
+    if meta_len < header_tail.len() {
+        let meta_bytes = &header_tail[..meta_len];
+        let xml = String::from_utf8_lossy(meta_bytes).to_string();
+        let _close = find_ascii_bytes(xml.as_bytes(), b"</RecordInfo>")
+            .ok_or_else(|| anyhow::anyhow!("AMP YXDB metadata end tag not found"))?;
+        let fields = parse_meta_info(&xml)?;
+        return Ok((fields, rest));
+    }
+    if rest.len() + header_tail.len() < meta_len {
+        bail!("AMP YXDB payload too small");
+    }
+    let mut meta_bytes = Vec::with_capacity(meta_len);
+    meta_bytes.extend_from_slice(header_tail);
+    let remaining = meta_len - header_tail.len();
+    meta_bytes.extend_from_slice(&rest[..remaining]);
+    let xml = String::from_utf8_lossy(&meta_bytes).to_string();
+    let _close = find_ascii_bytes(xml.as_bytes(), b"</RecordInfo>")
+        .ok_or_else(|| anyhow::anyhow!("AMP YXDB metadata end tag not found"))?;
+    let fields = parse_meta_info(&xml)?;
+    Ok((fields, rest[remaining..].to_vec()))
 }
 
 fn parse_bool(value: u8) -> Option<bool> {
@@ -406,31 +533,53 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
     file.read_exact(&mut header)
         .with_context(|| format!("failed to read YXDB header '{}'", path.display()))?;
 
-    let file_type = String::from_utf8_lossy(&header[0..21]).to_string();
-    if file_type != "Alteryx Database File" {
+    let header_text = String::from_utf8_lossy(&header[..64]).to_string();
+    let is_amp = header_text.starts_with("Alteryx e2 Database file");
+    if !header_text.starts_with("Alteryx Database File") && !is_amp {
         bail!("file is not a valid YXDB format");
     }
 
-    let meta_size = u32::from_le_bytes(header[80..84].try_into().unwrap()) as usize;
-    let num_records = u32::from_le_bytes(header[104..108].try_into().unwrap()) as usize;
-    let meta_len = meta_size
-        .checked_mul(2)
-        .and_then(|v| v.checked_sub(2))
-        .ok_or_else(|| anyhow::anyhow!("YXDB metadata is invalid"))?;
-    let mut meta_bytes = vec![0u8; meta_len];
-    file.read_exact(&mut meta_bytes)
-        .with_context(|| format!("failed to read YXDB metadata '{}'", path.display()))?;
-    let mut terminator = [0u8; 2];
-    file.read_exact(&mut terminator)
-        .with_context(|| format!("failed to read YXDB metadata terminator '{}'", path.display()))?;
-    let meta_xml = String::from_utf16_lossy(
-        &meta_bytes
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect::<Vec<_>>(),
-    );
-    let record_block_index_pos = u64::from_le_bytes(header[96..104].try_into().unwrap());
-    let fields = parse_meta_info(&meta_xml)?;
+    let (fields, record_bytes, num_records) = if is_amp {
+        let meta_len = u32::from_le_bytes(header[96..100].try_into().unwrap()) as usize;
+        let (fields, record_bytes) = parse_amp_meta_and_records(&header, &mut file, meta_len)?;
+        let record_bytes = record_bytes;
+        let inferred = record_bytes.len();
+        let rows_hint = inferred; // fall back to streaming termination
+        (fields, record_bytes, rows_hint)
+    } else {
+        let meta_size = u32::from_le_bytes(header[80..84].try_into().unwrap()) as usize;
+        let num_records = u32::from_le_bytes(header[104..108].try_into().unwrap()) as usize;
+        let meta_len = meta_size
+            .checked_mul(2)
+            .and_then(|v| v.checked_sub(2))
+            .ok_or_else(|| anyhow::anyhow!("YXDB metadata is invalid"))?;
+        let mut meta_bytes = vec![0u8; meta_len];
+        file.read_exact(&mut meta_bytes)
+            .with_context(|| format!("failed to read YXDB metadata '{}'", path.display()))?;
+        let mut terminator = [0u8; 2];
+        file.read_exact(&mut terminator)
+            .with_context(|| format!("failed to read YXDB metadata terminator '{}'", path.display()))?;
+        let meta_xml = String::from_utf16_lossy(
+            &meta_bytes
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect::<Vec<_>>(),
+        );
+        let record_block_index_pos = u64::from_le_bytes(header[96..104].try_into().unwrap());
+        let fields = parse_meta_info(&meta_xml)?;
+        let record_data_end = record_block_index_pos;
+        let record_data_start = file
+            .stream_position()
+            .with_context(|| format!("failed to query YXDB position '{}'", path.display()))?;
+        if record_data_end < record_data_start {
+            bail!("YXDB block index position precedes record data");
+        }
+        let record_data_len = (record_data_end - record_data_start) as usize;
+        let mut rest = vec![0u8; record_data_len];
+        file.read_exact(&mut rest)
+            .with_context(|| format!("failed to read YXDB records '{}'", path.display()))?;
+        (fields, rest, num_records)
+    };
     let fixed_size = fields.iter().fold(0usize, |acc, field| {
         acc + match field.data_type.as_str() {
             "Int16" => 3,
@@ -454,40 +603,68 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
     });
     let has_var = fields.iter().any(|field| matches!(field.data_type.as_str(), "V_String" | "V_WString" | "Blob" | "SpatialObj"));
 
-    let record_data_end = record_block_index_pos;
-    let record_data_start = file
-        .stream_position()
-        .with_context(|| format!("failed to query YXDB position '{}'", path.display()))?;
-    if record_data_end < record_data_start {
-        bail!("YXDB block index position precedes record data");
-    }
-    let record_data_len = (record_data_end - record_data_start) as usize;
-    let mut rest = vec![0u8; record_data_len];
-    file.read_exact(&mut rest)
-        .with_context(|| format!("failed to read YXDB records '{}'", path.display()))?;
-    let mut cursor = ByteCursor::new(rest);
-    let stream = read_record_stream(&mut cursor)?;
+    let mut cursor = ByteCursor::new(record_bytes);
+    let stream = if is_amp {
+        decode_lzf(&cursor.data)?
+    } else {
+        read_record_stream(&mut cursor)?
+    };
     let mut record_cursor = ByteCursor::new(stream);
 
-    let mut rows = Vec::with_capacity(num_records);
-    for _ in 0..num_records {
-        let record_len = if has_var {
-            let fixed_and_len = fixed_size + 4;
-            let prefix = record_cursor.read_exact(fixed_and_len)?.to_vec();
-            let var_len = u32::from_le_bytes(prefix[fixed_size..fixed_size + 4].try_into().unwrap()) as usize;
-            let var_bytes = record_cursor.read_exact(var_len)?.to_vec();
-            let mut record = prefix;
-            record.extend_from_slice(&var_bytes);
-            record
-        } else {
-            record_cursor.read_exact(fixed_size)?.to_vec()
-        };
-        let parsed = read_fixed_record(&fields, &record_len)?;
-        let mut row = serde_json::Map::new();
-        for (name, value) in parsed {
-            row.insert(name, value.to_json());
+    let mut rows = Vec::new();
+    if is_amp {
+        loop {
+            if record_cursor.pos >= record_cursor.data.len() {
+                break;
+            }
+            let record_len = if has_var {
+                let fixed_and_len = fixed_size + 4;
+                if record_cursor.pos + fixed_and_len > record_cursor.data.len() {
+                    break;
+                }
+                let prefix = record_cursor.read_exact(fixed_and_len)?.to_vec();
+                let var_len = u32::from_le_bytes(prefix[fixed_size..fixed_size + 4].try_into().unwrap()) as usize;
+                if record_cursor.pos + var_len > record_cursor.data.len() {
+                    break;
+                }
+                let var_bytes = record_cursor.read_exact(var_len)?.to_vec();
+                let mut record = prefix;
+                record.extend_from_slice(&var_bytes);
+                record
+            } else {
+                if record_cursor.pos + fixed_size > record_cursor.data.len() {
+                    break;
+                }
+                record_cursor.read_exact(fixed_size)?.to_vec()
+            };
+            let parsed = read_fixed_record(&fields, &record_len)?;
+            let mut row = serde_json::Map::new();
+            for (name, value) in parsed {
+                row.insert(name, value.to_json());
+            }
+            rows.push(Value::Object(row));
         }
-        rows.push(Value::Object(row));
+    } else {
+        rows.reserve(num_records);
+        for _ in 0..num_records {
+            let record_len = if has_var {
+                let fixed_and_len = fixed_size + 4;
+                let prefix = record_cursor.read_exact(fixed_and_len)?.to_vec();
+                let var_len = u32::from_le_bytes(prefix[fixed_size..fixed_size + 4].try_into().unwrap()) as usize;
+                let var_bytes = record_cursor.read_exact(var_len)?.to_vec();
+                let mut record = prefix;
+                record.extend_from_slice(&var_bytes);
+                record
+            } else {
+                record_cursor.read_exact(fixed_size)?.to_vec()
+            };
+            let parsed = read_fixed_record(&fields, &record_len)?;
+            let mut row = serde_json::Map::new();
+            for (name, value) in parsed {
+                row.insert(name, value.to_json());
+            }
+            rows.push(Value::Object(row));
+        }
     }
 
     if let Some(csv_path) = csv_output {
