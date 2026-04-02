@@ -9,7 +9,7 @@ if (-not $Version) { $Version = 'latest' }
 if (-not $InstallDir) { $InstallDir = Join-Path $HOME '.local\bin' }
 
 $repoOwner = 'RyanMerlin'
-$repoName = 'ayx-cli'
+$repoName = 'ayx-rs'
 $artifactName = 'ayx-x86_64-pc-windows-msvc.zip'
 
 $downloadUrl = if ($Version -eq 'latest') {

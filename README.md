@@ -1,4 +1,4 @@
-# AYX CLI
+# AYX-RS
 
 `ayx` is a Rust workspace for Alteryx administrators and automation agents.
 

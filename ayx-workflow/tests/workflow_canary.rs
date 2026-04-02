@@ -23,7 +23,7 @@ fn temp_path(name: &str) -> PathBuf {
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
-        .join("ayx-cli")
+        .join("ayx-rs")
         .join("tests")
         .join("fixtures")
         .join("workflow-canary")
@@ -32,7 +32,7 @@ fn fixture_dir() -> PathBuf {
 fn yxdb_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
-        .join("ayx-cli")
+        .join("ayx-rs")
         .join("tests")
         .join("fixtures")
         .join("yxdb")

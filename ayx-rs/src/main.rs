@@ -38,8 +38,7 @@ use ayx_workflow::{
     inspect as inspect_workflow, load_rules as load_workflow_rules, migrate as migrate_workflow,
     read_yxdb as read_yxdb_workflow, recurse as recurse_workflow,
     repackage_dir as repackage_workflow, replace as replace_workflow, scan as scan_workflow,
-    unpack_package as unpack_workflow, validate as validate_workflow,
-    WorkflowReplacement,
+    unpack_package as unpack_workflow, validate as validate_workflow, WorkflowReplacement,
 };
 use self_update::backends::github::Update as GitHubUpdate;
 use self_update::Status;
@@ -62,7 +61,9 @@ enum Command {
         #[command(subcommand)]
         command: Option<OneCommand>,
     },
-    #[command(about = "Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls")]
+    #[command(
+        about = "Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls"
+    )]
     Server {
         #[command(subcommand)]
         command: Option<ServerCommand>,
@@ -96,7 +97,7 @@ enum Command {
     Update {
         #[arg(long, default_value = "RyanMerlin")]
         repo_owner: String,
-        #[arg(long, default_value = "ayx-cli")]
+        #[arg(long, default_value = "ayx-rs")]
         repo_name: String,
         #[arg(long, default_value = "ayx")]
         bin_name: String,

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "AYX CLI Envelope",
+  "title": "AYX-RS Envelope",
   "type": "object",
   "required": ["ok", "message", "timestamp_utc", "data"],
   "properties": {

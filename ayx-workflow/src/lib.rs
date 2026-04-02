@@ -162,7 +162,10 @@ fn parse_meta_info(xml: &str) -> Result<Vec<MetaInfoField>> {
         .find(|node| node.has_tag_name("RecordInfo"))
         .ok_or_else(|| anyhow::anyhow!("YXDB metadata is invalid"))?;
     let mut fields = Vec::new();
-    for field in record_info.children().filter(|node| node.has_tag_name("Field")) {
+    for field in record_info
+        .children()
+        .filter(|node| node.has_tag_name("Field"))
+    {
         let name = field
             .attribute("name")
             .ok_or_else(|| anyhow::anyhow!("YXDB metadata is invalid"))?
@@ -175,7 +178,11 @@ fn parse_meta_info(xml: &str) -> Result<Vec<MetaInfoField>> {
             .attribute("size")
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(0);
-        fields.push(MetaInfoField { name, data_type, size });
+        fields.push(MetaInfoField {
+            name,
+            data_type,
+            size,
+        });
     }
     Ok(fields)
 }
@@ -318,31 +325,67 @@ fn read_fixed_record(fields: &[MetaInfoField], record: &[u8]) -> Result<Vec<(Str
             "Int16" => {
                 let val = i16::from_le_bytes(record[start_at..start_at + 2].try_into().unwrap());
                 let null = record[start_at + 2] == 1;
-                values.push((name, if null { YxdbValue::Null } else { YxdbValue::I64(val as i64) }));
+                values.push((
+                    name,
+                    if null {
+                        YxdbValue::Null
+                    } else {
+                        YxdbValue::I64(val as i64)
+                    },
+                ));
                 start_at += 3;
             }
             "Int32" => {
                 let val = i32::from_le_bytes(record[start_at..start_at + 4].try_into().unwrap());
                 let null = record[start_at + 4] == 1;
-                values.push((name, if null { YxdbValue::Null } else { YxdbValue::I64(val as i64) }));
+                values.push((
+                    name,
+                    if null {
+                        YxdbValue::Null
+                    } else {
+                        YxdbValue::I64(val as i64)
+                    },
+                ));
                 start_at += 5;
             }
             "Int64" => {
                 let val = i64::from_le_bytes(record[start_at..start_at + 8].try_into().unwrap());
                 let null = record[start_at + 8] == 1;
-                values.push((name, if null { YxdbValue::Null } else { YxdbValue::I64(val) }));
+                values.push((
+                    name,
+                    if null {
+                        YxdbValue::Null
+                    } else {
+                        YxdbValue::I64(val)
+                    },
+                ));
                 start_at += 9;
             }
             "Float" => {
-                let val = f32::from_le_bytes(record[start_at..start_at + 4].try_into().unwrap()) as f64;
+                let val =
+                    f32::from_le_bytes(record[start_at..start_at + 4].try_into().unwrap()) as f64;
                 let null = record[start_at + 4] == 1;
-                values.push((name, if null { YxdbValue::Null } else { YxdbValue::F64(val) }));
+                values.push((
+                    name,
+                    if null {
+                        YxdbValue::Null
+                    } else {
+                        YxdbValue::F64(val)
+                    },
+                ));
                 start_at += 5;
             }
             "Double" => {
                 let val = f64::from_le_bytes(record[start_at..start_at + 8].try_into().unwrap());
                 let null = record[start_at + 8] == 1;
-                values.push((name, if null { YxdbValue::Null } else { YxdbValue::F64(val) }));
+                values.push((
+                    name,
+                    if null {
+                        YxdbValue::Null
+                    } else {
+                        YxdbValue::F64(val)
+                    },
+                ));
                 start_at += 9;
             }
             "FixedDecimal" => {
@@ -350,7 +393,14 @@ fn read_fixed_record(fields: &[MetaInfoField], record: &[u8]) -> Result<Vec<(Str
                 let null = record[start_at + len] == 1;
                 let text = String::from_utf8_lossy(&record[start_at..start_at + len]).to_string();
                 let val = text.trim_matches('\0').trim().parse::<f64>().ok();
-                values.push((name, if null { YxdbValue::Null } else { val.map(YxdbValue::F64).unwrap_or(YxdbValue::String(text)) }));
+                values.push((
+                    name,
+                    if null {
+                        YxdbValue::Null
+                    } else {
+                        val.map(YxdbValue::F64).unwrap_or(YxdbValue::String(text))
+                    },
+                ));
                 start_at += len + 1;
             }
             "String" => {
@@ -359,7 +409,14 @@ fn read_fixed_record(fields: &[MetaInfoField], record: &[u8]) -> Result<Vec<(Str
                 let text = String::from_utf8_lossy(&record[start_at..start_at + len])
                     .trim_end_matches('\0')
                     .to_string();
-                values.push((name, if null { YxdbValue::Null } else { YxdbValue::String(text) }));
+                values.push((
+                    name,
+                    if null {
+                        YxdbValue::Null
+                    } else {
+                        YxdbValue::String(text)
+                    },
+                ));
                 start_at += len + 1;
             }
             "WString" => {
@@ -374,7 +431,14 @@ fn read_fixed_record(fields: &[MetaInfoField], record: &[u8]) -> Result<Vec<(Str
                     utf16.push(word);
                 }
                 let text = String::from_utf16_lossy(&utf16);
-                values.push((name, if null { YxdbValue::Null } else { YxdbValue::String(text) }));
+                values.push((
+                    name,
+                    if null {
+                        YxdbValue::Null
+                    } else {
+                        YxdbValue::String(text)
+                    },
+                ));
                 start_at += len + 1;
             }
             "V_String" => {
@@ -392,13 +456,27 @@ fn read_fixed_record(fields: &[MetaInfoField], record: &[u8]) -> Result<Vec<(Str
             "Date" => {
                 let text = String::from_utf8_lossy(&record[start_at..start_at + 10]).to_string();
                 let null = record[start_at + 10] == 1;
-                values.push((name, if null { YxdbValue::Null } else { YxdbValue::String(text) }));
+                values.push((
+                    name,
+                    if null {
+                        YxdbValue::Null
+                    } else {
+                        YxdbValue::String(text)
+                    },
+                ));
                 start_at += 11;
             }
             "DateTime" => {
                 let text = String::from_utf8_lossy(&record[start_at..start_at + 19]).to_string();
                 let null = record[start_at + 19] == 1;
-                values.push((name, if null { YxdbValue::Null } else { YxdbValue::String(text) }));
+                values.push((
+                    name,
+                    if null {
+                        YxdbValue::Null
+                    } else {
+                        YxdbValue::String(text)
+                    },
+                ));
                 start_at += 20;
             }
             "Bool" => {
@@ -408,7 +486,14 @@ fn read_fixed_record(fields: &[MetaInfoField], record: &[u8]) -> Result<Vec<(Str
             }
             "Byte" => {
                 let null = record[start_at + 1] == 1;
-                values.push((name, if null { YxdbValue::Null } else { YxdbValue::I64(record[start_at] as i64) }));
+                values.push((
+                    name,
+                    if null {
+                        YxdbValue::Null
+                    } else {
+                        YxdbValue::I64(record[start_at] as i64)
+                    },
+                ));
                 start_at += 2;
             }
             "Blob" | "SpatialObj" => {
@@ -452,7 +537,9 @@ fn parse_blob(
                 .collect::<Vec<_>>();
             Ok(YxdbValue::String(String::from_utf16_lossy(&utf16)))
         } else {
-            Ok(YxdbValue::String(String::from_utf8_lossy(bytes).to_string()))
+            Ok(YxdbValue::String(
+                String::from_utf8_lossy(bytes).to_string(),
+            ))
         };
     }
     let block_start = start + (fixed_portion & 0x7fff_ffff) as usize;
@@ -476,14 +563,22 @@ fn parse_blob(
                     .collect::<Vec<_>>(),
             )))
         } else {
-            Ok(YxdbValue::String(String::from_utf8_lossy(&bytes).to_string()))
+            Ok(YxdbValue::String(
+                String::from_utf8_lossy(&bytes).to_string(),
+            ))
         };
     }
     let blob_len = u32::from_le_bytes(record[block_start..block_start + 4].try_into().unwrap());
     let len = (blob_len / 2) as usize;
     let end = block_start + 4 + len;
     if end > record.len() {
-        bail!("yxdb var-data out of range for field '{}' at offset {} in record len {} (pointer {})", field_name, start, record.len(), fixed_portion);
+        bail!(
+            "yxdb var-data out of range for field '{}' at offset {} in record len {} (pointer {})",
+            field_name,
+            start,
+            record.len(),
+            fixed_portion
+        );
     }
     let bytes = record[block_start + 4..end].to_vec();
     Ok(if wstring {
@@ -498,8 +593,8 @@ fn parse_blob(
     })
 }
 pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
-    let mut file = fs::File::open(path)
-        .with_context(|| format!("failed to open '{}'", path.display()))?;
+    let mut file =
+        fs::File::open(path).with_context(|| format!("failed to open '{}'", path.display()))?;
     let mut header = [0u8; 512];
     file.read_exact(&mut header)
         .with_context(|| format!("failed to read YXDB header '{}'", path.display()))?;
@@ -528,8 +623,12 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
         file.read_exact(&mut meta_bytes)
             .with_context(|| format!("failed to read YXDB metadata '{}'", path.display()))?;
         let mut terminator = [0u8; 2];
-        file.read_exact(&mut terminator)
-            .with_context(|| format!("failed to read YXDB metadata terminator '{}'", path.display()))?;
+        file.read_exact(&mut terminator).with_context(|| {
+            format!(
+                "failed to read YXDB metadata terminator '{}'",
+                path.display()
+            )
+        })?;
         let meta_xml = String::from_utf16_lossy(
             &meta_bytes
                 .chunks_exact(2)
@@ -572,7 +671,12 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
             }
         }
     });
-    let has_var = fields.iter().any(|field| matches!(field.data_type.as_str(), "V_String" | "V_WString" | "Blob" | "SpatialObj"));
+    let has_var = fields.iter().any(|field| {
+        matches!(
+            field.data_type.as_str(),
+            "V_String" | "V_WString" | "Blob" | "SpatialObj"
+        )
+    });
 
     let mut cursor = ByteCursor::new(record_bytes);
     let stream = if is_amp {
@@ -594,7 +698,9 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
                     break;
                 }
                 let prefix = record_cursor.read_exact(fixed_and_len)?.to_vec();
-                let var_len = u32::from_le_bytes(prefix[fixed_size..fixed_size + 4].try_into().unwrap()) as usize;
+                let var_len =
+                    u32::from_le_bytes(prefix[fixed_size..fixed_size + 4].try_into().unwrap())
+                        as usize;
                 if record_cursor.pos + var_len > record_cursor.data.len() {
                     break;
                 }
@@ -621,7 +727,9 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
             let record_len = if has_var {
                 let fixed_and_len = fixed_size + 4;
                 let prefix = record_cursor.read_exact(fixed_and_len)?.to_vec();
-                let var_len = u32::from_le_bytes(prefix[fixed_size..fixed_size + 4].try_into().unwrap()) as usize;
+                let var_len =
+                    u32::from_le_bytes(prefix[fixed_size..fixed_size + 4].try_into().unwrap())
+                        as usize;
                 let var_bytes = record_cursor.read_exact(var_len)?.to_vec();
                 let mut record = prefix;
                 record.extend_from_slice(&var_bytes);
@@ -646,7 +754,17 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
         let mut writer = fs::File::create(csv_path)
             .with_context(|| format!("failed to create '{}'", csv_path.display()))?;
         let headers: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
-        writer.write_all(format!("{}\n", headers.iter().map(|h| csv_escape(h)).collect::<Vec<_>>().join(",")).as_bytes())?;
+        writer.write_all(
+            format!(
+                "{}\n",
+                headers
+                    .iter()
+                    .map(|h| csv_escape(h))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+            .as_bytes(),
+        )?;
         for row in &rows {
             let obj = row.as_object().unwrap();
             let line = headers

@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-  "ayx-cli",
+  "ayx-rs",
   "ayx-core",
   "ayx-server",
   "ayx-api",

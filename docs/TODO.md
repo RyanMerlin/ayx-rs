@@ -1,6 +1,6 @@
 # TODO
 
-This is the working plan for evolving the AYX CLI into a production-grade, agent-friendly toolset for the Alteryx ecosystem.
+This is the working plan for evolving AYX-RS into a production-grade, agent-friendly toolset for the Alteryx ecosystem.
 
 ## 1. Command registry
 - define a compact machine-readable schema for the existing `clap` tree (name, purpose, args, output shape, safety level, mutating vs read-only).
