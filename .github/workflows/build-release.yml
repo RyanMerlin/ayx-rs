@@ -24,13 +24,13 @@ jobs:
         run: cargo fmt --check
         shell: pwsh
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
         shell: pwsh
       - name: Run tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace
         shell: pwsh
       - name: Build release
-        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+        run: cargo build --release --target x86_64-pc-windows-msvc
         shell: pwsh
       - name: Package Windows release
         shell: pwsh
@@ -64,13 +64,13 @@ jobs:
         run: cargo fmt --check
         shell: bash
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
         shell: bash
       - name: Run tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace
         shell: bash
       - name: Build release
-        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
+        run: cargo build --release --target x86_64-unknown-linux-gnu
         shell: bash
       - name: Package Linux release
         shell: bash
