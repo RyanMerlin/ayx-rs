@@ -60,13 +60,13 @@ Execution behavior:
 - `ayx server api workflow-version-upload --profile <path> --workflow-id <id> --file-path <path> --name <value> --owner-id <id> [--execution-mode Safe|SemiSafe|Standard] [--workflow-credential-type Default|Required|Specific] [--others-may-download] [--others-can-execute] [--has-private-data-exemption] [--comments <text>] [--make-published] [--credential-id <id>] [--bypass-workflow-version-check] [--apply]`
 
 ## Upgrade Commands
-- `ayx upgrade path --from <source> --to <target> [--deployment embedded-mongo|user-mongo|sql]`
-- `ayx upgrade precheck --profile <path> --target <version> --out <dir> [--deployment embedded-mongo|user-mongo|sql]`
-- `ayx upgrade backup --profile <path> --type <mongo|runtime|logs|all> --out <dir>`
-- `ayx upgrade plan --from <source> --to <target> --out <dir> [--deployment embedded-mongo|user-mongo|sql]`
-- `ayx upgrade apply --manifest <path> --apply --yes`
-- `ayx upgrade postcheck --profile <path> --manifest <path> --out <dir>`
-- `ayx upgrade bundle --input <dir> --out <zip>`
+- `ayx server upgrade path --from <source> --to <target> [--deployment embedded-mongo|user-mongo|sql]`
+- `ayx server upgrade precheck --profile <path> --target <version> --out <dir> [--deployment embedded-mongo|user-mongo|sql]`
+- `ayx server upgrade backup --profile <path> --type <mongo|runtime|logs|all> --out <dir>`
+- `ayx server upgrade plan --from <source> --to <target> --out <dir> [--deployment embedded-mongo|user-mongo|sql]`
+- `ayx server upgrade apply --manifest <path> --apply --yes`
+- `ayx server upgrade postcheck --profile <path> --manifest <path> --out <dir>`
+- `ayx server upgrade bundle --input <dir> --out <zip>`
 
 Upgrade commands rely on the optional `upgrade` block in `config.yaml`, for example:
 
@@ -76,7 +76,7 @@ upgrade:
   deployment: embedded-mongo
 ```
 
-`precheck` validates runtime/service expectations and curator access before evaluating the supported path between the configured `target_version` and the CLI `--target`. `backup` captures runtime/service files, writes `backup_results.csv`, and records instructions for embedded Mongo. `plan` writes `upgrade_plan.json` plus the hashed `plan_manifest.json` and a run manifest describing each hop. `apply` replays the plan manifest with simulated steps (`execution_audit.csv`), while `postcheck` verifies migration logs and the manifest hash. `bundle` zips an input directory for sharing with operations or support.
+`server upgrade precheck` validates runtime/service expectations and curator access before evaluating the supported path between the configured `target_version` and the CLI `--target`. `server upgrade backup` captures runtime/service files, writes `backup_results.csv`, and records instructions for embedded Mongo. `server upgrade plan` writes `upgrade_plan.json` plus the hashed `plan_manifest.json` and a run manifest describing each hop. `server upgrade apply` replays the plan manifest with simulated steps (`execution_audit.csv`), while `server upgrade postcheck` verifies migration logs and the manifest hash. `server upgrade bundle` zips an input directory for sharing with operations or support.
 
 ## Update Command
 - `ayx update [--repo-owner <owner>] [--repo-name <repo>] [--bin-name <name>] [--target-version <tag>] [--skip-confirm]`

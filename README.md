@@ -52,9 +52,10 @@ ayx server
   - `workflow scan --rules docs/workflow-recurse.example.yaml` to preflight a migration
   - `workflow recurse --rules docs/workflow-recurse.example.yaml` for recursive migrations
   - `workflow publish` to hand a repackaged workflow back to the Server API
+- `tools` as a placeholder branch for future integration and orchestration workflows
 - `license` for the Licensing portal and API branch
 - `one` for the Alteryx One platform branch
-- `upgrade` for upgrade path planning, prechecks, backup, apply simulation, and postchecks
+- `server upgrade` for upgrade path planning, prechecks, backup, apply simulation, and postchecks
 - `catalog` for machine-readable command discovery
 - `update` for GitHub release self-update
 

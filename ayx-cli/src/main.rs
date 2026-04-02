@@ -56,38 +56,42 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    Mongo {
-        #[command(subcommand)]
-        command: MongoCommand,
-    },
-    Server {
-        #[command(subcommand)]
-        command: Option<ServerCommand>,
-    },
-    Upgrade {
-        #[command(subcommand)]
-        command: UpgradeCommand,
-    },
-    Sqlserver {
-        #[command(subcommand)]
-        command: Option<SqlserverCommand>,
-    },
-    Workflow {
-        #[command(subcommand)]
-        command: Option<WorkflowCommand>,
-    },
+    #[command(about = "Alteryx One platform branch and API surface")]
     One {
         #[command(subcommand)]
         command: Option<OneCommand>,
     },
+    #[command(about = "Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls")]
+    Server {
+        #[command(subcommand)]
+        command: Option<ServerCommand>,
+    },
+    #[command(about = "Mongo inventory, backup, restore, query, and doctor helpers")]
+    Mongo {
+        #[command(subcommand)]
+        command: MongoCommand,
+    },
+    #[command(about = "SQL Server command family (stubbed)")]
+    Sqlserver {
+        #[command(subcommand)]
+        command: Option<SqlserverCommand>,
+    },
+    #[command(about = "Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb")]
+    Workflow {
+        #[command(subcommand)]
+        command: Option<WorkflowCommand>,
+    },
+    #[command(about = "Integration placeholder branch for future cross-product workflows")]
+    Tools {
+        #[command(subcommand)]
+        command: Option<ToolsCommand>,
+    },
+    #[command(about = "Licensing portal branch and API surface")]
     License {
         #[command(subcommand)]
         command: Option<LicenseCommand>,
     },
-    Catalog {
-        #[command(subcommand)]
-        command: CatalogCommand,
-    },
+    #[command(about = "Self-update from GitHub releases")]
     Update {
         #[arg(long, default_value = "RyanMerlin")]
         repo_owner: String,
@@ -99,6 +103,11 @@ enum Command {
         target_version: Option<String>,
         #[arg(long)]
         skip_confirm: bool,
+    },
+    #[command(about = "Machine-readable command registry")]
+    Catalog {
+        #[command(subcommand)]
+        command: CatalogCommand,
     },
 }
 
@@ -212,6 +221,10 @@ enum ServerCommand {
     Doctor {
         #[command(subcommand)]
         command: ServerDoctorCommand,
+    },
+    Upgrade {
+        #[command(subcommand)]
+        command: UpgradeCommand,
     },
     BackupPlan {
         #[arg(long)]
@@ -335,6 +348,11 @@ enum WorkflowCommand {
         #[arg(long)]
         validate: bool,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum ToolsCommand {
+    Status,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1165,8 +1183,8 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Use before future license api call-style workflows."],
     },
     CommandSpec {
-        name: "upgrade plan",
-        path: "upgrade/plan",
+        name: "server upgrade plan",
+        path: "server/upgrade/plan",
         summary: "Compute an upgrade path between versions.",
         output: "upgrade plan manifest",
         safety: "read-only",
@@ -1524,6 +1542,7 @@ enum ServerApiCommand {
 }
 
 #[derive(Subcommand, Debug)]
+#[command(about = "Server upgrade planning, backup, apply simulation, and postcheck helpers")]
 enum UpgradeCommand {
     Path {
         #[arg(long)]
@@ -2390,6 +2409,65 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     )
                 }
             },
+            Some(ServerCommand::Upgrade { command }) => match command {
+                UpgradeCommand::Path {
+                    from,
+                    to,
+                    deployment,
+                } => {
+                    let detail = compute_path(&from, &to, &deployment);
+                    Envelope::ok_with_data("upgrade path computed", detail)
+                }
+                UpgradeCommand::Precheck {
+                    profile,
+                    target,
+                    out,
+                    deployment,
+                } => {
+                    let config = load_profile(&profile)?;
+                    let detail = run_precheck(&config, &target, &out, &deployment)?;
+                    Envelope::ok_with_data("upgrade precheck completed", detail)
+                }
+                UpgradeCommand::Backup {
+                    profile,
+                    r#type,
+                    out,
+                } => {
+                    let config = load_profile(&profile)?;
+                    let detail = run_backup(&config, &r#type, &out)?;
+                    Envelope::ok_with_data("upgrade backup completed", detail)
+                }
+                UpgradeCommand::Plan {
+                    from,
+                    to,
+                    out,
+                    deployment,
+                } => {
+                    let detail = run_plan(&from, &to, &deployment, &out)?;
+                    Envelope::ok_with_data("upgrade plan generated", detail)
+                }
+                UpgradeCommand::Apply {
+                    manifest,
+                    apply,
+                    yes,
+                } => {
+                    let detail = run_apply(&manifest, apply, yes)?;
+                    Envelope::ok_with_data("upgrade apply simulated", detail)
+                }
+                UpgradeCommand::Postcheck {
+                    profile,
+                    manifest,
+                    out,
+                } => {
+                    let config = load_profile(&profile)?;
+                    let detail = run_postcheck(&config, &manifest, &out)?;
+                    Envelope::ok_with_data("upgrade postcheck completed", detail)
+                }
+                UpgradeCommand::Bundle { input, out } => {
+                    let detail = run_bundle(&input, &out)?;
+                    Envelope::ok_with_data("upgrade bundle created", detail)
+                }
+            },
             Some(ServerCommand::BackupPlan { backup_dir }) => {
                 let plan = backup_plan(&backup_dir)?;
                 Envelope::ok_with_data("backup plan generated", plan)
@@ -2410,65 +2488,6 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     },
                     data,
                 )
-            }
-        },
-        Command::Upgrade { command } => match command {
-            UpgradeCommand::Path {
-                from,
-                to,
-                deployment,
-            } => {
-                let detail = compute_path(&from, &to, &deployment);
-                Envelope::ok_with_data("upgrade path computed", detail)
-            }
-            UpgradeCommand::Precheck {
-                profile,
-                target,
-                out,
-                deployment,
-            } => {
-                let config = load_profile(&profile)?;
-                let detail = run_precheck(&config, &target, &out, &deployment)?;
-                Envelope::ok_with_data("upgrade precheck completed", detail)
-            }
-            UpgradeCommand::Backup {
-                profile,
-                r#type,
-                out,
-            } => {
-                let config = load_profile(&profile)?;
-                let detail = run_backup(&config, &r#type, &out)?;
-                Envelope::ok_with_data("upgrade backup completed", detail)
-            }
-            UpgradeCommand::Plan {
-                from,
-                to,
-                out,
-                deployment,
-            } => {
-                let detail = run_plan(&from, &to, &deployment, &out)?;
-                Envelope::ok_with_data("upgrade plan generated", detail)
-            }
-            UpgradeCommand::Apply {
-                manifest,
-                apply,
-                yes,
-            } => {
-                let detail = run_apply(&manifest, apply, yes)?;
-                Envelope::ok_with_data("upgrade apply simulated", detail)
-            }
-            UpgradeCommand::Postcheck {
-                profile,
-                manifest,
-                out,
-            } => {
-                let config = load_profile(&profile)?;
-                let detail = run_postcheck(&config, &manifest, &out)?;
-                Envelope::ok_with_data("upgrade postcheck completed", detail)
-            }
-            UpgradeCommand::Bundle { input, out } => {
-                let detail = run_bundle(&input, &out)?;
-                Envelope::ok_with_data("upgrade bundle created", detail)
             }
         },
         Command::Sqlserver { command } => match command {
@@ -2689,6 +2708,19 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     }),
                 )
             }
+        },
+        Command::Tools { command } => match command {
+            None => Envelope::ok("tools placeholder branch"),
+            Some(ToolsCommand::Status) => Envelope::ok_with_data(
+                "tools placeholder status",
+                json!({
+                    "status": "placeholder",
+                    "notes": [
+                        "Reserved for future cross-product workflows",
+                        "Likely to host integration and orchestration helpers"
+                    ]
+                }),
+            ),
         },
         Command::One { command } => match command {
             None => Envelope::ok(
@@ -3855,7 +3887,7 @@ fn main() -> Result<()> {
 
 fn print_help() {
     println!(
-    "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help       Print this help message\n    --output     Output format: text or json\n\nCOMMANDS:\n    mongo         Mongo inventory, backup, restore, query, and doctor helpers\n    server api    Server API operations\n    server        Server discovery, logs, auth, diagnose, doctor, and low-level API calls\n    upgrade       Upgrade planning and execution helpers\n    catalog       Machine-readable command registry\n    license       Licensing portal branch and API surface\n    one           Alteryx One platform branch and API surface\n    sqlserver     SQL Server command family (stubbed)\n    workflow      Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb\n    update        Self-update from GitHub releases\n"
+    "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help       Print this help message\n    --output     Output format: text or json\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server command family (stubbed)\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb\n    tools          Integration placeholder branch for future cross-product workflows\n    license        Licensing portal branch and API surface\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
     );
 }
 
