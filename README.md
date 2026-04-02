@@ -94,6 +94,8 @@ Embedded Mongo discovery looks for `RuntimeSettings.xml` in the standard Alteryx
 
 The GitHub Actions workflow at [`.github/workflows/build-release.yml`](.github/workflows/build-release.yml) builds Windows, Linux, and macOS binaries and now runs format, clippy, and tests before packaging.
 
+The workflow supports manual `workflow_dispatch` runs and tagged releases (`v*`), so you can publish a release artifact on demand or from a version tag.
+
 Release archives:
 - Windows: `ayx-x86_64-pc-windows-msvc.zip`
 - Linux: `ayx-x86_64-unknown-linux-gnu.tar.gz`
