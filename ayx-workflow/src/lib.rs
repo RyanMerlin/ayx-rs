@@ -608,7 +608,6 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
     let (fields, record_bytes, num_records) = if is_amp {
         let meta_len = u32::from_le_bytes(header[96..100].try_into().unwrap()) as usize;
         let (fields, record_bytes) = parse_amp_meta_and_records(&header, &mut file, meta_len)?;
-        let record_bytes = record_bytes;
         let inferred = record_bytes.len();
         let rows_hint = inferred; // fall back to streaming termination
         (fields, record_bytes, rows_hint)
