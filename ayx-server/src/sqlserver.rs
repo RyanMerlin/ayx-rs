@@ -1,9 +1,7 @@
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
-use ayx_core::profile::{
-    Config, MongoMode, SqlServerConnectionProfile, SqlServerProfile,
-};
+use ayx_core::profile::{Config, MongoMode, SqlServerConnectionProfile, SqlServerProfile};
 
 pub fn status_envelope(config: &Config) -> Result<Value> {
     Ok(json!({
@@ -19,8 +17,14 @@ pub fn status_envelope(config: &Config) -> Result<Value> {
 
 pub fn inventory_envelope(config: &Config) -> Result<Value> {
     let sql = sql_profile(config)?;
-    let controller = sql.controller.as_ref().ok_or_else(|| anyhow!("sqlserver.controller is missing"))?;
-    let server_ui = sql.server_ui.as_ref().ok_or_else(|| anyhow!("sqlserver.server_ui is missing"))?;
+    let controller = sql
+        .controller
+        .as_ref()
+        .ok_or_else(|| anyhow!("sqlserver.controller is missing"))?;
+    let server_ui = sql
+        .server_ui
+        .as_ref()
+        .ok_or_else(|| anyhow!("sqlserver.server_ui is missing"))?;
 
     Ok(json!({
         "profile": config.profile_name,
@@ -37,7 +41,10 @@ pub fn inventory_envelope(config: &Config) -> Result<Value> {
 
 pub fn precheck_envelope(config: &Config, collation: Option<&str>) -> Result<Value> {
     let sql = sql_profile(config)?;
-    let controller = sql.controller.as_ref().ok_or_else(|| anyhow!("sqlserver.controller is missing"))?;
+    let controller = sql
+        .controller
+        .as_ref()
+        .ok_or_else(|| anyhow!("sqlserver.controller is missing"))?;
     let collation = collation.unwrap_or("Latin1_General_100_CI_AS_SC_UTF8");
     let collation_ok = is_collation_acceptable(collation);
 
@@ -90,11 +97,20 @@ pub fn connection_string_envelope(
     let scope = scope.to_lowercase();
     let auth = auth.to_lowercase();
     let conn = match scope.as_str() {
-        "controller" => sql.controller.as_ref().ok_or_else(|| anyhow!("sqlserver.controller is missing"))?,
-        "server-ui" => sql.server_ui.as_ref().ok_or_else(|| anyhow!("sqlserver.server_ui is missing"))?,
+        "controller" => sql
+            .controller
+            .as_ref()
+            .ok_or_else(|| anyhow!("sqlserver.controller is missing"))?,
+        "server-ui" => sql
+            .server_ui
+            .as_ref()
+            .ok_or_else(|| anyhow!("sqlserver.server_ui is missing"))?,
         _ => return Err(anyhow!("scope must be controller or server-ui")),
     };
-    let server = server.map(ToOwned::to_owned).or_else(|| conn.host.clone()).unwrap_or_else(|| "localhost".to_string());
+    let server = server
+        .map(ToOwned::to_owned)
+        .or_else(|| conn.host.clone())
+        .unwrap_or_else(|| "localhost".to_string());
     let port = port.or(conn.port).unwrap_or(1433);
     let default_database = match scope.as_str() {
         "controller" => "AlteryxService",
@@ -107,10 +123,38 @@ pub fn connection_string_envelope(
         .unwrap_or_else(|| default_database.to_string());
 
     let connection_string = match (scope.as_str(), auth.as_str()) {
-        ("controller", "sql") => build_controller_sql_auth(&server, port, &database, encrypt, trust_server_certificate, multi_subnet_failover),
-        ("controller", "kerberos") => build_controller_kerberos(&server, port, &database, encrypt, trust_server_certificate, multi_subnet_failover),
-        ("server-ui", "sql") => build_server_ui_sql_auth(&server, port, &database, encrypt, trust_server_certificate, multi_subnet_failover),
-        ("server-ui", "kerberos") => build_server_ui_kerberos(&server, port, &database, encrypt, trust_server_certificate, multi_subnet_failover),
+        ("controller", "sql") => build_controller_sql_auth(
+            &server,
+            port,
+            &database,
+            encrypt,
+            trust_server_certificate,
+            multi_subnet_failover,
+        ),
+        ("controller", "kerberos") => build_controller_kerberos(
+            &server,
+            port,
+            &database,
+            encrypt,
+            trust_server_certificate,
+            multi_subnet_failover,
+        ),
+        ("server-ui", "sql") => build_server_ui_sql_auth(
+            &server,
+            port,
+            &database,
+            encrypt,
+            trust_server_certificate,
+            multi_subnet_failover,
+        ),
+        ("server-ui", "kerberos") => build_server_ui_kerberos(
+            &server,
+            port,
+            &database,
+            encrypt,
+            trust_server_certificate,
+            multi_subnet_failover,
+        ),
         _ => return Err(anyhow!("auth must be sql or kerberos")),
     };
 
@@ -127,10 +171,20 @@ pub fn connection_string_envelope(
     }))
 }
 
-pub fn migration_prepare_envelope(config: &Config, target_version: Option<&str>, dry_run: bool) -> Result<Value> {
+pub fn migration_prepare_envelope(
+    config: &Config,
+    target_version: Option<&str>,
+    dry_run: bool,
+) -> Result<Value> {
     let sql = sql_profile(config)?;
-    let controller = sql.controller.as_ref().ok_or_else(|| anyhow!("sqlserver.controller is missing"))?;
-    let server_ui = sql.server_ui.as_ref().ok_or_else(|| anyhow!("sqlserver.server_ui is missing"))?;
+    let controller = sql
+        .controller
+        .as_ref()
+        .ok_or_else(|| anyhow!("sqlserver.controller is missing"))?;
+    let server_ui = sql
+        .server_ui
+        .as_ref()
+        .ok_or_else(|| anyhow!("sqlserver.server_ui is missing"))?;
 
     Ok(json!({
         "profile": config.profile_name,
@@ -203,7 +257,10 @@ fn summarize_sql_connection(conn: &SqlServerConnectionProfile) -> Value {
     })
 }
 
-fn validate_connection_profile(field: &str, conn: Option<&SqlServerConnectionProfile>) -> Result<Value> {
+fn validate_connection_profile(
+    field: &str,
+    conn: Option<&SqlServerConnectionProfile>,
+) -> Result<Value> {
     let conn = conn.ok_or_else(|| anyhow!("{field} is missing"))?;
     Ok(json!({
         "field": field,
@@ -482,7 +539,13 @@ mod tests {
     fn validate_connections_returns_secret_sources() {
         let cfg = sample_config();
         let data = validate_connection_strings_envelope(&cfg).expect("validate");
-        assert_eq!(data["controller"]["secret_source"], "AYX_SQL_CONTROLLER_PASSWORD");
-        assert_eq!(data["server_ui"]["secret_source"], "AYX_SQL_SERVER_UI_PASSWORD");
+        assert_eq!(
+            data["controller"]["secret_source"],
+            "AYX_SQL_CONTROLLER_PASSWORD"
+        );
+        assert_eq!(
+            data["server_ui"]["secret_source"],
+            "AYX_SQL_SERVER_UI_PASSWORD"
+        );
     }
 }
