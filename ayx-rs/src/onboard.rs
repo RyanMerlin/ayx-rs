@@ -134,6 +134,7 @@ pub fn run_onboarding(profile_path: &Path) -> Result<Value> {
         }
     }
 
+    validate_onboarded_config(&config)?;
     write_config(profile_path, &config, &env_updates)?;
 
     Ok(json!({
@@ -319,6 +320,9 @@ fn prompt_sql_connection(
         false,
     )?);
     conn.connection_string = prompt_optional_text(&format!("{label} connection string"), connection_string_default)?;
+    if conn.password.as_ref().is_some_and(|password| password.trim().is_empty()) {
+        return Err(anyhow::anyhow!("{label} password cannot be empty"));
+    }
     Ok(conn)
 }
 
@@ -427,8 +431,16 @@ fn prompt_secret(prompt: &str, current: Option<&str>, env_key: &str) -> Result<S
         true,
     )?;
     if value == "stored" {
-        Ok(current.unwrap_or("").to_string())
+        let secret = current.unwrap_or("").to_string();
+        if secret.trim().is_empty() {
+            Err(anyhow::anyhow!("{prompt} is required for {env_key}"))
+        } else {
+            Ok(secret)
+        }
     } else {
+        if value.trim().is_empty() {
+            return Err(anyhow::anyhow!("{prompt} cannot be empty"));
+        }
         Ok(value)
     }
 }
@@ -510,4 +522,108 @@ fn prompt_raw(prompt: &str) -> Result<String> {
     let mut buf = String::new();
     io::stdin().read_line(&mut buf).context("failed to read interactive input")?;
     Ok(buf)
+}
+
+fn validate_onboarded_config(config: &Config) -> Result<()> {
+    if let Some(sqlserver) = &config.sqlserver {
+        validate_connection_profile_for_onboarding("sqlserver.controller", sqlserver.controller.as_ref())?;
+        validate_connection_profile_for_onboarding("sqlserver.server_ui", sqlserver.server_ui.as_ref())?;
+    }
+    Ok(())
+}
+
+fn validate_connection_profile_for_onboarding(
+    field: &str,
+    conn: Option<&SqlServerConnectionProfile>,
+) -> Result<()> {
+    let conn = conn.ok_or_else(|| anyhow::anyhow!("{field} is missing"))?;
+    if conn.host.as_deref().is_none_or(|v| v.trim().is_empty()) {
+        return Err(anyhow::anyhow!("{field}.host is required"));
+    }
+    if conn.database.as_deref().is_none_or(|v| v.trim().is_empty()) {
+        return Err(anyhow::anyhow!("{field}.database is required"));
+    }
+    if conn.password.as_deref().is_none_or(|v| v.trim().is_empty()) {
+        return Err(anyhow::anyhow!("{field}.password is required"));
+    }
+    if conn.password_env.as_deref().is_none_or(|v| v.trim().is_empty()) {
+        return Err(anyhow::anyhow!("{field}.password_env is required"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ayx_core::profile::{
+        Config, MongoDatabases, MongoEmbedded, MongoMode, MongoProfile, SqlServerConnectionProfile,
+        SqlServerProfile,
+    };
+
+    fn base_config() -> Config {
+        Config {
+            profile_name: "test".to_string(),
+            mongo: MongoProfile {
+                mode: MongoMode::Embedded,
+                databases: MongoDatabases {
+                    gallery_name: "AlteryxGallery".to_string(),
+                    service_name: "AlteryxService".to_string(),
+                },
+                embedded: Some(MongoEmbedded {
+                    runtime_settings_path: None,
+                    alteryx_service_path: None,
+                    restore_target_path: None,
+                }),
+                managed: None,
+            },
+            alteryx_one: None,
+            observability: None,
+            server_api: None,
+            api: None,
+            server: None,
+            sqlserver: Some(SqlServerProfile {
+                controller: Some(SqlServerConnectionProfile {
+                    connection_string: None,
+                    host: Some("sql.example.com".to_string()),
+                    port: Some(1433),
+                    database: Some("AlteryxService".to_string()),
+                    username: Some("svc".to_string()),
+                    password: Some("secret".to_string()),
+                    password_env: Some("AYX_SQL_CONTROLLER_PASSWORD".to_string()),
+                    integrated_security: Some(false),
+                    encrypt: Some(true),
+                    trust_server_certificate: Some(false),
+                    multi_subnet_failover: Some(false),
+                }),
+                server_ui: Some(SqlServerConnectionProfile {
+                    connection_string: None,
+                    host: Some("sql.example.com".to_string()),
+                    port: Some(1433),
+                    database: Some("AlteryxServerUI".to_string()),
+                    username: Some("svc".to_string()),
+                    password: Some("secret".to_string()),
+                    password_env: Some("AYX_SQL_SERVER_UI_PASSWORD".to_string()),
+                    integrated_security: Some(false),
+                    encrypt: Some(true),
+                    trust_server_certificate: Some(false),
+                    multi_subnet_failover: Some(false),
+                }),
+                legacy_connection_string: None,
+            }),
+            upgrade: None,
+        }
+    }
+
+    #[test]
+    fn onboarding_validator_rejects_empty_sql_password() {
+        let mut cfg = base_config();
+        cfg.sqlserver.as_mut().unwrap().controller.as_mut().unwrap().password = Some(String::new());
+        assert!(validate_onboarded_config(&cfg).is_err());
+    }
+
+    #[test]
+    fn onboarding_validator_accepts_complete_sql_profile() {
+        let cfg = base_config();
+        assert!(validate_onboarded_config(&cfg).is_ok());
+    }
 }
