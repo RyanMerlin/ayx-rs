@@ -68,7 +68,7 @@ ayx catalog list
 cargo install --locked --path .
 ```
 
-5. Use `--output json` when another tool should consume the result.
+5. Use `--output json` when another tool should consume the result. For `workflow yxdb`, pair `--csv <path>` with top-level `--output json` if you want both export and structured metadata.
 
 If you want the shortest path from zero to useful output, start with:
 
@@ -90,8 +90,8 @@ ayx mongo inventory --profile config.yaml --output json
 - `workflow` for local `.yxmd`, `.yxmc`, `.yxzp`, and `.yxdb` package/XML tooling
   - `workflow scan --rules docs/workflow-recurse.example.yaml` to preflight a migration
   - `workflow recurse --rules docs/workflow-recurse.example.yaml` for recursive migrations
-  - `workflow yxdb --input <file> [--csv <path>]` to inspect and export YXDB data
-  - `workflow yxdb --input <file> --output json` to return a structured JSON envelope
+- `workflow yxdb --input <file> [--csv <path>]` to inspect and export YXDB data
+- `workflow yxdb --input <file> --csv <path> --output json` to export CSV and return a structured JSON envelope
   - `workflow publish` to hand a repackaged workflow back to the Server API
 - `tools` as a placeholder branch for future integration and orchestration workflows
 - `license` for the Licensing portal and API branch

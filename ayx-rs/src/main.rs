@@ -80,7 +80,7 @@ enum Command {
         #[command(subcommand)]
         command: MongoCommand,
     },
-    #[command(about = "SQL Server command family (stubbed)")]
+    #[command(about = "SQL Server status, prechecks, connection helpers, and migration planning")]
     Sqlserver {
         #[command(subcommand)]
         command: Option<SqlserverCommand>,
@@ -95,7 +95,7 @@ enum Command {
         #[command(subcommand)]
         command: Option<ToolsCommand>,
     },
-    #[command(about = "Interactive first-run setup for config.yaml")]
+    #[command(about = "Interactive first-run setup for config.yaml with validation and secret reuse")]
     Onboard {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
@@ -414,6 +414,7 @@ enum WorkflowCommand {
         #[arg(long)]
         validate: bool,
     },
+    #[command(about = "Read and export .yxdb data; use --csv for export and top-level --output json for machine-readable envelopes")]
     Yxdb {
         #[arg(long)]
         input: PathBuf,
