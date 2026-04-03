@@ -1,0 +1,60 @@
+stages:
+  - build
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+    - when: never
+
+.build_template:
+  stage: build
+  variables:
+    CARGO_TERM_COLOR: "always"
+  before_script:
+    - rustc --version
+    - cargo --version
+
+windows:
+  extends: .build_template
+  tags:
+    - windows
+  script:
+    - cargo build --release --locked --target x86_64-pc-windows-msvc
+    - New-Item -ItemType Directory -Force -Path dist | Out-Null
+    - Copy-Item target/x86_64-pc-windows-msvc/release/ayx.exe dist/ayx.exe
+    - Compress-Archive -Path dist/ayx.exe -DestinationPath dist/ayx-x86_64-pc-windows-msvc.zip -Force
+  artifacts:
+    name: "ayx-x86_64-pc-windows-msvc-$CI_COMMIT_TAG"
+    paths:
+      - dist/ayx-x86_64-pc-windows-msvc.zip
+    expire_in: 1 week
+
+linux:
+  extends: .build_template
+  tags:
+    - linux
+  script:
+    - cargo build --release --locked --target x86_64-unknown-linux-gnu
+    - mkdir -p dist
+    - cp target/x86_64-unknown-linux-gnu/release/ayx dist/ayx
+    - tar -czf dist/ayx-x86_64-unknown-linux-gnu.tar.gz -C dist ayx
+  artifacts:
+    name: "ayx-x86_64-unknown-linux-gnu-$CI_COMMIT_TAG"
+    paths:
+      - dist/ayx-x86_64-unknown-linux-gnu.tar.gz
+    expire_in: 1 week
+
+macos:
+  extends: .build_template
+  tags:
+    - macos
+  script:
+    - cargo build --release --locked --target aarch64-apple-darwin
+    - mkdir -p dist
+    - cp target/aarch64-apple-darwin/release/ayx dist/ayx
+    - tar -czf dist/ayx-aarch64-apple-darwin.tar.gz -C dist ayx
+  artifacts:
+    name: "ayx-aarch64-apple-darwin-$CI_COMMIT_TAG"
+    paths:
+      - dist/ayx-aarch64-apple-darwin.tar.gz
+    expire_in: 1 week
