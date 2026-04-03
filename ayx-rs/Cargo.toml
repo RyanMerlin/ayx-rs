@@ -20,6 +20,9 @@ ayx-one = { path = "../ayx-one" }
 ayx-server = { path = "../ayx-server" }
 self_update = "0.43.1"
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [[bin]]
 name = "ayx"
 path = "src/main.rs"

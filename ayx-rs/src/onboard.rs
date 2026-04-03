@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -10,6 +11,7 @@ use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::profile::{
     AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded, MongoManaged, MongoMode,
     MongoProfile, ServerProfile, SqlServerConnectionProfile, SqlServerProfile, TlsConfig,
+    WorkspaceConfig,
 };
 use ayx_server::util::runtime_settings_summary;
 
@@ -17,7 +19,12 @@ pub fn run_onboarding(
     profile_path: &Path,
     environment: Option<&str>,
     non_interactive: bool,
+    workspace_mode: bool,
 ) -> Result<Value> {
+    if workspace_mode {
+        let active_environment = environment.unwrap_or("dev");
+        return write_workspace_template(profile_path, active_environment, "dev", "prod");
+    }
     let existing = load_existing_config(profile_path, environment).ok();
     let mut config = existing.unwrap_or_else(default_config);
     let mut env_updates = BTreeMap::new();
@@ -41,37 +48,66 @@ pub fn run_onboarding(
     println!("AYX onboarding");
     println!("Press Enter to accept a default. Existing values are reused unless you choose to change them.");
 
-    config.profile_name = prompt_text("Profile name", Some(&config.profile_name), Some("local"), false)?;
+    config.profile_name = prompt_text(
+        "Profile name",
+        Some(&config.profile_name),
+        Some("local"),
+        false,
+    )?;
 
-    let email_default = config.alteryx_one.as_ref().map(|one| one.account_email.as_str());
+    let email_default = config
+        .alteryx_one
+        .as_ref()
+        .map(|one| one.account_email.as_str());
     let account_email = prompt_text("Email address", email_default, None, true)?;
     config.alteryx_one = Some(update_or_create_one(config.alteryx_one, account_email));
 
-    let configure_server = prompt_yes_no("Configure Alteryx Server", config.server.is_some(), true)?;
+    let configure_server =
+        prompt_yes_no("Configure Alteryx Server", config.server.is_some(), true)?;
     if configure_server {
         let local_server = prompt_yes_no("Is the Server localhost", true, true)?;
         let mut server = config.server.take().unwrap_or_else(default_server);
         server.webapi_url = if local_server {
-            prompt_text("Server base URL", Some(&server.webapi_url), Some("http://localhost/"), true)?
+            prompt_text(
+                "Server base URL",
+                Some(&server.webapi_url),
+                Some("http://localhost/"),
+                true,
+            )?
         } else {
             prompt_text("Server base URL", Some(&server.webapi_url), None, true)?
         };
-        server.curator_api_key = prompt_text("Server API key", Some(&server.curator_api_key), Some("stored"), true)?;
-        server.curator_api_secret = prompt_text("Server API secret", Some(&server.curator_api_secret), Some("stored"), true)?;
-        server.verify_tls = Some(prompt_yes_no("Verify TLS certificates", server.verify_tls(), true)?);
+        server.curator_api_key = prompt_text(
+            "Server API key",
+            Some(&server.curator_api_key),
+            Some("stored"),
+            true,
+        )?;
+        server.curator_api_secret = prompt_text(
+            "Server API secret",
+            Some(&server.curator_api_secret),
+            Some("stored"),
+            true,
+        )?;
+        server.verify_tls = Some(prompt_yes_no(
+            "Verify TLS certificates",
+            server.verify_tls(),
+            true,
+        )?);
         config.server = Some(server);
     }
 
     let backend = prompt_backend(config.mongo.mode.clone())?;
     match backend {
         BackendChoice::Embedded => {
-            let mut embedded = config.mongo.embedded.take().unwrap_or_else(default_embedded);
+            let mut embedded = config
+                .mongo
+                .embedded
+                .take()
+                .unwrap_or_else(default_embedded);
             let runtime_settings_path = prompt_path(
                 "RuntimeSettings.xml path",
-                embedded
-                    .runtime_settings_path
-                    .as_deref()
-                    .map(Path::new),
+                embedded.runtime_settings_path.as_deref().map(Path::new),
                 Some(Path::new(DEFAULT_RUNTIME_SETTINGS_PATH)),
                 true,
             )?;
@@ -97,28 +133,60 @@ pub fn run_onboarding(
             };
         }
         BackendChoice::ManagedMongo => {
-            let mut managed = config.mongo.managed.take().unwrap_or_else(default_managed_mongo);
-            let use_url = prompt_yes_no("Use a MongoDB URL connection string", managed.url.is_some(), false)?;
+            let mut managed = config
+                .mongo
+                .managed
+                .take()
+                .unwrap_or_else(default_managed_mongo);
+            let use_url = prompt_yes_no(
+                "Use a MongoDB URL connection string",
+                managed.url.is_some(),
+                false,
+            )?;
             if use_url {
-                managed.url = Some(prompt_text("MongoDB URL", managed.url.as_deref(), None, true)?);
+                managed.url = Some(prompt_text(
+                    "MongoDB URL",
+                    managed.url.as_deref(),
+                    None,
+                    true,
+                )?);
                 managed.host = None;
             } else {
                 managed.url = None;
-                managed.host = Some(prompt_text("Mongo host", managed.host.as_deref(), None, true)?);
+                managed.host = Some(prompt_text(
+                    "Mongo host",
+                    managed.host.as_deref(),
+                    None,
+                    true,
+                )?);
                 managed.port = prompt_u16("Mongo port", managed.port, 27017)?;
-                managed.auth_database = prompt_optional_text("Mongo auth database", managed.auth_database.as_deref())?;
+                managed.auth_database =
+                    prompt_optional_text("Mongo auth database", managed.auth_database.as_deref())?;
             }
             managed.username = prompt_optional_text("Mongo username", managed.username.as_deref())?;
-            managed.password = Some(prompt_secret("Mongo password", managed.password.as_deref(), "AYX_MONGO_MANAGED_PASSWORD")?);
+            managed.password = Some(prompt_secret(
+                "Mongo password",
+                managed.password.as_deref(),
+                "AYX_MONGO_MANAGED_PASSWORD",
+            )?);
             env_updates.insert(
                 "AYX_MONGO_MANAGED_PASSWORD".to_string(),
                 managed.password.clone().unwrap_or_default(),
             );
             managed.tls.enabled = prompt_yes_no("Enable TLS", managed.tls.enabled, true)?;
             if managed.tls.enabled {
-                managed.tls.ca_path = prompt_optional_path("Mongo TLS CA path", managed.tls.ca_path.as_deref().map(Path::new))?;
-                managed.tls.cert_path = prompt_optional_path("Mongo TLS cert path", managed.tls.cert_path.as_deref().map(Path::new))?;
-                managed.tls.key_path = prompt_optional_path("Mongo TLS key path", managed.tls.key_path.as_deref().map(Path::new))?;
+                managed.tls.ca_path = prompt_optional_path(
+                    "Mongo TLS CA path",
+                    managed.tls.ca_path.as_deref().map(Path::new),
+                )?;
+                managed.tls.cert_path = prompt_optional_path(
+                    "Mongo TLS cert path",
+                    managed.tls.cert_path.as_deref().map(Path::new),
+                )?;
+                managed.tls.key_path = prompt_optional_path(
+                    "Mongo TLS key path",
+                    managed.tls.key_path.as_deref().map(Path::new),
+                )?;
                 managed.tls.allow_invalid_hostnames = Some(prompt_yes_no(
                     "Allow invalid Mongo TLS hostnames",
                     managed.tls.allow_invalid_hostnames.unwrap_or(false),
@@ -167,14 +235,60 @@ pub fn run_onboarding(
     }))
 }
 
+pub fn write_workspace_template(
+    profile_path: &Path,
+    active_environment: &str,
+    source_environment: &str,
+    target_environment: &str,
+) -> Result<Value> {
+    let workspace = WorkspaceConfig {
+        workspace_name: "workspace".to_string(),
+        active_environment: active_environment.to_string(),
+        environments: HashMap::from([
+            (
+                source_environment.to_string(),
+                default_config_with_profile("dev"),
+            ),
+            (
+                target_environment.to_string(),
+                default_config_with_profile("prod"),
+            ),
+        ]),
+    };
+
+    if let Some(parent) = profile_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(profile_path, serde_yaml::to_string(&workspace)?)?;
+
+    Ok(json!({
+        "profile": profile_path.display().to_string(),
+            "saved": true,
+            "mode": "workspace-template",
+            "workspace": {
+                "workspace_name": workspace.workspace_name,
+                "active_environment": workspace.active_environment,
+                "environments": [source_environment, target_environment],
+            },
+            "notes": [
+                "workspace.yaml is the canonical multi-environment file",
+            "Use --environment dev or --environment prod to select the active environment for a run",
+        ],
+    }))
+}
+
 fn load_existing_config(profile_path: &Path, environment: Option<&str>) -> Result<Config> {
     ayx_core::profile::Config::load_from_path_with_environment(profile_path, environment)
         .map_err(|err| anyhow::anyhow!(err))
 }
 
 fn default_config() -> Config {
+    default_config_with_profile("local")
+}
+
+fn default_config_with_profile(profile_name: &str) -> Config {
     Config {
-        profile_name: "local".to_string(),
+        profile_name: profile_name.to_string(),
         mongo: MongoProfile {
             mode: MongoMode::Embedded,
             databases: MongoDatabases {
@@ -248,7 +362,11 @@ fn default_sqlserver() -> SqlServerProfile {
     }
 }
 
-fn default_sql_connection(database: &str, password_env: &str, controller: bool) -> SqlServerConnectionProfile {
+fn default_sql_connection(
+    database: &str,
+    password_env: &str,
+    controller: bool,
+) -> SqlServerConnectionProfile {
     SqlServerConnectionProfile {
         connection_string: None,
         host: Some("localhost".to_string()),
@@ -264,7 +382,10 @@ fn default_sql_connection(database: &str, password_env: &str, controller: bool) 
     }
 }
 
-fn update_or_create_one(existing: Option<AlteryxOneProfile>, account_email: String) -> AlteryxOneProfile {
+fn update_or_create_one(
+    existing: Option<AlteryxOneProfile>,
+    account_email: String,
+) -> AlteryxOneProfile {
     let mut one = existing.unwrap_or(AlteryxOneProfile {
         account_email: account_email.clone(),
         oauth_client_id: None,
@@ -287,7 +408,11 @@ fn prompt_backend(current: MongoMode) -> Result<BackendChoice> {
     };
     loop {
         let input = prompt_raw(&format!("Choose backend [{}]", default))?;
-        let choice = if input.trim().is_empty() { default } else { input.trim().parse::<u32>().unwrap_or(0) };
+        let choice = if input.trim().is_empty() {
+            default
+        } else {
+            input.trim().parse::<u32>().unwrap_or(0)
+        };
         match choice {
             1 => return Ok(BackendChoice::Embedded),
             2 => return Ok(BackendChoice::ManagedMongo),
@@ -312,17 +437,39 @@ fn prompt_sql_connection(
 ) -> Result<SqlServerConnectionProfile> {
     let mut conn = existing.unwrap_or_else(|| {
         default_sql_connection(
-            if use_driver { "AlteryxService" } else { "AlteryxServerUI" },
+            if use_driver {
+                "AlteryxService"
+            } else {
+                "AlteryxServerUI"
+            },
             env_key,
             use_driver,
         )
     });
     let connection_string_default = conn.connection_string.as_deref();
-    conn.host = Some(prompt_text(&format!("{label} SQL host"), conn.host.as_deref(), Some("localhost"), true)?);
-    conn.port = Some(prompt_u16(&format!("{label} SQL port"), conn.port.unwrap_or(1433), 1433)?);
-    conn.database = Some(prompt_text(&format!("{label} database"), conn.database.as_deref(), None, true)?);
+    conn.host = Some(prompt_text(
+        &format!("{label} SQL host"),
+        conn.host.as_deref(),
+        Some("localhost"),
+        true,
+    )?);
+    conn.port = Some(prompt_u16(
+        &format!("{label} SQL port"),
+        conn.port.unwrap_or(1433),
+        1433,
+    )?);
+    conn.database = Some(prompt_text(
+        &format!("{label} database"),
+        conn.database.as_deref(),
+        None,
+        true,
+    )?);
     conn.username = prompt_optional_text(&format!("{label} username"), conn.username.as_deref())?;
-    let secret = prompt_secret(&format!("{label} password"), conn.password.as_deref(), env_key)?;
+    let secret = prompt_secret(
+        &format!("{label} password"),
+        conn.password.as_deref(),
+        env_key,
+    )?;
     env_updates.insert(env_key.to_string(), secret.clone());
     conn.password = Some(secret);
     conn.password_env = Some(env_key.to_string());
@@ -331,7 +478,11 @@ fn prompt_sql_connection(
         conn.integrated_security.unwrap_or(!use_driver),
         true,
     )?);
-    conn.encrypt = Some(prompt_yes_no(&format!("{label} enable encryption"), conn.encrypt.unwrap_or(true), true)?);
+    conn.encrypt = Some(prompt_yes_no(
+        &format!("{label} enable encryption"),
+        conn.encrypt.unwrap_or(true),
+        true,
+    )?);
     conn.trust_server_certificate = Some(prompt_yes_no(
         &format!("{label} trust server certificate"),
         conn.trust_server_certificate.unwrap_or(false),
@@ -342,14 +493,25 @@ fn prompt_sql_connection(
         conn.multi_subnet_failover.unwrap_or(false),
         false,
     )?);
-    conn.connection_string = prompt_optional_text(&format!("{label} connection string"), connection_string_default)?;
-    if conn.password.as_ref().is_some_and(|password| password.trim().is_empty()) {
+    conn.connection_string = prompt_optional_text(
+        &format!("{label} connection string"),
+        connection_string_default,
+    )?;
+    if conn
+        .password
+        .as_ref()
+        .is_some_and(|password| password.trim().is_empty())
+    {
         return Err(anyhow::anyhow!("{label} password cannot be empty"));
     }
     Ok(conn)
 }
 
-fn write_config(path: &Path, config: &Config, env_updates: &BTreeMap<String, String>) -> Result<()> {
+fn write_config(
+    path: &Path,
+    config: &Config,
+    env_updates: &BTreeMap<String, String>,
+) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -377,7 +539,12 @@ fn read_env_map(path: &Path) -> Result<BTreeMap<String, String>> {
         }
         let mut parts = trimmed.splitn(2, '=');
         let key = parts.next().unwrap_or("").trim();
-        let value = parts.next().unwrap_or("").trim().trim_matches('"').trim_matches('\'');
+        let value = parts
+            .next()
+            .unwrap_or("")
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'');
         if !key.is_empty() {
             values.insert(key.to_string(), value.to_string());
         }
@@ -438,7 +605,11 @@ fn summarize_secret_sql_connection(conn: &SqlServerConnectionProfile) -> Value {
 }
 
 fn mask_if_present(value: &str) -> Option<&'static str> {
-    if value.trim().is_empty() { None } else { Some("stored") }
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some("stored")
+    }
 }
 
 fn prompt_optional_text(prompt: &str, default: Option<&str>) -> Result<Option<String>> {
@@ -468,20 +639,35 @@ fn prompt_secret(prompt: &str, current: Option<&str>, env_key: &str) -> Result<S
     }
 }
 
-fn prompt_path(prompt: &str, default: Option<&Path>, fallback: Option<&Path>, required: bool) -> Result<PathBuf> {
+fn prompt_path(
+    prompt: &str,
+    default: Option<&Path>,
+    fallback: Option<&Path>,
+    required: bool,
+) -> Result<PathBuf> {
     let default_text = default.or(fallback).map(|p| p.display().to_string());
     let input = prompt_text(prompt, default_text.as_deref(), None, required)?;
     Ok(PathBuf::from(input))
 }
 
 fn prompt_optional_path(prompt: &str, default: Option<&Path>) -> Result<Option<String>> {
-    let input = prompt_text(prompt, default.map(|p| p.display().to_string()).as_deref(), None, false)?;
+    let input = prompt_text(
+        prompt,
+        default.map(|p| p.display().to_string()).as_deref(),
+        None,
+        false,
+    )?;
     Ok((!input.trim().is_empty()).then_some(input))
 }
 
 fn prompt_u16(prompt: &str, current: u16, default: u16) -> Result<u16> {
     loop {
-        let input = prompt_text(prompt, Some(&current.to_string()), Some(&default.to_string()), true)?;
+        let input = prompt_text(
+            prompt,
+            Some(&current.to_string()),
+            Some(&default.to_string()),
+            true,
+        )?;
         match input.trim().parse::<u16>() {
             Ok(value) if value > 0 => return Ok(value),
             _ => println!("Enter a number between 1 and 65535."),
@@ -543,17 +729,25 @@ fn prompt_raw(prompt: &str) -> Result<String> {
     print!("{prompt}: ");
     io::stdout().flush().ok();
     let mut buf = String::new();
-    io::stdin().read_line(&mut buf).context("failed to read interactive input")?;
+    io::stdin()
+        .read_line(&mut buf)
+        .context("failed to read interactive input")?;
     Ok(buf)
 }
 
 fn validate_onboarded_config(config: &Config) -> Result<Value> {
     let mut missing = Vec::new();
     if let Some(sqlserver) = &config.sqlserver {
-        if let Err(err) = validate_connection_profile_for_onboarding("sqlserver.controller", sqlserver.controller.as_ref()) {
+        if let Err(err) = validate_connection_profile_for_onboarding(
+            "sqlserver.controller",
+            sqlserver.controller.as_ref(),
+        ) {
             missing.push(err.to_string());
         }
-        if let Err(err) = validate_connection_profile_for_onboarding("sqlserver.server_ui", sqlserver.server_ui.as_ref()) {
+        if let Err(err) = validate_connection_profile_for_onboarding(
+            "sqlserver.server_ui",
+            sqlserver.server_ui.as_ref(),
+        ) {
             missing.push(err.to_string());
         }
     } else {
@@ -565,7 +759,10 @@ fn validate_onboarded_config(config: &Config) -> Result<Value> {
             "missing": [],
         }))
     } else {
-        Err(anyhow::anyhow!("onboarding validation failed: {}", missing.join("; ")))
+        Err(anyhow::anyhow!(
+            "onboarding validation failed: {}",
+            missing.join("; ")
+        ))
     }
 }
 
@@ -583,7 +780,11 @@ fn validate_connection_profile_for_onboarding(
     if conn.password.as_deref().is_none_or(|v| v.trim().is_empty()) {
         return Err(anyhow::anyhow!("{field}.password is required"));
     }
-    if conn.password_env.as_deref().is_none_or(|v| v.trim().is_empty()) {
+    if conn
+        .password_env
+        .as_deref()
+        .is_none_or(|v| v.trim().is_empty())
+    {
         return Err(anyhow::anyhow!("{field}.password_env is required"));
     }
     Ok(())
@@ -654,7 +855,13 @@ mod tests {
     #[test]
     fn onboarding_validator_rejects_empty_sql_password() {
         let mut cfg = base_config();
-        cfg.sqlserver.as_mut().unwrap().controller.as_mut().unwrap().password = Some(String::new());
+        cfg.sqlserver
+            .as_mut()
+            .unwrap()
+            .controller
+            .as_mut()
+            .unwrap()
+            .password = Some(String::new());
         assert!(validate_onboarded_config(&cfg).is_err());
     }
 
@@ -662,5 +869,18 @@ mod tests {
     fn onboarding_validator_accepts_complete_sql_profile() {
         let cfg = base_config();
         assert!(validate_onboarded_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn workspace_template_writes_named_environments() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("workspace.yaml");
+        let detail = write_workspace_template(&path, "prod", "dev", "prod").unwrap();
+        assert_eq!(detail["mode"], "workspace-template");
+        let loaded = Config::load_from_path_with_environment(&path, Some("prod")).unwrap();
+        assert_eq!(loaded.profile_name, "prod");
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("workspace_name"));
+        assert!(content.contains("active_environment"));
     }
 }

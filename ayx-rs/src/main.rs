@@ -92,15 +92,19 @@ enum Command {
         #[command(subcommand)]
         command: Option<WorkflowCommand>,
     },
-    #[command(about = "Integration placeholder branch for future cross-product workflows")]
+    #[command(about = "Cross-environment tools for workspace.yaml source/target workflows")]
     Tools {
         #[command(subcommand)]
         command: Option<ToolsCommand>,
     },
-    #[command(about = "Interactive first-run setup for config.yaml with validation and secret reuse")]
+    #[command(
+        about = "Interactive first-run setup for config.yaml or workspace.yaml with validation and secret reuse"
+    )]
     Onboard {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        workspace: bool,
         #[arg(long)]
         non_interactive: bool,
     },
@@ -418,7 +422,9 @@ enum WorkflowCommand {
         #[arg(long)]
         validate: bool,
     },
-    #[command(about = "Read and export .yxdb data; use --csv for export and top-level --output json for machine-readable envelopes")]
+    #[command(
+        about = "Read and export .yxdb data; use --csv for export and top-level --output json for machine-readable envelopes"
+    )]
     Yxdb {
         #[arg(long)]
         input: PathBuf,
@@ -429,7 +435,56 @@ enum WorkflowCommand {
 
 #[derive(Subcommand, Debug)]
 enum ToolsCommand {
-    Status,
+    Workspace {
+        #[command(subcommand)]
+        command: Option<ToolsWorkspaceCommand>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ToolsWorkspaceCommand {
+    Init {
+        #[arg(long, default_value = "workspace.yaml")]
+        output: PathBuf,
+        #[arg(long, default_value = "dev")]
+        active_environment: String,
+        #[arg(long, default_value = "dev")]
+        source_environment: String,
+        #[arg(long, default_value = "prod")]
+        target_environment: String,
+    },
+    Resolve {
+        #[arg(long, default_value = "workspace.yaml")]
+        workspace: PathBuf,
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        target: String,
+    },
+    Compare {
+        #[arg(long, default_value = "workspace.yaml")]
+        workspace: PathBuf,
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        target: String,
+    },
+    MigrateWorkflows {
+        #[arg(long, default_value = "workspace.yaml")]
+        workspace: PathBuf,
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        target: String,
+    },
+    CheckDcmConnections {
+        #[arg(long, default_value = "workspace.yaml")]
+        workspace: PathBuf,
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        target: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1689,6 +1744,117 @@ fn load_payload(path: &Path) -> Result<Value> {
     Ok(value)
 }
 
+fn tools_workspace_init_envelope(
+    output: &Path,
+    active_environment: &str,
+    source_environment: &str,
+    target_environment: &str,
+) -> Result<Envelope> {
+    onboard::write_workspace_template(
+        output,
+        active_environment,
+        source_environment,
+        target_environment,
+    )?;
+    Ok(Envelope::ok_with_data(
+        "workspace template written",
+        json!({
+            "workspace": output.display().to_string(),
+            "active_environment": active_environment,
+            "environments": [source_environment, target_environment],
+            "notes": [
+                "workspace.yaml is the canonical multi-environment file",
+                "Use --environment to override the active environment for a run",
+            ],
+        }),
+    ))
+}
+
+fn tools_workspace_resolve_envelope(
+    workspace: &Path,
+    source: &str,
+    target: &str,
+) -> Result<Envelope> {
+    let source_config = Config::load_from_path_with_environment(workspace, Some(source))?;
+    let target_config = Config::load_from_path_with_environment(workspace, Some(target))?;
+    Ok(Envelope::ok_with_data(
+        "workspace environments resolved",
+        json!({
+            "workspace": workspace.display().to_string(),
+            "source": {
+                "environment": source,
+                "profile": source_config.profile_name,
+            },
+            "target": {
+                "environment": target,
+                "profile": target_config.profile_name,
+            },
+        }),
+    ))
+}
+
+fn tools_workspace_compare_envelope(
+    workspace: &Path,
+    source: &str,
+    target: &str,
+) -> Result<Envelope> {
+    let source_config = Config::load_from_path_with_environment(workspace, Some(source))?;
+    let target_config = Config::load_from_path_with_environment(workspace, Some(target))?;
+    Ok(Envelope::ok_with_data(
+        "workspace comparison scaffold",
+        json!({
+            "workspace": workspace.display().to_string(),
+            "source": summarize_profile(&source_config),
+            "target": summarize_profile(&target_config),
+            "notes": [
+                "This is the workspace-aware scaffold for future ayx tools operations",
+                "Use source and target explicitly for cross-environment workflows",
+            ],
+        }),
+    ))
+}
+
+fn tools_workspace_migrate_envelope(
+    workspace: &Path,
+    source: &str,
+    target: &str,
+    operation: &str,
+) -> Result<Envelope> {
+    let source_config = Config::load_from_path_with_environment(workspace, Some(source))?;
+    let target_config = Config::load_from_path_with_environment(workspace, Some(target))?;
+    Ok(Envelope::ok_with_data(
+        &format!("workspace {operation} scaffold"),
+        json!({
+            "workspace": workspace.display().to_string(),
+            "operation": operation,
+            "source": summarize_profile(&source_config),
+            "target": summarize_profile(&target_config),
+            "notes": [
+                "The command currently resolves source and target environments explicitly",
+                "This is the right hook for future cross-environment migration logic",
+            ],
+        }),
+    ))
+}
+
+fn summarize_profile(config: &Config) -> Value {
+    json!({
+        "profile_name": config.profile_name,
+        "server": config.server.as_ref().map(|server| json!({
+            "webapi_url": server.webapi_url,
+            "verify_tls": server.verify_tls(),
+        })),
+        "sqlserver": config.sqlserver.as_ref().map(|sql| json!({
+            "controller": sql.controller.as_ref().map(|conn| conn.database.clone()),
+            "server_ui": sql.server_ui.as_ref().map(|conn| conn.database.clone()),
+        })),
+        "mongo_mode": match config.mongo.mode {
+            ayx_core::profile::MongoMode::Embedded => "embedded",
+            ayx_core::profile::MongoMode::Managed => "managed",
+        },
+    })
+}
+
 fn server_profile(config: &Config) -> Result<&ServerProfile> {
     config.server.as_ref().ok_or_else(|| {
         anyhow!(
@@ -1715,7 +1881,10 @@ fn parse_key_value_params(items: &[String]) -> Result<HashMap<String, String>> {
 
 fn execute(cli: Cli) -> Result<Envelope> {
     let load_profile = |path: &Path| -> Result<Config> {
-        Ok(Config::load_from_path_with_environment(path, cli.environment.as_deref())?)
+        Ok(Config::load_from_path_with_environment(
+            path,
+            cli.environment.as_deref(),
+        )?)
     };
     let envelope = match cli.command {
         Command::Mongo { command } => match command {
@@ -2872,23 +3041,53 @@ fn execute(cli: Cli) -> Result<Envelope> {
             }
         },
         Command::Tools { command } => match command {
-            None => Envelope::ok("tools placeholder branch"),
-            Some(ToolsCommand::Status) => Envelope::ok_with_data(
-                "tools placeholder status",
-                json!({
-                    "status": "placeholder",
-                    "notes": [
-                        "Reserved for future cross-product workflows",
-                        "Likely to host integration and orchestration helpers"
-                    ]
-                }),
-            ),
+            None => Envelope::ok("tools workspace commands available: init, resolve, compare, migrate-workflows, check-dcm-connections"),
+            Some(ToolsCommand::Workspace { command }) => match command {
+                None => Envelope::ok("tools workspace commands available: init, resolve, compare, migrate-workflows, check-dcm-connections"),
+                Some(ToolsWorkspaceCommand::Init {
+                    output,
+                    active_environment,
+                    source_environment,
+                    target_environment,
+                }) => tools_workspace_init_envelope(
+                    &output,
+                    &active_environment,
+                    &source_environment,
+                    &target_environment,
+                )?,
+                Some(ToolsWorkspaceCommand::Resolve {
+                    workspace,
+                    source,
+                    target,
+                }) => tools_workspace_resolve_envelope(&workspace, &source, &target)?,
+                Some(ToolsWorkspaceCommand::Compare {
+                    workspace,
+                    source,
+                    target,
+                }) => tools_workspace_compare_envelope(&workspace, &source, &target)?,
+                Some(ToolsWorkspaceCommand::MigrateWorkflows {
+                    workspace,
+                    source,
+                    target,
+                }) => tools_workspace_migrate_envelope(&workspace, &source, &target, "workflows")?,
+                Some(ToolsWorkspaceCommand::CheckDcmConnections {
+                    workspace,
+                    source,
+                    target,
+                }) => tools_workspace_migrate_envelope(&workspace, &source, &target, "dcm-connections")?,
+            },
         },
         Command::Onboard {
             profile,
+            workspace,
             non_interactive,
         } => {
-            let detail = onboard::run_onboarding(&profile, cli.environment.as_deref(), non_interactive)?;
+            let detail = onboard::run_onboarding(
+                &profile,
+                cli.environment.as_deref(),
+                non_interactive,
+                workspace,
+            )?;
             Envelope::ok_with_data("onboarding completed", detail)
         },
         Command::One { command } => match command {
@@ -4056,7 +4255,7 @@ fn main() -> Result<()> {
 
 fn print_help() {
     println!(
-    "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help           Print this help message\n    --output         Output format: text or json\n    --environment    Active environment name when loading a workspace file\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server status, prechecks, connection helpers, and migration planning\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb\n    tools          Integration placeholder branch for future cross-product workflows\n    license        Licensing portal branch and API surface\n    onboard        Interactive first-run setup for config.yaml\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
+        "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help           Print this help message\n    --output         Output format: text or json\n    --environment    Active environment name when loading a workspace file\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server status, prechecks, connection helpers, and migration planning\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb\n    tools          Cross-environment tools for workspace.yaml source/target workflows\n    license        Licensing portal branch and API surface\n    onboard        Interactive first-run setup for config.yaml or workspace.yaml\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
     );
 }
 
