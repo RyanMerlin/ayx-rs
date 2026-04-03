@@ -9,6 +9,7 @@ use roxmltree::Document;
 use serde::Serialize;
 use serde_json::{json, Value};
 use serde_yaml::Value as YamlValue;
+use snap::raw::Decoder as SnapDecoder;
 use walkdir::WalkDir;
 use zip::read::ZipArchive;
 use zip::write::FileOptions;
@@ -70,6 +71,82 @@ impl YxdbValue {
 struct ByteCursor {
     data: Vec<u8>,
     pos: usize,
+}
+
+struct SliceCursor<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> SliceCursor<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, pos: 0 }
+    }
+
+    fn read_u8(&mut self) -> Result<u8> {
+        if self.pos + 1 > self.data.len() {
+            bail!("unexpected end of YXDB data");
+        }
+        let v = self.data[self.pos];
+        self.pos += 1;
+        Ok(v)
+    }
+
+    fn read_u16_le(&mut self) -> Result<u16> {
+        if self.pos + 2 > self.data.len() {
+            bail!("unexpected end of YXDB data");
+        }
+        let v = u16::from_le_bytes(self.data[self.pos..self.pos + 2].try_into().unwrap());
+        self.pos += 2;
+        Ok(v)
+    }
+
+    fn read_u32_le(&mut self) -> Result<u32> {
+        if self.pos + 4 > self.data.len() {
+            bail!("unexpected end of YXDB data");
+        }
+        let v = u32::from_le_bytes(self.data[self.pos..self.pos + 4].try_into().unwrap());
+        self.pos += 4;
+        Ok(v)
+    }
+
+    fn read_i32_le(&mut self) -> Result<i32> {
+        Ok(self.read_u32_le()? as i32)
+    }
+
+    fn read_u64_le(&mut self) -> Result<u64> {
+        if self.pos + 8 > self.data.len() {
+            bail!("unexpected end of YXDB data");
+        }
+        let v = u64::from_le_bytes(self.data[self.pos..self.pos + 8].try_into().unwrap());
+        self.pos += 8;
+        Ok(v)
+    }
+
+    fn read_i64_le(&mut self) -> Result<i64> {
+        Ok(self.read_u64_le()? as i64)
+    }
+
+    fn read_exact(&mut self, len: usize) -> Result<&'a [u8]> {
+        if self.pos + len > self.data.len() {
+            bail!("unexpected end of YXDB data");
+        }
+        let start = self.pos;
+        self.pos += len;
+        Ok(&self.data[start..start + len])
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum YxdbFlavor {
+    E1,
+    E2,
+}
+
+#[derive(Debug, Clone)]
+struct E2PacketIndexEntry {
+    file_offset: u64,
+    record_count: u32,
 }
 
 impl ByteCursor {
@@ -187,6 +264,203 @@ fn parse_meta_info(xml: &str) -> Result<Vec<MetaInfoField>> {
     Ok(fields)
 }
 
+fn parse_e2_metadata(xml: &str) -> Result<Vec<MetaInfoField>> {
+    parse_meta_info(xml)
+}
+
+fn detect_yxdb_flavor(header: &[u8; 512]) -> Result<YxdbFlavor> {
+    let desc = String::from_utf8_lossy(&header[..64]);
+    let file_id = u32::from_le_bytes(header[64..68].try_into().unwrap());
+    if desc.starts_with("Alteryx e2 Database file") || file_id == 0x0044_0208 {
+        return Ok(YxdbFlavor::E2);
+    }
+    if desc.starts_with("Alteryx Database File") {
+        return Ok(YxdbFlavor::E1);
+    }
+    bail!("file is not a valid YXDB format");
+}
+
+fn parse_e2_header(file: &[u8]) -> Result<(usize, Vec<MetaInfoField>)> {
+    if file.len() < 100 {
+        bail!("E2 YXDB file too small");
+    }
+    let meta_len = u32::from_le_bytes(file[96..100].try_into().unwrap()) as usize;
+    let meta_start = 100usize;
+    if meta_start + meta_len > file.len() {
+        bail!("E2 YXDB metadata extends beyond file");
+    }
+    let xml = std::str::from_utf8(&file[meta_start..meta_start + meta_len])
+        .context("E2 YXDB metadata is not utf-8")?;
+    let fields = parse_e2_metadata(xml)?;
+    Ok((meta_len, fields))
+}
+
+fn parse_e2_footer(file: &[u8]) -> Result<(i64, Vec<E2PacketIndexEntry>, u64)> {
+    if file.len() < 29 {
+        bail!("E2 YXDB file too small");
+    }
+    let magic = u32::from_le_bytes(file[file.len() - 4..].try_into().unwrap());
+    if magic != 0x3245_5859 {
+        bail!("E2 YXDB footer magic not found");
+    }
+    let packet_count = i64::from_le_bytes(file[file.len() - 20..file.len() - 12].try_into().unwrap());
+    let record_count = i64::from_le_bytes(file[file.len() - 12..file.len() - 4].try_into().unwrap());
+    let footer_len = 29usize + 12usize * packet_count as usize;
+    if file.len() < footer_len {
+        bail!("E2 YXDB footer truncated");
+    }
+    let footer_start = file.len() - footer_len;
+    let mut cur = SliceCursor::new(&file[footer_start..]);
+    let block_type = cur.read_u8()?;
+    if block_type != 0 {
+        bail!("E2 YXDB footer block type mismatch");
+    }
+    let _spatial_idx_pos = cur.read_i64_le()?;
+    let mut packets = Vec::with_capacity(packet_count as usize);
+    for _ in 0..packet_count {
+        let file_offset = cur.read_i64_le()? as u64;
+        let record_count = cur.read_i32_le()? as u32;
+        packets.push(E2PacketIndexEntry {
+            file_offset,
+            record_count,
+        });
+    }
+    let counted_packet_count = cur.read_i64_le()?;
+    let counted_record_count = cur.read_i64_le()?;
+    if counted_packet_count != packet_count || counted_record_count != record_count {
+        bail!("E2 YXDB footer counts mismatch");
+    }
+    Ok((record_count, packets, footer_start as u64))
+}
+
+fn snappy_decompress(bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut decoder = SnapDecoder::new();
+    decoder
+        .decompress_vec(bytes)
+        .map_err(|e| anyhow::anyhow!("snappy decode failed: {e}"))
+}
+
+fn read_e2_packet(file: &[u8], entry: &E2PacketIndexEntry) -> Result<Vec<u8>> {
+    let start = entry.file_offset as usize;
+    if start + 5 > file.len() {
+        bail!("E2 YXDB packet offset out of range");
+    }
+    let mut cur = SliceCursor::new(&file[start..]);
+    let block_type = cur.read_u8()?;
+    if block_type != 2 {
+        bail!("E2 YXDB packet block type mismatch");
+    }
+    let compressed_size = cur.read_u32_le()? as usize;
+    let payload = cur.read_exact(compressed_size)?;
+    if payload.is_empty() {
+        bail!("E2 YXDB packet payload is empty");
+    }
+    match payload[0] {
+        0 => Ok(payload[1..].to_vec()),
+        10 => snappy_decompress(&payload[1..]),
+        11 => bail!("unsupported E2 YXDB packet compression type 11"),
+        other => bail!("unsupported E2 YXDB packet compression type {other}"),
+    }
+}
+
+#[derive(Debug)]
+struct E2RecordPacket<'a> {
+    data: &'a [u8],
+    record_count: u32,
+}
+
+fn parse_e2_record_packet(buf: &[u8]) -> Result<E2RecordPacket<'_>> {
+    if buf.len() < 8 {
+        bail!("E2 YXDB record packet too small");
+    }
+    let word0 = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+    let data_len = (word0 & 0x00ff_ffff) as usize;
+    let record_count = u32::from_le_bytes(buf[4..8].try_into().unwrap());
+    if buf.len() < 8 + data_len {
+        bail!("E2 YXDB record packet truncated");
+    }
+    Ok(E2RecordPacket {
+        data: &buf[8..8 + data_len],
+        record_count,
+    })
+}
+
+fn read_e2_field(cur: &mut SliceCursor<'_>) -> Result<YxdbValue> {
+    let tag = cur.read_u8()?;
+    if tag & 0x80 != 0 {
+        let len = (tag & 0x7f) as usize;
+        let bytes = cur.read_exact(len)?;
+        return Ok(YxdbValue::String(String::from_utf8_lossy(bytes).to_string()));
+    }
+    let base = tag & 0x3f;
+    if tag & 0x40 != 0 {
+        return Ok(YxdbValue::Null);
+    }
+    match base {
+        1 => {
+            let len = cur.read_u16_le()? as usize;
+            let bytes = cur.read_exact(len)?;
+            Ok(YxdbValue::String(String::from_utf8_lossy(bytes).to_string()))
+        }
+        2 | 3 | 4 => {
+            let len = cur.read_u16_le()? as usize;
+            let bytes = cur.read_exact(len)?.to_vec();
+            Ok(YxdbValue::Bytes(bytes))
+        }
+        5 => Ok(YxdbValue::Bool(cur.read_u8()? != 0)),
+        6 => Ok(YxdbValue::I64(0)),
+        7 => Ok(YxdbValue::I64(cur.read_u8()? as i64)),
+        8 => Ok(YxdbValue::I64(cur.read_u16_le()? as i16 as i64)),
+        9 => Ok(YxdbValue::I64(cur.read_i32_le()? as i64)),
+        10 => Ok(YxdbValue::I64(cur.read_i64_le()?)),
+        11 => Ok(YxdbValue::F64(f32::from_le_bytes(
+            cur.read_exact(4)?.try_into().unwrap(),
+        ) as f64)),
+        12 => Ok(YxdbValue::F64(f64::from_le_bytes(
+            cur.read_exact(8)?.try_into().unwrap(),
+        ))),
+        13 => Ok(YxdbValue::Bytes(cur.read_exact(4)?.to_vec())),
+        14 => Ok(YxdbValue::Bytes(cur.read_exact(8)?.to_vec())),
+        15 => Ok(YxdbValue::Bytes(cur.read_exact(4)?.to_vec())),
+        17 | 18 | 19 | 25 | 27 => {
+            let _offset = cur.read_u64_le()?;
+            Ok(YxdbValue::Null)
+        }
+        20 => Ok(YxdbValue::Bool(false)),
+        21 => Ok(YxdbValue::Bool(true)),
+        22 => Ok(YxdbValue::Bytes(cur.read_exact(8)?.to_vec())),
+        23 => Ok(YxdbValue::Bytes(cur.read_exact(4)?.to_vec())),
+        24 | 26 => {
+            let len = cur.read_u16_le()? as usize;
+            let bytes = cur.read_exact(len)?.to_vec();
+            Ok(YxdbValue::Bytes(bytes))
+        }
+        other => bail!("unsupported E2 raw field type {other}"),
+    }
+}
+
+fn read_e2_rows(fields: &[MetaInfoField], file: &[u8], packets: &[E2PacketIndexEntry]) -> Result<Vec<Value>> {
+    let mut rows = Vec::new();
+    for entry in packets.iter() {
+        let packet = read_e2_packet(file, entry)?;
+        let rp = parse_e2_record_packet(&packet)?;
+        if rp.record_count != entry.record_count {
+            bail!("E2 YXDB packet record count mismatch");
+        }
+        for _ in 0..entry.record_count as usize {
+            let mut record_cur = SliceCursor::new(rp.data);
+            let _record_header = record_cur.read_u32_le()?;
+            let mut row = serde_json::Map::new();
+            for field in fields.iter() {
+                let value = read_e2_field(&mut record_cur)?;
+                row.insert(field.name.clone(), value.to_json());
+            }
+            rows.push(Value::Object(row));
+        }
+    }
+    Ok(rows)
+}
+
 fn read_lzf_block(cursor: &mut ByteCursor) -> Result<Vec<u8>> {
     let mut block_len = cursor.read_u32_le()? as usize;
     if block_len & 0x8000_0000 != 0 {
@@ -264,47 +538,6 @@ fn read_record_stream(cursor: &mut ByteCursor) -> Result<Vec<u8>> {
         data.extend_from_slice(&block);
     }
     Ok(data)
-}
-
-fn find_ascii_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || haystack.len() < needle.len() {
-        return None;
-    }
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
-fn parse_amp_meta_and_records(
-    header: &[u8; 512],
-    file: &mut fs::File,
-    meta_len: usize,
-) -> Result<(Vec<MetaInfoField>, Vec<u8>)> {
-    let mut rest = Vec::new();
-    file.read_to_end(&mut rest)
-        .context("failed to read AMP YXDB payload")?;
-    let meta_start = 100usize;
-    let header_tail = &header[meta_start..];
-    if meta_len < header_tail.len() {
-        let meta_bytes = &header_tail[..meta_len];
-        let xml = String::from_utf8_lossy(meta_bytes).to_string();
-        let _close = find_ascii_bytes(xml.as_bytes(), b"</RecordInfo>")
-            .ok_or_else(|| anyhow::anyhow!("AMP YXDB metadata end tag not found"))?;
-        let fields = parse_meta_info(&xml)?;
-        return Ok((fields, rest));
-    }
-    if rest.len() + header_tail.len() < meta_len {
-        bail!("AMP YXDB payload too small");
-    }
-    let mut meta_bytes = Vec::with_capacity(meta_len);
-    meta_bytes.extend_from_slice(header_tail);
-    let remaining = meta_len - header_tail.len();
-    meta_bytes.extend_from_slice(&rest[..remaining]);
-    let xml = String::from_utf8_lossy(&meta_bytes).to_string();
-    let _close = find_ascii_bytes(xml.as_bytes(), b"</RecordInfo>")
-        .ok_or_else(|| anyhow::anyhow!("AMP YXDB metadata end tag not found"))?;
-    let fields = parse_meta_info(&xml)?;
-    Ok((fields, rest[remaining..].to_vec()))
 }
 
 fn parse_bool(value: u8) -> Option<bool> {
@@ -599,18 +832,25 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
     file.read_exact(&mut header)
         .with_context(|| format!("failed to read YXDB header '{}'", path.display()))?;
 
-    let header_text = String::from_utf8_lossy(&header[..64]).to_string();
-    let is_amp = header_text.starts_with("Alteryx e2 Database file");
-    if !header_text.starts_with("Alteryx Database File") && !is_amp {
-        bail!("file is not a valid YXDB format");
-    }
+    let flavor = detect_yxdb_flavor(&header)?;
+    let mut rows = Vec::new();
+    let fields: Vec<MetaInfoField>;
 
-    let (fields, record_bytes, num_records) = if is_amp {
-        let meta_len = u32::from_le_bytes(header[96..100].try_into().unwrap()) as usize;
-        let (fields, record_bytes) = parse_amp_meta_and_records(&header, &mut file, meta_len)?;
-        let inferred = record_bytes.len();
-        let rows_hint = inferred; // fall back to streaming termination
-        (fields, record_bytes, rows_hint)
+    if flavor == YxdbFlavor::E2 {
+        let mut rest = Vec::new();
+        file.read_to_end(&mut rest)
+            .with_context(|| format!("failed to read YXDB body '{}'", path.display()))?;
+        let mut full = header.to_vec();
+        full.extend_from_slice(&rest);
+        let (meta_len, parsed_fields) = parse_e2_header(&full)?;
+        fields = parsed_fields;
+        let record_start = 100usize + meta_len;
+        let (footer_record_count, packets, footer_start) = parse_e2_footer(&full)?;
+        let _ = footer_record_count;
+        if record_start > footer_start as usize {
+            bail!("E2 YXDB metadata overlaps footer");
+        }
+        rows = read_e2_rows(&fields, &full, &packets)?;
     } else {
         let meta_size = u32::from_le_bytes(header[80..84].try_into().unwrap()) as usize;
         let num_records = u32::from_le_bytes(header[104..108].try_into().unwrap()) as usize;
@@ -635,7 +875,7 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
                 .collect::<Vec<_>>(),
         );
         let record_block_index_pos = u64::from_le_bytes(header[96..104].try_into().unwrap());
-        let fields = parse_meta_info(&meta_xml)?;
+        fields = parse_meta_info(&meta_xml)?;
         let record_data_end = record_block_index_pos;
         let record_data_start = file
             .stream_position()
@@ -647,83 +887,36 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
         let mut rest = vec![0u8; record_data_len];
         file.read_exact(&mut rest)
             .with_context(|| format!("failed to read YXDB records '{}'", path.display()))?;
-        (fields, rest, num_records)
-    };
-    let fixed_size = fields.iter().fold(0usize, |acc, field| {
-        acc + match field.data_type.as_str() {
-            "Int16" => 3,
-            "Int32" => 5,
-            "Int64" => 9,
-            "Float" => 5,
-            "Double" => 9,
-            "FixedDecimal" => field.size + 1,
-            "String" => field.size + 1,
-            "WString" => field.size * 2 + 1,
-            "V_String" | "V_WString" => 4,
-            "Date" => 11,
-            "DateTime" => 20,
-            "Bool" => 1,
-            "Byte" => 2,
-            "Blob" | "SpatialObj" => 4,
-            other => {
-                panic!("unsupported YXDB field type {}", other)
-            }
-        }
-    });
-    let has_var = fields.iter().any(|field| {
-        matches!(
-            field.data_type.as_str(),
-            "V_String" | "V_WString" | "Blob" | "SpatialObj"
-        )
-    });
-
-    let mut cursor = ByteCursor::new(record_bytes);
-    let stream = if is_amp {
-        decode_lzf(&cursor.data)?
-    } else {
-        read_record_stream(&mut cursor)?
-    };
-    let mut record_cursor = ByteCursor::new(stream);
-
-    let mut rows = Vec::new();
-    if is_amp {
-        loop {
-            if record_cursor.pos >= record_cursor.data.len() {
-                break;
-            }
-            let record_len = if has_var {
-                let fixed_and_len = fixed_size + 4;
-                if record_cursor.pos + fixed_and_len > record_cursor.data.len() {
-                    break;
-                }
-                let prefix = record_cursor.read_exact(fixed_and_len)?.to_vec();
-                let var_len =
-                    u32::from_le_bytes(prefix[fixed_size..fixed_size + 4].try_into().unwrap())
-                        as usize;
-                if record_cursor.pos + var_len > record_cursor.data.len() {
-                    break;
-                }
-                let var_bytes = record_cursor.read_exact(var_len)?.to_vec();
-                let mut record = prefix;
-                record.extend_from_slice(&var_bytes);
-                record
-            } else {
-                if record_cursor.pos + fixed_size > record_cursor.data.len() {
-                    break;
-                }
-                record_cursor.read_exact(fixed_size)?.to_vec()
-            };
-            let parsed = read_fixed_record(&fields, &record_len)?;
-            let mut row = serde_json::Map::new();
-            for (name, value) in parsed {
-                row.insert(name, value.to_json());
-            }
-            rows.push(Value::Object(row));
-        }
-    } else {
+        let mut cursor = ByteCursor::new(rest);
+        let stream = read_record_stream(&mut cursor)?;
+        let mut record_cursor = ByteCursor::new(stream);
         rows.reserve(num_records);
         for _ in 0..num_records {
-            let record_len = if has_var {
+            let record_len = if fields.iter().any(|field| {
+                matches!(
+                    field.data_type.as_str(),
+                    "V_String" | "V_WString" | "Blob" | "SpatialObj"
+                )
+            }) {
+                let fixed_size = fields.iter().fold(0usize, |acc, field| {
+                    acc + match field.data_type.as_str() {
+                        "Int16" => 3,
+                        "Int32" => 5,
+                        "Int64" => 9,
+                        "Float" => 5,
+                        "Double" => 9,
+                        "FixedDecimal" => field.size + 1,
+                        "String" => field.size + 1,
+                        "WString" => field.size * 2 + 1,
+                        "V_String" | "V_WString" => 4,
+                        "Date" => 11,
+                        "DateTime" => 20,
+                        "Bool" => 1,
+                        "Byte" => 2,
+                        "Blob" | "SpatialObj" => 4,
+                        other => panic!("unsupported YXDB field type {}", other),
+                    }
+                });
                 let fixed_and_len = fixed_size + 4;
                 let prefix = record_cursor.read_exact(fixed_and_len)?.to_vec();
                 let var_len =
@@ -734,6 +927,25 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
                 record.extend_from_slice(&var_bytes);
                 record
             } else {
+                let fixed_size = fields.iter().fold(0usize, |acc, field| {
+                    acc + match field.data_type.as_str() {
+                        "Int16" => 3,
+                        "Int32" => 5,
+                        "Int64" => 9,
+                        "Float" => 5,
+                        "Double" => 9,
+                        "FixedDecimal" => field.size + 1,
+                        "String" => field.size + 1,
+                        "WString" => field.size * 2 + 1,
+                        "V_String" | "V_WString" => 4,
+                        "Date" => 11,
+                        "DateTime" => 20,
+                        "Bool" => 1,
+                        "Byte" => 2,
+                        "Blob" | "SpatialObj" => 4,
+                        other => panic!("unsupported YXDB field type {}", other),
+                    }
+                });
                 record_cursor.read_exact(fixed_size)?.to_vec()
             };
             let parsed = read_fixed_record(&fields, &record_len)?;
@@ -1473,6 +1685,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use snap::raw::Encoder as SnapEncoder;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
     fn temp_path(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -1485,6 +1700,51 @@ mod tests {
             nanos,
             name
         ))
+    }
+
+    fn e2_test_file() -> Vec<u8> {
+        let meta = r#"<MetaInfo><RecordInfo><Field name="name" type="String" size="0"/><Field name="age" type="Int32" size="0"/><Field name="active" type="Bool" size="0"/></RecordInfo></MetaInfo>"#;
+        let mut header = vec![0u8; 512];
+        let desc = b"Alteryx e2 Database file";
+        header[..desc.len()].copy_from_slice(desc);
+        header[64..68].copy_from_slice(&0x0044_0208u32.to_le_bytes());
+        header[68] = 1;
+        header[69..73].copy_from_slice(&(4u32 * 1024 * 1024).to_le_bytes());
+        header[96..100].copy_from_slice(&(meta.len() as u32).to_le_bytes());
+        header[100..100 + meta.len()].copy_from_slice(meta.as_bytes());
+
+        let mut record = Vec::new();
+        record.extend_from_slice(&0u32.to_le_bytes());
+        record.extend_from_slice(&1u32.to_le_bytes());
+        record.push(0x85);
+        record.extend_from_slice(b"Alice");
+        record.push(0x09);
+        record.extend_from_slice(&42i32.to_le_bytes());
+        record.push(0x15);
+        let data_len = record.len() - 8;
+        record[0..4].copy_from_slice(&((data_len as u32) & 0x00ff_ffff).to_le_bytes());
+
+        let mut encoder = SnapEncoder::new();
+        let compressed = encoder.compress_vec(&record).unwrap();
+        let mut packet = Vec::new();
+        packet.push(2);
+        packet.extend_from_slice(&((compressed.len() + 1) as u32).to_le_bytes());
+        packet.push(10);
+        packet.extend_from_slice(&compressed);
+
+        let packet_offset = header.len() as u64;
+        let mut file = header;
+        file.extend_from_slice(&packet);
+        let mut footer = Vec::new();
+        footer.push(0);
+        footer.extend_from_slice(&0i64.to_le_bytes());
+        footer.extend_from_slice(&packet_offset.to_le_bytes());
+        footer.extend_from_slice(&1i32.to_le_bytes());
+        footer.extend_from_slice(&1i64.to_le_bytes());
+        footer.extend_from_slice(&1i64.to_le_bytes());
+        footer.extend_from_slice(&0x3245_5859u32.to_le_bytes());
+        file.extend_from_slice(&footer);
+        file
     }
 
     #[test]
@@ -1511,6 +1771,19 @@ mod tests {
         assert!(text.contains("xyz"));
         let _ = fs::remove_file(&input);
         let _ = fs::remove_file(&output);
+    }
+
+    #[test]
+    fn parse_e2_synthetic_round_trip() {
+        let bytes = e2_test_file();
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(&bytes).unwrap();
+        let out = tmp.path().with_extension("csv");
+        let result = read_yxdb(tmp.path(), Some(&out)).unwrap();
+        assert_eq!(result["field_count"].as_u64().unwrap(), 3);
+        assert_eq!(result["row_count"].as_u64().unwrap(), 1);
+        let csv = std::fs::read_to_string(&out).unwrap();
+        assert_eq!(csv.lines().count(), 2);
     }
 
     #[test]
