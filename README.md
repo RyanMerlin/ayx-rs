@@ -55,6 +55,8 @@ ayx onboard --profile config.yaml
 The onboarding flow reuses existing values on later runs, masks stored secrets in its summary, and auto-discovers embedded Server runtime settings when `RuntimeSettings.xml` is available.
 For automation or agents, add `--non-interactive` to validate an existing profile without prompting.
 
+For multi-environment setups, keep one file per environment or use a workspace file with named environments and select the active one with `--environment <name>`.
+
 3. Run a first quick query:
 
 ```powershell
@@ -91,9 +93,10 @@ ayx mongo inventory --profile config.yaml --output json
 - `workflow` for local `.yxmd`, `.yxmc`, `.yxzp`, and `.yxdb` package/XML tooling
   - `workflow scan --rules docs/workflow-recurse.example.yaml` to preflight a migration
   - `workflow recurse --rules docs/workflow-recurse.example.yaml` for recursive migrations
-- `workflow yxdb --input <file> [--csv <path>]` to inspect and export YXDB data
-- `workflow yxdb --input <file> --csv <path> --output json` to export CSV and return a structured JSON envelope
+  - `workflow yxdb --input <file> [--csv <path>]` to inspect and export YXDB data
+  - `workflow yxdb --input <file> --csv <path> --output json` to export CSV and return a structured JSON envelope
   - `workflow publish` to hand a repackaged workflow back to the Server API
+- `--environment <name>` to pick the active environment from a workspace file when multiple named environments are present
 - `tools` as a placeholder branch for future integration and orchestration workflows
 - `license` for the Licensing portal and API branch
 - `one` for the Alteryx One platform branch
@@ -115,6 +118,7 @@ The tool returns a consistent envelope model so humans and agents can parse succ
 ## Configuration
 
 `ayx` loads `config.yaml` by default.
+If the file is a workspace, it should contain `workspace_name`, `active_environment`, and an `environments` map of named `Config` entries. Use `--environment <name>` to override the active environment for a single run.
 
 Minimum expectations:
 - `profile_name`

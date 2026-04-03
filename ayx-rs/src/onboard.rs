@@ -13,8 +13,12 @@ use ayx_core::profile::{
 };
 use ayx_server::util::runtime_settings_summary;
 
-pub fn run_onboarding(profile_path: &Path, non_interactive: bool) -> Result<Value> {
-    let existing = load_existing_config(profile_path).ok();
+pub fn run_onboarding(
+    profile_path: &Path,
+    environment: Option<&str>,
+    non_interactive: bool,
+) -> Result<Value> {
+    let existing = load_existing_config(profile_path, environment).ok();
     let mut config = existing.unwrap_or_else(default_config);
     let mut env_updates = BTreeMap::new();
 
@@ -163,8 +167,9 @@ pub fn run_onboarding(profile_path: &Path, non_interactive: bool) -> Result<Valu
     }))
 }
 
-fn load_existing_config(profile_path: &Path) -> Result<Config> {
-    ayx_core::profile::Config::load_from_path(profile_path).map_err(|err| anyhow::anyhow!(err))
+fn load_existing_config(profile_path: &Path, environment: Option<&str>) -> Result<Config> {
+    ayx_core::profile::Config::load_from_path_with_environment(profile_path, environment)
+        .map_err(|err| anyhow::anyhow!(err))
 }
 
 fn default_config() -> Config {
