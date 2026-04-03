@@ -56,6 +56,8 @@ mod onboard;
 struct Cli {
     #[arg(long, default_value = "text")]
     output: String,
+    #[arg(long)]
+    environment: Option<String>,
 
     #[command(subcommand)]
     command: Command,
@@ -1679,10 +1681,6 @@ enum UpgradeCommand {
     },
 }
 
-fn load_profile(path: &Path) -> Result<Config> {
-    Ok(Config::load_from_path(path)?)
-}
-
 fn load_payload(path: &Path) -> Result<Value> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("failed to read payload file '{}'", path.display()))?;
@@ -1716,6 +1714,9 @@ fn parse_key_value_params(items: &[String]) -> Result<HashMap<String, String>> {
 }
 
 fn execute(cli: Cli) -> Result<Envelope> {
+    let load_profile = |path: &Path| -> Result<Config> {
+        Ok(Config::load_from_path_with_environment(path, cli.environment.as_deref())?)
+    };
     let envelope = match cli.command {
         Command::Mongo { command } => match command {
             MongoCommand::Status { profile } => {
@@ -2887,7 +2888,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
             profile,
             non_interactive,
         } => {
-            let detail = onboard::run_onboarding(&profile, non_interactive)?;
+            let detail = onboard::run_onboarding(&profile, cli.environment.as_deref(), non_interactive)?;
             Envelope::ok_with_data("onboarding completed", detail)
         },
         Command::One { command } => match command {
@@ -4055,7 +4056,7 @@ fn main() -> Result<()> {
 
 fn print_help() {
     println!(
-    "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help       Print this help message\n    --output     Output format: text or json\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server status, prechecks, connection helpers, and migration planning\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb\n    tools          Integration placeholder branch for future cross-product workflows\n    license        Licensing portal branch and API surface\n    onboard        Interactive first-run setup for config.yaml\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
+    "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help           Print this help message\n    --output         Output format: text or json\n    --environment    Active environment name when loading a workspace file\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server status, prechecks, connection helpers, and migration planning\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb\n    tools          Integration placeholder branch for future cross-product workflows\n    license        Licensing portal branch and API surface\n    onboard        Interactive first-run setup for config.yaml\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
     );
 }
 

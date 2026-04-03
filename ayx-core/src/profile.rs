@@ -23,7 +23,7 @@ pub enum ProfileError {
     Invalid(String),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub profile_name: String,
     pub mongo: MongoProfile,
@@ -42,7 +42,14 @@ pub struct Config {
     pub upgrade: Option<UpgradeProfile>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorkspaceConfig {
+    pub workspace_name: String,
+    pub active_environment: String,
+    pub environments: HashMap<String, Config>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MongoProfile {
     pub mode: MongoMode,
     pub databases: MongoDatabases,
@@ -50,7 +57,7 @@ pub struct MongoProfile {
     pub managed: Option<MongoManaged>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MongoDatabases {
     pub gallery_name: String,
     pub service_name: String,
@@ -63,14 +70,14 @@ pub enum MongoMode {
     Managed,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MongoEmbedded {
     pub runtime_settings_path: Option<String>,
     pub alteryx_service_path: Option<String>,
     pub restore_target_path: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MongoManaged {
     pub url: Option<String>,
     pub host: Option<String>,
@@ -84,7 +91,7 @@ pub struct MongoManaged {
     pub max_pool_size: Option<u32>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TlsConfig {
     pub enabled: bool,
     pub ca_path: Option<String>,
@@ -93,14 +100,14 @@ pub struct TlsConfig {
     pub allow_invalid_hostnames: Option<bool>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApiProfile {
     pub base_url: String,
     pub auth: ApiAuth,
     pub timeout_ms: Option<u64>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApiAuth {
     pub mode: ApiAuthMode,
     pub pat: Option<String>,
@@ -109,25 +116,25 @@ pub struct ApiAuth {
     pub scope: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiAuthMode {
     Pat,
     Oauth2ClientCredentials,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UpgradeProfile {
     pub target_version: Option<String>,
     pub deployment: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ObservabilityProfile {
     pub api_logging: Option<ApiLoggingProfile>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ApiLoggingProfile {
     pub enabled: bool,
     pub path: Option<String>,
@@ -136,7 +143,7 @@ pub struct ApiLoggingProfile {
     pub log_responses: Option<bool>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AlteryxOneProfile {
     pub account_email: String,
     pub oauth_client_id: Option<String>,
@@ -145,7 +152,7 @@ pub struct AlteryxOneProfile {
     pub refresh_token: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ServerProfile {
     pub webapi_url: String,
     pub curator_api_key: String,
@@ -153,14 +160,14 @@ pub struct ServerProfile {
     pub verify_tls: Option<bool>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ServerApiProfile {
     pub base_url: String,
     pub client_id: String,
     pub client_secret: String,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct SqlServerProfile {
     pub controller: Option<SqlServerConnectionProfile>,
     pub server_ui: Option<SqlServerConnectionProfile>,
@@ -168,7 +175,7 @@ pub struct SqlServerProfile {
     pub legacy_connection_string: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct SqlServerConnectionProfile {
     pub connection_string: Option<String>,
     pub host: Option<String>,
@@ -218,6 +225,59 @@ impl Config {
                 path: path_str,
                 source,
             })?;
+        let config = config.with_server_api_overrides()?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    pub fn load_from_path_with_environment(
+        path: &Path,
+        environment: Option<&str>,
+    ) -> Result<Self, ProfileError> {
+        let path_str = path.display().to_string();
+        let content = fs::read_to_string(path).map_err(|source| ProfileError::Read {
+            path: path_str.clone(),
+            source,
+        })?;
+        let env_path = path
+            .parent()
+            .map(|parent| parent.join(".env"))
+            .unwrap_or_else(|| Path::new(".env").to_path_buf());
+        let env_values =
+            read_env_file_if_present(&env_path).map_err(|source| ProfileError::Read {
+                path: env_path.display().to_string(),
+                source,
+            })?;
+        let expanded = expand_env_placeholders(&content, &env_values);
+
+        let value: serde_yaml::Value =
+            serde_yaml::from_str(&expanded).map_err(|source| ProfileError::Parse {
+                path: path_str.clone(),
+                source,
+            })?;
+        let value = flatten_alteryx_server_block(value);
+        if is_workspace_value(&value) {
+            let workspace: WorkspaceConfig =
+                serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+                    path: path_str.clone(),
+                    source,
+                })?;
+            let active = environment.unwrap_or(&workspace.active_environment);
+            let config = workspace.environments.get(active).ok_or_else(|| {
+                ProfileError::Invalid(format!(
+                    "workspace '{}' does not contain environment '{}'",
+                    workspace.workspace_name, active
+                ))
+            })?;
+            let config = config.clone().with_server_api_overrides()?;
+            config.validate()?;
+            return Ok(config);
+        }
+
+        let config: Self = serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+            path: path_str,
+            source,
+        })?;
         let config = config.with_server_api_overrides()?;
         config.validate()?;
         Ok(config)
@@ -517,4 +577,184 @@ fn flatten_alteryx_server_block(value: serde_yaml::Value) -> serde_yaml::Value {
     }
 
     serde_yaml::Value::Mapping(merged)
+}
+
+fn is_workspace_value(value: &serde_yaml::Value) -> bool {
+    value
+        .as_mapping()
+        .is_some_and(|map| {
+            map.contains_key(serde_yaml::Value::String("workspace_name".to_string()))
+                && map.contains_key(serde_yaml::Value::String("active_environment".to_string()))
+                && map.contains_key(serde_yaml::Value::String("environments".to_string()))
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn base_config(profile_name: &str, database: &str) -> Config {
+        Config {
+            profile_name: profile_name.to_string(),
+            mongo: MongoProfile {
+                mode: MongoMode::Embedded,
+                databases: MongoDatabases {
+                    gallery_name: "AlteryxGallery".to_string(),
+                    service_name: "AlteryxService".to_string(),
+                },
+                embedded: Some(MongoEmbedded {
+                    runtime_settings_path: Some("RuntimeSettings.xml".to_string()),
+                    alteryx_service_path: None,
+                    restore_target_path: None,
+                }),
+                managed: None,
+            },
+            alteryx_one: Some(AlteryxOneProfile {
+                account_email: "user@example.com".to_string(),
+                oauth_client_id: None,
+                token_endpoint_url: None,
+                access_token: None,
+                refresh_token: None,
+            }),
+            observability: None,
+            server_api: Some(ServerApiProfile {
+                base_url: "http://localhost/webapi/".to_string(),
+                client_id: "client".to_string(),
+                client_secret: "secret".to_string(),
+            }),
+            api: None,
+            server: None,
+            sqlserver: Some(SqlServerProfile {
+                controller: Some(SqlServerConnectionProfile {
+                    connection_string: None,
+                    host: Some("localhost".to_string()),
+                    port: Some(1433),
+                    database: Some(database.to_string()),
+                    username: Some("sa".to_string()),
+                    password: Some("secret".to_string()),
+                    password_env: Some("AYX_SQL_CONTROLLER_PASSWORD".to_string()),
+                    integrated_security: Some(false),
+                    encrypt: Some(true),
+                    trust_server_certificate: Some(false),
+                    multi_subnet_failover: Some(false),
+                }),
+                server_ui: Some(SqlServerConnectionProfile {
+                    connection_string: None,
+                    host: Some("localhost".to_string()),
+                    port: Some(1433),
+                    database: Some("AlteryxServerUI".to_string()),
+                    username: Some("sa".to_string()),
+                    password: Some("secret".to_string()),
+                    password_env: Some("AYX_SQL_SERVER_UI_PASSWORD".to_string()),
+                    integrated_security: Some(false),
+                    encrypt: Some(true),
+                    trust_server_certificate: Some(false),
+                    multi_subnet_failover: Some(false),
+                }),
+                legacy_connection_string: None,
+            }),
+            upgrade: None,
+        }
+    }
+
+    #[test]
+    fn loads_active_workspace_environment() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let mut file = temp.reopen().unwrap();
+        let workspace = serde_yaml::to_string(&serde_yaml::Value::Mapping(
+            [
+                ("workspace_name", "lab"),
+                ("active_environment", "dev"),
+            ]
+            .into_iter()
+            .map(|(k, v)| {
+                (
+                    serde_yaml::Value::String(k.to_string()),
+                    serde_yaml::Value::String(v.to_string()),
+                )
+            })
+            .chain(std::iter::once((
+                serde_yaml::Value::String("environments".to_string()),
+                serde_yaml::to_value(serde_yaml::Mapping::from_iter([
+                    (
+                        serde_yaml::Value::String("dev".to_string()),
+                        serde_yaml::to_value(base_config("dev", "AlteryxService")).unwrap(),
+                    ),
+                    (
+                        serde_yaml::Value::String("prod".to_string()),
+                        serde_yaml::to_value(base_config("prod", "ProdService")).unwrap(),
+                    ),
+                ]))
+                .unwrap(),
+            )))
+            .collect(),
+        ))
+        .unwrap();
+        file.write_all(workspace.as_bytes()).unwrap();
+
+        let cfg = Config::load_from_path_with_environment(temp.path(), None).unwrap();
+        assert_eq!(cfg.profile_name, "dev");
+        assert_eq!(
+            cfg.sqlserver
+                .as_ref()
+                .unwrap()
+                .controller
+                .as_ref()
+                .unwrap()
+                .database
+                .as_deref(),
+            Some("AlteryxService")
+        );
+    }
+
+    #[test]
+    fn loads_named_workspace_environment_override() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let mut file = temp.reopen().unwrap();
+        let workspace = serde_yaml::to_string(&serde_yaml::Value::Mapping(
+            [
+                ("workspace_name", "lab"),
+                ("active_environment", "dev"),
+            ]
+            .into_iter()
+            .map(|(k, v)| {
+                (
+                    serde_yaml::Value::String(k.to_string()),
+                    serde_yaml::Value::String(v.to_string()),
+                )
+            })
+            .chain(std::iter::once((
+                serde_yaml::Value::String("environments".to_string()),
+                serde_yaml::to_value(serde_yaml::Mapping::from_iter([
+                    (
+                        serde_yaml::Value::String("dev".to_string()),
+                        serde_yaml::to_value(base_config("dev", "DevService")).unwrap(),
+                    ),
+                    (
+                        serde_yaml::Value::String("prod".to_string()),
+                        serde_yaml::to_value(base_config("prod", "ProdService")).unwrap(),
+                    ),
+                ]))
+                .unwrap(),
+            )))
+            .collect(),
+        ))
+        .unwrap();
+        file.write_all(workspace.as_bytes()).unwrap();
+
+        let cfg = Config::load_from_path_with_environment(temp.path(), Some("prod")).unwrap();
+        assert_eq!(cfg.profile_name, "prod");
+        assert_eq!(
+            cfg.sqlserver
+                .as_ref()
+                .unwrap()
+                .controller
+                .as_ref()
+                .unwrap()
+                .database
+                .as_deref(),
+            Some("ProdService")
+        );
+    }
 }
