@@ -99,6 +99,8 @@ enum Command {
     Onboard {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        non_interactive: bool,
     },
     #[command(about = "Licensing portal branch and API surface")]
     License {
@@ -2881,8 +2883,11 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 }),
             ),
         },
-        Command::Onboard { profile } => {
-            let detail = onboard::run_onboarding(&profile)?;
+        Command::Onboard {
+            profile,
+            non_interactive,
+        } => {
+            let detail = onboard::run_onboarding(&profile, non_interactive)?;
             Envelope::ok_with_data("onboarding completed", detail)
         },
         Command::One { command } => match command {
