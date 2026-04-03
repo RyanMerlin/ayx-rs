@@ -124,6 +124,7 @@ mod tests {
                 timeout_ms: Some(15000),
             }),
             server: None,
+            sqlserver: None,
             upgrade: None,
         }
     }
