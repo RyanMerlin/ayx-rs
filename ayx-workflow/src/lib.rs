@@ -303,8 +303,10 @@ fn parse_e2_footer(file: &[u8]) -> Result<(i64, Vec<E2PacketIndexEntry>, u64)> {
     if magic != 0x3245_5859 {
         bail!("E2 YXDB footer magic not found");
     }
-    let packet_count = i64::from_le_bytes(file[file.len() - 20..file.len() - 12].try_into().unwrap());
-    let record_count = i64::from_le_bytes(file[file.len() - 12..file.len() - 4].try_into().unwrap());
+    let packet_count =
+        i64::from_le_bytes(file[file.len() - 20..file.len() - 12].try_into().unwrap());
+    let record_count =
+        i64::from_le_bytes(file[file.len() - 12..file.len() - 4].try_into().unwrap());
     let footer_len = 29usize + 12usize * packet_count as usize;
     if file.len() < footer_len {
         bail!("E2 YXDB footer truncated");
@@ -390,7 +392,9 @@ fn read_e2_field(cur: &mut SliceCursor<'_>) -> Result<YxdbValue> {
     if tag & 0x80 != 0 {
         let len = (tag & 0x7f) as usize;
         let bytes = cur.read_exact(len)?;
-        return Ok(YxdbValue::String(String::from_utf8_lossy(bytes).to_string()));
+        return Ok(YxdbValue::String(
+            String::from_utf8_lossy(bytes).to_string(),
+        ));
     }
     let base = tag & 0x3f;
     if tag & 0x40 != 0 {
@@ -400,7 +404,9 @@ fn read_e2_field(cur: &mut SliceCursor<'_>) -> Result<YxdbValue> {
         1 => {
             let len = cur.read_u16_le()? as usize;
             let bytes = cur.read_exact(len)?;
-            Ok(YxdbValue::String(String::from_utf8_lossy(bytes).to_string()))
+            Ok(YxdbValue::String(
+                String::from_utf8_lossy(bytes).to_string(),
+            ))
         }
         2 | 3 | 4 => {
             let len = cur.read_u16_le()? as usize;
@@ -413,9 +419,9 @@ fn read_e2_field(cur: &mut SliceCursor<'_>) -> Result<YxdbValue> {
         8 => Ok(YxdbValue::I64(cur.read_u16_le()? as i16 as i64)),
         9 => Ok(YxdbValue::I64(cur.read_i32_le()? as i64)),
         10 => Ok(YxdbValue::I64(cur.read_i64_le()?)),
-        11 => Ok(YxdbValue::F64(f32::from_le_bytes(
-            cur.read_exact(4)?.try_into().unwrap(),
-        ) as f64)),
+        11 => Ok(YxdbValue::F64(
+            f32::from_le_bytes(cur.read_exact(4)?.try_into().unwrap()) as f64,
+        )),
         12 => Ok(YxdbValue::F64(f64::from_le_bytes(
             cur.read_exact(8)?.try_into().unwrap(),
         ))),
@@ -439,7 +445,11 @@ fn read_e2_field(cur: &mut SliceCursor<'_>) -> Result<YxdbValue> {
     }
 }
 
-fn read_e2_rows(fields: &[MetaInfoField], file: &[u8], packets: &[E2PacketIndexEntry]) -> Result<Vec<Value>> {
+fn read_e2_rows(
+    fields: &[MetaInfoField],
+    file: &[u8],
+    packets: &[E2PacketIndexEntry],
+) -> Result<Vec<Value>> {
     let mut rows = Vec::new();
     for entry in packets.iter() {
         let packet = read_e2_packet(file, entry)?;
@@ -1683,10 +1693,10 @@ pub fn package_summary(path: &Path) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use snap::raw::Encoder as SnapEncoder;
     use std::io::Write;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tempfile::NamedTempFile;
 
     fn temp_path(name: &str) -> PathBuf {
