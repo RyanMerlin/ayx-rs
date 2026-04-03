@@ -408,7 +408,7 @@ fn read_e2_field(cur: &mut SliceCursor<'_>) -> Result<YxdbValue> {
                 String::from_utf8_lossy(bytes).to_string(),
             ))
         }
-        2 | 3 | 4 => {
+        2..=4 => {
             let len = cur.read_u16_le()? as usize;
             let bytes = cur.read_exact(len)?.to_vec();
             Ok(YxdbValue::Bytes(bytes))

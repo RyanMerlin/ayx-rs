@@ -82,6 +82,7 @@ pub fn validate_connection_strings_envelope(config: &Config) -> Result<Value> {
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn connection_string_envelope(
     config: &Config,
     scope: &str,

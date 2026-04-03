@@ -1823,7 +1823,7 @@ fn tools_workspace_migrate_envelope(
     let source_config = Config::load_from_path_with_environment(workspace, Some(source))?;
     let target_config = Config::load_from_path_with_environment(workspace, Some(target))?;
     Ok(Envelope::ok_with_data(
-        &format!("workspace {operation} scaffold"),
+        format!("workspace {operation} scaffold"),
         json!({
             "workspace": workspace.display().to_string(),
             "operation": operation,
