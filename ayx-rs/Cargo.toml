@@ -11,6 +11,7 @@ chrono.workspace = true
 clap.workspace = true
 reqwest.workspace = true
 roxmltree.workspace = true
+serde_yaml.workspace = true
 serde_json.workspace = true
 ayx-api = { path = "../ayx-api" }
 ayx-core = { path = "../ayx-core" }
@@ -18,6 +19,9 @@ ayx-workflow = { path = "../ayx-workflow" }
 ayx-one = { path = "../ayx-one" }
 ayx-server = { path = "../ayx-server" }
 self_update = "0.43.1"
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [[bin]]
 name = "ayx"

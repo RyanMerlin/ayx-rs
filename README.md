@@ -46,6 +46,18 @@ alteryx_one:
   account_email: you@example.com
 ```
 
+If you want the CLI to guide you through setup instead of editing YAML by hand, run:
+
+```powershell
+ayx onboard --profile config.yaml
+```
+
+The onboarding flow reuses existing values on later runs, masks stored secrets in its summary, and auto-discovers embedded Server runtime settings when `RuntimeSettings.xml` is available.
+For automation or agents, add `--non-interactive` to validate an existing profile without prompting.
+
+For multi-environment setups, use a `workspace.yaml` file with named environments and select the active one with `--environment <name>`.
+`ayx onboard --workspace` writes a starter `workspace.yaml` with `dev` and `prod` entries.
+
 3. Run a first quick query:
 
 ```powershell
@@ -60,7 +72,7 @@ ayx catalog list
 cargo install --locked --path .
 ```
 
-5. Use `--output json` when another tool should consume the result.
+5. Use `--output json` when another tool should consume the result. For `workflow yxdb`, pair `--csv <path>` with top-level `--output json` if you want both export and structured metadata.
 
 If you want the shortest path from zero to useful output, start with:
 
@@ -83,11 +95,14 @@ ayx mongo inventory --profile config.yaml --output json
   - `workflow scan --rules docs/workflow-recurse.example.yaml` to preflight a migration
   - `workflow recurse --rules docs/workflow-recurse.example.yaml` for recursive migrations
   - `workflow yxdb --input <file> [--csv <path>]` to inspect and export YXDB data
-  - `workflow yxdb --input <file> --output json` to return a structured JSON envelope
+  - `workflow yxdb --input <file> --csv <path> --output json` to export CSV and return a structured JSON envelope
   - `workflow publish` to hand a repackaged workflow back to the Server API
-- `tools` as a placeholder branch for future integration and orchestration workflows
+- `--environment <name>` to pick the active environment from a workspace file when multiple named environments are present
+- `tools` for workspace-aware source/target workflows and future cross-environment automation
 - `license` for the Licensing portal and API branch
 - `one` for the Alteryx One platform branch
+- `sqlserver` for SQL Server status, prechecks, connection-string helpers, and migration planning
+- `onboard` for guided first-run profile setup and subsequent value reuse
 - `server upgrade` for upgrade path planning, prechecks, backup, apply simulation, and postchecks
 - `catalog` for machine-readable command discovery
 - `update` for GitHub release self-update
@@ -104,6 +119,7 @@ The tool returns a consistent envelope model so humans and agents can parse succ
 ## Configuration
 
 `ayx` loads `config.yaml` by default.
+`workspace.yaml` is the canonical multi-environment file. It should contain `workspace_name`, `active_environment`, and an `environments` map of named `Config` entries. Use `--environment <name>` to override the active environment for a single run.
 
 Minimum expectations:
 - `profile_name`
