@@ -479,17 +479,29 @@ fn validate_sql_connection(
     field: &str,
 ) -> Result<(), ProfileError> {
     if let Some(conn) = conn {
-        if conn.connection_string.as_ref().is_some_and(|s| s.trim().is_empty()) {
-            return Err(ProfileError::Invalid(format!("{field}.connection_string cannot be empty when set")));
+        if conn
+            .connection_string
+            .as_ref()
+            .is_some_and(|s| s.trim().is_empty())
+        {
+            return Err(ProfileError::Invalid(format!(
+                "{field}.connection_string cannot be empty when set"
+            )));
         }
         if conn.host.as_ref().is_some_and(|s| s.trim().is_empty()) {
-            return Err(ProfileError::Invalid(format!("{field}.host cannot be empty when set")));
+            return Err(ProfileError::Invalid(format!(
+                "{field}.host cannot be empty when set"
+            )));
         }
         if conn.database.as_ref().is_some_and(|s| s.trim().is_empty()) {
-            return Err(ProfileError::Invalid(format!("{field}.database cannot be empty when set")));
+            return Err(ProfileError::Invalid(format!(
+                "{field}.database cannot be empty when set"
+            )));
         }
         if conn.password.as_ref().is_some_and(|s| s.trim().is_empty()) {
-            return Err(ProfileError::Invalid(format!("{field}.password cannot be empty when set")));
+            return Err(ProfileError::Invalid(format!(
+                "{field}.password cannot be empty when set"
+            )));
         }
     }
     Ok(())
@@ -580,13 +592,11 @@ fn flatten_alteryx_server_block(value: serde_yaml::Value) -> serde_yaml::Value {
 }
 
 fn is_workspace_value(value: &serde_yaml::Value) -> bool {
-    value
-        .as_mapping()
-        .is_some_and(|map| {
-            map.contains_key(serde_yaml::Value::String("workspace_name".to_string()))
-                && map.contains_key(serde_yaml::Value::String("active_environment".to_string()))
-                && map.contains_key(serde_yaml::Value::String("environments".to_string()))
-        })
+    value.as_mapping().is_some_and(|map| {
+        map.contains_key(serde_yaml::Value::String("workspace_name".to_string()))
+            && map.contains_key(serde_yaml::Value::String("active_environment".to_string()))
+            && map.contains_key(serde_yaml::Value::String("environments".to_string()))
+    })
 }
 
 #[cfg(test)]
@@ -663,32 +673,29 @@ mod tests {
         let temp = tempfile::NamedTempFile::new().unwrap();
         let mut file = temp.reopen().unwrap();
         let workspace = serde_yaml::to_string(&serde_yaml::Value::Mapping(
-            [
-                ("workspace_name", "lab"),
-                ("active_environment", "dev"),
-            ]
-            .into_iter()
-            .map(|(k, v)| {
-                (
-                    serde_yaml::Value::String(k.to_string()),
-                    serde_yaml::Value::String(v.to_string()),
-                )
-            })
-            .chain(std::iter::once((
-                serde_yaml::Value::String("environments".to_string()),
-                serde_yaml::to_value(serde_yaml::Mapping::from_iter([
+            [("workspace_name", "lab"), ("active_environment", "dev")]
+                .into_iter()
+                .map(|(k, v)| {
                     (
-                        serde_yaml::Value::String("dev".to_string()),
-                        serde_yaml::to_value(base_config("dev", "AlteryxService")).unwrap(),
-                    ),
-                    (
-                        serde_yaml::Value::String("prod".to_string()),
-                        serde_yaml::to_value(base_config("prod", "ProdService")).unwrap(),
-                    ),
-                ]))
-                .unwrap(),
-            )))
-            .collect(),
+                        serde_yaml::Value::String(k.to_string()),
+                        serde_yaml::Value::String(v.to_string()),
+                    )
+                })
+                .chain(std::iter::once((
+                    serde_yaml::Value::String("environments".to_string()),
+                    serde_yaml::to_value(serde_yaml::Mapping::from_iter([
+                        (
+                            serde_yaml::Value::String("dev".to_string()),
+                            serde_yaml::to_value(base_config("dev", "AlteryxService")).unwrap(),
+                        ),
+                        (
+                            serde_yaml::Value::String("prod".to_string()),
+                            serde_yaml::to_value(base_config("prod", "ProdService")).unwrap(),
+                        ),
+                    ]))
+                    .unwrap(),
+                )))
+                .collect(),
         ))
         .unwrap();
         file.write_all(workspace.as_bytes()).unwrap();
@@ -713,32 +720,29 @@ mod tests {
         let temp = tempfile::NamedTempFile::new().unwrap();
         let mut file = temp.reopen().unwrap();
         let workspace = serde_yaml::to_string(&serde_yaml::Value::Mapping(
-            [
-                ("workspace_name", "lab"),
-                ("active_environment", "dev"),
-            ]
-            .into_iter()
-            .map(|(k, v)| {
-                (
-                    serde_yaml::Value::String(k.to_string()),
-                    serde_yaml::Value::String(v.to_string()),
-                )
-            })
-            .chain(std::iter::once((
-                serde_yaml::Value::String("environments".to_string()),
-                serde_yaml::to_value(serde_yaml::Mapping::from_iter([
+            [("workspace_name", "lab"), ("active_environment", "dev")]
+                .into_iter()
+                .map(|(k, v)| {
                     (
-                        serde_yaml::Value::String("dev".to_string()),
-                        serde_yaml::to_value(base_config("dev", "DevService")).unwrap(),
-                    ),
-                    (
-                        serde_yaml::Value::String("prod".to_string()),
-                        serde_yaml::to_value(base_config("prod", "ProdService")).unwrap(),
-                    ),
-                ]))
-                .unwrap(),
-            )))
-            .collect(),
+                        serde_yaml::Value::String(k.to_string()),
+                        serde_yaml::Value::String(v.to_string()),
+                    )
+                })
+                .chain(std::iter::once((
+                    serde_yaml::Value::String("environments".to_string()),
+                    serde_yaml::to_value(serde_yaml::Mapping::from_iter([
+                        (
+                            serde_yaml::Value::String("dev".to_string()),
+                            serde_yaml::to_value(base_config("dev", "DevService")).unwrap(),
+                        ),
+                        (
+                            serde_yaml::Value::String("prod".to_string()),
+                            serde_yaml::to_value(base_config("prod", "ProdService")).unwrap(),
+                        ),
+                    ]))
+                    .unwrap(),
+                )))
+                .collect(),
         ))
         .unwrap();
         file.write_all(workspace.as_bytes()).unwrap();
