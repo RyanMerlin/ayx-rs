@@ -96,7 +96,15 @@ pub fn connection_string_envelope(
     };
     let server = server.map(ToOwned::to_owned).or_else(|| conn.host.clone()).unwrap_or_else(|| "localhost".to_string());
     let port = port.or(conn.port).unwrap_or(1433);
-    let database = database.map(ToOwned::to_owned).or_else(|| conn.database.clone()).unwrap_or_else(|| "AlteryxService".to_string());
+    let default_database = match scope.as_str() {
+        "controller" => "AlteryxService",
+        "server-ui" => "AlteryxServerUI",
+        _ => unreachable!(),
+    };
+    let database = database
+        .map(ToOwned::to_owned)
+        .or_else(|| conn.database.clone())
+        .unwrap_or_else(|| default_database.to_string());
 
     let connection_string = match (scope.as_str(), auth.as_str()) {
         ("controller", "sql") => build_controller_sql_auth(&server, port, &database, encrypt, trust_server_certificate, multi_subnet_failover),
