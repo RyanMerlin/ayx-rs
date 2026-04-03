@@ -13,10 +13,26 @@ use ayx_core::profile::{
 };
 use ayx_server::util::runtime_settings_summary;
 
-pub fn run_onboarding(profile_path: &Path) -> Result<Value> {
+pub fn run_onboarding(profile_path: &Path, non_interactive: bool) -> Result<Value> {
     let existing = load_existing_config(profile_path).ok();
     let mut config = existing.unwrap_or_else(default_config);
     let mut env_updates = BTreeMap::new();
+
+    if non_interactive {
+        let validation = validate_onboarded_config(&config)?;
+        return Ok(json!({
+            "profile": profile_path.display().to_string(),
+            "saved": false,
+            "mode": "non-interactive",
+            "summary": summarize_config(&config),
+            "validation": validation,
+            "env_updates": [],
+            "notes": [
+                "Non-interactive onboarding validates an existing config without prompting",
+                "Use interactive onboarding to create or repair missing secrets and values",
+            ],
+        }));
+    }
 
     println!("AYX onboarding");
     println!("Press Enter to accept a default. Existing values are reused unless you choose to change them.");
@@ -134,13 +150,15 @@ pub fn run_onboarding(profile_path: &Path) -> Result<Value> {
         }
     }
 
-    validate_onboarded_config(&config)?;
+    let validation = validate_onboarded_config(&config)?;
     write_config(profile_path, &config, &env_updates)?;
 
     Ok(json!({
         "profile": profile_path.display().to_string(),
         "saved": true,
+        "mode": "interactive",
         "summary": summarize_config(&config),
+        "validation": validation,
         "env_updates": env_updates.keys().collect::<Vec<_>>(),
     }))
 }
@@ -524,12 +542,26 @@ fn prompt_raw(prompt: &str) -> Result<String> {
     Ok(buf)
 }
 
-fn validate_onboarded_config(config: &Config) -> Result<()> {
+fn validate_onboarded_config(config: &Config) -> Result<Value> {
+    let mut missing = Vec::new();
     if let Some(sqlserver) = &config.sqlserver {
-        validate_connection_profile_for_onboarding("sqlserver.controller", sqlserver.controller.as_ref())?;
-        validate_connection_profile_for_onboarding("sqlserver.server_ui", sqlserver.server_ui.as_ref())?;
+        if let Err(err) = validate_connection_profile_for_onboarding("sqlserver.controller", sqlserver.controller.as_ref()) {
+            missing.push(err.to_string());
+        }
+        if let Err(err) = validate_connection_profile_for_onboarding("sqlserver.server_ui", sqlserver.server_ui.as_ref()) {
+            missing.push(err.to_string());
+        }
+    } else {
+        missing.push("sqlserver section is missing".to_string());
     }
-    Ok(())
+    if missing.is_empty() {
+        Ok(json!({
+            "ok": true,
+            "missing": [],
+        }))
+    } else {
+        Err(anyhow::anyhow!("onboarding validation failed: {}", missing.join("; ")))
+    }
 }
 
 fn validate_connection_profile_for_onboarding(

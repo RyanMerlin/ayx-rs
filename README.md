@@ -53,6 +53,7 @@ ayx onboard --profile config.yaml
 ```
 
 The onboarding flow reuses existing values on later runs, masks stored secrets in its summary, and auto-discovers embedded Server runtime settings when `RuntimeSettings.xml` is available.
+For automation or agents, add `--non-interactive` to validate an existing profile without prompting.
 
 3. Run a first quick query:
 
