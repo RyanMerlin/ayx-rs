@@ -46,6 +46,14 @@ alteryx_one:
   account_email: you@example.com
 ```
 
+If you want the CLI to guide you through setup instead of editing YAML by hand, run:
+
+```powershell
+ayx onboard --profile config.yaml
+```
+
+The onboarding flow reuses existing values on later runs, masks stored secrets in its summary, and auto-discovers embedded Server runtime settings when `RuntimeSettings.xml` is available.
+
 3. Run a first quick query:
 
 ```powershell
@@ -88,6 +96,8 @@ ayx mongo inventory --profile config.yaml --output json
 - `tools` as a placeholder branch for future integration and orchestration workflows
 - `license` for the Licensing portal and API branch
 - `one` for the Alteryx One platform branch
+- `sqlserver` for SQL Server status, prechecks, connection-string helpers, and migration planning
+- `onboard` for guided first-run profile setup and subsequent value reuse
 - `server upgrade` for upgrade path planning, prechecks, backup, apply simulation, and postchecks
 - `catalog` for machine-readable command discovery
 - `update` for GitHub release self-update

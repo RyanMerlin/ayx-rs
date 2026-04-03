@@ -37,6 +37,8 @@ pub struct Config {
     #[serde(default)]
     pub server: Option<ServerProfile>,
     #[serde(default)]
+    pub sqlserver: Option<SqlServerProfile>,
+    #[serde(default)]
     pub upgrade: Option<UpgradeProfile>,
 }
 
@@ -54,7 +56,7 @@ pub struct MongoDatabases {
     pub service_name: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MongoMode {
     Embedded,
@@ -156,6 +158,29 @@ pub struct ServerApiProfile {
     pub base_url: String,
     pub client_id: String,
     pub client_secret: String,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct SqlServerProfile {
+    pub controller: Option<SqlServerConnectionProfile>,
+    pub server_ui: Option<SqlServerConnectionProfile>,
+    #[serde(default)]
+    pub legacy_connection_string: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct SqlServerConnectionProfile {
+    pub connection_string: Option<String>,
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub database: Option<String>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub password_env: Option<String>,
+    pub integrated_security: Option<bool>,
+    pub encrypt: Option<bool>,
+    pub trust_server_certificate: Option<bool>,
+    pub multi_subnet_failover: Option<bool>,
 }
 
 impl ServerProfile {
@@ -380,8 +405,34 @@ impl Config {
             }
         }
 
+        if let Some(sql) = &self.sqlserver {
+            validate_sql_connection(sql.controller.as_ref(), "sqlserver.controller")?;
+            validate_sql_connection(sql.server_ui.as_ref(), "sqlserver.server_ui")?;
+        }
+
         Ok(())
     }
+}
+
+fn validate_sql_connection(
+    conn: Option<&SqlServerConnectionProfile>,
+    field: &str,
+) -> Result<(), ProfileError> {
+    if let Some(conn) = conn {
+        if conn.connection_string.as_ref().is_some_and(|s| s.trim().is_empty()) {
+            return Err(ProfileError::Invalid(format!("{field}.connection_string cannot be empty when set")));
+        }
+        if conn.host.as_ref().is_some_and(|s| s.trim().is_empty()) {
+            return Err(ProfileError::Invalid(format!("{field}.host cannot be empty when set")));
+        }
+        if conn.database.as_ref().is_some_and(|s| s.trim().is_empty()) {
+            return Err(ProfileError::Invalid(format!("{field}.database cannot be empty when set")));
+        }
+        if conn.password.as_ref().is_some_and(|s| s.trim().is_empty()) {
+            return Err(ProfileError::Invalid(format!("{field}.password cannot be empty when set")));
+        }
+    }
+    Ok(())
 }
 
 fn read_env_file_if_present(path: &Path) -> std::io::Result<HashMap<String, String>> {
