@@ -26,6 +26,11 @@ use ayx_server::mongo::{
     backup_envelope, doctor_envelope as mongo_doctor_envelope, inventory_envelope,
     query_envelope as mongo_query_envelope, restore_envelope, status_envelope,
 };
+use ayx_server::sqlserver::{
+    connection_string_envelope, inventory_envelope as sqlserver_inventory_envelope,
+    migration_prepare_envelope, precheck_envelope as sqlserver_precheck_envelope,
+    status_envelope as sqlserver_status_envelope, validate_connection_strings_envelope,
+};
 use ayx_server::upgrade::{
     compute_path, run_apply, run_backup, run_bundle, run_plan, run_postcheck, run_precheck,
 };
@@ -42,6 +47,8 @@ use ayx_workflow::{
 };
 use self_update::backends::github::Update as GitHubUpdate;
 use self_update::Status;
+
+mod onboard;
 
 #[derive(Parser, Debug)]
 #[command(name = "ayx")]
@@ -87,6 +94,11 @@ enum Command {
     Tools {
         #[command(subcommand)]
         command: Option<ToolsCommand>,
+    },
+    #[command(about = "Interactive first-run setup for config.yaml")]
+    Onboard {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
     },
     #[command(about = "Licensing portal branch and API surface")]
     License {
@@ -246,8 +258,60 @@ enum ServerCommand {
 
 #[derive(Subcommand, Debug)]
 enum SqlserverCommand {
-    Status,
-    Inventory,
+    Status {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Inventory {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Precheck {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        collation: Option<String>,
+    },
+    ValidateStrings {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    ConnectionString {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long, default_value = "controller")]
+        scope: String,
+        #[arg(long, default_value = "sql")]
+        auth: String,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        database: Option<String>,
+        #[arg(long)]
+        port: Option<u16>,
+        #[arg(long)]
+        encrypt: bool,
+        #[arg(long)]
+        trust_server_certificate: bool,
+        #[arg(long)]
+        multi_subnet_failover: bool,
+    },
+    Migrate {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        target_version: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    Prepare {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        target_version: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -2499,10 +2563,85 @@ fn execute(cli: Cli) -> Result<Envelope> {
             }
         },
         Command::Sqlserver { command } => match command {
-            None => Envelope::ok("sqlserver commands are not yet implemented"),
-            Some(SqlserverCommand::Status) => bail!("sqlserver status is not yet implemented"),
-            Some(SqlserverCommand::Inventory) => {
-                bail!("sqlserver inventory is not yet implemented")
+            None => Envelope::ok(
+                "sqlserver commands available: status, inventory, precheck, connection-string, migrate",
+            ),
+            Some(SqlserverCommand::Status { profile }) => {
+                let config = load_profile(&profile)?;
+                Envelope::ok_with_data(
+                    "sqlserver status summarized",
+                    sqlserver_status_envelope(&config)?,
+                )
+            }
+            Some(SqlserverCommand::Inventory { profile }) => {
+                let config = load_profile(&profile)?;
+                Envelope::ok_with_data(
+                    "sqlserver inventory summarized",
+                    sqlserver_inventory_envelope(&config)?,
+                )
+            }
+            Some(SqlserverCommand::Precheck { profile, collation }) => {
+                let config = load_profile(&profile)?;
+                Envelope::ok_with_data(
+                    "sqlserver precheck summarized",
+                    sqlserver_precheck_envelope(&config, collation.as_deref())?,
+                )
+            }
+            Some(SqlserverCommand::ValidateStrings { profile }) => {
+                let config = load_profile(&profile)?;
+                Envelope::ok_with_data(
+                    "sqlserver connection strings validated",
+                    validate_connection_strings_envelope(&config)?,
+                )
+            }
+            Some(SqlserverCommand::ConnectionString {
+                profile,
+                scope,
+                auth,
+                server,
+                database,
+                port,
+                encrypt,
+                trust_server_certificate,
+                multi_subnet_failover,
+            }) => {
+                let config = load_profile(&profile)?;
+                Envelope::ok_with_data(
+                    "sqlserver connection string generated",
+                    connection_string_envelope(
+                        &config,
+                        &scope,
+                        &auth,
+                        server.as_deref(),
+                        database.as_deref(),
+                        port,
+                        encrypt,
+                        trust_server_certificate,
+                        multi_subnet_failover,
+                    )?,
+                )
+            }
+            Some(SqlserverCommand::Migrate {
+                profile,
+                target_version,
+                dry_run,
+            }) => {
+                let config = load_profile(&profile)?;
+                Envelope::ok_with_data(
+                    "sqlserver migration plan generated",
+                    migration_prepare_envelope(&config, target_version.as_deref(), dry_run)?,
+                )
+            }
+            Some(SqlserverCommand::Prepare {
+                profile,
+                target_version,
+                dry_run,
+            }) => {
+                let config = load_profile(&profile)?;
+                Envelope::ok_with_data(
+                    "sqlserver migration preparation generated",
+                    migration_prepare_envelope(&config, target_version.as_deref(), dry_run)?,
+                )
             }
         },
         Command::Workflow { command } => match command {
@@ -2740,6 +2879,10 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     ]
                 }),
             ),
+        },
+        Command::Onboard { profile } => {
+            let detail = onboard::run_onboarding(&profile)?;
+            Envelope::ok_with_data("onboarding completed", detail)
         },
         Command::One { command } => match command {
             None => Envelope::ok(
@@ -3906,7 +4049,7 @@ fn main() -> Result<()> {
 
 fn print_help() {
     println!(
-    "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help       Print this help message\n    --output     Output format: text or json\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server command family (stubbed)\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb\n    tools          Integration placeholder branch for future cross-product workflows\n    license        Licensing portal branch and API surface\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
+    "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help       Print this help message\n    --output     Output format: text or json\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server status, prechecks, connection helpers, and migration planning\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb\n    tools          Integration placeholder branch for future cross-product workflows\n    license        Licensing portal branch and API surface\n    onboard        Interactive first-run setup for config.yaml\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
     );
 }
 
@@ -4081,6 +4224,7 @@ mod tests {
             server_api: None,
             api: None,
             server: None,
+            sqlserver: None,
             upgrade: None,
         }
     }
