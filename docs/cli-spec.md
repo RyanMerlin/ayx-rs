@@ -11,7 +11,7 @@
 The fastest path from zero to useful output is:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-cli/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash
 ```
 
 Then create a small `config.yaml` with your Server and One credentials, and start with:
@@ -99,7 +99,7 @@ upgrade:
 ## Update Command
 - `ayx update [--repo-owner <owner>] [--repo-name <repo>] [--bin-name <name>] [--target-version <tag>] [--skip-confirm]`
 
-`ayx update` checks the latest GitHub release (defaulting to `RyanMerlin/ayx-cli`) and, after prompting unless `--skip-confirm` is used, downloads and replaces the running binary with the release asset named for the current target triple. Use `--target-version` to install a specific tag instead of the latest release, and `--repo-owner/--repo-name` if you host releases in a different repo.
+`ayx update` checks the latest GitHub release (defaulting to `RyanMerlin/ayx-rs`) and, after prompting unless `--skip-confirm` is used, downloads and replaces the running binary with the release asset named for the current target triple. Use `--target-version` to install a specific tag instead of the latest release, and `--repo-owner/--repo-name` if you host releases in a different repo.
 - `ayx server api workflow-detail --profile <path> --workflow-id <id>`
 - `ayx server api workflow-jobs --profile <path> --workflow-id <id>`
 - `ayx server api schedules --profile <path> [--view Default|Full]`

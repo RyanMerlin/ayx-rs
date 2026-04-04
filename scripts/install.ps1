@@ -6,11 +6,46 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if (-not $Version) { $Version = 'latest' }
-if (-not $InstallDir) { $InstallDir = Join-Path $HOME '.local\bin' }
 
 $repoOwner = 'RyanMerlin'
-$repoName = 'ayx-cli'
+$repoName = 'ayx-rs'
 $artifactName = 'ayx-x86_64-pc-windows-msvc.zip'
+
+function Test-OnPath {
+  param([string]$PathToCheck)
+
+  $pathEntries = @($env:PATH -split ';' | Where-Object { $_ })
+  foreach ($entry in $pathEntries) {
+    if ([System.IO.Path]::GetFullPath($entry.TrimEnd('\')) -eq [System.IO.Path]::GetFullPath($PathToCheck.TrimEnd('\'))) {
+      return $true
+    }
+  }
+  return $false
+}
+
+function Get-InstallDir {
+  if ($InstallDir) { return $InstallDir }
+
+  $candidates = @(
+    (Join-Path $HOME '.local\bin'),
+    (Join-Path $HOME 'bin')
+  )
+
+  foreach ($candidate in $candidates) {
+    $parent = Split-Path -Parent $candidate
+    if (-not (Test-Path $parent)) { continue }
+    try {
+      New-Item -ItemType Directory -Force -Path $candidate | Out-Null
+      return $candidate
+    } catch {
+      continue
+    }
+  }
+
+  return (Join-Path $HOME '.local\bin')
+}
+
+$InstallDir = Get-InstallDir
 
 $downloadUrl = if ($Version -eq 'latest') {
   "https://github.com/$repoOwner/$repoName/releases/latest/download/$artifactName"
@@ -29,7 +64,12 @@ try {
   Expand-Archive -Path $archivePath -DestinationPath $InstallDir -Force
 
   Write-Host "installed ayx to $InstallDir\ayx.exe"
-  Write-Host "make sure $InstallDir is on your PATH"
+  if (Test-OnPath $InstallDir) {
+    Write-Host "$InstallDir is already on your PATH"
+  } else {
+    Write-Host "make sure $InstallDir is on your PATH"
+    Write-Host "for this session: `$env:PATH = `"$InstallDir;$env:PATH`""
+  }
 }
 finally {
   Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue

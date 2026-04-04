@@ -147,7 +147,7 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          repository: RyanMerlin/ayx-cli
+          repository: RyanMerlin/ayx-rs
           token: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
           files: |
             dist/ayx-x86_64-pc-windows-msvc/ayx-x86_64-pc-windows-msvc.zip
