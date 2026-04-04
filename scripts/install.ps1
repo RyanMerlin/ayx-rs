@@ -47,6 +47,17 @@ function Get-InstallDir {
 
 $InstallDir = Get-InstallDir
 
+function Require-Command {
+  param([string]$Name)
+
+  if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
+    throw "missing required command: $Name"
+  }
+}
+
+Require-Command Invoke-WebRequest
+Require-Command Expand-Archive
+
 $downloadUrl = if ($Version -eq 'latest') {
   "https://github.com/$repoOwner/$repoName/releases/latest/download/$artifactName"
 } else {

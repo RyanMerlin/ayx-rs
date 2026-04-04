@@ -70,6 +70,17 @@ pick_install_dir() {
 
 INSTALL_DIR="$(pick_install_dir)"
 
+require_cmd() {
+  local cmd="$1"
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "missing required command: $cmd" >&2
+    exit 1
+  fi
+}
+
+require_cmd curl
+require_cmd tar
+
 if [[ "$VERSION" == "latest" ]]; then
   DOWNLOAD_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/${BINARY_NAME}-${PLATFORM}.tar.gz"
 else
