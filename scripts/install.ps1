@@ -72,7 +72,16 @@ try {
   Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath
 
   New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-  Expand-Archive -Path $archivePath -DestinationPath $InstallDir -Force
+  $extractDir = Join-Path $tmpDir 'extract'
+  New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+  Expand-Archive -Path $archivePath -DestinationPath $extractDir -Force
+
+  $binaryPath = Get-ChildItem -Path $extractDir -Recurse -File -Filter 'ayx.exe' | Select-Object -First 1
+  if (-not $binaryPath) {
+    throw 'downloaded archive did not contain ayx.exe'
+  }
+
+  Copy-Item $binaryPath.FullName -Destination (Join-Path $InstallDir 'ayx.exe') -Force
 
   Write-Host "installed ayx to $InstallDir\ayx.exe"
   if (Test-OnPath $InstallDir) {

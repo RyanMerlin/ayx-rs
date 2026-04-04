@@ -95,7 +95,21 @@ echo "Downloading ${DOWNLOAD_URL}"
 curl -fsSL "$DOWNLOAD_URL" -o "$ARCHIVE"
 
 mkdir -p "$INSTALL_DIR"
-tar -xzf "$ARCHIVE" -C "$INSTALL_DIR" "$BINARY_NAME"
+EXTRACT_DIR="$TMPDIR/extract"
+mkdir -p "$EXTRACT_DIR"
+tar -xzf "$ARCHIVE" -C "$EXTRACT_DIR"
+
+if [[ -f "$EXTRACT_DIR/$BINARY_NAME" ]]; then
+  cp "$EXTRACT_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
+else
+  BINARY_PATH="$(find "$EXTRACT_DIR" -type f -name "$BINARY_NAME" | head -n 1)"
+  if [[ -z "${BINARY_PATH:-}" ]]; then
+    echo "downloaded archive did not contain ${BINARY_NAME}" >&2
+    exit 1
+  fi
+  cp "$BINARY_PATH" "$INSTALL_DIR/$BINARY_NAME"
+fi
+
 chmod +x "$INSTALL_DIR/$BINARY_NAME"
 
 echo "installed ${BINARY_NAME} to ${INSTALL_DIR}/${BINARY_NAME}"
