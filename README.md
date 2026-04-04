@@ -23,13 +23,13 @@ Licensing and Alteryx One surfaces being added in product-scoped branches:
 1. Install the binary with a one-liner:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-cli/main/scripts/install.sh | bash
 ```
 
 On Windows PowerShell, use:
 
 ```powershell
-iwr https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.ps1 | iex
+iwr https://raw.githubusercontent.com/RyanMerlin/ayx-cli/main/scripts/install.ps1 | iex
 ```
 
 2. Create `config.yaml` and set the minimum credentials:

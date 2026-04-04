@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_OWNER="RyanMerlin"
-REPO_NAME="ayx-rs"
+REPO_NAME="ayx-cli"
 BINARY_NAME="ayx"
 VERSION="${AYX_VERSION:-latest}"
 INSTALL_DIR="${AYX_INSTALL_DIR:-$HOME/.local/bin}"
