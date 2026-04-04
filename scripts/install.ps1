@@ -69,15 +69,30 @@ New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
 
 try {
   $archivePath = Join-Path $tmpDir $artifactName
-  Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath
+  try {
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath
+  } catch {
+    throw "failed to download $downloadUrl. $($_.Exception.Message)"
+  }
 
   New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
   $extractDir = Join-Path $tmpDir 'extract'
   New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
-  Expand-Archive -Path $archivePath -DestinationPath $extractDir -Force
+  try {
+    Expand-Archive -Path $archivePath -DestinationPath $extractDir -Force
+  } catch {
+    $listing = & tar -tf $archivePath 2>$null
+    if ($listing) {
+      Write-Host "archive contents:"
+      $listing | ForEach-Object { Write-Host $_ }
+    }
+    throw "failed to extract $downloadUrl. $($_.Exception.Message)"
+  }
 
   $binaryPath = Get-ChildItem -Path $extractDir -Recurse -File -Filter 'ayx.exe' | Select-Object -First 1
   if (-not $binaryPath) {
+    Write-Host "archive contents:"
+    Get-ChildItem -Path $extractDir -Recurse | ForEach-Object { Write-Host $_.FullName }
     throw 'downloaded archive did not contain ayx.exe'
   }
 

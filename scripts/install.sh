@@ -92,12 +92,20 @@ trap 'rm -rf "$TMPDIR"' EXIT
 ARCHIVE="$TMPDIR/${BINARY_NAME}-${PLATFORM}.tar.gz"
 
 echo "Downloading ${DOWNLOAD_URL}"
-curl -fsSL "$DOWNLOAD_URL" -o "$ARCHIVE"
+if ! curl -fsSL "$DOWNLOAD_URL" -o "$ARCHIVE"; then
+  echo "failed to download ${DOWNLOAD_URL}" >&2
+  exit 1
+fi
 
 mkdir -p "$INSTALL_DIR"
 EXTRACT_DIR="$TMPDIR/extract"
 mkdir -p "$EXTRACT_DIR"
-tar -xzf "$ARCHIVE" -C "$EXTRACT_DIR"
+if ! tar -xzf "$ARCHIVE" -C "$EXTRACT_DIR"; then
+  echo "failed to extract ${DOWNLOAD_URL}" >&2
+  echo "archive contents:" >&2
+  tar -tzf "$ARCHIVE" >&2 || true
+  exit 1
+fi
 
 if [[ -f "$EXTRACT_DIR/$BINARY_NAME" ]]; then
   cp "$EXTRACT_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
@@ -105,6 +113,8 @@ else
   BINARY_PATH="$(find "$EXTRACT_DIR" -type f -name "$BINARY_NAME" | head -n 1)"
   if [[ -z "${BINARY_PATH:-}" ]]; then
     echo "downloaded archive did not contain ${BINARY_NAME}" >&2
+    echo "archive contents:" >&2
+    find "$EXTRACT_DIR" -maxdepth 2 -print >&2 || true
     exit 1
   fi
   cp "$BINARY_PATH" "$INSTALL_DIR/$BINARY_NAME"
