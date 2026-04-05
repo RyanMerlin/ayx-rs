@@ -53,12 +53,21 @@ is_on_path() {
 
 pick_install_dir() {
   local candidate
+  local path_entries
   if [[ -n "${AYX_INSTALL_DIR:-}" ]]; then
     echo "$INSTALL_DIR"
     return
   fi
 
-  for candidate in "${HOME}/.local/bin" /usr/local/bin /usr/bin; do
+  IFS=':' read -r -a path_entries <<< "${PATH:-}"
+  for candidate in "${path_entries[@]}"; do
+    if [[ -n "$candidate" && -d "$candidate" && -w "$candidate" ]]; then
+      echo "$candidate"
+      return
+    fi
+  done
+
+  for candidate in /usr/local/bin /usr/bin "${HOME}/.local/bin" "${HOME}/bin"; do
     if [[ -d "$candidate" && -w "$candidate" ]]; then
       echo "$candidate"
       return
@@ -128,4 +137,11 @@ if is_on_path "$INSTALL_DIR"; then
 else
   echo "make sure ${INSTALL_DIR} is on your PATH"
   echo "for this shell: export PATH=\"${INSTALL_DIR}:\$PATH\""
+  if [[ -w "${HOME}" ]]; then
+    PROFILE_FILE="${HOME}/.profile"
+    if ! grep -qsF "export PATH=\"${INSTALL_DIR}:\$PATH\"" "$PROFILE_FILE" 2>/dev/null; then
+      printf '\nexport PATH="%s:$PATH"\n' "$INSTALL_DIR" >> "$PROFILE_FILE"
+      echo "added PATH export to ${PROFILE_FILE} for future shells"
+    fi
+  fi
 fi

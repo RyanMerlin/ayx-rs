@@ -23,6 +23,24 @@ function Test-OnPath {
   return $false
 }
 
+function Add-ToUserPath {
+  param([string]$PathToAdd)
+
+  $currentUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+  $entries = @()
+  if ($currentUserPath) {
+    $entries = @($currentUserPath -split ';' | Where-Object { $_ })
+  }
+
+  if ($entries -contains $PathToAdd) {
+    return
+  }
+
+  $newUserPath = if ($currentUserPath) { "$currentUserPath;$PathToAdd" } else { $PathToAdd }
+  [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
+  $env:Path = "$PathToAdd;$env:Path"
+}
+
 function Get-InstallDir {
   if ($InstallDir) { return $InstallDir }
 
@@ -97,13 +115,14 @@ try {
   }
 
   Copy-Item $binaryPath.FullName -Destination (Join-Path $InstallDir 'ayx.exe') -Force
+  Add-ToUserPath $InstallDir
 
   Write-Host "installed ayx to $InstallDir\ayx.exe"
   if (Test-OnPath $InstallDir) {
     Write-Host "$InstallDir is already on your PATH"
   } else {
-    Write-Host "make sure $InstallDir is on your PATH"
-    Write-Host "for this session: `$env:PATH = `"$InstallDir;$env:PATH`""
+    Write-Host "added $InstallDir to your user PATH"
+    Write-Host "open a new shell to use ayx immediately"
   }
 }
 finally {
