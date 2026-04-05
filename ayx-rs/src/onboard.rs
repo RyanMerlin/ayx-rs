@@ -112,11 +112,7 @@ pub fn run_onboarding(
                 .embedded
                 .take()
                 .unwrap_or_else(default_embedded);
-            let designer_install = prompt_yes_no(
-                "Designer user install",
-                false,
-                false,
-            )?;
+            let designer_install = prompt_yes_no("Designer user install", false, false)?;
             let runtime_settings_input = prompt_text(
                 "RuntimeSettings.xml path",
                 embedded.runtime_settings_path.as_deref(),
@@ -871,8 +867,12 @@ fn detect_alteryx_service_path(
         }
     }
 
-    candidates.push(PathBuf::from(r"C:\Program Files\Alteryx\bin\AlteryxService.exe"));
-    candidates.push(PathBuf::from(r"C:\Program Files (x86)\Alteryx\bin\AlteryxService.exe"));
+    candidates.push(PathBuf::from(
+        r"C:\Program Files\Alteryx\bin\AlteryxService.exe",
+    ));
+    candidates.push(PathBuf::from(
+        r"C:\Program Files (x86)\Alteryx\bin\AlteryxService.exe",
+    ));
 
     candidates.into_iter().find(|path| path.exists())
 }
@@ -949,13 +949,17 @@ mod tests {
             .as_mut()
             .unwrap()
             .password = Some(String::new());
-        assert!(!summarize_onboarding_validation(&cfg)["ok"].as_bool().unwrap());
+        assert!(!summarize_onboarding_validation(&cfg)["ok"]
+            .as_bool()
+            .unwrap());
     }
 
     #[test]
     fn onboarding_validator_accepts_complete_sql_profile() {
         let cfg = base_config();
-        assert!(summarize_onboarding_validation(&cfg)["ok"].as_bool().unwrap());
+        assert!(summarize_onboarding_validation(&cfg)["ok"]
+            .as_bool()
+            .unwrap());
     }
 
     #[test]

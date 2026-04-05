@@ -781,9 +781,6 @@ mod tests {
             normalize_alteryx_base_url("http://host/gallery"),
             "http://host"
         );
-        assert_eq!(
-            normalize_alteryx_base_url("http://host"),
-            "http://host"
-        );
+        assert_eq!(normalize_alteryx_base_url("http://host"), "http://host");
     }
 }

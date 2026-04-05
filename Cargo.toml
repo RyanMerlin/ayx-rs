@@ -13,7 +13,7 @@ members = [
 [workspace.package]
 edition = "2021"
 license = "MIT"
-version = "0.3.3"
+version = "0.3.4"
 authors = ["AYX Team", "Ryan Merlin"]
 
 [workspace.dependencies]
