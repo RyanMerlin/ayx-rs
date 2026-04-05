@@ -654,7 +654,7 @@ fn prompt_secret(prompt: &str, current: &str, label: &str, env_key: &str) -> Res
     let prompt_label = if current.trim().is_empty() {
         format!("{prompt} [{label}]")
     } else {
-        format!("{prompt} [curator]")
+        format!("{prompt} [stored]")
     };
     let value = prompt_raw(&prompt_label)?;
     let trimmed = value.trim();
@@ -784,8 +784,6 @@ fn summarize_onboarding_validation(config: &Config) -> Value {
         ) {
             missing.push(err.to_string());
         }
-    } else {
-        missing.push("sqlserver section is missing".to_string());
     }
     json!({
         "ok": missing.is_empty(),
@@ -958,6 +956,15 @@ mod tests {
     fn onboarding_validator_accepts_complete_sql_profile() {
         let cfg = base_config();
         assert!(summarize_onboarding_validation(&cfg)["ok"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn onboarding_validator_allows_missing_sql_profile() {
+        let mut cfg = base_config();
+        cfg.sqlserver = None;
+        let validation = summarize_onboarding_validation(&cfg);
+        assert!(validation["ok"].as_bool().unwrap());
+        assert!(validation["missing"].as_array().unwrap().is_empty());
     }
 
     #[test]

@@ -117,7 +117,7 @@ enum Command {
     Update {
         #[arg(long, default_value = "RyanMerlin")]
         repo_owner: String,
-        #[arg(long, default_value = "ayx-rs")]
+        #[arg(long, default_value = "ayx-cli")]
         repo_name: String,
         #[arg(long, default_value = "ayx")]
         bin_name: String,
