@@ -9,9 +9,9 @@ use serde_json::{json, Value};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::profile::{
-    AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded, MongoManaged, MongoMode,
-    MongoProfile, ServerProfile, SqlServerConnectionProfile, SqlServerProfile, TlsConfig,
-    WorkspaceConfig,
+    normalize_alteryx_base_url, AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded,
+    MongoManaged, MongoMode, MongoProfile, ServerProfile, SqlServerConnectionProfile,
+    SqlServerProfile, TlsConfig, WorkspaceConfig,
 };
 use ayx_server::util::runtime_settings_summary;
 
@@ -67,15 +67,22 @@ pub fn run_onboarding(
     if configure_server {
         let local_server = prompt_yes_no("Is the Server localhost", true, true)?;
         let mut server = config.server.take().unwrap_or_else(default_server);
+        println!("Enter the bare Server base URL only.");
+        println!("Do not include /webapi or /gallery. Example: http://10.1.1.1");
         server.webapi_url = if local_server {
-            prompt_text(
+            normalize_alteryx_base_url(&prompt_text(
                 "Server base URL",
                 Some(&server.webapi_url),
-                Some("http://localhost/"),
+                Some("http://10.1.1.1"),
                 true,
-            )?
+            )?)
         } else {
-            prompt_text("Server base URL", Some(&server.webapi_url), None, true)?
+            normalize_alteryx_base_url(&prompt_text(
+                "Server base URL",
+                Some(&server.webapi_url),
+                Some("http://10.1.1.1"),
+                true,
+            )?)
         };
         server.curator_api_key = prompt_text(
             "Server API key",
