@@ -97,6 +97,11 @@ ayx mongo inventory --profile config.yaml --output json
   - `workflow yxdb --input <file> [--csv <path>]` to inspect and export YXDB data
   - `workflow yxdb --input <file> --csv <path> --output json` to export CSV and return a structured JSON envelope
   - `workflow publish` to hand a repackaged workflow back to the Server API
+- `ui` for Cloud page-scoped driver primitives
+  - `ui session` for browser/session policy and reuse
+  - `ui workflow` for workflow canvas, config pane, results pane, and graph operations
+  - `ui data` for dataset discovery, detail, preview, uploads, and validation fan-out
+  - future `ui library`, `ui schedules`, and `ui jobs` surfaces
 - `--environment <name>` to pick the active environment from a workspace file when multiple named environments are present
 - `tools` for workspace-aware source/target workflows and future cross-environment automation
 - `license` for the Licensing portal and API branch

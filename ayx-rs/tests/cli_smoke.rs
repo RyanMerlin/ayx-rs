@@ -86,3 +86,18 @@ fn workflow_yxdb_help_renders() {
     assert!(stdout.contains("yxdb"));
     assert!(stdout.contains("--csv"));
 }
+
+#[test]
+fn ui_help_renders() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["ui", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ui"));
+    assert!(stdout.contains("session"));
+    assert!(stdout.contains("workflow"));
+    assert!(stdout.contains("data"));
+}

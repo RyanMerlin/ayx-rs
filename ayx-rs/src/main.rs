@@ -92,6 +92,11 @@ enum Command {
         #[command(subcommand)]
         command: Option<WorkflowCommand>,
     },
+    #[command(about = "Cloud UI driver for workflow, data, and future page-scoped operations")]
+    Ui {
+        #[command(subcommand)]
+        command: Option<UiCommand>,
+    },
     #[command(about = "Cross-environment tools for workspace.yaml source/target workflows")]
     Tools {
         #[command(subcommand)]
@@ -431,6 +436,150 @@ enum WorkflowCommand {
         #[arg(long)]
         csv: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum UiCommand {
+    Session {
+        #[command(subcommand)]
+        command: Option<UiSessionCommand>,
+    },
+    Workflow {
+        #[command(subcommand)]
+        command: Option<UiWorkflowCommand>,
+    },
+    Data {
+        #[command(subcommand)]
+        command: Option<UiDataCommand>,
+    },
+    Library {
+        #[command(subcommand)]
+        command: Option<UiLibraryCommand>,
+    },
+    Schedules {
+        #[command(subcommand)]
+        command: Option<UiSchedulesCommand>,
+    },
+    Jobs {
+        #[command(subcommand)]
+        command: Option<UiJobsCommand>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum UiSessionCommand {
+    Status,
+    Ensure,
+    Attach {
+        #[arg(long)]
+        tab: Option<String>,
+    },
+    Inventory,
+}
+
+#[derive(Subcommand, Debug)]
+enum UiWorkflowCommand {
+    Open {
+        #[arg(long)]
+        workflow_id: Option<String>,
+        #[arg(long)]
+        foreground: bool,
+    },
+    Create {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        foreground: bool,
+    },
+    Inventory {
+        #[arg(long)]
+        workflow_id: Option<String>,
+        #[arg(long)]
+        foreground: bool,
+    },
+    PaneConfig {
+        #[arg(long)]
+        workflow_id: Option<String>,
+        #[arg(long)]
+        tool_id: Option<String>,
+    },
+    PaneResults {
+        #[arg(long)]
+        workflow_id: Option<String>,
+        #[arg(long)]
+        tool_id: Option<String>,
+    },
+    ToolList {
+        #[arg(long)]
+        workflow_id: Option<String>,
+    },
+    ToolSelect {
+        #[arg(long)]
+        workflow_id: Option<String>,
+        #[arg(long)]
+        tool_id: String,
+    },
+    ToolInspect {
+        #[arg(long)]
+        workflow_id: Option<String>,
+        #[arg(long)]
+        tool_id: String,
+    },
+    GraphGet {
+        #[arg(long)]
+        workflow_id: Option<String>,
+    },
+    GraphPut {
+        #[arg(long)]
+        workflow_id: Option<String>,
+        #[arg(long)]
+        input: PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum UiDataCommand {
+    ListDatasets {
+        #[arg(long)]
+        foreground: bool,
+    },
+    DatasetDetail {
+        #[arg(long)]
+        dataset_id: String,
+        #[arg(long)]
+        foreground: bool,
+    },
+    DatasetPreview {
+        #[arg(long)]
+        dataset_id: String,
+        #[arg(long)]
+        foreground: bool,
+    },
+    Upload {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        foreground: bool,
+    },
+    ListConnections {
+        #[arg(long)]
+        foreground: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum UiLibraryCommand {
+    Inventory,
+}
+
+#[derive(Subcommand, Debug)]
+enum UiSchedulesCommand {
+    Inventory,
+}
+
+#[derive(Subcommand, Debug)]
+enum UiJobsCommand {
+    Inventory,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1041,6 +1190,45 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &[
             "Uses the Server workflow upload API for the actual publish step.",
             "Accepts a ready .yxzp or a directory that can be repackaged first.",
+        ],
+    },
+    CommandSpec {
+        name: "ui session status",
+        path: "ui/session/status",
+        summary: "Report the Cloud UI browser session policy and reuse posture.",
+        output: "ui session status envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["browser session"],
+        notes: &[
+            "Use pinned visible tabs for operator-facing workflow and data pages.",
+            "Background pages are allowed for read-only validation and refresh work.",
+        ],
+    },
+    CommandSpec {
+        name: "ui workflow inventory",
+        path: "ui/workflow/inventory",
+        summary: "Inventory the workflow page canvas, config pane, and results pane.",
+        output: "ui workflow inventory envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["authenticated Cloud workflow page"],
+        notes: &[
+            "This is the deterministic capture point for UI-driven workflow debugging.",
+            "Future commands should reuse the same tab/page when the workflow is already open.",
+        ],
+    },
+    CommandSpec {
+        name: "ui data list-datasets",
+        path: "ui/data/list-datasets",
+        summary: "List available Cloud datasets from the data page.",
+        output: "ui data inventory envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["authenticated Cloud data page"],
+        notes: &[
+            "May use a pinned Data tab or a background page depending on the caller's policy.",
+            "Useful as the first step before preview, detail, upload, or validation fan-out.",
         ],
     },
     CommandSpec {
@@ -3040,6 +3228,128 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 )
             }
         },
+        Command::Ui { command } => match command {
+            None => Envelope::ok("ui commands available: session, workflow, data, library, schedules, jobs"),
+            Some(UiCommand::Session { command }) => match command {
+                None => Envelope::ok("ui session commands available: status, ensure, attach, inventory"),
+                Some(UiSessionCommand::Status) => Envelope::ok_with_data(
+                    "ui session status scaffolded",
+                    ui_command_envelope("session", "status", json!({
+                        "browser": "managed by ayx-rs",
+                        "mode": "hybrid pinned visible tabs plus background read-only pages",
+                    })),
+                ),
+                Some(UiSessionCommand::Ensure) => Envelope::ok_with_data(
+                    "ui session ensure scaffolded",
+                    ui_command_envelope("session", "ensure", json!({ "result": "scaffolded" })),
+                ),
+                Some(UiSessionCommand::Attach { tab }) => Envelope::ok_with_data(
+                    "ui session attach scaffolded",
+                    ui_command_envelope("session", "attach", json!({ "tab": tab })),
+                ),
+                Some(UiSessionCommand::Inventory) => Envelope::ok_with_data(
+                    "ui session inventory scaffolded",
+                    ui_command_envelope("session", "inventory", json!({
+                        "tabs": ["workflow", "data"],
+                        "policy": "foreground tabs are reusable; read-only tasks may use background pages",
+                    })),
+                ),
+            },
+            Some(UiCommand::Workflow { command }) => match command {
+                None => Envelope::ok("ui workflow commands available: open, create, inventory, pane-config, pane-results, tool-list, tool-select, tool-inspect, graph-get, graph-put"),
+                Some(UiWorkflowCommand::Open { workflow_id, foreground }) => Envelope::ok_with_data(
+                    "ui workflow open scaffolded",
+                    ui_command_envelope("workflow", "open", json!({ "workflow_id": workflow_id, "foreground": foreground })),
+                ),
+                Some(UiWorkflowCommand::Create { name, foreground }) => Envelope::ok_with_data(
+                    "ui workflow create scaffolded",
+                    ui_command_envelope("workflow", "create", json!({ "name": name, "foreground": foreground })),
+                ),
+                Some(UiWorkflowCommand::Inventory { workflow_id, foreground }) => Envelope::ok_with_data(
+                    "ui workflow inventory scaffolded",
+                    ui_command_envelope("workflow", "inventory", json!({
+                        "workflow_id": workflow_id,
+                        "foreground": foreground,
+                        "captures": ["canvas", "config-pane", "results-pane"],
+                    })),
+                ),
+                Some(UiWorkflowCommand::PaneConfig { workflow_id, tool_id }) => Envelope::ok_with_data(
+                    "ui workflow pane-config scaffolded",
+                    ui_command_envelope("workflow", "pane-config", json!({ "workflow_id": workflow_id, "tool_id": tool_id })),
+                ),
+                Some(UiWorkflowCommand::PaneResults { workflow_id, tool_id }) => Envelope::ok_with_data(
+                    "ui workflow pane-results scaffolded",
+                    ui_command_envelope("workflow", "pane-results", json!({ "workflow_id": workflow_id, "tool_id": tool_id })),
+                ),
+                Some(UiWorkflowCommand::ToolList { workflow_id }) => Envelope::ok_with_data(
+                    "ui workflow tool-list scaffolded",
+                    ui_command_envelope("workflow", "tool-list", json!({ "workflow_id": workflow_id })),
+                ),
+                Some(UiWorkflowCommand::ToolSelect { workflow_id, tool_id }) => Envelope::ok_with_data(
+                    "ui workflow tool-select scaffolded",
+                    ui_command_envelope("workflow", "tool-select", json!({ "workflow_id": workflow_id, "tool_id": tool_id })),
+                ),
+                Some(UiWorkflowCommand::ToolInspect { workflow_id, tool_id }) => Envelope::ok_with_data(
+                    "ui workflow tool-inspect scaffolded",
+                    ui_command_envelope("workflow", "tool-inspect", json!({ "workflow_id": workflow_id, "tool_id": tool_id })),
+                ),
+                Some(UiWorkflowCommand::GraphGet { workflow_id }) => Envelope::ok_with_data(
+                    "ui workflow graph-get scaffolded",
+                    ui_command_envelope("workflow", "graph-get", json!({ "workflow_id": workflow_id })),
+                ),
+                Some(UiWorkflowCommand::GraphPut { workflow_id, input }) => Envelope::ok_with_data(
+                    "ui workflow graph-put scaffolded",
+                    ui_command_envelope("workflow", "graph-put", json!({ "workflow_id": workflow_id, "input": input.display().to_string() })),
+                ),
+            },
+            Some(UiCommand::Data { command }) => match command {
+                None => Envelope::ok("ui data commands available: list-datasets, dataset-detail, dataset-preview, upload, list-connections"),
+                Some(UiDataCommand::ListDatasets { foreground }) => Envelope::ok_with_data(
+                    "ui data list-datasets scaffolded",
+                    ui_command_envelope("data", "list-datasets", json!({
+                        "foreground": foreground,
+                        "tab_policy": "use pinned tab when warm; background page for read-only refresh is allowed",
+                    })),
+                ),
+                Some(UiDataCommand::DatasetDetail { dataset_id, foreground }) => Envelope::ok_with_data(
+                    "ui data dataset-detail scaffolded",
+                    ui_command_envelope("data", "dataset-detail", json!({ "dataset_id": dataset_id, "foreground": foreground })),
+                ),
+                Some(UiDataCommand::DatasetPreview { dataset_id, foreground }) => Envelope::ok_with_data(
+                    "ui data dataset-preview scaffolded",
+                    ui_command_envelope("data", "dataset-preview", json!({ "dataset_id": dataset_id, "foreground": foreground })),
+                ),
+                Some(UiDataCommand::Upload { input, foreground }) => Envelope::ok_with_data(
+                    "ui data upload scaffolded",
+                    ui_command_envelope("data", "upload", json!({ "input": input.display().to_string(), "foreground": foreground })),
+                ),
+                Some(UiDataCommand::ListConnections { foreground }) => Envelope::ok_with_data(
+                    "ui data list-connections scaffolded",
+                    ui_command_envelope("data", "list-connections", json!({ "foreground": foreground })),
+                ),
+            },
+            Some(UiCommand::Library { command }) => match command {
+                None => Envelope::ok("ui library commands available: inventory"),
+                Some(UiLibraryCommand::Inventory) => Envelope::ok_with_data(
+                    "ui library inventory scaffolded",
+                    ui_command_envelope("library", "inventory", json!({})),
+                ),
+            },
+            Some(UiCommand::Schedules { command }) => match command {
+                None => Envelope::ok("ui schedules commands available: inventory"),
+                Some(UiSchedulesCommand::Inventory) => Envelope::ok_with_data(
+                    "ui schedules inventory scaffolded",
+                    ui_command_envelope("schedules", "inventory", json!({})),
+                ),
+            },
+            Some(UiCommand::Jobs { command }) => match command {
+                None => Envelope::ok("ui jobs commands available: inventory"),
+                Some(UiJobsCommand::Inventory) => Envelope::ok_with_data(
+                    "ui jobs inventory scaffolded",
+                    ui_command_envelope("jobs", "inventory", json!({})),
+                ),
+            },
+        },
         Command::Tools { command } => match command {
             None => Envelope::ok("tools workspace commands available: init, resolve, compare, migrate-workflows, check-dcm-connections"),
             Some(ToolsCommand::Workspace { command }) => match command {
@@ -4310,6 +4620,19 @@ fn catalog_describe_envelope(command: &str) -> Result<Envelope> {
             "notes": spec.notes,
         }),
     ))
+}
+
+fn ui_command_envelope(page: &str, command: &str, data: Value) -> Value {
+    json!({
+        "page": page,
+        "command": command,
+        "page_policy": {
+            "foreground_tabs": "sticky and user-visible",
+            "background_pages": "allowed for read-only refresh and validation",
+            "mutations": "serialized per page kind",
+        },
+        "data": data,
+    })
 }
 
 fn build_auth_status(
