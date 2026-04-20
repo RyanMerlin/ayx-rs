@@ -23,13 +23,13 @@ Licensing and Alteryx One surfaces being added in product-scoped branches:
 1. Install the binary with a one-liner:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-cli/main/scripts/install.sh | bash
 ```
 
 On Windows PowerShell, use:
 
 ```powershell
-iwr https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.ps1 | iex
+iwr https://raw.githubusercontent.com/RyanMerlin/ayx-cli/main/scripts/install.ps1 | iex
 ```
 
 2. Create `config.yaml` and set the minimum credentials:
@@ -97,6 +97,7 @@ ayx mongo inventory --profile config.yaml --output json
   - `workflow yxdb --input <file> [--csv <path>]` to inspect and export YXDB data
   - `workflow yxdb --input <file> --csv <path> --output json` to export CSV and return a structured JSON envelope
   - `workflow publish` to hand a repackaged workflow back to the Server API
+- `one ui` for interacting with the Alteryx One visual interface - experimental
 - `--environment <name>` to pick the active environment from a workspace file when multiple named environments are present
 - `tools` for workspace-aware source/target workflows and future cross-environment automation
 - `license` for the Licensing portal and API branch

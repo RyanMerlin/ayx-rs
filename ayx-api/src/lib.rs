@@ -1865,6 +1865,7 @@ mod tests {
                 curator_api_secret: "secret".to_string(),
                 verify_tls: Some(true),
             }),
+            sqlserver: None,
             upgrade: None,
         };
 

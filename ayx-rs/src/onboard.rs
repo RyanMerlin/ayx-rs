@@ -9,9 +9,9 @@ use serde_json::{json, Value};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::profile::{
-    AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded, MongoManaged, MongoMode,
-    MongoProfile, ServerProfile, SqlServerConnectionProfile, SqlServerProfile, TlsConfig,
-    WorkspaceConfig,
+    normalize_alteryx_base_url, AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded,
+    MongoManaged, MongoMode, MongoProfile, ServerProfile, SqlServerConnectionProfile,
+    SqlServerProfile, TlsConfig, WorkspaceConfig,
 };
 use ayx_server::util::runtime_settings_summary;
 
@@ -30,7 +30,7 @@ pub fn run_onboarding(
     let mut env_updates = BTreeMap::new();
 
     if non_interactive {
-        let validation = validate_onboarded_config(&config)?;
+        let validation = summarize_onboarding_validation(&config);
         return Ok(json!({
             "profile": profile_path.display().to_string(),
             "saved": false,
@@ -67,27 +67,34 @@ pub fn run_onboarding(
     if configure_server {
         let local_server = prompt_yes_no("Is the Server localhost", true, true)?;
         let mut server = config.server.take().unwrap_or_else(default_server);
-        server.webapi_url = if local_server {
-            prompt_text(
-                "Server base URL",
-                Some(&server.webapi_url),
-                Some("http://localhost/"),
-                true,
-            )?
+        println!("Enter the bare Server base URL only.");
+        println!("Do not include /webapi or /gallery. Example: http://10.1.1.1");
+        let server_base_default = if server.webapi_url.trim().is_empty() {
+            if local_server {
+                Some("http://10.1.1.1")
+            } else {
+                None
+            }
         } else {
-            prompt_text("Server base URL", Some(&server.webapi_url), None, true)?
+            Some(server.webapi_url.as_str())
         };
-        server.curator_api_key = prompt_text(
+        server.webapi_url = normalize_alteryx_base_url(&prompt_text(
+            "Server base URL",
+            server_base_default,
+            Some("http://10.1.1.1"),
+            true,
+        )?);
+        server.curator_api_key = prompt_secret(
             "Server API key",
-            Some(&server.curator_api_key),
-            Some("stored"),
-            true,
+            server.curator_api_key.as_str(),
+            "curator",
+            "AYX_SERVER_CURATOR_API_KEY",
         )?;
-        server.curator_api_secret = prompt_text(
+        server.curator_api_secret = prompt_secret(
             "Server API secret",
-            Some(&server.curator_api_secret),
-            Some("stored"),
-            true,
+            server.curator_api_secret.as_str(),
+            "curator secret",
+            "AYX_SERVER_CURATOR_API_SECRET",
         )?;
         server.verify_tls = Some(prompt_yes_no(
             "Verify TLS certificates",
@@ -105,21 +112,40 @@ pub fn run_onboarding(
                 .embedded
                 .take()
                 .unwrap_or_else(default_embedded);
-            let runtime_settings_path = prompt_path(
+            let designer_install = prompt_yes_no("Designer user install", false, false)?;
+            let runtime_settings_input = prompt_text(
                 "RuntimeSettings.xml path",
-                embedded.runtime_settings_path.as_deref().map(Path::new),
-                Some(Path::new(DEFAULT_RUNTIME_SETTINGS_PATH)),
-                true,
+                embedded.runtime_settings_path.as_deref(),
+                Some(DEFAULT_RUNTIME_SETTINGS_PATH),
+                false,
             )?;
-            if runtime_settings_path.exists() {
-                let summary = runtime_settings_summary(&runtime_settings_path)?;
-                println!("Detected runtime settings:");
-                println!("{}", serde_yaml::to_string(&summary)?);
+            let runtime_settings_path = if runtime_settings_input.trim().is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(runtime_settings_input))
+            };
+            if let Some(runtime_settings_path) = runtime_settings_path.as_ref() {
+                if runtime_settings_path.exists() {
+                    let summary = runtime_settings_summary(runtime_settings_path)?;
+                    println!("Detected runtime settings:");
+                    println!("{}", serde_yaml::to_string(&summary)?);
+                }
+                embedded.runtime_settings_path = Some(runtime_settings_path.display().to_string());
+            } else {
+                embedded.runtime_settings_path = None;
             }
-            embedded.runtime_settings_path = Some(runtime_settings_path.display().to_string());
+            let detected_service_path =
+                detect_alteryx_service_path(runtime_settings_path.as_deref(), designer_install);
+            if let Some(path) = &detected_service_path {
+                println!("Detected AlteryxService.exe: {}", path.display());
+            }
             embedded.alteryx_service_path = prompt_optional_path(
                 "AlteryxService.exe path",
-                embedded.alteryx_service_path.as_deref().map(Path::new),
+                embedded
+                    .alteryx_service_path
+                    .as_deref()
+                    .map(Path::new)
+                    .or(detected_service_path.as_deref()),
             )?;
             embedded.restore_target_path = prompt_optional_path(
                 "Embedded Mongo restore target path",
@@ -166,7 +192,8 @@ pub fn run_onboarding(
             managed.username = prompt_optional_text("Mongo username", managed.username.as_deref())?;
             managed.password = Some(prompt_secret(
                 "Mongo password",
-                managed.password.as_deref(),
+                managed.password.as_deref().unwrap_or(""),
+                "stored",
                 "AYX_MONGO_MANAGED_PASSWORD",
             )?);
             env_updates.insert(
@@ -222,7 +249,7 @@ pub fn run_onboarding(
         }
     }
 
-    let validation = validate_onboarded_config(&config)?;
+    let validation = summarize_onboarding_validation(&config);
     write_config(profile_path, &config, &env_updates)?;
 
     Ok(json!({
@@ -232,6 +259,7 @@ pub fn run_onboarding(
         "summary": summarize_config(&config),
         "validation": validation,
         "env_updates": env_updates.keys().collect::<Vec<_>>(),
+        "warnings": collect_onboarding_warnings(&config),
     }))
 }
 
@@ -467,7 +495,8 @@ fn prompt_sql_connection(
     conn.username = prompt_optional_text(&format!("{label} username"), conn.username.as_deref())?;
     let secret = prompt_secret(
         &format!("{label} password"),
-        conn.password.as_deref(),
+        conn.password.as_deref().unwrap_or(""),
+        "stored",
         env_key,
     )?;
     env_updates.insert(env_key.to_string(), secret.clone());
@@ -617,37 +646,38 @@ fn prompt_optional_text(prompt: &str, default: Option<&str>) -> Result<Option<St
     Ok((!value.trim().is_empty()).then_some(value))
 }
 
-fn prompt_secret(prompt: &str, current: Option<&str>, env_key: &str) -> Result<String> {
-    let value = prompt_text(
-        &format!("{prompt} ({env_key})"),
-        current,
-        Some("stored"),
-        true,
-    )?;
-    if value == "stored" {
-        let secret = current.unwrap_or("").to_string();
-        if secret.trim().is_empty() {
-            Err(anyhow::anyhow!("{prompt} is required for {env_key}"))
-        } else {
-            Ok(secret)
-        }
+fn prompt_secret(prompt: &str, current: &str, label: &str, env_key: &str) -> Result<String> {
+    let prompt_label = if current.trim().is_empty() {
+        format!("{prompt} [{label}]")
     } else {
-        if value.trim().is_empty() {
-            return Err(anyhow::anyhow!("{prompt} cannot be empty"));
+        format!("{prompt} [stored]")
+    };
+    let value = prompt_raw(&prompt_label)?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        if current.trim().is_empty() {
+            return Ok(String::new());
         }
-        Ok(value)
+        return Ok(current.to_string());
     }
-}
-
-fn prompt_path(
-    prompt: &str,
-    default: Option<&Path>,
-    fallback: Option<&Path>,
-    required: bool,
-) -> Result<PathBuf> {
-    let default_text = default.or(fallback).map(|p| p.display().to_string());
-    let input = prompt_text(prompt, default_text.as_deref(), None, required)?;
-    Ok(PathBuf::from(input))
+    if trimmed.eq_ignore_ascii_case("curator") {
+        if current.trim().is_empty() {
+            return Ok(String::new());
+        }
+        return Ok(current.to_string());
+    }
+    if trimmed.eq_ignore_ascii_case("stored") {
+        if current.trim().is_empty() {
+            return Ok(String::new());
+        }
+        return Ok(current.to_string());
+    }
+    if trimmed.is_empty() {
+        Err(anyhow::anyhow!("{prompt} cannot be empty"))
+    } else {
+        let _ = env_key;
+        Ok(trimmed.to_string())
+    }
 }
 
 fn prompt_optional_path(prompt: &str, default: Option<&Path>) -> Result<Option<String>> {
@@ -735,7 +765,7 @@ fn prompt_raw(prompt: &str) -> Result<String> {
     Ok(buf)
 }
 
-fn validate_onboarded_config(config: &Config) -> Result<Value> {
+fn summarize_onboarding_validation(config: &Config) -> Value {
     let mut missing = Vec::new();
     if let Some(sqlserver) = &config.sqlserver {
         if let Err(err) = validate_connection_profile_for_onboarding(
@@ -750,20 +780,11 @@ fn validate_onboarded_config(config: &Config) -> Result<Value> {
         ) {
             missing.push(err.to_string());
         }
-    } else {
-        missing.push("sqlserver section is missing".to_string());
     }
-    if missing.is_empty() {
-        Ok(json!({
-            "ok": true,
-            "missing": [],
-        }))
-    } else {
-        Err(anyhow::anyhow!(
-            "onboarding validation failed: {}",
-            missing.join("; ")
-        ))
-    }
+    json!({
+        "ok": missing.is_empty(),
+        "missing": missing,
+    })
 }
 
 fn validate_connection_profile_for_onboarding(
@@ -788,6 +809,72 @@ fn validate_connection_profile_for_onboarding(
         return Err(anyhow::anyhow!("{field}.password_env is required"));
     }
     Ok(())
+}
+
+fn collect_onboarding_warnings(config: &Config) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    if config
+        .server
+        .as_ref()
+        .is_none_or(|server| server.webapi_url.trim().is_empty())
+    {
+        warnings.push("server.webapi_url is missing".to_string());
+    }
+    if config
+        .server
+        .as_ref()
+        .is_none_or(|server| server.curator_api_key.trim().is_empty())
+    {
+        warnings.push("server.curator_api_key is missing".to_string());
+    }
+    if config
+        .server
+        .as_ref()
+        .is_none_or(|server| server.curator_api_secret.trim().is_empty())
+    {
+        warnings.push("server.curator_api_secret is missing".to_string());
+    }
+    if config
+        .mongo
+        .embedded
+        .as_ref()
+        .is_none_or(|embedded| embedded.runtime_settings_path.is_none())
+    {
+        warnings.push("mongo.embedded.runtime_settings_path is missing".to_string());
+    }
+
+    warnings
+}
+
+fn detect_alteryx_service_path(
+    runtime_settings_path: Option<&Path>,
+    designer_install: bool,
+) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(runtime_settings_path) = runtime_settings_path {
+        if let Some(root) = runtime_settings_path.parent() {
+            candidates.push(root.join("bin").join("AlteryxService.exe"));
+            candidates.push(root.join("AlteryxService.exe"));
+        }
+    }
+
+    if designer_install {
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            let base = PathBuf::from(local_app_data);
+            candidates.push(base.join("Alteryx").join("bin").join("AlteryxService.exe"));
+            candidates.push(base.join("Alteryx").join("AlteryxService.exe"));
+        }
+    }
+
+    candidates.push(PathBuf::from(
+        r"C:\Program Files\Alteryx\bin\AlteryxService.exe",
+    ));
+    candidates.push(PathBuf::from(
+        r"C:\Program Files (x86)\Alteryx\bin\AlteryxService.exe",
+    ));
+
+    candidates.into_iter().find(|path| path.exists())
 }
 
 #[cfg(test)]
@@ -862,13 +949,26 @@ mod tests {
             .as_mut()
             .unwrap()
             .password = Some(String::new());
-        assert!(validate_onboarded_config(&cfg).is_err());
+        assert!(!summarize_onboarding_validation(&cfg)["ok"]
+            .as_bool()
+            .unwrap());
     }
 
     #[test]
     fn onboarding_validator_accepts_complete_sql_profile() {
         let cfg = base_config();
-        assert!(validate_onboarded_config(&cfg).is_ok());
+        assert!(summarize_onboarding_validation(&cfg)["ok"]
+            .as_bool()
+            .unwrap());
+    }
+
+    #[test]
+    fn onboarding_validator_allows_missing_sql_profile() {
+        let mut cfg = base_config();
+        cfg.sqlserver = None;
+        let validation = summarize_onboarding_validation(&cfg);
+        assert!(validation["ok"].as_bool().unwrap());
+        assert!(validation["missing"].as_array().unwrap().is_empty());
     }
 
     #[test]

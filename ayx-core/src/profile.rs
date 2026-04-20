@@ -287,7 +287,7 @@ impl Config {
         if let Some(shared) = &self.server_api {
             if self.api.is_none() {
                 self.api = Some(ApiProfile {
-                    base_url: shared.base_url.clone(),
+                    base_url: normalize_alteryx_base_url(&shared.base_url),
                     auth: ApiAuth {
                         mode: ApiAuthMode::Oauth2ClientCredentials,
                         pat: None,
@@ -301,7 +301,7 @@ impl Config {
 
             if self.server.is_none() {
                 self.server = Some(ServerProfile {
-                    webapi_url: shared.base_url.clone(),
+                    webapi_url: normalize_alteryx_base_url(&shared.base_url),
                     curator_api_key: shared.client_id.clone(),
                     curator_api_secret: shared.client_secret.clone(),
                     verify_tls: None,
@@ -472,6 +472,15 @@ impl Config {
 
         Ok(())
     }
+}
+
+pub fn normalize_alteryx_base_url(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    let stripped = trimmed
+        .strip_suffix("/webapi")
+        .or_else(|| trimmed.strip_suffix("/gallery"))
+        .unwrap_or(trimmed);
+    stripped.trim_end_matches('/').to_string()
 }
 
 fn validate_sql_connection(
@@ -760,5 +769,18 @@ mod tests {
                 .as_deref(),
             Some("ProdService")
         );
+    }
+
+    #[test]
+    fn normalizes_alteryx_base_urls() {
+        assert_eq!(
+            normalize_alteryx_base_url("http://host/webapi/"),
+            "http://host"
+        );
+        assert_eq!(
+            normalize_alteryx_base_url("http://host/gallery"),
+            "http://host"
+        );
+        assert_eq!(normalize_alteryx_base_url("http://host"), "http://host");
     }
 }
