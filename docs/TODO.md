@@ -71,6 +71,13 @@ Completed items are removed here rather than left to rot in the plan.
 - keep secrets, request bodies, and raw response bodies redacted by default.
 - make Walter read the same event schema instead of inventing a second logging model.
 
+## 13. Workspace hardening
+- make workspace identity explicit at the start of every workflow that mutates state.
+- fail closed when the requested workspace does not match the active browser or CLI context.
+- add a preflight check that resolves the current workspace and records it in evidence bundles.
+- treat stale workflow tabs and stale cached browser state as suspect until the workspace is validated.
+- keep Walter responsible for orchestration, but make `ayx-rs` expose the deterministic workspace validation and workflow-open primitives.
+
 ## Current priority
 - complete the repo split plan and decide which paths stay in the private source repo vs the public docs/binary repo.
 - finish `ayx tools` source/target workflows for workspace-aware migration planning and comparison.
