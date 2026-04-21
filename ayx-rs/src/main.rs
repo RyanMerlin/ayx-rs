@@ -4400,13 +4400,26 @@ fn one_platform_auth_status_envelope(config: &Config) -> Result<Envelope> {
             })
         })
     });
+    let workspace_probe = if one.access_token.as_ref().is_some_and(|v| !v.trim().is_empty()) {
+        Some(one_api_live_request(
+            config,
+            "platform",
+            "auth-status",
+            "GET",
+            "/iam/v1/workspaces/current",
+            false,
+            &[],
+        )?)
+    } else {
+        None
+    };
 
     Ok(Envelope::ok_with_data(
         "one platform auth status",
         json!({
             "product": "one",
-                "surface": "platform",
-                "profile": config.profile_name,
+            "surface": "platform",
+            "profile": config.profile_name,
             "oauth_client_id_present": one.oauth_client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
             "token_endpoint_url": one.token_endpoint_url.clone(),
             "access_token_present": one.access_token.as_ref().is_some_and(|v| !v.trim().is_empty()),
@@ -4418,6 +4431,7 @@ fn one_platform_auth_status_envelope(config: &Config) -> Result<Envelope> {
                 "missing"
             },
             "validation_target": "/iam/v1/workspaces/current",
+            "workspace_probe": workspace_probe.as_ref().map(|probe| probe.data.clone()),
             "message": "One API token posture captured",
         }),
     ))
