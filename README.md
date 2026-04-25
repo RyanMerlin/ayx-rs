@@ -94,6 +94,7 @@ ayx mongo inventory --profile config.yaml --output json
 - `workflow` for local `.yxmd`, `.yxmc`, `.yxzp`, and `.yxdb` package/XML tooling
   - `workflow scan --rules docs/workflow-recurse.example.yaml` to preflight a migration
   - `workflow recurse --rules docs/workflow-recurse.example.yaml` for recursive migrations
+  - `workflow convert-cloud --input <file.yxmd> --output <file.json> [--fail-on-unsupported]` to convert Desktop workflows to Designer Cloud JSON
   - `workflow yxdb --input <file> [--csv <path>]` to inspect and export YXDB data
   - `workflow yxdb --input <file> --csv <path> --output json` to export CSV and return a structured JSON envelope
   - `workflow publish` to hand a repackaged workflow back to the Server API

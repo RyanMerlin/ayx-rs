@@ -22,3 +22,8 @@
 - [ ] Add containerized integration tests.
 - [ ] Add Windows/Linux/macOS CI release pipeline.
 - [x] Generate docs/cli-spec.md and docs/cli-schema.json.
+
+## Workflow Cloud Conversion
+- [x] Add native `workflow convert-cloud` support for Desktop `.yxmd` workflows.
+- [x] Reuse the shared workflow XML model for Desktop-to-Cloud conversion and macro/schema handling.
+- [x] Add smoke coverage for the CLI command and the converter library entry point.
