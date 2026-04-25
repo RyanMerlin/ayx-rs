@@ -218,6 +218,7 @@ Ownership transfer is API-first through `PUT /v3/workflows/{workflowId}/transfer
 - `collection-update-user-group-permissions` expects `UpdatePermissionsContract`.
 - `workflow yxdb --input <file>` reads `.yxdb` files and can export the full result set to CSV with `--csv <path>`.
 - `workflow yxdb --input <file> --csv <path> --output json` exports CSV and returns a structured JSON envelope with path, field, row, and CSV metadata.
+- `workflow convert-cloud --input <file.yxmd> --output <file.json> [--fail-on-unsupported]` converts Desktop workflows to Designer Cloud JSON, preserves unsupported tools generically, and emits warnings in the CLI envelope.
 - `onboard --profile <file> --non-interactive` validates an existing profile and returns a machine-readable summary without prompting.
 - `onboard --profile workspace.yaml --workspace` writes a starter workspace file with `dev` and `prod` entries.
 - `--environment <name>` selects the active environment when loading a workspace file with multiple named environments.
