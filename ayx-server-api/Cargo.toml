@@ -1,5 +1,5 @@
 [package]
-name = "ayx-api"
+name = "ayx-server-api"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

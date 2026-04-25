@@ -1870,7 +1870,7 @@ mod tests {
         };
 
         let temp_dir = std::env::temp_dir().join(format!(
-            "ayx-api-test-{}",
+            "ayx-server-api-test-{}",
             Utc::now().timestamp_nanos_opt().unwrap_or_default()
         ));
         let env =

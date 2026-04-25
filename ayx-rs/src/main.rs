@@ -6,18 +6,17 @@ use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use reqwest::blocking::Client;
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER};
-use reqwest::StatusCode;
 use roxmltree::Document;
 use serde_json::{json, Value};
-use std::time::{Duration, Instant};
 
-use ayx_api::workflow_version_upload_envelope;
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::envelope::Envelope;
-use ayx_core::observability::{record_api_event, response_shape, ApiEvent};
 use ayx_core::profile::{Config, ServerProfile};
-use ayx_one::{api_diagnose_envelope, api_inventory_envelope, api_status_envelope};
+use ayx_one::{
+    api_diagnose_envelope, api_inventory_envelope, api_status_envelope,
+    one_surface_inventory_envelope,
+};
+use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 use ayx_server::logs::{
     discover_log_inventory, extract_context, parse_gallery_csv, parse_gallery_events,
     parse_service_events, recent_log_candidates, summarize_log_file, tail_log_file,
@@ -39,6 +38,7 @@ use ayx_server::util::{
     write_runtime_settings_json,
 };
 use ayx_server::{call_operation, diagnose_api, import_swagger};
+use ayx_server_api::workflow_version_upload_envelope;
 use ayx_workflow::{
     convert_desktop_to_cloud, inspect as inspect_workflow, load_rules as load_workflow_rules,
     migrate as migrate_workflow, read_yxdb as read_yxdb_workflow, recurse as recurse_workflow,
@@ -713,22 +713,94 @@ enum OnePlatformCommand {
         command: OneRoleCommand,
     },
     User,
-    Group,
-    Sso,
-    Audit,
-    Session,
-    Token,
-    OauthClient,
-    EnvParam,
-    Pdh,
-    App,
-    Health,
+    Token {
+        #[command(subcommand)]
+        command: Option<OnePlatformTokenCommand>,
+    },
+    Person {
+        #[command(subcommand)]
+        command: Option<OnePlatformPersonCommand>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OnePlatformTokenCommand {
+    List,
+    Create {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Detail {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        token_id: String,
+    },
+    Delete {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        token_id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OnePlatformPersonCommand {
+    List,
+    Current,
+    Detail {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        person_id: String,
+    },
+    Create {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    UpdatePassword {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    PasswordResetRequest {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
 }
 
 #[derive(Subcommand, Debug)]
 enum OneWorkspaceCommand {
+    List,
     Current,
+    CurrentConfiguration,
+    SaveCurrentConfiguration {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
     Configuration {
+        #[arg(long)]
+        workspace_id: String,
+    },
+    ConfigurationSchema {
+        #[arg(long)]
+        workspace_id: String,
+    },
+    CurrentConfigurationSchema,
+    DeleteCurrentConfiguration {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    DeleteConfiguration {
         #[arg(long)]
         workspace_id: String,
     },
@@ -761,6 +833,12 @@ enum OneWorkspaceCommand {
     Transfer {
         #[arg(long)]
         workspace_id: String,
+    },
+    TransferAssets {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
     },
 }
 
@@ -1270,15 +1348,85 @@ const COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "one platform inventory",
         path: "one/platform/inventory",
-        summary: "Summarize One platform inventory candidates.",
+        summary: "Summarize the current One API surface registry.",
         output: "one platform inventory envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["config.yaml"],
         notes: &[
-            "Use this as the first pass for platform surface discovery.",
-            "Start with workspace, user, role, and group operations before broader platform areas.",
+            "Use this as the authoritative One endpoint registry.",
+            "Implemented and partial surfaces are listed separately from documented-only gaps.",
         ],
+    },
+    CommandSpec {
+        name: "one platform user",
+        path: "one/platform/user",
+        summary: "Show the current One user profile.",
+        output: "one platform user envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to GET /v4/people/current in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform person list",
+        path: "one/platform/person/list",
+        summary: "List One people.",
+        output: "one platform person list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to GET /v4/people in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform person current",
+        path: "one/platform/person/current",
+        summary: "Inspect the current One person record.",
+        output: "one platform person current envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to GET /v4/people/current in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform person detail",
+        path: "one/platform/person/detail",
+        summary: "Inspect a One person record by id.",
+        output: "one platform person detail envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to GET /v4/people/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform person create",
+        path: "one/platform/person/create",
+        summary: "Create a One person from JSON payload.",
+        output: "one platform person create envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        notes: &["Maps to POST /v4/people in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform person update-password",
+        path: "one/platform/person/update-password",
+        summary: "Update the current One person's password from JSON payload.",
+        output: "one platform person update-password envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        notes: &["Maps to PATCH /v4/people/current/updatePassword in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform person password-reset-request",
+        path: "one/platform/person/password-reset-request",
+        summary: "Request a One password reset from JSON payload.",
+        output: "one platform person password reset request envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        notes: &["Maps to POST /v4/passwordresetrequest in the One API docs."],
     },
     CommandSpec {
         name: "one platform workspace current",
@@ -1289,6 +1437,76 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
         notes: &["Maps to GET /iam/v1/workspaces/current in managed-iam-v1.yaml."],
+    },
+    CommandSpec {
+        name: "one platform workspace current-configuration",
+        path: "one/platform/workspace/current-configuration",
+        summary: "Inspect the current One workspace configuration.",
+        output: "one platform workspace current configuration envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to GET /v4/workspaces/current/configuration in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform workspace save-current-configuration",
+        path: "one/platform/workspace/save-current-configuration",
+        summary: "Update the current One workspace configuration from JSON payload.",
+        output: "one platform workspace save-current-configuration envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        notes: &["Maps to PATCH /v4/workspaces/current/configuration in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform workspace list",
+        path: "one/platform/workspace/list",
+        summary: "List accessible One workspaces.",
+        output: "one platform workspace list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to GET /v4/workspaces in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform workspace configuration-schema",
+        path: "one/platform/workspace/configuration-schema",
+        summary: "Inspect the workspace configuration schema.",
+        output: "one platform workspace configuration schema envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to GET /v4/workspaces/{id}/configuration-schema in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform workspace current-configuration-schema",
+        path: "one/platform/workspace/current-configuration-schema",
+        summary: "Inspect the current workspace configuration schema.",
+        output: "one platform workspace current configuration schema envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to GET /v4/workspaces/current/configuration-schema in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform workspace delete-current-configuration",
+        path: "one/platform/workspace/delete-current-configuration",
+        summary: "Reset the current workspace configuration.",
+        output: "one platform workspace delete-current-configuration envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to POST /v4/workspaces/current/delete-configuration in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform workspace delete-configuration",
+        path: "one/platform/workspace/delete-configuration",
+        summary: "Reset a workspace configuration by workspace id.",
+        output: "one platform workspace delete-configuration envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to POST /v4/workspaces/{id}/delete-configuration in the One API docs."],
     },
     CommandSpec {
         name: "one platform workspace people",
@@ -1329,6 +1547,46 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["config.yaml", "alteryx_one.access_token"],
         notes: &["Confirms OAuth client ID, token endpoint, access token presence, refresh token presence, and whether a safe workspace endpoint is reachable."],
+    },
+    CommandSpec {
+        name: "one platform token",
+        path: "one/platform/token",
+        summary: "List One API access tokens.",
+        output: "one platform token envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to GET /v4/apiAccessTokens in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform token create",
+        path: "one/platform/token/create",
+        summary: "Create a One API access token from JSON payload.",
+        output: "one platform token create envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        notes: &["Maps to POST /v4/apiAccessTokens in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform token detail",
+        path: "one/platform/token/detail",
+        summary: "Inspect a One API access token by id.",
+        output: "one platform token detail envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to GET /v4/apiAccessTokens/{tokenId} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform token delete",
+        path: "one/platform/token/delete",
+        summary: "Delete a One API access token by id.",
+        output: "one platform token delete envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to DELETE /v4/apiAccessTokens/{tokenId} in the One API docs."],
     },
     CommandSpec {
         name: "one platform auth diagnose",
@@ -3376,9 +3634,47 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 }
                 Some(OnePlatformCommand::Inventory { profile }) => {
                     let config = load_profile(&profile)?;
-                    api_inventory_envelope(&config, "one platform")?
+                    one_surface_inventory_envelope(&config)?
                 }
                 Some(OnePlatformCommand::Workspace { command }) => match command {
+                    OneWorkspaceCommand::List => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "workspace-list",
+                            "GET",
+                            "/v4/workspaces",
+                            false,
+                            &[],
+                        )?
+                    }
+                    OneWorkspaceCommand::CurrentConfiguration => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "workspace-current-configuration",
+                            "GET",
+                            "/v4/workspaces/current/configuration",
+                            false,
+                            &[],
+                        )?
+                    }
+                    OneWorkspaceCommand::SaveCurrentConfiguration { profile, body } => {
+                        let config = load_profile(&profile)?;
+                        let payload = load_payload(&body)?;
+                        one_api_live_request_with_body(
+                            &config,
+                            "platform",
+                            "workspace-save-current-configuration",
+                            "PATCH",
+                            "/v4/workspaces/current/configuration",
+                            true,
+                            &[],
+                            Some(payload),
+                        )?
+                    }
                     OneWorkspaceCommand::Current => {
                         let config = load_profile(&PathBuf::from("config.yaml"))?;
                         one_api_live_request(
@@ -3389,6 +3685,54 @@ fn execute(cli: Cli) -> Result<Envelope> {
                             "/iam/v1/workspaces/current",
                             false,
                             &[],
+                        )?
+                    }
+                    OneWorkspaceCommand::ConfigurationSchema { workspace_id } => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "workspace-configuration-schema",
+                            "GET",
+                            "/v4/workspaces/{id}/configuration-schema",
+                            false,
+                            &[("id", &workspace_id)],
+                        )?
+                    }
+                    OneWorkspaceCommand::CurrentConfigurationSchema => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "workspace-current-configuration-schema",
+                            "GET",
+                            "/v4/workspaces/current/configuration-schema",
+                            false,
+                            &[],
+                        )?
+                    }
+                    OneWorkspaceCommand::DeleteCurrentConfiguration { profile } => {
+                        let config = load_profile(&profile)?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "workspace-delete-current-configuration",
+                            "POST",
+                            "/v4/workspaces/current/delete-configuration",
+                            true,
+                            &[],
+                        )?
+                    }
+                    OneWorkspaceCommand::DeleteConfiguration { workspace_id } => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "workspace-delete-configuration",
+                            "POST",
+                            "/v4/workspaces/{id}/delete-configuration",
+                            true,
+                            &[("id", &workspace_id)],
                         )?
                     }
                     OneWorkspaceCommand::Configuration { workspace_id } => {
@@ -3490,6 +3834,20 @@ fn execute(cli: Cli) -> Result<Envelope> {
                             &[("id", &workspace_id)],
                         )?
                     }
+                    OneWorkspaceCommand::TransferAssets { profile, body } => {
+                        let config = load_profile(&profile)?;
+                        let payload = load_payload(&body)?;
+                        one_api_live_request_with_body(
+                            &config,
+                            "platform",
+                            "workspace-transfer-assets",
+                            "PATCH",
+                            "/v4/workspaces/current/transfer",
+                            true,
+                            &[],
+                            Some(payload),
+                        )?
+                    }
                 },
                 Some(OnePlatformCommand::Role { command }) => match command {
                     OneRoleCommand::ListAssignments { role_id } => {
@@ -3539,95 +3897,151 @@ fn execute(cli: Cli) -> Result<Envelope> {
                         one_platform_auth_diagnose_envelope(&config)?
                     }
                 },
-                Some(OnePlatformCommand::User) => Envelope::ok_with_data(
-                    "one platform user",
-                    json!({
-                        "product": "one",
-                        "surface": "platform",
-                        "message": "user workflow scaffolded",
-                    }),
-                ),
-                Some(OnePlatformCommand::Group) => Envelope::ok_with_data(
-                    "one platform group",
-                    json!({
-                        "product": "one",
-                        "surface": "platform",
-                        "message": "group workflow scaffolded",
-                    }),
-                ),
-                Some(OnePlatformCommand::Sso) => Envelope::ok_with_data(
-                    "one platform sso",
-                    json!({
-                        "product": "one",
-                        "surface": "platform",
-                        "message": "sso workflow scaffolded",
-                    }),
-                ),
-                Some(OnePlatformCommand::Audit) => Envelope::ok_with_data(
-                    "one platform audit",
-                    json!({
-                        "product": "one",
-                        "surface": "platform",
-                        "message": "audit workflow scaffolded",
-                    }),
-                ),
-                Some(OnePlatformCommand::Session) => Envelope::ok_with_data(
-                    "one platform session",
-                    json!({
-                        "product": "one",
-                        "surface": "platform",
-                        "message": "session workflow scaffolded",
-                    }),
-                ),
-                Some(OnePlatformCommand::Token) => Envelope::ok_with_data(
-                    "one platform token",
-                    json!({
-                        "product": "one",
-                        "surface": "platform",
-                        "message": "token workflow scaffolded",
-                    }),
-                ),
-                Some(OnePlatformCommand::OauthClient) => Envelope::ok_with_data(
-                    "one platform oauth-client",
-                    json!({
-                        "product": "one",
-                        "surface": "platform",
-                        "message": "oauth-client workflow scaffolded",
-                    }),
-                ),
-                Some(OnePlatformCommand::EnvParam) => Envelope::ok_with_data(
-                    "one platform env-param",
-                    json!({
-                        "product": "one",
-                        "surface": "platform",
-                        "message": "env-param workflow scaffolded",
-                    }),
-                ),
-                Some(OnePlatformCommand::Pdh) => Envelope::ok_with_data(
-                    "one platform pdh",
-                    json!({
-                        "product": "one",
-                        "surface": "platform",
-                        "message": "pdh workflow scaffolded",
-                    }),
-                ),
-                Some(OnePlatformCommand::App) => Envelope::ok_with_data(
-                    "one platform app",
-                    json!({
-                        "product": "one",
-                        "surface": "platform",
-                        "message": "app workflow scaffolded",
-                    }),
-                ),
-                Some(OnePlatformCommand::Health) => Envelope::ok_with_data(
-                    "one platform health",
-                    json!({
-                        "product": "one",
-                        "surface": "platform",
-                        "message": "health workflow scaffolded",
-                    }),
-                ),
-                None => Envelope::ok("one platform commands available: api, status, inventory, workspace, role, user, group, sso, audit, session, token, oauth-client, env-param, pdh, app, health"),
+                Some(OnePlatformCommand::User) => {
+                    let config = load_profile(&PathBuf::from("config.yaml"))?;
+                    one_api_live_request(
+                        &config,
+                        "platform",
+                        "user-current",
+                        "GET",
+                        "/v4/people/current",
+                        false,
+                        &[],
+                    )?
+                }
+                Some(OnePlatformCommand::Person { command }) => match command {
+                    None | Some(OnePlatformPersonCommand::List) => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "person-list",
+                            "GET",
+                            "/v4/people",
+                            false,
+                            &[],
+                        )?
+                    }
+                    Some(OnePlatformPersonCommand::Current) => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "person-current",
+                            "GET",
+                            "/v4/people/current",
+                            false,
+                            &[],
+                        )?
+                    }
+                    Some(OnePlatformPersonCommand::Detail { profile, person_id }) => {
+                        let config = load_profile(&profile)?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "person-detail",
+                            "GET",
+                            "/v4/people/{id}",
+                            false,
+                            &[("id", &person_id)],
+                        )?
+                    }
+                    Some(OnePlatformPersonCommand::Create { profile, body }) => {
+                        let config = load_profile(&profile)?;
+                        let payload = load_payload(&body)?;
+                        one_api_live_request_with_body(
+                            &config,
+                            "platform",
+                            "person-create",
+                            "POST",
+                            "/v4/people",
+                            true,
+                            &[],
+                            Some(payload),
+                        )?
+                    }
+                    Some(OnePlatformPersonCommand::UpdatePassword { profile, body }) => {
+                        let config = load_profile(&profile)?;
+                        let payload = load_payload(&body)?;
+                        one_api_live_request_with_body(
+                            &config,
+                            "platform",
+                            "person-update-password",
+                            "PATCH",
+                            "/v4/people/current/updatePassword",
+                            true,
+                            &[],
+                            Some(payload),
+                        )?
+                    }
+                    Some(OnePlatformPersonCommand::PasswordResetRequest { profile, body }) => {
+                        let config = load_profile(&profile)?;
+                        let payload = load_payload(&body)?;
+                        one_api_live_request_with_body(
+                            &config,
+                            "platform",
+                            "person-password-reset-request",
+                            "POST",
+                            "/v4/passwordresetrequest",
+                            true,
+                            &[],
+                            Some(payload),
+                        )?
+                    }
+                },
+                Some(OnePlatformCommand::Token { command }) => match command {
+                    None | Some(OnePlatformTokenCommand::List) => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "api-access-tokens-list",
+                            "GET",
+                            "/v4/apiAccessTokens",
+                            false,
+                            &[],
+                        )?
+                    }
+                    Some(OnePlatformTokenCommand::Create { profile, body }) => {
+                        let config = load_profile(&profile)?;
+                        let payload = load_payload(&body)?;
+                        one_api_live_request_with_body(
+                            &config,
+                            "platform",
+                            "api-access-tokens-create",
+                            "POST",
+                            "/v4/apiAccessTokens",
+                            true,
+                            &[],
+                            Some(payload),
+                        )?
+                    }
+                    Some(OnePlatformTokenCommand::Detail { profile, token_id }) => {
+                        let config = load_profile(&profile)?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "api-access-tokens-detail",
+                            "GET",
+                            "/v4/apiAccessTokens/{tokenId}",
+                            false,
+                            &[("tokenId", &token_id)],
+                        )?
+                    }
+                    Some(OnePlatformTokenCommand::Delete { profile, token_id }) => {
+                        let config = load_profile(&profile)?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "api-access-tokens-delete",
+                            "DELETE",
+                            "/v4/apiAccessTokens/{tokenId}",
+                            true,
+                            &[("tokenId", &token_id)],
+                        )?
+                    }
+                },
+                None => Envelope::ok("one platform commands available: api, auth, status, inventory, workspace, role, user, token, person"),
             },
             Some(OneCommand::Status { profile }) => {
                 let config = load_profile(&profile)?;
@@ -3990,269 +4404,6 @@ fn execute(cli: Cli) -> Result<Envelope> {
         )?,
     };
     Ok(envelope)
-}
-
-fn one_api_live_request(
-    config: &Config,
-    surface: &str,
-    operation: &str,
-    method: &str,
-    endpoint: &str,
-    mutating: bool,
-    path_params: &[(&str, &str)],
-) -> Result<Envelope> {
-    let observability = config.observability.as_ref();
-    let base_url = "https://api.us1.alteryxcloud.com";
-    let client = Client::builder()
-        .timeout(Duration::from_secs(60))
-        .build()
-        .context("failed to build one api client")?;
-    let mut access_token = resolve_one_access_token(config, &client)?;
-
-    let mut url = format!("{}{}", base_url, endpoint);
-    for (key, value) in path_params {
-        url = url.replace(&format!("{{{}}}", key), value);
-    }
-    let method_name = method.to_string();
-    let method = reqwest::Method::from_bytes(method_name.as_bytes())
-        .map_err(|_| anyhow!("unsupported one api method '{}'", method))?;
-    let mut attempt = 0u32;
-    let max_attempts = if mutating { 1 } else { 4 };
-    let started = Instant::now();
-    let mut last_status: Option<StatusCode> = None;
-    let mut retry_after_seconds: Option<u64> = None;
-    let mut refreshed_once = false;
-
-    loop {
-        attempt += 1;
-        let mut request = client
-            .request(method.clone(), &url)
-            .header(AUTHORIZATION, format!("Bearer {}", access_token))
-            .header(reqwest::header::ACCEPT, "application/json");
-        if mutating {
-            request = request.header(CONTENT_TYPE, "application/json");
-        }
-
-        let response = request.send();
-        match response {
-            Ok(response) => {
-                let status = response.status();
-                last_status = Some(status);
-                retry_after_seconds = parse_retry_after(response.headers().get(RETRY_AFTER));
-                if status == StatusCode::UNAUTHORIZED && !refreshed_once {
-                    access_token = refresh_one_access_token(config, &client)?;
-                    refreshed_once = true;
-                    continue;
-                }
-                if status.is_success()
-                    || !should_retry_status(status, mutating)
-                    || attempt >= max_attempts
-                {
-                    let content_type = response
-                        .headers()
-                        .get(CONTENT_TYPE)
-                        .and_then(|val| val.to_str().ok())
-                        .unwrap_or_default()
-                        .to_string();
-                    let request_id = response
-                        .headers()
-                        .get("x-request-id")
-                        .and_then(|val| val.to_str().ok())
-                        .map(ToOwned::to_owned);
-                    let text = response.text().unwrap_or_else(|_| String::new());
-                    let response_body = parse_response_text(&content_type, &text);
-                    let envelope = Envelope::ok_with_data(
-                        format!(
-                            "{} {} {}",
-                            surface,
-                            operation,
-                            if status.is_success() { "ok" } else { "failed" }
-                        ),
-                        json!({
-                            "surface": surface,
-                            "operation": operation,
-                            "method": method_name,
-                            "url": url,
-                            "attempts": attempt,
-                            "elapsed_ms": started.elapsed().as_millis(),
-                            "status_code": status.as_u16(),
-                            "ok": status.is_success(),
-                            "request_id": request_id,
-                            "retry_after_seconds": retry_after_seconds,
-                            "response": response_body,
-                        }),
-                    );
-                    let _ = record_api_event(
-                        observability,
-                        ApiEvent {
-                            product: "one",
-                            surface,
-                            operation,
-                            method: &method_name,
-                            endpoint_template: endpoint,
-                            resolved_url: &url,
-                            status_code: Some(status.as_u16()),
-                            duration_ms: started.elapsed().as_millis(),
-                            attempt,
-                            retry_after_seconds,
-                            request_id: request_id.as_deref(),
-                            ok: status.is_success(),
-                            error_class: None,
-                            response_shape: Some(response_shape(&response_body)),
-                            mutating,
-                            dry_run: false,
-                        },
-                    );
-                    return Ok(envelope);
-                }
-                let delay = retry_delay(attempt, retry_after_seconds);
-                std::thread::sleep(delay);
-                continue;
-            }
-            Err(err) => {
-                if mutating || attempt >= max_attempts {
-                    let envelope = Envelope::ok_with_data(
-                        format!("{} {} failed", surface, operation),
-                        json!({
-                            "surface": surface,
-                            "operation": operation,
-                            "method": method_name,
-                            "url": url,
-                            "attempts": attempt,
-                            "elapsed_ms": started.elapsed().as_millis(),
-                            "ok": false,
-                            "status_code": last_status.map(|s| s.as_u16()),
-                            "retry_after_seconds": retry_after_seconds,
-                            "error": err.to_string(),
-                            "response": Value::Null,
-                        }),
-                    );
-                    let _ = record_api_event(
-                        observability,
-                        ApiEvent {
-                            product: "one",
-                            surface,
-                            operation,
-                            method: &method_name,
-                            endpoint_template: endpoint,
-                            resolved_url: &url,
-                            status_code: last_status.map(|s| s.as_u16()),
-                            duration_ms: started.elapsed().as_millis(),
-                            attempt,
-                            retry_after_seconds,
-                            request_id: None,
-                            ok: false,
-                            error_class: Some("transport"),
-                            response_shape: Some("null"),
-                            mutating,
-                            dry_run: false,
-                        },
-                    );
-                    return Ok(envelope);
-                }
-                let delay = retry_delay(attempt, retry_after_seconds);
-                std::thread::sleep(delay);
-            }
-        }
-    }
-}
-
-fn parse_response_text(content_type: &str, text: &str) -> Value {
-    if content_type.to_lowercase().contains("application/json") {
-        serde_json::from_str(text).unwrap_or_else(|_| json!({ "raw": text }))
-    } else if text.trim().is_empty() {
-        Value::Null
-    } else {
-        json!({ "raw": text })
-    }
-}
-
-fn should_retry_status(status: StatusCode, mutating: bool) -> bool {
-    if mutating {
-        return false;
-    }
-    matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504)
-}
-
-fn parse_retry_after(header: Option<&reqwest::header::HeaderValue>) -> Option<u64> {
-    let value = header?.to_str().ok()?.trim();
-    value.parse::<u64>().ok()
-}
-
-fn resolve_one_access_token(config: &Config, client: &Client) -> Result<String> {
-    if let Some(access_token) = config
-        .alteryx_one
-        .as_ref()
-        .and_then(|one| one.access_token.as_ref())
-        .filter(|token| !token.trim().is_empty())
-    {
-        return Ok(access_token.clone());
-    }
-
-    refresh_one_access_token(config, client)
-}
-
-fn refresh_one_access_token(config: &Config, client: &Client) -> Result<String> {
-    let one = config
-        .alteryx_one
-        .as_ref()
-        .ok_or_else(|| anyhow!("config missing alteryx_one section"))?;
-    let client_id = one
-        .oauth_client_id
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            anyhow!("alteryx_one.oauth_client_id is required for refresh_token support")
-        })?;
-    let refresh_token = one
-        .refresh_token
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow!("alteryx_one.refresh_token is required to refresh access tokens"))?;
-    let token_endpoint_url = one
-        .token_endpoint_url
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            anyhow!("alteryx_one.token_endpoint_url is required to refresh access tokens")
-        })?;
-
-    let response = client
-        .post(token_endpoint_url)
-        .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("client_id", client_id),
-            ("refresh_token", refresh_token),
-        ])
-        .send()
-        .with_context(|| format!("refresh token request to '{}' failed", token_endpoint_url))?
-        .error_for_status()
-        .context("refresh token request returned error status")?;
-
-    let token_json: Value = response
-        .json()
-        .context("failed to parse refresh token response")?;
-    let token_type = token_json
-        .get("token_type")
-        .and_then(Value::as_str)
-        .unwrap_or("Bearer");
-    let access_token = token_json
-        .get("access_token")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("refresh token response missing access_token"))?;
-
-    Ok(format!("{token_type} {access_token}"))
-}
-
-fn retry_delay(attempt: u32, retry_after_seconds: Option<u64>) -> Duration {
-    if let Some(seconds) = retry_after_seconds {
-        return Duration::from_secs(seconds.clamp(1, 60));
-    }
-    let shift = attempt.saturating_sub(1).min(6);
-    let multiplier = 1u64 << shift;
-    let base_ms = 250u64.saturating_mul(multiplier);
-    Duration::from_millis(base_ms.min(8_000))
 }
 
 fn one_doctor_platform_envelope(config: &Config) -> Result<Envelope> {
@@ -4843,6 +4994,8 @@ fn parse_saml_metadata_source(input: &str) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ayx_one_api::refresh_one_access_token;
+    use reqwest::blocking::Client;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -4893,16 +5046,40 @@ mod tests {
         assert!(names.contains(&"license api status"));
         assert!(names.contains(&"license status"));
         assert!(names.contains(&"one platform status"));
+        assert!(names.contains(&"one platform inventory"));
+        assert!(names.contains(&"one platform user"));
+        assert!(names.contains(&"one platform person list"));
+        assert!(names.contains(&"one platform person current"));
+        assert!(names.contains(&"one platform person detail"));
+        assert!(names.contains(&"one platform person create"));
+        assert!(names.contains(&"one platform person update-password"));
+        assert!(names.contains(&"one platform person password-reset-request"));
         assert!(names.contains(&"one platform api status"));
         assert!(names.contains(&"one platform auth status"));
         assert!(names.contains(&"one platform workspace current"));
+        assert!(names.contains(&"one platform workspace list"));
+        assert!(names.contains(&"one platform workspace current-configuration"));
+        assert!(names.contains(&"one platform workspace save-current-configuration"));
         assert!(names.contains(&"one platform role list-assignments"));
         assert!(names.contains(&"one plans status"));
         assert!(names.contains(&"one plans list"));
         assert!(names.contains(&"one scheduling list"));
         assert!(names.contains(&"one billing current-account"));
+        assert!(names.contains(&"one platform token"));
+        assert!(names.contains(&"one platform token create"));
+        assert!(names.contains(&"one platform token detail"));
+        assert!(names.contains(&"one platform token delete"));
         assert!(names.contains(&"one auto-insights status"));
         assert!(names.contains(&"one desktop-exec status"));
+        assert!(!names.contains(&"one platform group"));
+        assert!(!names.contains(&"one platform sso"));
+        assert!(!names.contains(&"one platform audit"));
+        assert!(!names.contains(&"one platform session"));
+        assert!(!names.contains(&"one platform oauth-client"));
+        assert!(!names.contains(&"one platform env-param"));
+        assert!(!names.contains(&"one platform pdh"));
+        assert!(!names.contains(&"one platform app"));
+        assert!(!names.contains(&"one platform health"));
         let capabilities = env.data["capabilities"]
             .as_array()
             .expect("capabilities array");
@@ -4928,6 +5105,52 @@ mod tests {
         let env =
             catalog_describe_envelope("one platform status").expect("catalog describe should work");
         assert_eq!(env.data["name"], "one platform status");
+
+        let env = catalog_describe_envelope("one platform inventory")
+            .expect("catalog describe should work for inventory");
+        assert_eq!(env.data["path"], "one/platform/inventory");
+
+        let env =
+            catalog_describe_envelope("one platform user").expect("catalog describe should work");
+        assert_eq!(env.data["path"], "one/platform/user");
+
+        let env = catalog_describe_envelope("one platform person list")
+            .expect("catalog describe should work for person list");
+        assert_eq!(env.data["path"], "one/platform/person/list");
+
+        let env = catalog_describe_envelope("one platform person current")
+            .expect("catalog describe should work for person current");
+        assert_eq!(env.data["path"], "one/platform/person/current");
+
+        let env = catalog_describe_envelope("one platform person detail")
+            .expect("catalog describe should work for person detail");
+        assert_eq!(env.data["path"], "one/platform/person/detail");
+
+        let env = catalog_describe_envelope("one platform workspace list")
+            .expect("catalog describe should work for workspace list");
+        assert_eq!(env.data["path"], "one/platform/workspace/list");
+
+        let env = catalog_describe_envelope("one platform workspace current-configuration")
+            .expect("catalog describe should work for current configuration");
+        assert_eq!(
+            env.data["path"],
+            "one/platform/workspace/current-configuration"
+        );
+
+        let env = catalog_describe_envelope("one platform workspace save-current-configuration")
+            .expect("catalog describe should work for save current configuration");
+        assert_eq!(
+            env.data["path"],
+            "one/platform/workspace/save-current-configuration"
+        );
+
+        let env =
+            catalog_describe_envelope("one platform token").expect("catalog describe should work");
+        assert_eq!(env.data["path"], "one/platform/token");
+
+        let env = catalog_describe_envelope("one platform token detail")
+            .expect("catalog describe should work for token detail");
+        assert_eq!(env.data["path"], "one/platform/token/detail");
 
         let env = catalog_describe_envelope("one platform api diagnose")
             .expect("catalog describe should work for one platform api");

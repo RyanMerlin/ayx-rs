@@ -1,5 +1,5 @@
 [package]
-name = "ayx-one"
+name = "ayx-one-api"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,5 +8,8 @@ authors.workspace = true
 [dependencies]
 anyhow.workspace = true
 ayx-core = { path = "../ayx-core" }
+chrono.workspace = true
+reqwest.workspace = true
+serde.workspace = true
 serde_json.workspace = true
-ayx_one_api = { package = "ayx-one-api", path = "../ayx-one-api" }
+url.workspace = true
