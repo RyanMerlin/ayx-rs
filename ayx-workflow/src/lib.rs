@@ -15,6 +15,12 @@ use zip::read::ZipArchive;
 use zip::write::FileOptions;
 use zip::ZipWriter;
 
+pub mod cloud_convert;
+
+pub use cloud_convert::{
+    convert_desktop_to_cloud, CloudConversionOptions, CloudConversionReport, CloudConversionWarning,
+};
+
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkflowReplacement {
     pub find: String,
@@ -1806,6 +1812,59 @@ mod tests {
         .unwrap();
         let result = inspect(&input).unwrap();
         assert_eq!(result["kind"], "macro");
+        let _ = fs::remove_file(&input);
+    }
+
+    #[test]
+    fn convert_cloud_smoke() {
+        let input = temp_path("workflow.yxmd");
+        write_text(
+            &input,
+            r#"<AlteryxDocument yxmdVer="2025.2">
+  <Nodes>
+    <Node ToolID="1">
+      <GuiSettings Plugin="AlteryxBasePluginsGui.TextInput.TextInput"/>
+      <Properties>
+        <Configuration>
+          <Fields>
+            <Field name="A"/>
+          </Fields>
+          <Data>
+            <r><c>1</c></r>
+          </Data>
+        </Configuration>
+      </Properties>
+    </Node>
+    <Node ToolID="2">
+      <GuiSettings Plugin="Not.Real.Plugin"/>
+    </Node>
+  </Nodes>
+  <Connections/>
+</AlteryxDocument>"#,
+        )
+        .unwrap();
+
+        let report = convert_desktop_to_cloud(
+            &input,
+            crate::cloud_convert::CloudConversionOptions {
+                fail_on_unsupported: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(report.content["@yxmdVer"].as_str().unwrap(), "2021.4");
+        assert_eq!(report.converted_tool_count, 2);
+        assert!(!report.warnings.is_empty());
+        assert!(!report.content_checksum.is_empty());
+
+        let strict = convert_desktop_to_cloud(
+            &input,
+            crate::cloud_convert::CloudConversionOptions {
+                fail_on_unsupported: true,
+            },
+        );
+        assert!(strict.is_err());
+
         let _ = fs::remove_file(&input);
     }
 }

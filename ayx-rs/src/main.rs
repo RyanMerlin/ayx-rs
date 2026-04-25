@@ -40,10 +40,12 @@ use ayx_server::util::{
 };
 use ayx_server::{call_operation, diagnose_api, import_swagger};
 use ayx_workflow::{
+    convert_desktop_to_cloud, 
     inspect as inspect_workflow, load_rules as load_workflow_rules, migrate as migrate_workflow,
     read_yxdb as read_yxdb_workflow, recurse as recurse_workflow,
     repackage_dir as repackage_workflow, replace as replace_workflow, scan as scan_workflow,
-    unpack_package as unpack_workflow, validate as validate_workflow, WorkflowReplacement,
+    unpack_package as unpack_workflow, validate as validate_workflow, CloudConversionOptions,
+    WorkflowReplacement,
 };
 use self_update::backends::github::Update as GitHubUpdate;
 use self_update::Status;
@@ -379,6 +381,14 @@ enum WorkflowCommand {
         find: Vec<String>,
         #[arg(long = "replace")]
         replace: Vec<String>,
+    },
+    ConvertCloud {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, default_value_t = false)]
+        fail_on_unsupported: bool,
     },
     Publish {
         #[arg(long, default_value = "config.yaml")]
@@ -3007,7 +3017,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
         },
         Command::Workflow { command } => match command {
             None => Envelope::ok(
-                "workflow commands available: inspect, unpack, validate, replace, repackage, recurse, scan, publish, migrate, yxdb",
+                "workflow commands available: inspect, unpack, validate, replace, repackage, recurse, scan, convert-cloud, publish, migrate, yxdb",
             ),
             Some(WorkflowCommand::Inspect { input }) => {
                 let detail = inspect_workflow(&input)?;
@@ -3164,6 +3174,33 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     json!({
                         "input": input.display().to_string(),
                         "data": detail,
+                    }),
+                )
+            }
+            Some(WorkflowCommand::ConvertCloud {
+                input,
+                output,
+                fail_on_unsupported,
+            }) => {
+                let report = convert_desktop_to_cloud(
+                    &input,
+                    CloudConversionOptions {
+                        fail_on_unsupported,
+                    },
+                )?;
+                fs::write(&output, serde_json::to_string_pretty(&report.content)? + "\n")
+                    .with_context(|| format!("failed to write '{}'", output.display()))?;
+                Envelope::ok_with_data(
+                    "workflow cloud conversion completed",
+                    json!({
+                        "input": input.display().to_string(),
+                        "output": output.display().to_string(),
+                        "content_checksum": report.content_checksum,
+                        "warning_count": report.warnings.len(),
+                        "warnings": report.warnings,
+                        "unsupported_tools": report.unsupported_tools,
+                        "removed_tools": report.removed_tools,
+                        "converted_tool_count": report.converted_tool_count,
                     }),
                 )
             }
@@ -4579,7 +4616,7 @@ fn main() -> Result<()> {
 
 fn print_help() {
     println!(
-        "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help           Print this help message\n    --output         Output format: text or json\n    --environment    Active environment name when loading a workspace file\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server status, prechecks, connection helpers, and migration planning\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb\n    tools          Cross-environment tools for workspace.yaml source/target workflows\n    license        Licensing portal branch and API surface\n    onboard        Interactive first-run setup for config.yaml or workspace.yaml\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
+        "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help           Print this help message\n    --output         Output format: text or json\n    --environment    Active environment name when loading a workspace file\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server status, prechecks, connection helpers, and migration planning\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, .yxdb, and cloud conversion\n    tools          Cross-environment tools for workspace.yaml source/target workflows\n    license        Licensing portal branch and API surface\n    onboard        Interactive first-run setup for config.yaml or workspace.yaml\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
     );
 }
 
