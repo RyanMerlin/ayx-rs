@@ -40,9 +40,8 @@ use ayx_server::util::{
 };
 use ayx_server::{call_operation, diagnose_api, import_swagger};
 use ayx_workflow::{
-    convert_desktop_to_cloud, 
-    inspect as inspect_workflow, load_rules as load_workflow_rules, migrate as migrate_workflow,
-    read_yxdb as read_yxdb_workflow, recurse as recurse_workflow,
+    convert_desktop_to_cloud, inspect as inspect_workflow, load_rules as load_workflow_rules,
+    migrate as migrate_workflow, read_yxdb as read_yxdb_workflow, recurse as recurse_workflow,
     repackage_dir as repackage_workflow, replace as replace_workflow, scan as scan_workflow,
     unpack_package as unpack_workflow, validate as validate_workflow, CloudConversionOptions,
     WorkflowReplacement,
@@ -50,6 +49,7 @@ use ayx_workflow::{
 use self_update::backends::github::Update as GitHubUpdate;
 use self_update::Status;
 
+mod capability;
 mod onboard;
 
 #[derive(Parser, Debug)]
@@ -962,10 +962,23 @@ enum LicenseApiCommand {
 
 #[derive(Subcommand, Debug)]
 enum CatalogCommand {
-    List,
-    Describe {
+    List {
         #[arg(long)]
-        command: String,
+        tag: Option<String>,
+        #[arg(long, default_value = "compact")]
+        format: String,
+    },
+    Describe {
+        target: Option<String>,
+        #[arg(long)]
+        command: Option<String>,
+    },
+    Run {
+        capability: String,
+        #[arg(long = "json")]
+        json_input: String,
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -3948,8 +3961,19 @@ fn execute(cli: Cli) -> Result<Envelope> {
             }
         },
         Command::Catalog { command } => match command {
-            CatalogCommand::List => catalog_list_envelope()?,
-            CatalogCommand::Describe { command } => catalog_describe_envelope(&command)?,
+            CatalogCommand::List { tag, format } => catalog_list_envelope(tag.as_deref(), &format)?,
+            CatalogCommand::Describe { target, command } => {
+                let target = target
+                    .as_deref()
+                    .or(command.as_deref())
+                    .ok_or_else(|| anyhow!("catalog describe requires a command or capability identifier"))?;
+                catalog_describe_envelope(target)?
+            }
+            CatalogCommand::Run {
+                capability,
+                json_input,
+                dry_run,
+            } => catalog_run_envelope(&capability, &json_input, dry_run)?,
         },
         Command::Update {
             repo_owner,
@@ -4437,7 +4461,11 @@ fn one_platform_auth_status_envelope(config: &Config) -> Result<Envelope> {
             })
         })
     });
-    let workspace_probe = if one.access_token.as_ref().is_some_and(|v| !v.trim().is_empty()) {
+    let workspace_probe = if one
+        .access_token
+        .as_ref()
+        .is_some_and(|v| !v.trim().is_empty())
+    {
         Some(one_api_live_request(
             config,
             "platform",
@@ -4628,39 +4656,67 @@ fn wants_help() -> bool {
     )
 }
 
-fn catalog_list_envelope() -> Result<Envelope> {
+fn catalog_list_envelope(tag: Option<&str>, format: &str) -> Result<Envelope> {
+    let full = match format {
+        "compact" => false,
+        "full" => true,
+        other => bail!(
+            "unsupported catalog format '{}'; use compact or full",
+            other
+        ),
+    };
     let commands: Vec<Value> = COMMAND_SPECS
         .iter()
         .map(|spec| {
-            json!({
+            let mut entry = json!({
+                "kind": "command",
                 "name": spec.name,
                 "path": spec.path,
                 "summary": spec.summary,
                 "output": spec.output,
                 "safety": spec.safety,
                 "mutating": spec.mutating,
-            })
+            });
+            if full {
+                entry["prerequisites"] = json!(spec.prerequisites);
+                entry["notes"] = json!(spec.notes);
+            }
+            entry
         })
         .collect();
+    let capabilities = capability::list_capabilities(tag, full)?;
 
     Ok(Envelope::ok_with_data(
         "catalog entries listed",
         json!({
-            "count": commands.len(),
+            "format": format,
+            "tag": tag,
+            "count": commands.len() + capabilities.len(),
+            "command_count": commands.len(),
+            "capability_count": capabilities.len(),
             "commands": commands,
+            "capabilities": capabilities,
         }),
     ))
 }
 
-fn catalog_describe_envelope(command: &str) -> Result<Envelope> {
+fn catalog_describe_envelope(identifier: &str) -> Result<Envelope> {
+    if let Some(capability) = capability::describe(identifier)? {
+        return Ok(Envelope::ok_with_data(
+            "catalog capability described",
+            capability,
+        ));
+    }
+
     let spec = COMMAND_SPECS
         .iter()
-        .find(|spec| spec.name == command || spec.path == command)
-        .ok_or_else(|| anyhow!("catalog entry '{}' not found", command))?;
+        .find(|spec| spec.name == identifier || spec.path == identifier)
+        .ok_or_else(|| anyhow!("catalog entry '{}' not found", identifier))?;
 
     Ok(Envelope::ok_with_data(
         "catalog entry described",
         json!({
+            "kind": "command",
             "name": spec.name,
             "path": spec.path,
             "summary": spec.summary,
@@ -4671,6 +4727,21 @@ fn catalog_describe_envelope(command: &str) -> Result<Envelope> {
             "notes": spec.notes,
         }),
     ))
+}
+
+fn catalog_run_envelope(capability_id: &str, json_input: &str, dry_run: bool) -> Result<Envelope> {
+    let input = parse_json_arg(json_input)?;
+    capability::run(capability_id, &input, dry_run)
+}
+
+fn parse_json_arg(raw: &str) -> Result<Value> {
+    let text = if let Some(path) = raw.strip_prefix('@') {
+        fs::read_to_string(path)
+            .with_context(|| format!("failed to read json input file '{}'", path))?
+    } else {
+        raw.to_string()
+    };
+    serde_json::from_str(&text).context("failed to parse --json input")
 }
 
 fn ui_command_envelope(page: &str, command: &str, data: Value) -> Value {
@@ -4811,7 +4882,7 @@ mod tests {
 
     #[test]
     fn catalog_list_includes_core_commands() {
-        let env = catalog_list_envelope().expect("catalog list should succeed");
+        let env = catalog_list_envelope(None, "compact").expect("catalog list should succeed");
         let commands = env.data["commands"].as_array().expect("commands array");
         let names: Vec<&str> = commands
             .iter()
@@ -4832,6 +4903,12 @@ mod tests {
         assert!(names.contains(&"one billing current-account"));
         assert!(names.contains(&"one auto-insights status"));
         assert!(names.contains(&"one desktop-exec status"));
+        let capabilities = env.data["capabilities"]
+            .as_array()
+            .expect("capabilities array");
+        assert!(capabilities
+            .iter()
+            .any(|item| item["id"] == "designer.workflow.context"));
     }
 
     #[test]
@@ -4867,6 +4944,48 @@ mod tests {
         let env = catalog_describe_envelope("one plans list")
             .expect("catalog describe should work for one plans list");
         assert_eq!(env.data["path"], "one/plans/list");
+
+        let env = catalog_describe_envelope("designer.workflow.run")
+            .expect("catalog describe should work for capability");
+        assert_eq!(env.data["kind"], "capability");
+        assert_eq!(env.data["provider"], "designer_local");
+    }
+
+    #[test]
+    fn catalog_list_filters_capabilities_by_tag() {
+        let env =
+            catalog_list_envelope(Some("cloud"), "compact").expect("catalog list should work");
+        let capabilities = env.data["capabilities"]
+            .as_array()
+            .expect("capabilities array");
+        assert!(capabilities.iter().all(|item| {
+            item["tags"]
+                .as_array()
+                .expect("tags")
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|tag| tag == "cloud")
+        }));
+    }
+
+    #[test]
+    fn catalog_run_executes_designer_capability() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let input = dir.path().join("sample.yxmd");
+        fs::write(
+            &input,
+            r#"<AlteryxDocument yxmdVer="2025.2"><Nodes><Node ToolID="1"><GuiSettings Plugin="AlteryxBasePluginsGui.TextInput.TextInput"/></Node></Nodes><Connections/></AlteryxDocument>"#,
+        )
+        .expect("write sample");
+
+        let env = catalog_run_envelope(
+            "designer.workflow.context",
+            &format!(r#"{{"workflow_path":"{}"}}"#, input.display()),
+            false,
+        )
+        .expect("catalog run should succeed");
+        assert_eq!(env.data["capability"]["id"], "designer.workflow.context");
+        assert_eq!(env.data["result"]["workflow"]["tool_count"], 1);
     }
 
     #[test]

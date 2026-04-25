@@ -106,7 +106,7 @@ ayx mongo inventory --profile config.yaml --output json
 - `sqlserver` for SQL Server status, prechecks, connection-string helpers, and migration planning
 - `onboard` for guided first-run profile setup and subsequent value reuse
 - `server upgrade` for upgrade path planning, prechecks, backup, apply simulation, and postchecks
-- `catalog` for machine-readable command discovery
+- `catalog` for machine-readable command and capability discovery
 - `update` for GitHub release self-update
 
 The tool returns a consistent envelope model so humans and agents can parse success, failure, and artifact paths in the same way.
@@ -173,7 +173,9 @@ Start with:
 
 ```powershell
 ayx catalog list
-ayx catalog describe --command mongo/backup
+ayx catalog describe mongo/backup
+ayx catalog describe designer.workflow.context
+ayx catalog run designer.workflow.context --json '{"workflow_path":"sample.yxmd"}'
 ayx license api status
 ayx one platform workspace current
 ayx one platform auth status
@@ -190,6 +192,12 @@ ayx server doctor startup --error "Failed to register Service URL"
 ayx mongo query --database AlteryxService --collection AS_Queue --filter "{}"
 ayx mongo doctor
 ```
+
+Agent-oriented catalog notes:
+- `ayx catalog list --tag designer --format full` surfaces capability ids, schemas, safety, and provider type alongside the existing command catalog.
+- `ayx catalog describe <command-or-capability>` resolves either a legacy command path/name or a capability id such as `designer.tool.add`.
+- `ayx catalog run <capability> --json <payload-or-@file> [--dry-run]` is the structured execution entry point for the native capability layer.
+- The first local Designer slice is file-backed today and aligned to the `eel.dll` / Nexus localhost WebSocket contract shape so a live IPC backend can slot in later without changing the public ids.
 
 ## Development
 
@@ -222,4 +230,3 @@ The old `ayxm` repo is being archived, but a few reference files are kept here s
 - `docs/legacy/mongo_schema.py`
 
 These are reference artifacts only. They are not runtime dependencies of the Rust CLI.
-
