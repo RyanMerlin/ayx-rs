@@ -20,6 +20,9 @@ Then create a small `config.yaml` with your Server and One credentials, and star
 ayx server api status --profile config.yaml
 ayx mongo status --profile config.yaml
 ayx catalog list
+ayx catalog list --tag designer --format full
+ayx catalog describe designer.workflow.context
+ayx catalog run designer.workflow.context --json '{"workflow_path":"sample.yxmd"}'
 ```
 
 If you want the command to feed another tool, add `--output json`.
@@ -225,4 +228,3 @@ Ownership transfer is API-first through `PUT /v3/workflows/{workflowId}/transfer
 - `tools workspace init --output workspace.yaml` writes the canonical workspace template, while `tools workspace resolve --workspace workspace.yaml --source dev --target prod` resolves explicit source/target environments for future cross-environment operations.
 - `workflow-package` saves the yxzp to the filesystem (default `<workflowId>.yxzp`) and accepts an optional `versionId`.
 - Payload files are supplied via `--payload-file <path>` and only evaluated when `--apply` is supplied; otherwise the CLI emits a dry-run envelope pointing to the payload file.
-

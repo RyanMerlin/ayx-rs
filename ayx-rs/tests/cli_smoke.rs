@@ -116,7 +116,10 @@ fn workflow_convert_cloud_smoke() {
     assert!(output.exists());
     let text = fs::read_to_string(&output).expect("read output");
     let json: serde_json::Value = serde_json::from_str(&text).expect("valid json");
-    assert_eq!(json.get("@yxmdVer").and_then(|value| value.as_str()), Some("2021.4"));
+    assert_eq!(
+        json.get("@yxmdVer").and_then(|value| value.as_str()),
+        Some("2021.4")
+    );
     assert!(json.get("Nodes").is_some());
 }
 
@@ -132,4 +135,82 @@ fn ui_help_renders() {
     assert!(stdout.contains("session"));
     assert!(stdout.contains("workflow"));
     assert!(stdout.contains("data"));
+}
+
+#[test]
+fn catalog_list_tag_smoke() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["--output", "json", "catalog", "list", "--tag", "designer"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid json");
+    let capabilities = json["data"]["capabilities"]
+        .as_array()
+        .expect("capabilities array");
+    assert!(!capabilities.is_empty());
+    assert!(capabilities.iter().all(|item| {
+        item["tags"]
+            .as_array()
+            .expect("tags")
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .any(|tag| tag == "designer")
+    }));
+}
+
+#[test]
+fn catalog_describe_capability_smoke() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "--output",
+            "json",
+            "catalog",
+            "describe",
+            "designer.workflow.context",
+        ])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid json");
+    assert_eq!(json["data"]["kind"], "capability");
+    assert_eq!(json["data"]["id"], "designer.workflow.context");
+}
+
+#[test]
+fn catalog_run_smoke() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let input = dir.path().join("sample.yxmd");
+    fs::write(
+        &input,
+        r#"<AlteryxDocument yxmdVer="2025.2"><Nodes><Node ToolID="1"><GuiSettings Plugin="AlteryxBasePluginsGui.TextInput.TextInput"/></Node></Nodes><Connections/></AlteryxDocument>"#,
+    )
+    .expect("write sample");
+
+    let payload = format!(r#"{{"workflow_path":"{}"}}"#, input.display());
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "--output",
+            "json",
+            "catalog",
+            "run",
+            "designer.workflow.context",
+            "--json",
+            &payload,
+        ])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid json");
+    assert_eq!(
+        json["data"]["capability"]["id"],
+        "designer.workflow.context"
+    );
+    assert_eq!(json["data"]["result"]["workflow"]["tool_count"], 1);
 }
