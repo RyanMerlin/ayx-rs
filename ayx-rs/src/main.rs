@@ -7314,9 +7314,22 @@ mod tests {
         assert!(names.contains(&"one job-group pdf-results"));
         assert!(names.contains(&"one job-group run"));
         assert!(names.contains(&"one output-object list"));
+        assert!(names.contains(&"one output-object count"));
         assert!(names.contains(&"one output-object create"));
+        assert!(names.contains(&"one output-object detail"));
+        assert!(names.contains(&"one output-object update"));
+        assert!(names.contains(&"one output-object delete"));
+        assert!(names.contains(&"one output-object inputs"));
+        assert!(names.contains(&"one output-object wrangle-to-python"));
         assert!(names.contains(&"one webhook-flow-task create"));
+        assert!(names.contains(&"one webhook-flow-task detail"));
+        assert!(names.contains(&"one webhook-flow-task delete"));
         assert!(names.contains(&"one write-setting create"));
+        assert!(names.contains(&"one write-setting list"));
+        assert!(names.contains(&"one write-setting count"));
+        assert!(names.contains(&"one write-setting detail"));
+        assert!(names.contains(&"one write-setting update"));
+        assert!(names.contains(&"one write-setting delete"));
         assert!(names.contains(&"one platform api open-api-spec"));
         assert!(names.contains(&"one scheduling list"));
         assert!(names.contains(&"one billing current-account"));
@@ -7474,6 +7487,10 @@ mod tests {
             .expect("catalog describe should work for one job-group pdf-results");
         assert_eq!(env.data["path"], "one/job-group/pdf-results");
 
+        let env = catalog_describe_envelope("one output-object wrangle-to-python")
+            .expect("catalog describe should work for one output-object wrangle-to-python");
+        assert_eq!(env.data["path"], "one/output-object/wrangle-to-python");
+
         let env = catalog_describe_envelope("one output-object create")
             .expect("catalog describe should work for one output-object create");
         assert_eq!(env.data["path"], "one/output-object/create");
@@ -7482,9 +7499,17 @@ mod tests {
             .expect("catalog describe should work for one webhook-flow-task create");
         assert_eq!(env.data["path"], "one/webhook-flow-task/create");
 
+        let env = catalog_describe_envelope("one webhook-flow-task delete")
+            .expect("catalog describe should work for one webhook-flow-task delete");
+        assert_eq!(env.data["path"], "one/webhook-flow-task/delete");
+
         let env = catalog_describe_envelope("one write-setting create")
             .expect("catalog describe should work for one write-setting create");
         assert_eq!(env.data["path"], "one/write-setting/create");
+
+        let env = catalog_describe_envelope("one write-setting update")
+            .expect("catalog describe should work for one write-setting update");
+        assert_eq!(env.data["path"], "one/write-setting/update");
 
         let env = catalog_describe_envelope("one platform api open-api-spec")
             .expect("catalog describe should work for one platform api open-api-spec");
