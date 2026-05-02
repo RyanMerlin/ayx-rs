@@ -368,6 +368,11 @@ const JOB_GROUP_ENDPOINTS: &[EndpointSpec] = &[
     },
     EndpointSpec {
         method: "GET",
+        path: "/v4/jobGroups/{id}/pdfResults",
+        command: "one job-group pdf-results",
+    },
+    EndpointSpec {
+        method: "GET",
         path: "/v4/jobGroups/{id}/outputs",
         command: "one job-group outputs",
     },

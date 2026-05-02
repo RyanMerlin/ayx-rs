@@ -1323,6 +1323,12 @@ enum OneJobGroupCommand {
         #[arg(long)]
         job_group_id: Option<String>,
     },
+    PdfResults {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        job_group_id: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -2619,6 +2625,16 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
         notes: &["Maps to GET /v4/jobLibrary/count in the One API docs."],
+    },
+    CommandSpec {
+        name: "one job-group pdf-results",
+        path: "one/job-group/pdf-results",
+        summary: "Inspect PDF results for a One job group.",
+        output: "one job-group pdf-results envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/jobGroups/{id}/pdfResults in the One API docs."],
     },
     CommandSpec {
         name: "one job-group run",
@@ -5240,7 +5256,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
             },
             Some(OneCommand::JobGroups { command }) => match command {
                 None => Envelope::ok(
-                    "one job-group commands available: list, count, run, detail, cancel, status, inputs, outputs, jobs, publications, profile, profile-results",
+                    "one job-group commands available: list, count, pdf-results, run, detail, cancel, status, inputs, outputs, jobs, publications, profile, profile-results",
                 ),
                 Some(OneJobGroupCommand::List { profile }) => {
                     let config = load_profile(&profile)?;
@@ -5270,6 +5286,20 @@ fn execute(cli: Cli) -> Result<Envelope> {
                         true,
                         &[],
                         Some(payload),
+                    )?
+                }
+                Some(OneJobGroupCommand::PdfResults { profile, job_group_id }) => {
+                    let config = load_profile(&profile)?;
+                    let job_group_id =
+                        job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "jobGroup",
+                        "pdf-results",
+                        "GET",
+                        "/v4/jobGroups/{id}/pdfResults",
+                        false,
+                        &[("id", job_group_id.as_str())],
                     )?
                 }
                 Some(OneJobGroupCommand::Detail { profile, job_group_id }) => {
@@ -7281,6 +7311,7 @@ mod tests {
         assert!(names.contains(&"one connections connector-metadata publish-info"));
         assert!(names.contains(&"one connections connector-metadata overrides create"));
         assert!(names.contains(&"one job-group list"));
+        assert!(names.contains(&"one job-group pdf-results"));
         assert!(names.contains(&"one job-group run"));
         assert!(names.contains(&"one output-object list"));
         assert!(names.contains(&"one output-object create"));
@@ -7438,6 +7469,10 @@ mod tests {
         let env = catalog_describe_envelope("one job-group run")
             .expect("catalog describe should work for one job-group run");
         assert_eq!(env.data["path"], "one/job-group/run");
+
+        let env = catalog_describe_envelope("one job-group pdf-results")
+            .expect("catalog describe should work for one job-group pdf-results");
+        assert_eq!(env.data["path"], "one/job-group/pdf-results");
 
         let env = catalog_describe_envelope("one output-object create")
             .expect("catalog describe should work for one output-object create");
