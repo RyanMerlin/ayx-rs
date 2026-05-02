@@ -565,8 +565,18 @@ const CONNECTION_ENDPOINTS: &[EndpointSpec] = &[
     },
     EndpointSpec {
         method: "GET",
+        path: "/v4/connectorMetadata/{connector}",
+        command: "one connections connector-metadata detail",
+    },
+    EndpointSpec {
+        method: "GET",
         path: "/v4/connectorMetadata/{connector}/publish/info",
         command: "one connections connector-metadata publish-info",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/connectorMetadata/{connector}/overrides",
+        command: "one connections connector-metadata overrides list",
     },
     EndpointSpec {
         method: "POST",
@@ -589,7 +599,7 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
         endpoints: CONNECTION_ENDPOINTS,
         notes: &[
             "Connection lifecycle, dry-run, status, and permissions commands are wired.",
-            "Connector metadata defaults and overrides are wired for JDBC behavior control.",
+            "Connector metadata defaults, current values, and overrides are wired for JDBC behavior control.",
             "Credential-backend specifics remain encoded in the API payloads rather than a local domain model.",
         ],
     },

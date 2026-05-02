@@ -1195,6 +1195,12 @@ enum OneConnectorMetadataCommand {
         #[arg(long)]
         connector: String,
     },
+    Detail {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connector: String,
+    },
     Overrides {
         #[command(subcommand)]
         command: Option<OneConnectorMetadataOverridesCommand>,
@@ -1210,6 +1216,12 @@ enum OneConnectorMetadataOverridesCommand {
         connector: String,
         #[arg(long)]
         body: PathBuf,
+    },
+    List {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connector: String,
     },
     Delete {
         #[arg(long, default_value = "config.yaml")]
@@ -2577,6 +2589,16 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to GET /v4/connectorMetadata/{connector}/defaults in the One API docs."],
     },
     CommandSpec {
+        name: "one connections connector-metadata detail",
+        path: "one/connections/connector-metadata/detail",
+        summary: "Inspect current connector metadata.",
+        output: "one connections connector-metadata detail envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/connectorMetadata/{connector} in the One API docs."],
+    },
+    CommandSpec {
         name: "one connections connector-metadata publish-info",
         path: "one/connections/connector-metadata/publish-info",
         summary: "Inspect connector publish information.",
@@ -2595,6 +2617,16 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: true,
         prerequisites: &["config.yaml", "server_api", "payload json"],
         notes: &["Maps to POST /v4/connectorMetadata/{connector}/overrides in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections connector-metadata overrides list",
+        path: "one/connections/connector-metadata/overrides/list",
+        summary: "Inspect connector metadata overrides.",
+        output: "one connections connector-metadata overrides list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/connectorMetadata/{connector}/overrides in the One API docs."],
     },
     CommandSpec {
         name: "one connections connector-metadata overrides delete",
@@ -5487,7 +5519,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                         &config,
                         "outputObject",
                         "update",
-                        "PUT",
+                        "PATCH",
                         "/v4/outputObjects/{id}",
                         true,
                         &[("id", output_object_id.as_str())],
@@ -5841,7 +5873,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 }
                 Some(OneConnectionsCommand::ConnectorMetadata { command }) => match command {
                     None => Envelope::ok(
-                        "one connections connector-metadata commands available: defaults, publish-info, overrides",
+                        "one connections connector-metadata commands available: defaults, detail, publish-info, overrides",
                     ),
                     Some(OneConnectorMetadataCommand::Defaults { profile, connector }) => {
                         let config = load_profile(&profile)?;
@@ -5851,6 +5883,18 @@ fn execute(cli: Cli) -> Result<Envelope> {
                             "connector-metadata-defaults",
                             "GET",
                             "/v4/connectorMetadata/{connector}/defaults",
+                            false,
+                            &[("connector", connector.as_str())],
+                        )?
+                    }
+                    Some(OneConnectorMetadataCommand::Detail { profile, connector }) => {
+                        let config = load_profile(&profile)?;
+                        one_api_live_request(
+                            &config,
+                            "connection",
+                            "connector-metadata-detail",
+                            "GET",
+                            "/v4/connectorMetadata/{connector}",
                             false,
                             &[("connector", connector.as_str())],
                         )?
@@ -5869,8 +5913,20 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     }
                     Some(OneConnectorMetadataCommand::Overrides { command }) => match command {
                         None => Envelope::ok(
-                            "one connections connector-metadata overrides commands available: create, delete",
+                            "one connections connector-metadata overrides commands available: list, create, delete",
                         ),
+                        Some(OneConnectorMetadataOverridesCommand::List { profile, connector }) => {
+                            let config = load_profile(&profile)?;
+                            one_api_live_request(
+                                &config,
+                                "connection",
+                                "connector-metadata-overrides-list",
+                                "GET",
+                                "/v4/connectorMetadata/{connector}/overrides",
+                                false,
+                                &[("connector", connector.as_str())],
+                            )?
+                        }
                         Some(OneConnectorMetadataOverridesCommand::Create {
                             profile,
                             connector,
@@ -7308,7 +7364,9 @@ mod tests {
         assert!(names.contains(&"one connections dry-run"));
         assert!(names.contains(&"one connections permissions"));
         assert!(names.contains(&"one connections connector-metadata defaults"));
+        assert!(names.contains(&"one connections connector-metadata detail"));
         assert!(names.contains(&"one connections connector-metadata publish-info"));
+        assert!(names.contains(&"one connections connector-metadata overrides list"));
         assert!(names.contains(&"one connections connector-metadata overrides create"));
         assert!(names.contains(&"one job-group list"));
         assert!(names.contains(&"one job-group pdf-results"));
@@ -7477,6 +7535,22 @@ mod tests {
         assert_eq!(
             env.data["path"],
             "one/connections/connector-metadata/defaults"
+        );
+
+        let env = catalog_describe_envelope("one connections connector-metadata detail")
+            .expect("catalog describe should work for one connections connector-metadata detail");
+        assert_eq!(
+            env.data["path"],
+            "one/connections/connector-metadata/detail"
+        );
+
+        let env = catalog_describe_envelope("one connections connector-metadata overrides list")
+            .expect(
+            "catalog describe should work for one connections connector-metadata overrides list",
+        );
+        assert_eq!(
+            env.data["path"],
+            "one/connections/connector-metadata/overrides/list"
         );
 
         let env = catalog_describe_envelope("one job-group run")

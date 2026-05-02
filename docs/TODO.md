@@ -69,7 +69,7 @@ Status:
 - split the API layer into product-specific crates: `ayx-server-api` for Server V3 and `ayx-one-api` for One.
 - moved One transport out of `ayx-rs` and into `ayx-one-api`; existing One live calls now reuse the shared helper there.
 - added a machine-readable One surface inventory in `ayx-one-api` with `implemented`, `partial`, and `documented_only` buckets.
-- wired live One commands for managed IAM workspace/role, connections and connector metadata, flow lifecycle/package handling, job groups, output objects, webhook flow tasks, write settings, plan, plans, scheduling, billing, current user, people, apiAccessTokens, and workspace listing/configuration/transfer.
+- wired live One commands for managed IAM workspace/role, connections and connector metadata current/defaults/overrides, flow lifecycle/package handling, job groups, output objects, webhook flow tasks, write settings, plan, plans, scheduling, billing, current user, people, apiAccessTokens, and workspace listing/configuration/transfer.
 - the inventory now treats `misc` as implemented and the remaining surface gaps live in the partial buckets rather than documented-only.
 - retired the placeholder `one platform` branches for `group`, `sso`, `audit`, `session`, `oauth-client`, `env-param`, `pdh`, `app`, and `health`; `user`, `person`, `token`, and workspace-list/configuration flows remain wired.
 
