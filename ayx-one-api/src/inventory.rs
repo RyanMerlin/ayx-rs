@@ -492,9 +492,81 @@ const WRITE_SETTING_ENDPOINTS: &[EndpointSpec] = &[
     },
 ];
 
+const CONNECTION_ENDPOINTS: &[EndpointSpec] = &[
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/connections",
+        command: "one connections list",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/connections/count",
+        command: "one connections count",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/connections",
+        command: "one connections create",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/connections/dryRun",
+        command: "one connections dry-run",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/connections/{id}",
+        command: "one connections detail",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/connections/{id}/status",
+        command: "one connections status",
+    },
+    EndpointSpec {
+        method: "PATCH",
+        path: "/v4/connections/{id}",
+        command: "one connections update",
+    },
+    EndpointSpec {
+        method: "DELETE",
+        path: "/v4/connections/{id}",
+        command: "one connections delete",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/connections/{id}/permissions",
+        command: "one connections permissions",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/connections/{id}/permissions",
+        command: "one connections permissions create",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/connections/{id}/permissions/{aid}",
+        command: "one connections permissions detail",
+    },
+    EndpointSpec {
+        method: "DELETE",
+        path: "/v4/connections/{id}/permissions/{aid}",
+        command: "one connections permissions delete",
+    },
+];
+
 const DOCUMENTED_ONLY_SURFACES: &[SurfaceSpec] = &[];
 
 const PARTIAL_SURFACES: &[SurfaceSpec] = &[
+    SurfaceSpec {
+        name: "connection",
+        status: "partial",
+        endpoints: CONNECTION_ENDPOINTS,
+        notes: &[
+            "Connection lifecycle, dry-run, status, and permissions commands are wired.",
+            "Credential-backend specifics remain encoded in the API payloads rather than a local domain model.",
+        ],
+    },
     SurfaceSpec {
         name: "flow",
         status: "partial",
@@ -844,6 +916,9 @@ mod tests {
         let partial = env.data["partial_surfaces"]
             .as_array()
             .expect("partial_surfaces");
+        assert!(partial
+            .iter()
+            .any(|surface| surface["name"] == "connection"));
         assert!(partial.iter().any(|surface| surface["name"] == "flow"));
         assert!(partial.iter().any(|surface| surface["name"] == "jobGroup"));
         assert!(partial

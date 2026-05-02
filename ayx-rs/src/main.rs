@@ -670,6 +670,10 @@ enum OneCommand {
         #[command(subcommand)]
         command: Option<OneFlowsCommand>,
     },
+    Connections {
+        #[command(subcommand)]
+        command: Option<OneConnectionsCommand>,
+    },
     JobGroups {
         #[command(subcommand)]
         command: Option<OneJobGroupCommand>,
@@ -1116,6 +1120,94 @@ enum OneFlowsCommand {
         profile: PathBuf,
         #[arg(long)]
         flow_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OneConnectionsCommand {
+    List {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Count {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Create {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    DryRun {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Detail {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connection_id: Option<String>,
+    },
+    Status {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connection_id: Option<String>,
+    },
+    Update {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connection_id: Option<String>,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Delete {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connection_id: Option<String>,
+    },
+    Permissions {
+        #[command(subcommand)]
+        command: Option<OneConnectionPermissionCommand>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OneConnectionPermissionCommand {
+    List {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connection_id: Option<String>,
+    },
+    Create {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connection_id: Option<String>,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Detail {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connection_id: Option<String>,
+        #[arg(long)]
+        aid: String,
+    },
+    Delete {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connection_id: Option<String>,
+        #[arg(long)]
+        aid: String,
     },
 }
 
@@ -2305,6 +2397,126 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
         notes: &["Maps to GET /v4/flows/{id}/package/dryRun in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections list",
+        path: "one/connections/list",
+        summary: "List One connections.",
+        output: "one connections list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/connections in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections count",
+        path: "one/connections/count",
+        summary: "Count One connections.",
+        output: "one connections count envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/connections/count in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections create",
+        path: "one/connections/create",
+        summary: "Create a One connection from JSON payload.",
+        output: "one connections create envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/connections in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections dry-run",
+        path: "one/connections/dry-run",
+        summary: "Dry-run creation of a One connection.",
+        output: "one connections dry-run envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/connections/dryRun in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections detail",
+        path: "one/connections/detail",
+        summary: "Inspect a One connection.",
+        output: "one connections detail envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/connections/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections status",
+        path: "one/connections/status",
+        summary: "Inspect connection status.",
+        output: "one connections status envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/connections/{id}/status in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections update",
+        path: "one/connections/update",
+        summary: "Update a One connection from JSON payload.",
+        output: "one connections update envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to PATCH /v4/connections/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections delete",
+        path: "one/connections/delete",
+        summary: "Delete a One connection.",
+        output: "one connections delete envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to DELETE /v4/connections/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections permissions",
+        path: "one/connections/permissions",
+        summary: "List permissions for a One connection.",
+        output: "one connections permissions envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/connections/{id}/permissions in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections permissions create",
+        path: "one/connections/permissions/create",
+        summary: "Create permissions for a One connection.",
+        output: "one connections permissions create envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/connections/{id}/permissions in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections permissions detail",
+        path: "one/connections/permissions/detail",
+        summary: "Inspect a One connection permission by aid.",
+        output: "one connections permissions detail envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/connections/{id}/permissions/{aid} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections permissions delete",
+        path: "one/connections/permissions/delete",
+        summary: "Delete a One connection permission by aid.",
+        output: "one connections permissions delete envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to DELETE /v4/connections/{id}/permissions/{aid} in the One API docs."],
     },
     CommandSpec {
         name: "one job-group list",
@@ -5397,6 +5609,200 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 let config = load_profile(&profile)?;
                 api_inventory_envelope(&config, "one")?
             }
+            Some(OneCommand::Connections { command }) => match command {
+                None => Envelope::ok(
+                    "one connections commands available: list, count, create, dry-run, detail, status, update, delete, permissions",
+                ),
+                Some(OneConnectionsCommand::List { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_live_request(
+                        &config,
+                        "connection",
+                        "list",
+                        "GET",
+                        "/v4/connections",
+                        false,
+                        &[],
+                    )?
+                }
+                Some(OneConnectionsCommand::Count { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_live_request(
+                        &config,
+                        "connection",
+                        "count",
+                        "GET",
+                        "/v4/connections/count",
+                        false,
+                        &[],
+                    )?
+                }
+                Some(OneConnectionsCommand::Create { profile, body }) => {
+                    let config = load_profile(&profile)?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "connection",
+                        "create",
+                        "POST",
+                        "/v4/connections",
+                        true,
+                        &[],
+                        Some(payload),
+                    )?
+                }
+                Some(OneConnectionsCommand::DryRun { profile, body }) => {
+                    let config = load_profile(&profile)?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "connection",
+                        "dry-run",
+                        "POST",
+                        "/v4/connections/dryRun",
+                        false,
+                        &[],
+                        Some(payload),
+                    )?
+                }
+                Some(OneConnectionsCommand::Detail { profile, connection_id }) => {
+                    let config = load_profile(&profile)?;
+                    let connection_id =
+                        connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "connection",
+                        "detail",
+                        "GET",
+                        "/v4/connections/{id}",
+                        false,
+                        &[("id", connection_id.as_str())],
+                    )?
+                }
+                Some(OneConnectionsCommand::Status { profile, connection_id }) => {
+                    let config = load_profile(&profile)?;
+                    let connection_id =
+                        connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "connection",
+                        "status",
+                        "GET",
+                        "/v4/connections/{id}/status",
+                        false,
+                        &[("id", connection_id.as_str())],
+                    )?
+                }
+                Some(OneConnectionsCommand::Update {
+                    profile,
+                    connection_id,
+                    body,
+                }) => {
+                    let config = load_profile(&profile)?;
+                    let connection_id =
+                        connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "connection",
+                        "update",
+                        "PATCH",
+                        "/v4/connections/{id}",
+                        true,
+                        &[("id", connection_id.as_str())],
+                        Some(payload),
+                    )?
+                }
+                Some(OneConnectionsCommand::Delete { profile, connection_id }) => {
+                    let config = load_profile(&profile)?;
+                    let connection_id =
+                        connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "connection",
+                        "delete",
+                        "DELETE",
+                        "/v4/connections/{id}",
+                        true,
+                        &[("id", connection_id.as_str())],
+                    )?
+                }
+                Some(OneConnectionsCommand::Permissions { command }) => match command {
+                    None => Envelope::ok(
+                        "one connection permissions commands available: list, create, detail, delete",
+                    ),
+                    Some(OneConnectionPermissionCommand::List { profile, connection_id }) => {
+                        let config = load_profile(&profile)?;
+                        let connection_id =
+                            connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
+                        one_api_live_request(
+                            &config,
+                            "connection",
+                            "permissions",
+                            "GET",
+                            "/v4/connections/{id}/permissions",
+                            false,
+                            &[("id", connection_id.as_str())],
+                        )?
+                    }
+                    Some(OneConnectionPermissionCommand::Create {
+                        profile,
+                        connection_id,
+                        body,
+                    }) => {
+                        let config = load_profile(&profile)?;
+                        let connection_id =
+                            connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
+                        let payload = load_payload(&body)?;
+                        one_api_live_request_with_body(
+                            &config,
+                            "connection",
+                            "permissions-create",
+                            "POST",
+                            "/v4/connections/{id}/permissions",
+                            true,
+                            &[("id", connection_id.as_str())],
+                            Some(payload),
+                        )?
+                    }
+                    Some(OneConnectionPermissionCommand::Detail {
+                        profile,
+                        connection_id,
+                        aid,
+                    }) => {
+                        let config = load_profile(&profile)?;
+                        let connection_id =
+                            connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
+                        one_api_live_request(
+                            &config,
+                            "connection",
+                            "permissions-detail",
+                            "GET",
+                            "/v4/connections/{id}/permissions/{aid}",
+                            false,
+                            &[("id", connection_id.as_str()), ("aid", aid.as_str())],
+                        )?
+                    }
+                    Some(OneConnectionPermissionCommand::Delete {
+                        profile,
+                        connection_id,
+                        aid,
+                    }) => {
+                        let config = load_profile(&profile)?;
+                        let connection_id =
+                            connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
+                        one_api_live_request(
+                            &config,
+                            "connection",
+                            "permissions-delete",
+                            "DELETE",
+                            "/v4/connections/{id}/permissions/{aid}",
+                            true,
+                            &[("id", connection_id.as_str()), ("aid", aid.as_str())],
+                        )?
+                    }
+                },
+            },
             Some(OneCommand::Flows { command }) => match command {
                 None => Envelope::ok(
                     "one flows commands available: list, count, detail, create, update, delete, copy, run, validate, parameters, inputs, outputs, import, import-dry-run, export, export-dry-run",
@@ -6721,6 +7127,10 @@ mod tests {
         assert!(names.contains(&"one flows import-dry-run"));
         assert!(names.contains(&"one flows export"));
         assert!(names.contains(&"one flows export-dry-run"));
+        assert!(names.contains(&"one connections list"));
+        assert!(names.contains(&"one connections create"));
+        assert!(names.contains(&"one connections dry-run"));
+        assert!(names.contains(&"one connections permissions"));
         assert!(names.contains(&"one job-group list"));
         assert!(names.contains(&"one job-group run"));
         assert!(names.contains(&"one output-object list"));
@@ -6860,6 +7270,14 @@ mod tests {
         let env = catalog_describe_envelope("one flows export")
             .expect("catalog describe should work for one flows export");
         assert_eq!(env.data["path"], "one/flows/export");
+
+        let env = catalog_describe_envelope("one connections list")
+            .expect("catalog describe should work for one connections list");
+        assert_eq!(env.data["path"], "one/connections/list");
+
+        let env = catalog_describe_envelope("one connections permissions")
+            .expect("catalog describe should work for one connections permissions");
+        assert_eq!(env.data["path"], "one/connections/permissions");
 
         let env = catalog_describe_envelope("one job-group run")
             .expect("catalog describe should work for one job-group run");

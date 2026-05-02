@@ -153,11 +153,12 @@ pub fn one_api_live_request_with_body(
             .request(method.clone(), &url)
             .header(AUTHORIZATION, format!("Bearer {}", access_token))
             .header(reqwest::header::ACCEPT, "application/json");
-        if mutating {
+        if let Some(ref payload) = body {
+            request = request
+                .header(CONTENT_TYPE, "application/json")
+                .json(payload);
+        } else if mutating {
             request = request.header(CONTENT_TYPE, "application/json");
-            if let Some(ref payload) = body {
-                request = request.json(payload);
-            }
         }
 
         let response = request.send();
