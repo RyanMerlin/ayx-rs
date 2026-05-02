@@ -247,29 +247,90 @@ const PLAN_ENDPOINTS: &[EndpointSpec] = &[
     },
 ];
 
-const DOCUMENTED_ONLY_SURFACES: &[SurfaceSpec] = &[
-    SurfaceSpec {
-        name: "flow",
-        status: "documented",
-        endpoints: &[
-            EndpointSpec {
-                method: "POST",
-                path: "/v4/flows/package",
-                command: "one flows import",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/flows",
-                command: "one flows list",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/flows/{id}/package",
-                command: "one flows export",
-            },
-        ],
-        notes: &["Indexed in the official Alteryx One API help pages; not wired in this CLI yet."],
+const FLOW_ENDPOINTS: &[EndpointSpec] = &[
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/flows",
+        command: "one flows create",
     },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/flows",
+        command: "one flows list",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/flows/count",
+        command: "one flows count",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/flows/{id}",
+        command: "one flows detail",
+    },
+    EndpointSpec {
+        method: "PUT",
+        path: "/v4/flows/{id}",
+        command: "one flows update",
+    },
+    EndpointSpec {
+        method: "DELETE",
+        path: "/v4/flows/{id}",
+        command: "one flows delete",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/flows/{id}/copy",
+        command: "one flows copy",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/flows/{id}/run",
+        command: "one flows run",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/flows/{id}/validate",
+        command: "one flows validate",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/flows/{id}/recipeParameters",
+        command: "one flows parameters",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/flows/{id}/inputs",
+        command: "one flows inputs",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/flows/{id}/outputs",
+        command: "one flows outputs",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/flows/package",
+        command: "one flows import",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/flows/package/dryRun",
+        command: "one flows import-dry-run",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/flows/{id}/package",
+        command: "one flows export",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/flows/{id}/package/dryRun",
+        command: "one flows export-dry-run",
+    },
+];
+
+const DOCUMENTED_ONLY_SURFACES: &[SurfaceSpec] = &[
     SurfaceSpec {
         name: "jobGroup",
         status: "documented",
@@ -374,6 +435,15 @@ const DOCUMENTED_ONLY_SURFACES: &[SurfaceSpec] = &[
 ];
 
 const PARTIAL_SURFACES: &[SurfaceSpec] = &[
+    SurfaceSpec {
+        name: "flow",
+        status: "partial",
+        endpoints: FLOW_ENDPOINTS,
+        notes: &[
+            "Flow lifecycle, package, parameters, and run-inspection commands are wired.",
+            "Flow library, folder-scoped, and permission-specific endpoints remain documented-only.",
+        ],
+    },
     SurfaceSpec {
         name: "apiAccessTokens",
         status: "partial",
@@ -673,6 +743,7 @@ mod tests {
         let partial = env.data["partial_surfaces"]
             .as_array()
             .expect("partial_surfaces");
+        assert!(partial.iter().any(|surface| surface["name"] == "flow"));
         assert!(partial
             .iter()
             .any(|surface| surface["name"] == "apiAccessTokens"));

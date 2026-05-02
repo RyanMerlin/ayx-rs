@@ -16,7 +16,10 @@ use ayx_one::{
     api_diagnose_envelope, api_inventory_envelope, api_status_envelope,
     one_surface_inventory_envelope,
 };
-use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
+use ayx_one_api::{
+    flow_export_package_envelope, flow_import_package_envelope, one_api_live_request,
+    one_api_live_request_with_body,
+};
 use ayx_server::logs::{
     discover_log_inventory, extract_context, parse_gallery_csv, parse_gallery_events,
     parse_service_events, recent_log_candidates, summarize_log_file, tail_log_file,
@@ -663,6 +666,10 @@ enum OneCommand {
         #[command(subcommand)]
         command: Option<OnePlansCommand>,
     },
+    Flows {
+        #[command(subcommand)]
+        command: Option<OneFlowsCommand>,
+    },
     Scheduling {
         #[command(subcommand)]
         command: Option<OneSchedulingCommand>,
@@ -971,6 +978,124 @@ enum OnePlansCommand {
         plan_id: Option<String>,
         #[arg(long)]
         subject_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OneFlowsCommand {
+    List {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Count {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Create {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Detail {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        flow_id: Option<String>,
+    },
+    Update {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        flow_id: Option<String>,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Delete {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        flow_id: Option<String>,
+    },
+    Copy {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        flow_id: Option<String>,
+        #[arg(long)]
+        body: Option<PathBuf>,
+    },
+    Run {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        flow_id: Option<String>,
+        #[arg(long)]
+        body: Option<PathBuf>,
+    },
+    Validate {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        flow_id: Option<String>,
+    },
+    Parameters {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        flow_id: Option<String>,
+        #[arg(long)]
+        output_object_type: Option<String>,
+    },
+    Inputs {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        flow_id: Option<String>,
+    },
+    Outputs {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        flow_id: Option<String>,
+    },
+    Import {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        folder_id: Option<String>,
+        #[arg(long)]
+        from_ui: bool,
+        #[arg(long)]
+        override_js_udfs: bool,
+    },
+    ImportDryRun {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        folder_id: Option<String>,
+        #[arg(long)]
+        from_ui: bool,
+        #[arg(long)]
+        override_js_udfs: bool,
+    },
+    Export {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        flow_id: Option<String>,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    ExportDryRun {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        flow_id: Option<String>,
     },
 }
 
@@ -1800,6 +1925,166 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: true,
         prerequisites: &["config.yaml", "server_api", "payload json"],
         notes: &["Maps to POST /v4/plans/{id}/permissions in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows list",
+        path: "one/flows/list",
+        summary: "List One flows.",
+        output: "one flows list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/flows in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows count",
+        path: "one/flows/count",
+        summary: "Count One flows.",
+        output: "one flows count envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/flows/count in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows detail",
+        path: "one/flows/detail",
+        summary: "Inspect a One flow by id.",
+        output: "one flows detail envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/flows/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows create",
+        path: "one/flows/create",
+        summary: "Create a One flow from JSON payload.",
+        output: "one flows create envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/flows in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows update",
+        path: "one/flows/update",
+        summary: "Update a One flow from JSON payload.",
+        output: "one flows update envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to PUT /v4/flows/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows delete",
+        path: "one/flows/delete",
+        summary: "Delete a One flow.",
+        output: "one flows delete envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to DELETE /v4/flows/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows copy",
+        path: "one/flows/copy",
+        summary: "Copy a One flow using a JSON payload.",
+        output: "one flows copy envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/flows/{id}/copy in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows run",
+        path: "one/flows/run",
+        summary: "Run a One flow using a JSON payload.",
+        output: "one flows run envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/flows/{id}/run in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows validate",
+        path: "one/flows/validate",
+        summary: "Validate a One flow.",
+        output: "one flows validate envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/flows/{id}/validate in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows parameters",
+        path: "one/flows/parameters",
+        summary: "Inspect flow-level parameters and overrides.",
+        output: "one flows parameters envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/flows/{id}/recipeParameters in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows inputs",
+        path: "one/flows/inputs",
+        summary: "List inputs for a One flow.",
+        output: "one flows inputs envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/flows/{id}/inputs in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows outputs",
+        path: "one/flows/outputs",
+        summary: "List outputs for a One flow.",
+        output: "one flows outputs envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/flows/{id}/outputs in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows import",
+        path: "one/flows/import",
+        summary: "Import a flow package.",
+        output: "one flows import envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "flow package"],
+        notes: &["Maps to POST /v4/flows/package in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows import-dry-run",
+        path: "one/flows/import-dry-run",
+        summary: "Dry-run import of a flow package.",
+        output: "one flows import dry-run envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api", "flow package"],
+        notes: &["Maps to POST /v4/flows/package/dryRun in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows export",
+        path: "one/flows/export",
+        summary: "Export a flow package to disk.",
+        output: "one flows export envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/flows/{id}/package in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows export-dry-run",
+        path: "one/flows/export-dry-run",
+        summary: "Dry-run export of a flow package.",
+        output: "one flows export dry-run envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/flows/{id}/package/dryRun in the One API docs."],
     },
     CommandSpec {
         name: "one scheduling list",
@@ -4135,6 +4420,227 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 let config = load_profile(&profile)?;
                 api_inventory_envelope(&config, "one")?
             }
+            Some(OneCommand::Flows { command }) => match command {
+                None => Envelope::ok(
+                    "one flows commands available: list, count, detail, create, update, delete, copy, run, validate, parameters, inputs, outputs, import, import-dry-run, export, export-dry-run",
+                ),
+                Some(OneFlowsCommand::List { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_live_request(&config, "flow", "list", "GET", "/v4/flows", false, &[])?
+                }
+                Some(OneFlowsCommand::Count { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_live_request(&config, "flow", "count", "GET", "/v4/flows/count", false, &[])?
+                }
+                Some(OneFlowsCommand::Create { profile, body }) => {
+                    let config = load_profile(&profile)?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "flow",
+                        "create",
+                        "POST",
+                        "/v4/flows",
+                        true,
+                        &[],
+                        Some(payload),
+                    )?
+                }
+                Some(OneFlowsCommand::Detail { profile, flow_id }) => {
+                    let config = load_profile(&profile)?;
+                    let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "flow",
+                        "detail",
+                        "GET",
+                        "/v4/flows/{id}",
+                        false,
+                        &[("id", flow_id.as_str())],
+                    )?
+                }
+                Some(OneFlowsCommand::Update { profile, flow_id, body }) => {
+                    let config = load_profile(&profile)?;
+                    let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "flow",
+                        "update",
+                        "PUT",
+                        "/v4/flows/{id}",
+                        true,
+                        &[("id", flow_id.as_str())],
+                        Some(payload),
+                    )?
+                }
+                Some(OneFlowsCommand::Delete { profile, flow_id }) => {
+                    let config = load_profile(&profile)?;
+                    let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "flow",
+                        "delete",
+                        "DELETE",
+                        "/v4/flows/{id}",
+                        true,
+                        &[("id", flow_id.as_str())],
+                    )?
+                }
+                Some(OneFlowsCommand::Copy { profile, flow_id, body }) => {
+                    let config = load_profile(&profile)?;
+                    let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+                    let payload = body.map(|path| load_payload(&path)).transpose()?;
+                    match payload {
+                        Some(payload) => one_api_live_request_with_body(
+                            &config,
+                            "flow",
+                            "copy",
+                            "POST",
+                            "/v4/flows/{id}/copy",
+                            true,
+                            &[("id", flow_id.as_str())],
+                            Some(payload),
+                        )?,
+                        None => one_api_live_request(
+                            &config,
+                            "flow",
+                            "copy",
+                            "POST",
+                            "/v4/flows/{id}/copy",
+                            true,
+                            &[("id", flow_id.as_str())],
+                        )?,
+                    }
+                }
+                Some(OneFlowsCommand::Run { profile, flow_id, body }) => {
+                    let config = load_profile(&profile)?;
+                    let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+                    let payload = body.map(|path| load_payload(&path)).transpose()?;
+                    match payload {
+                        Some(payload) => one_api_live_request_with_body(
+                            &config,
+                            "flow",
+                            "run",
+                            "POST",
+                            "/v4/flows/{id}/run",
+                            true,
+                            &[("id", flow_id.as_str())],
+                            Some(payload),
+                        )?,
+                        None => one_api_live_request(
+                            &config,
+                            "flow",
+                            "run",
+                            "POST",
+                            "/v4/flows/{id}/run",
+                            true,
+                            &[("id", flow_id.as_str())],
+                        )?,
+                    }
+                }
+                Some(OneFlowsCommand::Validate { profile, flow_id }) => {
+                    let config = load_profile(&profile)?;
+                    let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "flow",
+                        "validate",
+                        "GET",
+                        "/v4/flows/{id}/validate",
+                        false,
+                        &[("id", flow_id.as_str())],
+                    )?
+                }
+                Some(OneFlowsCommand::Parameters {
+                    profile,
+                    flow_id,
+                    output_object_type,
+                }) => {
+                    let config = load_profile(&profile)?;
+                    let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+                    let endpoint = if let Some(value) = output_object_type.as_deref() {
+                        format!("/v4/flows/{}/recipeParameters?outputObjectType={}", flow_id, value)
+                    } else {
+                        format!("/v4/flows/{}/recipeParameters", flow_id)
+                    };
+                    one_api_live_request(&config, "flow", "parameters", "GET", &endpoint, false, &[])?
+                }
+                Some(OneFlowsCommand::Inputs { profile, flow_id }) => {
+                    let config = load_profile(&profile)?;
+                    let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "flow",
+                        "inputs",
+                        "GET",
+                        "/v4/flows/{id}/inputs",
+                        false,
+                        &[("id", flow_id.as_str())],
+                    )?
+                }
+                Some(OneFlowsCommand::Outputs { profile, flow_id }) => {
+                    let config = load_profile(&profile)?;
+                    let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "flow",
+                        "outputs",
+                        "GET",
+                        "/v4/flows/{id}/outputs",
+                        false,
+                        &[("id", flow_id.as_str())],
+                    )?
+                }
+                Some(OneFlowsCommand::Import {
+                    profile,
+                    input,
+                    folder_id,
+                    from_ui,
+                    override_js_udfs,
+                }) => {
+                    let config = load_profile(&profile)?;
+                    flow_import_package_envelope(
+                        &config,
+                        &input,
+                        folder_id.as_deref(),
+                        from_ui,
+                        override_js_udfs,
+                        false,
+                    )?
+                }
+                Some(OneFlowsCommand::ImportDryRun {
+                    profile,
+                    input,
+                    folder_id,
+                    from_ui,
+                    override_js_udfs,
+                }) => {
+                    let config = load_profile(&profile)?;
+                    flow_import_package_envelope(
+                        &config,
+                        &input,
+                        folder_id.as_deref(),
+                        from_ui,
+                        override_js_udfs,
+                        true,
+                    )?
+                }
+                Some(OneFlowsCommand::Export {
+                    profile,
+                    flow_id,
+                    output,
+                }) => {
+                    let config = load_profile(&profile)?;
+                    let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+                    flow_export_package_envelope(&config, &flow_id, &output, false)?
+                }
+                Some(OneFlowsCommand::ExportDryRun { profile, flow_id }) => {
+                    let config = load_profile(&profile)?;
+                    let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+                    flow_export_package_envelope(&config, &flow_id, Path::new("unused"), true)?
+                }
+            },
             Some(OneCommand::Plans { command }) => match command {
                 None => Envelope::ok(
                     "one plans commands available: list, create, detail, full, run, count, run-parameters, schedules, export, update, delete, share, import, permissions",
@@ -5222,6 +5728,22 @@ mod tests {
         assert!(names.contains(&"one plans update"));
         assert!(names.contains(&"one plans delete"));
         assert!(names.contains(&"one plans share"));
+        assert!(names.contains(&"one flows list"));
+        assert!(names.contains(&"one flows count"));
+        assert!(names.contains(&"one flows detail"));
+        assert!(names.contains(&"one flows create"));
+        assert!(names.contains(&"one flows update"));
+        assert!(names.contains(&"one flows delete"));
+        assert!(names.contains(&"one flows copy"));
+        assert!(names.contains(&"one flows run"));
+        assert!(names.contains(&"one flows validate"));
+        assert!(names.contains(&"one flows parameters"));
+        assert!(names.contains(&"one flows inputs"));
+        assert!(names.contains(&"one flows outputs"));
+        assert!(names.contains(&"one flows import"));
+        assert!(names.contains(&"one flows import-dry-run"));
+        assert!(names.contains(&"one flows export"));
+        assert!(names.contains(&"one flows export-dry-run"));
         assert!(names.contains(&"one scheduling list"));
         assert!(names.contains(&"one billing current-account"));
         assert!(names.contains(&"one platform token"));
@@ -5346,6 +5868,14 @@ mod tests {
         let env = catalog_describe_envelope("one plans share")
             .expect("catalog describe should work for one plans share");
         assert_eq!(env.data["path"], "one/plans/share");
+
+        let env = catalog_describe_envelope("one flows list")
+            .expect("catalog describe should work for one flows list");
+        assert_eq!(env.data["path"], "one/flows/list");
+
+        let env = catalog_describe_envelope("one flows export")
+            .expect("catalog describe should work for one flows export");
+        assert_eq!(env.data["path"], "one/flows/export");
 
         let env = catalog_describe_envelope("designer.workflow.run")
             .expect("catalog describe should work for capability");

@@ -1,3 +1,5 @@
+use std::fs;
+use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -5,10 +7,12 @@ use anyhow::{bail, Context, Result};
 use ayx_core::envelope::Envelope;
 use ayx_core::observability::{record_api_event, response_shape, ApiEvent};
 use ayx_core::profile::Config;
+use reqwest::blocking::multipart::{Form, Part};
 use reqwest::blocking::Client;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER};
 use reqwest::StatusCode;
 use serde_json::{json, Value};
+use url::form_urlencoded::Serializer;
 const ONE_API_BASE_URL: &str = "https://api.us1.alteryxcloud.com";
 
 mod inventory;
@@ -278,6 +282,303 @@ pub fn one_api_live_request_with_body(
             }
         }
     }
+}
+
+pub fn flow_import_package_envelope(
+    config: &Config,
+    input_path: &Path,
+    folder_id: Option<&str>,
+    from_ui: bool,
+    override_js_udfs: bool,
+    dry_run: bool,
+) -> Result<Envelope> {
+    let observability = config.observability.as_ref();
+    let client = build_client()?;
+    let access_token = resolve_one_access_token(config, &client)?;
+    let started = Instant::now();
+
+    let endpoint = if dry_run {
+        "/v4/flows/package/dryRun"
+    } else {
+        "/v4/flows/package"
+    };
+    let mut url = format!("{}{}", normalized_base_url(), endpoint);
+    let mut query: Vec<(&str, String)> = Vec::new();
+    if let Some(value) = folder_id {
+        query.push(("folderId", value.to_string()));
+    }
+    if from_ui {
+        query.push(("fromUI", "true".to_string()));
+    }
+    if override_js_udfs {
+        query.push(("overrideJsUdfs", "true".to_string()));
+    }
+    if !query.is_empty() {
+        let mut serializer = Serializer::new(String::new());
+        for (key, value) in &query {
+            serializer.append_pair(key, value);
+        }
+        url.push('?');
+        url.push_str(&serializer.finish());
+    }
+
+    let file_bytes = fs::read(input_path)
+        .with_context(|| format!("failed to read flow package '{}'", input_path.display()))?;
+    let file_name = input_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "flow-package.zip".to_string());
+    let form = Form::new().part(
+        "data",
+        Part::bytes(file_bytes)
+            .file_name(file_name)
+            .mime_str("application/octet-stream")
+            .expect("mime literal is valid"),
+    );
+
+    let response = client
+        .post(&url)
+        .header(AUTHORIZATION, format!("Bearer {}", access_token))
+        .multipart(form)
+        .send()
+        .with_context(|| format!("flow package request to '{}' failed", url))?;
+
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let request_id = response
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned);
+    let text = response.text().unwrap_or_else(|_| String::new());
+    let response_body = parse_response_text(&content_type, &text);
+    let envelope = Envelope::ok_with_data(
+        format!(
+            "flow package {} {}",
+            if dry_run { "dry-run" } else { "import" },
+            if status.is_success() { "ok" } else { "failed" }
+        ),
+        json!({
+            "surface": "flow",
+            "operation": if dry_run { "import-dry-run" } else { "import" },
+            "method": "POST",
+            "url": url,
+            "status_code": status.as_u16(),
+            "ok": status.is_success(),
+            "request_id": request_id,
+            "response": response_body,
+        }),
+    );
+    let _ = record_api_event(
+        observability,
+        ApiEvent {
+            product: "one",
+            surface: "flow",
+            operation: if dry_run { "import-dry-run" } else { "import" },
+            method: "POST",
+            endpoint_template: endpoint,
+            resolved_url: &url,
+            status_code: Some(status.as_u16()),
+            duration_ms: started.elapsed().as_millis(),
+            attempt: 1,
+            retry_after_seconds: None,
+            request_id: request_id.as_deref(),
+            ok: status.is_success(),
+            error_class: None,
+            response_shape: Some(response_shape(&response_body)),
+            mutating: !dry_run,
+            dry_run,
+        },
+    );
+    Ok(envelope)
+}
+
+pub fn flow_export_package_envelope(
+    config: &Config,
+    flow_id: &str,
+    output_path: &Path,
+    dry_run: bool,
+) -> Result<Envelope> {
+    let observability = config.observability.as_ref();
+    let client = build_client()?;
+    let access_token = resolve_one_access_token(config, &client)?;
+    let started = Instant::now();
+
+    let endpoint = if dry_run {
+        "/v4/flows/{id}/package/dryRun"
+    } else {
+        "/v4/flows/{id}/package"
+    };
+    let mut url = format!("{}{}", normalized_base_url(), endpoint);
+    url = url.replace("{id}", flow_id);
+
+    let response = client
+        .get(&url)
+        .header(AUTHORIZATION, format!("Bearer {}", access_token))
+        .header(reqwest::header::ACCEPT, "*/*")
+        .send()
+        .with_context(|| format!("flow package request to '{}' failed", url))?;
+
+    let status = response.status();
+    let request_id = response
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned);
+
+    if status.is_success() {
+        if dry_run {
+            let content_type = response
+                .headers()
+                .get(CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            let text = response.text().unwrap_or_else(|_| String::new());
+            let response_body = parse_response_text(&content_type, &text);
+            let envelope = Envelope::ok_with_data(
+                "flow package export dry-run ok",
+                json!({
+                    "surface": "flow",
+                    "operation": "export-dry-run",
+                    "flow_id": flow_id,
+                    "status_code": status.as_u16(),
+                    "ok": true,
+                    "request_id": request_id,
+                    "response": response_body,
+                }),
+            );
+            let _ = record_api_event(
+                observability,
+                ApiEvent {
+                    product: "one",
+                    surface: "flow",
+                    operation: "export-dry-run",
+                    method: "GET",
+                    endpoint_template: endpoint,
+                    resolved_url: &url,
+                    status_code: Some(status.as_u16()),
+                    duration_ms: started.elapsed().as_millis(),
+                    attempt: 1,
+                    retry_after_seconds: None,
+                    request_id: request_id.as_deref(),
+                    ok: true,
+                    error_class: None,
+                    response_shape: Some(response_shape(&response_body)),
+                    mutating: false,
+                    dry_run: true,
+                },
+            );
+            return Ok(envelope);
+        }
+
+        let bytes = response
+            .bytes()
+            .with_context(|| format!("failed to read flow package download from '{}'", url))?;
+        if let Some(parent) = output_path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create flow export parent directory '{}'",
+                    parent.display()
+                )
+            })?;
+        }
+        fs::write(output_path, &bytes).with_context(|| {
+            format!(
+                "failed to write flow package to '{}'",
+                output_path.display()
+            )
+        })?;
+        let envelope = Envelope::ok_with_data(
+            "flow package exported",
+            json!({
+                "surface": "flow",
+                "operation": "export",
+                "flow_id": flow_id,
+                "status_code": status.as_u16(),
+                "ok": true,
+                "request_id": request_id,
+                "path": output_path.display().to_string(),
+                "bytes": bytes.len(),
+            }),
+        );
+        let _ = record_api_event(
+            observability,
+            ApiEvent {
+                product: "one",
+                surface: "flow",
+                operation: "export",
+                method: "GET",
+                endpoint_template: endpoint,
+                resolved_url: &url,
+                status_code: Some(status.as_u16()),
+                duration_ms: started.elapsed().as_millis(),
+                attempt: 1,
+                retry_after_seconds: None,
+                request_id: request_id.as_deref(),
+                ok: true,
+                error_class: None,
+                response_shape: Some("binary"),
+                mutating: false,
+                dry_run: false,
+            },
+        );
+        return Ok(envelope);
+    }
+
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let text = response.text().unwrap_or_else(|_| String::new());
+    let response_body = parse_response_text(&content_type, &text);
+    let envelope = Envelope::ok_with_data(
+        format!(
+            "flow package {} failed",
+            if dry_run { "dry-run" } else { "export" }
+        ),
+        json!({
+            "surface": "flow",
+            "operation": if dry_run { "export-dry-run" } else { "export" },
+            "flow_id": flow_id,
+            "status_code": status.as_u16(),
+            "ok": false,
+            "request_id": request_id,
+            "response": response_body,
+        }),
+    );
+    let _ = record_api_event(
+        observability,
+        ApiEvent {
+            product: "one",
+            surface: "flow",
+            operation: if dry_run { "export-dry-run" } else { "export" },
+            method: "GET",
+            endpoint_template: endpoint,
+            resolved_url: &url,
+            status_code: Some(status.as_u16()),
+            duration_ms: 0,
+            attempt: 1,
+            retry_after_seconds: None,
+            request_id: request_id.as_deref(),
+            ok: false,
+            error_class: None,
+            response_shape: Some(response_shape(&response_body)),
+            mutating: false,
+            dry_run,
+        },
+    );
+    Ok(envelope)
 }
 
 fn build_client() -> Result<Client> {
