@@ -1171,9 +1171,51 @@ enum OneConnectionsCommand {
         #[arg(long)]
         connection_id: Option<String>,
     },
+    ConnectorMetadata {
+        #[command(subcommand)]
+        command: Option<OneConnectorMetadataCommand>,
+    },
     Permissions {
         #[command(subcommand)]
         command: Option<OneConnectionPermissionCommand>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OneConnectorMetadataCommand {
+    Defaults {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connector: String,
+    },
+    PublishInfo {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connector: String,
+    },
+    Overrides {
+        #[command(subcommand)]
+        command: Option<OneConnectorMetadataOverridesCommand>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OneConnectorMetadataOverridesCommand {
+    Create {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connector: String,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Delete {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        connector: String,
     },
 }
 
@@ -2517,6 +2559,46 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: true,
         prerequisites: &["config.yaml", "server_api"],
         notes: &["Maps to DELETE /v4/connections/{id}/permissions/{aid} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections connector-metadata defaults",
+        path: "one/connections/connector-metadata/defaults",
+        summary: "Inspect connector defaults.",
+        output: "one connections connector-metadata defaults envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/connectorMetadata/{connector}/defaults in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections connector-metadata publish-info",
+        path: "one/connections/connector-metadata/publish-info",
+        summary: "Inspect connector publish information.",
+        output: "one connections connector-metadata publish-info envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/connectorMetadata/{connector}/publish/info in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections connector-metadata overrides create",
+        path: "one/connections/connector-metadata/overrides/create",
+        summary: "Create connector metadata overrides from JSON payload.",
+        output: "one connections connector-metadata overrides create envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/connectorMetadata/{connector}/overrides in the One API docs."],
+    },
+    CommandSpec {
+        name: "one connections connector-metadata overrides delete",
+        path: "one/connections/connector-metadata/overrides/delete",
+        summary: "Delete connector metadata overrides.",
+        output: "one connections connector-metadata overrides delete envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to DELETE /v4/connectorMetadata/{connector}/overrides in the One API docs."],
     },
     CommandSpec {
         name: "one job-group list",
@@ -5611,7 +5693,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
             }
             Some(OneCommand::Connections { command }) => match command {
                 None => Envelope::ok(
-                    "one connections commands available: list, count, create, dry-run, detail, status, update, delete, permissions",
+                    "one connections commands available: list, count, create, dry-run, detail, status, update, delete, permissions, connector-metadata",
                 ),
                 Some(OneConnectionsCommand::List { profile }) => {
                     let config = load_profile(&profile)?;
@@ -5727,6 +5809,70 @@ fn execute(cli: Cli) -> Result<Envelope> {
                         &[("id", connection_id.as_str())],
                     )?
                 }
+                Some(OneConnectionsCommand::ConnectorMetadata { command }) => match command {
+                    None => Envelope::ok(
+                        "one connections connector-metadata commands available: defaults, publish-info, overrides",
+                    ),
+                    Some(OneConnectorMetadataCommand::Defaults { profile, connector }) => {
+                        let config = load_profile(&profile)?;
+                        one_api_live_request(
+                            &config,
+                            "connection",
+                            "connector-metadata-defaults",
+                            "GET",
+                            "/v4/connectorMetadata/{connector}/defaults",
+                            false,
+                            &[("connector", connector.as_str())],
+                        )?
+                    }
+                    Some(OneConnectorMetadataCommand::PublishInfo { profile, connector }) => {
+                        let config = load_profile(&profile)?;
+                        one_api_live_request(
+                            &config,
+                            "connection",
+                            "connector-metadata-publish-info",
+                            "GET",
+                            "/v4/connectorMetadata/{connector}/publish/info",
+                            false,
+                            &[("connector", connector.as_str())],
+                        )?
+                    }
+                    Some(OneConnectorMetadataCommand::Overrides { command }) => match command {
+                        None => Envelope::ok(
+                            "one connections connector-metadata overrides commands available: create, delete",
+                        ),
+                        Some(OneConnectorMetadataOverridesCommand::Create {
+                            profile,
+                            connector,
+                            body,
+                        }) => {
+                            let config = load_profile(&profile)?;
+                            let payload = load_payload(&body)?;
+                            one_api_live_request_with_body(
+                                &config,
+                                "connection",
+                                "connector-metadata-overrides-create",
+                                "POST",
+                                "/v4/connectorMetadata/{connector}/overrides",
+                                true,
+                                &[("connector", connector.as_str())],
+                                Some(payload),
+                            )?
+                        }
+                        Some(OneConnectorMetadataOverridesCommand::Delete { profile, connector }) => {
+                            let config = load_profile(&profile)?;
+                            one_api_live_request(
+                                &config,
+                                "connection",
+                                "connector-metadata-overrides-delete",
+                                "DELETE",
+                                "/v4/connectorMetadata/{connector}/overrides",
+                                true,
+                                &[("connector", connector.as_str())],
+                            )?
+                        }
+                    },
+                },
                 Some(OneConnectionsCommand::Permissions { command }) => match command {
                     None => Envelope::ok(
                         "one connection permissions commands available: list, create, detail, delete",
@@ -7131,6 +7277,9 @@ mod tests {
         assert!(names.contains(&"one connections create"));
         assert!(names.contains(&"one connections dry-run"));
         assert!(names.contains(&"one connections permissions"));
+        assert!(names.contains(&"one connections connector-metadata defaults"));
+        assert!(names.contains(&"one connections connector-metadata publish-info"));
+        assert!(names.contains(&"one connections connector-metadata overrides create"));
         assert!(names.contains(&"one job-group list"));
         assert!(names.contains(&"one job-group run"));
         assert!(names.contains(&"one output-object list"));
@@ -7278,6 +7427,13 @@ mod tests {
         let env = catalog_describe_envelope("one connections permissions")
             .expect("catalog describe should work for one connections permissions");
         assert_eq!(env.data["path"], "one/connections/permissions");
+
+        let env = catalog_describe_envelope("one connections connector-metadata defaults")
+            .expect("catalog describe should work for one connections connector-metadata defaults");
+        assert_eq!(
+            env.data["path"],
+            "one/connections/connector-metadata/defaults"
+        );
 
         let env = catalog_describe_envelope("one job-group run")
             .expect("catalog describe should work for one job-group run");
