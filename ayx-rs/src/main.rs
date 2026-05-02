@@ -892,7 +892,19 @@ enum OnePlansCommand {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
     },
+    Create {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
     Detail {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        plan_id: Option<String>,
+    },
+    Full {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
         #[arg(long)]
@@ -925,6 +937,28 @@ enum OnePlansCommand {
         profile: PathBuf,
         #[arg(long)]
         plan_id: Option<String>,
+    },
+    Update {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        plan_id: Option<String>,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Delete {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        plan_id: Option<String>,
+    },
+    Share {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        plan_id: Option<String>,
+        #[arg(long)]
+        body: PathBuf,
     },
     Import {
         #[arg(long, default_value = "config.yaml")]
@@ -1708,6 +1742,16 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to GET /plans/v1/plans in managed-plans-v1.yaml."],
     },
     CommandSpec {
+        name: "one plans create",
+        path: "one/plans/create",
+        summary: "Create a One plan.",
+        output: "one plans create envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/plans in the One API docs."],
+    },
+    CommandSpec {
         name: "one plans run",
         path: "one/plans/run",
         summary: "Run a One plan.",
@@ -1716,6 +1760,46 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: true,
         prerequisites: &["config.yaml", "server_api"],
         notes: &["Maps to POST /plans/v1/plans/{id}/run in managed-plans-v1.yaml."],
+    },
+    CommandSpec {
+        name: "one plans full",
+        path: "one/plans/full",
+        summary: "Inspect a One plan with the full documented payload.",
+        output: "one plans full envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/plans/{id}/full in the One API docs."],
+    },
+    CommandSpec {
+        name: "one plans update",
+        path: "one/plans/update",
+        summary: "Update a One plan from JSON payload.",
+        output: "one plans update envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to PATCH /v4/plans/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one plans delete",
+        path: "one/plans/delete",
+        summary: "Delete a One plan.",
+        output: "one plans delete envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to DELETE /v4/plans/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one plans share",
+        path: "one/plans/share",
+        summary: "Share a One plan from JSON payload.",
+        output: "one plans share envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/plans/{id}/permissions in the One API docs."],
     },
     CommandSpec {
         name: "one scheduling list",
@@ -4053,11 +4137,25 @@ fn execute(cli: Cli) -> Result<Envelope> {
             }
             Some(OneCommand::Plans { command }) => match command {
                 None => Envelope::ok(
-                    "one plans commands available: list, detail, run, count, run-parameters, schedules, export, import, permissions",
+                    "one plans commands available: list, create, detail, full, run, count, run-parameters, schedules, export, update, delete, share, import, permissions",
                 ),
                 Some(OnePlansCommand::List { profile }) => {
                     let config = load_profile(&profile)?;
                     one_api_live_request(&config, "plans", "list", "GET", "/plans/v1/plans", false, &[])?
+                }
+                Some(OnePlansCommand::Create { profile, body }) => {
+                    let config = load_profile(&profile)?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "plans",
+                        "create",
+                        "POST",
+                        "/v4/plans",
+                        true,
+                        &[],
+                        Some(payload),
+                    )?
                 }
                 Some(OnePlansCommand::Detail { profile, plan_id }) => {
                     let config = load_profile(&profile)?;
@@ -4068,6 +4166,19 @@ fn execute(cli: Cli) -> Result<Envelope> {
                         "detail",
                         "GET",
                         "/plans/v1/plans/{id}",
+                        false,
+                        &[("id", plan_id.as_str())],
+                    )?
+                }
+                Some(OnePlansCommand::Full { profile, plan_id }) => {
+                    let config = load_profile(&profile)?;
+                    let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "plans",
+                        "full",
+                        "GET",
+                        "/v4/plans/{id}/full",
                         false,
                         &[("id", plan_id.as_str())],
                     )?
@@ -4126,6 +4237,49 @@ fn execute(cli: Cli) -> Result<Envelope> {
                         "/plans/v1/plans/{id}/package",
                         false,
                         &[("id", plan_id.as_str())],
+                    )?
+                }
+                Some(OnePlansCommand::Update { profile, plan_id, body }) => {
+                    let config = load_profile(&profile)?;
+                    let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "plans",
+                        "update",
+                        "PATCH",
+                        "/v4/plans/{id}",
+                        true,
+                        &[("id", plan_id.as_str())],
+                        Some(payload),
+                    )?
+                }
+                Some(OnePlansCommand::Delete { profile, plan_id }) => {
+                    let config = load_profile(&profile)?;
+                    let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "plans",
+                        "delete",
+                        "DELETE",
+                        "/v4/plans/{id}",
+                        true,
+                        &[("id", plan_id.as_str())],
+                    )?
+                }
+                Some(OnePlansCommand::Share { profile, plan_id, body }) => {
+                    let config = load_profile(&profile)?;
+                    let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "plans",
+                        "share",
+                        "POST",
+                        "/v4/plans/{id}/permissions",
+                        true,
+                        &[("id", plan_id.as_str())],
+                        Some(payload),
                     )?
                 }
                 Some(OnePlansCommand::Import { profile }) => {
@@ -5063,6 +5217,11 @@ mod tests {
         assert!(names.contains(&"one platform role list-assignments"));
         assert!(names.contains(&"one plans status"));
         assert!(names.contains(&"one plans list"));
+        assert!(names.contains(&"one plans create"));
+        assert!(names.contains(&"one plans full"));
+        assert!(names.contains(&"one plans update"));
+        assert!(names.contains(&"one plans delete"));
+        assert!(names.contains(&"one plans share"));
         assert!(names.contains(&"one scheduling list"));
         assert!(names.contains(&"one billing current-account"));
         assert!(names.contains(&"one platform token"));
@@ -5167,6 +5326,26 @@ mod tests {
         let env = catalog_describe_envelope("one plans list")
             .expect("catalog describe should work for one plans list");
         assert_eq!(env.data["path"], "one/plans/list");
+
+        let env = catalog_describe_envelope("one plans create")
+            .expect("catalog describe should work for one plans create");
+        assert_eq!(env.data["path"], "one/plans/create");
+
+        let env = catalog_describe_envelope("one plans full")
+            .expect("catalog describe should work for one plans full");
+        assert_eq!(env.data["path"], "one/plans/full");
+
+        let env = catalog_describe_envelope("one plans update")
+            .expect("catalog describe should work for one plans update");
+        assert_eq!(env.data["path"], "one/plans/update");
+
+        let env = catalog_describe_envelope("one plans delete")
+            .expect("catalog describe should work for one plans delete");
+        assert_eq!(env.data["path"], "one/plans/delete");
+
+        let env = catalog_describe_envelope("one plans share")
+            .expect("catalog describe should work for one plans share");
+        assert_eq!(env.data["path"], "one/plans/share");
 
         let env = catalog_describe_envelope("designer.workflow.run")
             .expect("catalog describe should work for capability");

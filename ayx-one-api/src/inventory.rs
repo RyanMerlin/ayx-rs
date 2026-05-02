@@ -174,84 +174,80 @@ const BILLING_ENDPOINTS: &[EndpointSpec] = &[
     },
 ];
 
-const DOCUMENTED_ONLY_SURFACES: &[SurfaceSpec] = &[
-    SurfaceSpec {
-        name: "plan",
-        status: "documented",
-        endpoints: &[
-            EndpointSpec {
-                method: "POST",
-                path: "/v4/plans",
-                command: "one plans create",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/plans",
-                command: "one plans list",
-            },
-            EndpointSpec {
-                method: "POST",
-                path: "/v4/plans/{id}/run",
-                command: "one plans run",
-            },
-            EndpointSpec {
-                method: "POST",
-                path: "/v4/plans/{id}/permissions",
-                command: "one plans share",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/plans/{id}/permissions",
-                command: "one plans permissions",
-            },
-            EndpointSpec {
-                method: "POST",
-                path: "/v4/plans/package",
-                command: "one plans import",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/plans/count",
-                command: "one plans count",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/plans/{id}/runParameters",
-                command: "one plans run-parameters",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/plans/{id}/full",
-                command: "one plans full",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/plans/{id}/schedules",
-                command: "one plans schedules",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/plans/{id}/package",
-                command: "one plans export",
-            },
-            EndpointSpec {
-                method: "PATCH",
-                path: "/v4/plans/{id}",
-                command: "one plans update",
-            },
-            EndpointSpec {
-                method: "DELETE",
-                path: "/v4/plans/{id}",
-                command: "one plans delete",
-            },
-            EndpointSpec {
-                method: "DELETE",
-                path: "/v4/plans/{id}/permissions/{subjectId}",
-                command: "one plans permissions remove",
-            },
-        ],
-        notes: &["Indexed in the official Alteryx One API help pages; the repo currently wires the managed plans subset."],
+const PLAN_ENDPOINTS: &[EndpointSpec] = &[
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/plans",
+        command: "one plans create",
     },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/plans",
+        command: "one plans list",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/plans/{id}/run",
+        command: "one plans run",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/plans/{id}/permissions",
+        command: "one plans share",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/plans/{id}/permissions",
+        command: "one plans permissions",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/plans/package",
+        command: "one plans import",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/plans/count",
+        command: "one plans count",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/plans/{id}/runParameters",
+        command: "one plans run-parameters",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/plans/{id}/full",
+        command: "one plans full",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/plans/{id}/schedules",
+        command: "one plans schedules",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/plans/{id}/package",
+        command: "one plans export",
+    },
+    EndpointSpec {
+        method: "PATCH",
+        path: "/v4/plans/{id}",
+        command: "one plans update",
+    },
+    EndpointSpec {
+        method: "DELETE",
+        path: "/v4/plans/{id}",
+        command: "one plans delete",
+    },
+    EndpointSpec {
+        method: "DELETE",
+        path: "/v4/plans/{id}/permissions/{subjectId}",
+        command: "one plans permissions remove",
+    },
+];
+
+const DOCUMENTED_ONLY_SURFACES: &[SurfaceSpec] = &[
     SurfaceSpec {
         name: "flow",
         status: "documented",
@@ -511,6 +507,12 @@ const SURFACES: &[SurfaceSpec] = &[
         notes: &["Managed IAM / workspace-admin surface."],
     },
     SurfaceSpec {
+        name: "plan",
+        status: "implemented",
+        endpoints: PLAN_ENDPOINTS,
+        notes: &["Indexed in the official Alteryx One API help pages; the repo now wires the plan surface."],
+    },
+    SurfaceSpec {
         name: "plans",
         status: "implemented",
         endpoints: PLANS_ENDPOINTS,
@@ -662,6 +664,7 @@ mod tests {
         assert!(surfaces
             .iter()
             .any(|surface| surface["name"] == "platform.iam"));
+        assert!(surfaces.iter().any(|surface| surface["name"] == "plan"));
         assert!(surfaces.iter().any(|surface| surface["name"] == "plans"));
         assert!(surfaces
             .iter()
