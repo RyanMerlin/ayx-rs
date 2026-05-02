@@ -670,6 +670,22 @@ enum OneCommand {
         #[command(subcommand)]
         command: Option<OneFlowsCommand>,
     },
+    JobGroups {
+        #[command(subcommand)]
+        command: Option<OneJobGroupCommand>,
+    },
+    OutputObjects {
+        #[command(subcommand)]
+        command: Option<OneOutputObjectCommand>,
+    },
+    WebhookFlowTasks {
+        #[command(subcommand)]
+        command: Option<OneWebhookFlowTaskCommand>,
+    },
+    WriteSettings {
+        #[command(subcommand)]
+        command: Option<OneWriteSettingCommand>,
+    },
     Scheduling {
         #[command(subcommand)]
         command: Option<OneSchedulingCommand>,
@@ -876,6 +892,10 @@ enum OnePlatformApiCommand {
         profile: PathBuf,
     },
     Diagnose {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    OpenApiSpec {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
     },
@@ -1096,6 +1116,196 @@ enum OneFlowsCommand {
         profile: PathBuf,
         #[arg(long)]
         flow_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OneJobGroupCommand {
+    List {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Count {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Run {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Detail {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        job_group_id: Option<String>,
+    },
+    Cancel {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        job_group_id: Option<String>,
+    },
+    Status {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        job_group_id: Option<String>,
+    },
+    Inputs {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        job_group_id: Option<String>,
+    },
+    Outputs {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        job_group_id: Option<String>,
+    },
+    Jobs {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        job_group_id: Option<String>,
+    },
+    Publications {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        job_group_id: Option<String>,
+    },
+    Profile {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        job_group_id: Option<String>,
+    },
+    ProfileResults {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        job_group_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OneOutputObjectCommand {
+    List {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Count {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Create {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Detail {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        output_object_id: Option<String>,
+    },
+    Update {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        output_object_id: Option<String>,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Delete {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        output_object_id: Option<String>,
+    },
+    Inputs {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        output_object_id: Option<String>,
+    },
+    WrangleToPython {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        output_object_id: Option<String>,
+        #[arg(long)]
+        body: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OneWebhookFlowTaskCommand {
+    Create {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Detail {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        webhook_flow_task_id: Option<String>,
+    },
+    Delete {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        webhook_flow_task_id: Option<String>,
+    },
+    Test {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum OneWriteSettingCommand {
+    List {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Count {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
+    Create {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Detail {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        write_setting_id: Option<String>,
+    },
+    Update {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        write_setting_id: Option<String>,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Delete {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        write_setting_id: Option<String>,
     },
 }
 
@@ -1844,6 +2054,16 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
+        name: "one platform api open-api-spec",
+        path: "one/platform/api/open-api-spec",
+        summary: "Fetch the One platform OpenAPI specification.",
+        output: "one platform api open-api-spec envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/open-api-spec in the One API docs."],
+    },
+    CommandSpec {
         name: "one plans status",
         path: "one/plans/status",
         summary: "Summarize the Alteryx One plans posture.",
@@ -2085,6 +2305,306 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
         notes: &["Maps to GET /v4/flows/{id}/package/dryRun in the One API docs."],
+    },
+    CommandSpec {
+        name: "one job-group list",
+        path: "one/job-group/list",
+        summary: "List One job groups.",
+        output: "one job-group list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/jobLibrary in the One API docs."],
+    },
+    CommandSpec {
+        name: "one job-group count",
+        path: "one/job-group/count",
+        summary: "Count One job groups.",
+        output: "one job-group count envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/jobLibrary/count in the One API docs."],
+    },
+    CommandSpec {
+        name: "one job-group run",
+        path: "one/job-group/run",
+        summary: "Run a One job group.",
+        output: "one job-group run envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/jobGroups in the One API docs."],
+    },
+    CommandSpec {
+        name: "one job-group detail",
+        path: "one/job-group/detail",
+        summary: "Inspect a One job group.",
+        output: "one job-group detail envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/jobGroups/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one job-group cancel",
+        path: "one/job-group/cancel",
+        summary: "Cancel a One job group.",
+        output: "one job-group cancel envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to POST /v4/jobGroups/{id}/cancel in the One API docs."],
+    },
+    CommandSpec {
+        name: "one job-group status",
+        path: "one/job-group/status",
+        summary: "Inspect a One job group status.",
+        output: "one job-group status envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/jobGroups/{id}/status in the One API docs."],
+    },
+    CommandSpec {
+        name: "one job-group inputs",
+        path: "one/job-group/inputs",
+        summary: "List One job group inputs.",
+        output: "one job-group inputs envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/jobGroups/{id}/inputs in the One API docs."],
+    },
+    CommandSpec {
+        name: "one job-group outputs",
+        path: "one/job-group/outputs",
+        summary: "List One job group outputs.",
+        output: "one job-group outputs envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/jobGroups/{id}/outputs in the One API docs."],
+    },
+    CommandSpec {
+        name: "one job-group jobs",
+        path: "one/job-group/jobs",
+        summary: "List jobs for a One job group.",
+        output: "one job-group jobs envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/jobGroups/{id}/jobs in the One API docs."],
+    },
+    CommandSpec {
+        name: "one job-group publications",
+        path: "one/job-group/publications",
+        summary: "List publications for a One job group.",
+        output: "one job-group publications envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/jobGroups/{id}/publications in the One API docs."],
+    },
+    CommandSpec {
+        name: "one job-group profile",
+        path: "one/job-group/profile",
+        summary: "Inspect profile data for a One job group.",
+        output: "one job-group profile envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/jobGroups/{id}/profile in the One API docs."],
+    },
+    CommandSpec {
+        name: "one job-group profile-results",
+        path: "one/job-group/profile-results",
+        summary: "Inspect profile results for a One job group.",
+        output: "one job-group profile-results envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/jobGroups/{id}/profileResults in the One API docs."],
+    },
+    CommandSpec {
+        name: "one output-object list",
+        path: "one/output-object/list",
+        summary: "List One output objects.",
+        output: "one output-object list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/outputObjects in the One API docs."],
+    },
+    CommandSpec {
+        name: "one output-object count",
+        path: "one/output-object/count",
+        summary: "Count One output objects.",
+        output: "one output-object count envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/outputObjects/count in the One API docs."],
+    },
+    CommandSpec {
+        name: "one output-object create",
+        path: "one/output-object/create",
+        summary: "Create a One output object from JSON payload.",
+        output: "one output-object create envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/outputObjects in the One API docs."],
+    },
+    CommandSpec {
+        name: "one output-object detail",
+        path: "one/output-object/detail",
+        summary: "Inspect a One output object.",
+        output: "one output-object detail envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/outputObjects/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one output-object update",
+        path: "one/output-object/update",
+        summary: "Update a One output object from JSON payload.",
+        output: "one output-object update envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to PUT /v4/outputObjects/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one output-object delete",
+        path: "one/output-object/delete",
+        summary: "Delete a One output object.",
+        output: "one output-object delete envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to DELETE /v4/outputObjects/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one output-object inputs",
+        path: "one/output-object/inputs",
+        summary: "List inputs for a One output object.",
+        output: "one output-object inputs envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/outputObjects/{id}/inputs in the One API docs."],
+    },
+    CommandSpec {
+        name: "one output-object wrangle-to-python",
+        path: "one/output-object/wrangle-to-python",
+        summary: "Generate Python from a One output object.",
+        output: "one output-object wrangle-to-python envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to POST /v4/outputObjects/{id}/wrangleToPython in the One API docs."],
+    },
+    CommandSpec {
+        name: "one webhook-flow-task create",
+        path: "one/webhook-flow-task/create",
+        summary: "Create a webhook flow task from JSON payload.",
+        output: "one webhook-flow-task create envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/webhookFlowTasks in the One API docs."],
+    },
+    CommandSpec {
+        name: "one webhook-flow-task detail",
+        path: "one/webhook-flow-task/detail",
+        summary: "Inspect a webhook flow task.",
+        output: "one webhook-flow-task detail envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/webhookFlowTasks/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one webhook-flow-task delete",
+        path: "one/webhook-flow-task/delete",
+        summary: "Delete a webhook flow task.",
+        output: "one webhook-flow-task delete envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to DELETE /v4/webhookFlowTasks/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one webhooks test",
+        path: "one/webhooks/test",
+        summary: "Test webhook settings from JSON payload.",
+        output: "one webhooks test envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/webhooks/test in the One API docs."],
+    },
+    CommandSpec {
+        name: "one write-setting list",
+        path: "one/write-setting/list",
+        summary: "List One write settings.",
+        output: "one write-setting list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/writeSettings in the One API docs."],
+    },
+    CommandSpec {
+        name: "one write-setting count",
+        path: "one/write-setting/count",
+        summary: "Count One write settings.",
+        output: "one write-setting count envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/writeSettings/count in the One API docs."],
+    },
+    CommandSpec {
+        name: "one write-setting create",
+        path: "one/write-setting/create",
+        summary: "Create a One write setting from JSON payload.",
+        output: "one write-setting create envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/writeSettings in the One API docs."],
+    },
+    CommandSpec {
+        name: "one write-setting detail",
+        path: "one/write-setting/detail",
+        summary: "Inspect a One write setting.",
+        output: "one write-setting detail envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to GET /v4/writeSettings/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one write-setting update",
+        path: "one/write-setting/update",
+        summary: "Update a One write setting from JSON payload.",
+        output: "one write-setting update envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to PATCH /v4/writeSettings/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one write-setting delete",
+        path: "one/write-setting/delete",
+        summary: "Delete a One write setting.",
+        output: "one write-setting delete envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api"],
+        notes: &["Maps to DELETE /v4/writeSettings/{id} in the One API docs."],
     },
     CommandSpec {
         name: "one scheduling list",
@@ -3996,6 +4516,18 @@ fn execute(cli: Cli) -> Result<Envelope> {
                         let config = load_profile(&profile)?;
                         api_diagnose_envelope(&config, "one platform")?
                     }
+                    OnePlatformApiCommand::OpenApiSpec { profile } => {
+                        let config = load_profile(&profile)?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "open-api-spec",
+                            "GET",
+                            "/v4/open-api-spec",
+                            false,
+                            &[],
+                        )?
+                    }
                 },
                 Some(OnePlatformCommand::Status { profile }) => {
                     let config = load_profile(&profile)?;
@@ -4411,6 +4943,451 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     }
                 },
                 None => Envelope::ok("one platform commands available: api, auth, status, inventory, workspace, role, user, token, person"),
+            },
+            Some(OneCommand::JobGroups { command }) => match command {
+                None => Envelope::ok(
+                    "one job-group commands available: list, count, run, detail, cancel, status, inputs, outputs, jobs, publications, profile, profile-results",
+                ),
+                Some(OneJobGroupCommand::List { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_live_request(&config, "jobGroup", "list", "GET", "/v4/jobLibrary", false, &[])?
+                }
+                Some(OneJobGroupCommand::Count { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_live_request(
+                        &config,
+                        "jobGroup",
+                        "count",
+                        "GET",
+                        "/v4/jobLibrary/count",
+                        false,
+                        &[],
+                    )?
+                }
+                Some(OneJobGroupCommand::Run { profile, body }) => {
+                    let config = load_profile(&profile)?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "jobGroup",
+                        "run",
+                        "POST",
+                        "/v4/jobGroups",
+                        true,
+                        &[],
+                        Some(payload),
+                    )?
+                }
+                Some(OneJobGroupCommand::Detail { profile, job_group_id }) => {
+                    let config = load_profile(&profile)?;
+                    let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "jobGroup",
+                        "detail",
+                        "GET",
+                        "/v4/jobGroups/{id}",
+                        false,
+                        &[("id", job_group_id.as_str())],
+                    )?
+                }
+                Some(OneJobGroupCommand::Cancel { profile, job_group_id }) => {
+                    let config = load_profile(&profile)?;
+                    let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "jobGroup",
+                        "cancel",
+                        "POST",
+                        "/v4/jobGroups/{id}/cancel",
+                        true,
+                        &[("id", job_group_id.as_str())],
+                    )?
+                }
+                Some(OneJobGroupCommand::Status { profile, job_group_id }) => {
+                    let config = load_profile(&profile)?;
+                    let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "jobGroup",
+                        "status",
+                        "GET",
+                        "/v4/jobGroups/{id}/status",
+                        false,
+                        &[("id", job_group_id.as_str())],
+                    )?
+                }
+                Some(OneJobGroupCommand::Inputs { profile, job_group_id }) => {
+                    let config = load_profile(&profile)?;
+                    let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "jobGroup",
+                        "inputs",
+                        "GET",
+                        "/v4/jobGroups/{id}/inputs",
+                        false,
+                        &[("id", job_group_id.as_str())],
+                    )?
+                }
+                Some(OneJobGroupCommand::Outputs { profile, job_group_id }) => {
+                    let config = load_profile(&profile)?;
+                    let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "jobGroup",
+                        "outputs",
+                        "GET",
+                        "/v4/jobGroups/{id}/outputs",
+                        false,
+                        &[("id", job_group_id.as_str())],
+                    )?
+                }
+                Some(OneJobGroupCommand::Jobs { profile, job_group_id }) => {
+                    let config = load_profile(&profile)?;
+                    let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "jobGroup",
+                        "jobs",
+                        "GET",
+                        "/v4/jobGroups/{id}/jobs",
+                        false,
+                        &[("id", job_group_id.as_str())],
+                    )?
+                }
+                Some(OneJobGroupCommand::Publications { profile, job_group_id }) => {
+                    let config = load_profile(&profile)?;
+                    let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "jobGroup",
+                        "publications",
+                        "GET",
+                        "/v4/jobGroups/{id}/publications",
+                        false,
+                        &[("id", job_group_id.as_str())],
+                    )?
+                }
+                Some(OneJobGroupCommand::Profile { profile, job_group_id }) => {
+                    let config = load_profile(&profile)?;
+                    let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "jobGroup",
+                        "profile",
+                        "GET",
+                        "/v4/jobGroups/{id}/profile",
+                        false,
+                        &[("id", job_group_id.as_str())],
+                    )?
+                }
+                Some(OneJobGroupCommand::ProfileResults { profile, job_group_id }) => {
+                    let config = load_profile(&profile)?;
+                    let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "jobGroup",
+                        "profile-results",
+                        "GET",
+                        "/v4/jobGroups/{id}/profileResults",
+                        false,
+                        &[("id", job_group_id.as_str())],
+                    )?
+                }
+            },
+            Some(OneCommand::OutputObjects { command }) => match command {
+                None => Envelope::ok(
+                    "one output-object commands available: list, count, create, detail, update, delete, inputs, wrangle-to-python",
+                ),
+                Some(OneOutputObjectCommand::List { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_live_request(
+                        &config,
+                        "outputObject",
+                        "list",
+                        "GET",
+                        "/v4/outputObjects",
+                        false,
+                        &[],
+                    )?
+                }
+                Some(OneOutputObjectCommand::Count { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_live_request(
+                        &config,
+                        "outputObject",
+                        "count",
+                        "GET",
+                        "/v4/outputObjects/count",
+                        false,
+                        &[],
+                    )?
+                }
+                Some(OneOutputObjectCommand::Create { profile, body }) => {
+                    let config = load_profile(&profile)?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "outputObject",
+                        "create",
+                        "POST",
+                        "/v4/outputObjects",
+                        true,
+                        &[],
+                        Some(payload),
+                    )?
+                }
+                Some(OneOutputObjectCommand::Detail { profile, output_object_id }) => {
+                    let config = load_profile(&profile)?;
+                    let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "outputObject",
+                        "detail",
+                        "GET",
+                        "/v4/outputObjects/{id}",
+                        false,
+                        &[("id", output_object_id.as_str())],
+                    )?
+                }
+                Some(OneOutputObjectCommand::Update {
+                    profile,
+                    output_object_id,
+                    body,
+                }) => {
+                    let config = load_profile(&profile)?;
+                    let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "outputObject",
+                        "update",
+                        "PUT",
+                        "/v4/outputObjects/{id}",
+                        true,
+                        &[("id", output_object_id.as_str())],
+                        Some(payload),
+                    )?
+                }
+                Some(OneOutputObjectCommand::Delete { profile, output_object_id }) => {
+                    let config = load_profile(&profile)?;
+                    let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "outputObject",
+                        "delete",
+                        "DELETE",
+                        "/v4/outputObjects/{id}",
+                        true,
+                        &[("id", output_object_id.as_str())],
+                    )?
+                }
+                Some(OneOutputObjectCommand::Inputs { profile, output_object_id }) => {
+                    let config = load_profile(&profile)?;
+                    let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "outputObject",
+                        "inputs",
+                        "GET",
+                        "/v4/outputObjects/{id}/inputs",
+                        false,
+                        &[("id", output_object_id.as_str())],
+                    )?
+                }
+                Some(OneOutputObjectCommand::WrangleToPython {
+                    profile,
+                    output_object_id,
+                    body,
+                }) => {
+                    let config = load_profile(&profile)?;
+                    let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
+                    match body {
+                        Some(body) => {
+                            let payload = load_payload(&body)?;
+                            one_api_live_request_with_body(
+                                &config,
+                                "outputObject",
+                                "wrangle-to-python",
+                                "POST",
+                                "/v4/outputObjects/{id}/wrangleToPython",
+                                true,
+                                &[("id", output_object_id.as_str())],
+                                Some(payload),
+                            )?
+                        }
+                        None => one_api_live_request(
+                            &config,
+                            "outputObject",
+                            "wrangle-to-python",
+                            "POST",
+                            "/v4/outputObjects/{id}/wrangleToPython",
+                            false,
+                            &[("id", output_object_id.as_str())],
+                        )?,
+                    }
+                }
+            },
+            Some(OneCommand::WebhookFlowTasks { command }) => match command {
+                None => Envelope::ok("one webhook-flow-task commands available: create, detail, delete, test"),
+                Some(OneWebhookFlowTaskCommand::Create { profile, body }) => {
+                    let config = load_profile(&profile)?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "webhookFlowTask",
+                        "create",
+                        "POST",
+                        "/v4/webhookFlowTasks",
+                        true,
+                        &[],
+                        Some(payload),
+                    )?
+                }
+                Some(OneWebhookFlowTaskCommand::Detail {
+                    profile,
+                    webhook_flow_task_id,
+                }) => {
+                    let config = load_profile(&profile)?;
+                    let webhook_flow_task_id =
+                        webhook_flow_task_id.ok_or_else(|| anyhow!("--webhook-flow-task-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "webhookFlowTask",
+                        "detail",
+                        "GET",
+                        "/v4/webhookFlowTasks/{id}",
+                        false,
+                        &[("id", webhook_flow_task_id.as_str())],
+                    )?
+                }
+                Some(OneWebhookFlowTaskCommand::Delete {
+                    profile,
+                    webhook_flow_task_id,
+                }) => {
+                    let config = load_profile(&profile)?;
+                    let webhook_flow_task_id =
+                        webhook_flow_task_id.ok_or_else(|| anyhow!("--webhook-flow-task-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "webhookFlowTask",
+                        "delete",
+                        "DELETE",
+                        "/v4/webhookFlowTasks/{id}",
+                        true,
+                        &[("id", webhook_flow_task_id.as_str())],
+                    )?
+                }
+                Some(OneWebhookFlowTaskCommand::Test { profile, body }) => {
+                    let config = load_profile(&profile)?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "webhookFlowTask",
+                        "test",
+                        "POST",
+                        "/v4/webhooks/test",
+                        true,
+                        &[],
+                        Some(payload),
+                    )?
+                }
+            },
+            Some(OneCommand::WriteSettings { command }) => match command {
+                None => Envelope::ok("one write-setting commands available: list, count, create, detail, update, delete"),
+                Some(OneWriteSettingCommand::List { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_live_request(
+                        &config,
+                        "writeSetting",
+                        "list",
+                        "GET",
+                        "/v4/writeSettings",
+                        false,
+                        &[],
+                    )?
+                }
+                Some(OneWriteSettingCommand::Count { profile }) => {
+                    let config = load_profile(&profile)?;
+                    one_api_live_request(
+                        &config,
+                        "writeSetting",
+                        "count",
+                        "GET",
+                        "/v4/writeSettings/count",
+                        false,
+                        &[],
+                    )?
+                }
+                Some(OneWriteSettingCommand::Create { profile, body }) => {
+                    let config = load_profile(&profile)?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "writeSetting",
+                        "create",
+                        "POST",
+                        "/v4/writeSettings",
+                        true,
+                        &[],
+                        Some(payload),
+                    )?
+                }
+                Some(OneWriteSettingCommand::Detail {
+                    profile,
+                    write_setting_id,
+                }) => {
+                    let config = load_profile(&profile)?;
+                    let write_setting_id =
+                        write_setting_id.ok_or_else(|| anyhow!("--write-setting-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "writeSetting",
+                        "detail",
+                        "GET",
+                        "/v4/writeSettings/{id}",
+                        false,
+                        &[("id", write_setting_id.as_str())],
+                    )?
+                }
+                Some(OneWriteSettingCommand::Update {
+                    profile,
+                    write_setting_id,
+                    body,
+                }) => {
+                    let config = load_profile(&profile)?;
+                    let write_setting_id =
+                        write_setting_id.ok_or_else(|| anyhow!("--write-setting-id is required"))?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "writeSetting",
+                        "update",
+                        "PATCH",
+                        "/v4/writeSettings/{id}",
+                        true,
+                        &[("id", write_setting_id.as_str())],
+                        Some(payload),
+                    )?
+                }
+                Some(OneWriteSettingCommand::Delete {
+                    profile,
+                    write_setting_id,
+                }) => {
+                    let config = load_profile(&profile)?;
+                    let write_setting_id =
+                        write_setting_id.ok_or_else(|| anyhow!("--write-setting-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "writeSetting",
+                        "delete",
+                        "DELETE",
+                        "/v4/writeSettings/{id}",
+                        true,
+                        &[("id", write_setting_id.as_str())],
+                    )?
+                }
             },
             Some(OneCommand::Status { profile }) => {
                 let config = load_profile(&profile)?;
@@ -5744,6 +6721,13 @@ mod tests {
         assert!(names.contains(&"one flows import-dry-run"));
         assert!(names.contains(&"one flows export"));
         assert!(names.contains(&"one flows export-dry-run"));
+        assert!(names.contains(&"one job-group list"));
+        assert!(names.contains(&"one job-group run"));
+        assert!(names.contains(&"one output-object list"));
+        assert!(names.contains(&"one output-object create"));
+        assert!(names.contains(&"one webhook-flow-task create"));
+        assert!(names.contains(&"one write-setting create"));
+        assert!(names.contains(&"one platform api open-api-spec"));
         assert!(names.contains(&"one scheduling list"));
         assert!(names.contains(&"one billing current-account"));
         assert!(names.contains(&"one platform token"));
@@ -5876,6 +6860,26 @@ mod tests {
         let env = catalog_describe_envelope("one flows export")
             .expect("catalog describe should work for one flows export");
         assert_eq!(env.data["path"], "one/flows/export");
+
+        let env = catalog_describe_envelope("one job-group run")
+            .expect("catalog describe should work for one job-group run");
+        assert_eq!(env.data["path"], "one/job-group/run");
+
+        let env = catalog_describe_envelope("one output-object create")
+            .expect("catalog describe should work for one output-object create");
+        assert_eq!(env.data["path"], "one/output-object/create");
+
+        let env = catalog_describe_envelope("one webhook-flow-task create")
+            .expect("catalog describe should work for one webhook-flow-task create");
+        assert_eq!(env.data["path"], "one/webhook-flow-task/create");
+
+        let env = catalog_describe_envelope("one write-setting create")
+            .expect("catalog describe should work for one write-setting create");
+        assert_eq!(env.data["path"], "one/write-setting/create");
+
+        let env = catalog_describe_envelope("one platform api open-api-spec")
+            .expect("catalog describe should work for one platform api open-api-spec");
+        assert_eq!(env.data["path"], "one/platform/api/open-api-spec");
 
         let env = catalog_describe_envelope("designer.workflow.run")
             .expect("catalog describe should work for capability");

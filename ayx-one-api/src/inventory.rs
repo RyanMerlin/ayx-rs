@@ -330,109 +330,169 @@ const FLOW_ENDPOINTS: &[EndpointSpec] = &[
     },
 ];
 
-const DOCUMENTED_ONLY_SURFACES: &[SurfaceSpec] = &[
-    SurfaceSpec {
-        name: "jobGroup",
-        status: "documented",
-        endpoints: &[
-            EndpointSpec {
-                method: "POST",
-                path: "/v4/jobGroups",
-                command: "one job-group run",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/jobGroups/{id}",
-                command: "one job-group detail",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/jobGroups/{id}/jobs",
-                command: "one job-group jobs",
-            },
-        ],
-        notes: &["Indexed in the official Alteryx One API help pages; not wired in this CLI yet."],
+const JOB_GROUP_ENDPOINTS: &[EndpointSpec] = &[
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/jobLibrary",
+        command: "one job-group list",
     },
-    SurfaceSpec {
-        name: "misc",
-        status: "documented",
-        endpoints: &[EndpointSpec {
-            method: "GET",
-            path: "/v4/open-api-spec",
-            command: "one api open-api-spec",
-        }],
-        notes: &["The platform exposes an OpenAPI document through the product UI/docs."],
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/jobLibrary/count",
+        command: "one job-group count",
     },
-    SurfaceSpec {
-        name: "outputObject",
-        status: "documented",
-        endpoints: &[
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/outputObjects/count",
-                command: "one output-object count",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/outputObjects/{id}",
-                command: "one output-object detail",
-            },
-            EndpointSpec {
-                method: "PATCH",
-                path: "/v4/outputObjects/{id}",
-                command: "one output-object update",
-            },
-            EndpointSpec {
-                method: "DELETE",
-                path: "/v4/outputObjects/{id}",
-                command: "one output-object delete",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/outputObjects/{id}/inputs",
-                command: "one output-object inputs",
-            },
-        ],
-        notes: &["Indexed in the official Alteryx One API help pages; not wired in this CLI yet."],
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/jobGroups",
+        command: "one job-group run",
     },
-    SurfaceSpec {
-        name: "webhookFlowTask",
-        status: "documented",
-        endpoints: &[
-            EndpointSpec {
-                method: "POST",
-                path: "/v4/webhookFlowTasks",
-                command: "one webhook-flow-task create",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/webhookFlowTasks/{id}",
-                command: "one webhook-flow-task detail",
-            },
-            EndpointSpec {
-                method: "DELETE",
-                path: "/v4/webhookFlowTasks/{id}",
-                command: "one webhook-flow-task delete",
-            },
-            EndpointSpec {
-                method: "POST",
-                path: "/v4/webhooks/test",
-                command: "one webhooks test",
-            },
-        ],
-        notes: &["Indexed in the official Alteryx One API help pages; not wired in this CLI yet."],
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/jobGroups/{id}",
+        command: "one job-group detail",
     },
-    SurfaceSpec {
-        name: "writeSetting",
-        status: "documented",
-        endpoints: &[EndpointSpec {
-            method: "DELETE",
-            path: "/v4/writeSettings/{id}",
-            command: "one write-setting delete",
-        }],
-        notes: &["Indexed in the official Alteryx One API help pages; not wired in this CLI yet."],
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/jobGroups/{id}/cancel",
+        command: "one job-group cancel",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/jobGroups/{id}/status",
+        command: "one job-group status",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/jobGroups/{id}/inputs",
+        command: "one job-group inputs",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/jobGroups/{id}/outputs",
+        command: "one job-group outputs",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/jobGroups/{id}/jobs",
+        command: "one job-group jobs",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/jobGroups/{id}/publications",
+        command: "one job-group publications",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/jobGroups/{id}/profile",
+        command: "one job-group profile",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/jobGroups/{id}/profileResults",
+        command: "one job-group profile-results",
     },
 ];
+
+const OUTPUT_OBJECT_ENDPOINTS: &[EndpointSpec] = &[
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/outputObjects",
+        command: "one output-object list",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/outputObjects/count",
+        command: "one output-object count",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/outputObjects",
+        command: "one output-object create",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/outputObjects/{id}",
+        command: "one output-object detail",
+    },
+    EndpointSpec {
+        method: "PUT",
+        path: "/v4/outputObjects/{id}",
+        command: "one output-object update",
+    },
+    EndpointSpec {
+        method: "DELETE",
+        path: "/v4/outputObjects/{id}",
+        command: "one output-object delete",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/outputObjects/{id}/inputs",
+        command: "one output-object inputs",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/outputObjects/{id}/wrangleToPython",
+        command: "one output-object wrangle-to-python",
+    },
+];
+
+const WEBHOOK_FLOW_TASK_ENDPOINTS: &[EndpointSpec] = &[
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/webhookFlowTasks",
+        command: "one webhook-flow-task create",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/webhookFlowTasks/{id}",
+        command: "one webhook-flow-task detail",
+    },
+    EndpointSpec {
+        method: "DELETE",
+        path: "/v4/webhookFlowTasks/{id}",
+        command: "one webhook-flow-task delete",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/webhooks/test",
+        command: "one webhooks test",
+    },
+];
+
+const WRITE_SETTING_ENDPOINTS: &[EndpointSpec] = &[
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/writeSettings",
+        command: "one write-setting list",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/writeSettings/count",
+        command: "one write-setting count",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/writeSettings",
+        command: "one write-setting create",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/writeSettings/{id}",
+        command: "one write-setting detail",
+    },
+    EndpointSpec {
+        method: "PATCH",
+        path: "/v4/writeSettings/{id}",
+        command: "one write-setting update",
+    },
+    EndpointSpec {
+        method: "DELETE",
+        path: "/v4/writeSettings/{id}",
+        command: "one write-setting delete",
+    },
+];
+
+const DOCUMENTED_ONLY_SURFACES: &[SurfaceSpec] = &[];
 
 const PARTIAL_SURFACES: &[SurfaceSpec] = &[
     SurfaceSpec {
@@ -443,6 +503,36 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             "Flow lifecycle, package, parameters, and run-inspection commands are wired.",
             "Flow library, folder-scoped, and permission-specific endpoints remain documented-only.",
         ],
+    },
+    SurfaceSpec {
+        name: "jobGroup",
+        status: "partial",
+        endpoints: JOB_GROUP_ENDPOINTS,
+        notes: &[
+            "Job-group execution and inspection commands are wired.",
+            "PDF/log artifact downloads and other deeper job-library paths remain documented-only.",
+        ],
+    },
+    SurfaceSpec {
+        name: "outputObject",
+        status: "partial",
+        endpoints: OUTPUT_OBJECT_ENDPOINTS,
+        notes: &[
+            "Output object lifecycle and wrangle-to-python commands are wired.",
+            "Additional nested resources stay documented-only until the CLI needs them.",
+        ],
+    },
+    SurfaceSpec {
+        name: "webhookFlowTask",
+        status: "partial",
+        endpoints: WEBHOOK_FLOW_TASK_ENDPOINTS,
+        notes: &["Webhook task create/read/delete plus webhook test are wired."],
+    },
+    SurfaceSpec {
+        name: "writeSetting",
+        status: "partial",
+        endpoints: WRITE_SETTING_ENDPOINTS,
+        notes: &["Write-setting CRUD is wired."],
     },
     SurfaceSpec {
         name: "apiAccessTokens",
@@ -575,6 +665,16 @@ const SURFACES: &[SurfaceSpec] = &[
         status: "implemented",
         endpoints: IAM_ENDPOINTS,
         notes: &["Managed IAM / workspace-admin surface."],
+    },
+    SurfaceSpec {
+        name: "misc",
+        status: "implemented",
+        endpoints: &[EndpointSpec {
+            method: "GET",
+            path: "/v4/open-api-spec",
+            command: "one platform api open-api-spec",
+        }],
+        notes: &["The OpenAPI spec is now exposed through the CLI."],
     },
     SurfaceSpec {
         name: "plan",
@@ -736,6 +836,7 @@ mod tests {
             .any(|surface| surface["name"] == "platform.iam"));
         assert!(surfaces.iter().any(|surface| surface["name"] == "plan"));
         assert!(surfaces.iter().any(|surface| surface["name"] == "plans"));
+        assert!(surfaces.iter().any(|surface| surface["name"] == "misc"));
         assert!(surfaces
             .iter()
             .any(|surface| surface["name"] == "scheduling"));
@@ -744,6 +845,16 @@ mod tests {
             .as_array()
             .expect("partial_surfaces");
         assert!(partial.iter().any(|surface| surface["name"] == "flow"));
+        assert!(partial.iter().any(|surface| surface["name"] == "jobGroup"));
+        assert!(partial
+            .iter()
+            .any(|surface| surface["name"] == "outputObject"));
+        assert!(partial
+            .iter()
+            .any(|surface| surface["name"] == "webhookFlowTask"));
+        assert!(partial
+            .iter()
+            .any(|surface| surface["name"] == "writeSetting"));
         assert!(partial
             .iter()
             .any(|surface| surface["name"] == "apiAccessTokens"));
@@ -752,7 +863,7 @@ mod tests {
         let documented = env.data["documented_only_surfaces"]
             .as_array()
             .expect("documented_only_surfaces");
-        assert!(documented.iter().any(|surface| surface["name"] == "misc"));
+        assert!(documented.is_empty());
         let deferred = env.data["deferred_surfaces"]
             .as_array()
             .expect("deferred_surfaces");
