@@ -9,6 +9,12 @@ Completed items are removed here rather than left to rot in the plan.
 - keep public fixtures and generated artifacts sanitized so they do not leak real environment state.
 - document the release workflow for building, packaging, and publishing the public binary from this repo.
 
+## 1a. Central profile and doctor hardening
+- move remaining inline-secret guidance toward environment-variable or native keychain storage instead of YAML.
+- expand `ayx doctor --fix` from local state/bootstrap repair into deeper safe remediation where the action is deterministic and auditable.
+- add profile/workspace export and import flows that keep shareable configuration separate from machine-local secrets.
+- make the future TUI reuse the same profile resolver, doctor checks, and active-profile state instead of inventing a second config model.
+
 ## 2. Command registry
 - keep the machine-readable command catalog aligned with the live `clap` tree.
 - extend the catalog with richer command metadata for safety, mutating vs read-only behavior, and agent-friendly discovery.
@@ -88,6 +94,7 @@ Status:
 
 ## Current priority
 - finish the public release cutover and keep `ayx-rs` as the published repo.
+- harden the new central profile system with better secret storage and profile import/export ergonomics.
 - finish `ayx tools` source/target workflows for workspace-aware migration planning and comparison.
 - keep the command catalog aligned with the live CLI after the split.
 - finish the Mongo query registry and doctor suite before adding any Mongo remediation/mutation workflows.
@@ -97,6 +104,8 @@ Status:
 - harden One API execution before adding more mutating One workflows or bulk operations.
 
 ## Next phase
+- add native keychain-backed secret storage for interactive operator use while keeping environment variables first-class for automation.
+- add TUI surfaces on top of the new central profile resolver and top-level doctor system.
 - finish the remaining One partial surfaces: `connection`, `flow`, `jobGroup`, `outputObject`, `webhookFlowTask`, `writeSetting`, `apiAccessTokens`, `person`, and `workspace`.
 - keep `ui`, `auto-insights`, and `desktop-exec` reserved until their contracts are stable enough to expose publicly.
 - document any newly wired One branch in the inventory, catalog tests, and README start-here examples before moving on.

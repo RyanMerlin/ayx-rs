@@ -9,9 +9,10 @@ use serde_json::{json, Value};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::profile::{
-    normalize_alteryx_base_url, AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded,
-    MongoManaged, MongoMode, MongoProfile, ServerProfile, SqlServerConnectionProfile,
-    SqlServerProfile, TlsConfig, WorkspaceConfig,
+    default_profile_storage_path, default_workspace_storage_path, normalize_alteryx_base_url,
+    AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded, MongoManaged, MongoMode,
+    MongoProfile, ServerProfile, SqlServerConnectionProfile, SqlServerProfile, TlsConfig,
+    WorkspaceConfig,
 };
 use ayx_server::util::runtime_settings_summary;
 
@@ -21,18 +22,30 @@ pub fn run_onboarding(
     non_interactive: bool,
     workspace_mode: bool,
 ) -> Result<Value> {
+    let resolved_path = if workspace_mode {
+        if profile_path == Path::new("workspace.yaml") {
+            default_workspace_storage_path().map_err(anyhow::Error::from)?
+        } else {
+            profile_path.to_path_buf()
+        }
+    } else if profile_path == Path::new("config.yaml") {
+        default_profile_storage_path().map_err(anyhow::Error::from)?
+    } else {
+        profile_path.to_path_buf()
+    };
+
     if workspace_mode {
         let active_environment = environment.unwrap_or("dev");
-        return write_workspace_template(profile_path, active_environment, "dev", "prod");
+        return write_workspace_template(&resolved_path, active_environment, "dev", "prod");
     }
-    let existing = load_existing_config(profile_path, environment).ok();
+    let existing = load_existing_config(&resolved_path, environment).ok();
     let mut config = existing.unwrap_or_else(default_config);
     let mut env_updates = BTreeMap::new();
 
     if non_interactive {
         let validation = summarize_onboarding_validation(&config);
         return Ok(json!({
-            "profile": profile_path.display().to_string(),
+            "profile": resolved_path.display().to_string(),
             "saved": false,
             "mode": "non-interactive",
             "summary": summarize_config(&config),
@@ -250,10 +263,10 @@ pub fn run_onboarding(
     }
 
     let validation = summarize_onboarding_validation(&config);
-    write_config(profile_path, &config, &env_updates)?;
+    write_config(&resolved_path, &config, &env_updates)?;
 
     Ok(json!({
-        "profile": profile_path.display().to_string(),
+        "profile": resolved_path.display().to_string(),
         "saved": true,
         "mode": "interactive",
         "summary": summarize_config(&config),

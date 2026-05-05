@@ -11,7 +11,11 @@ use serde_json::{json, Value};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::envelope::Envelope;
-use ayx_core::profile::{Config, ServerProfile};
+use ayx_core::profile::{
+    ayx_config_home, ayx_profiles_dir, ayx_state_path, ayx_workspaces_dir, list_central_profiles,
+    load_ayx_state, profile_resolution_detail, profile_storage_path, save_ayx_state, AyxState,
+    Config, ServerProfile,
+};
 use ayx_one::{
     api_diagnose_envelope, api_inventory_envelope, api_status_envelope,
     one_surface_inventory_envelope,
@@ -113,6 +117,20 @@ enum Command {
         #[arg(long)]
         non_interactive: bool,
     },
+    #[command(about = "Central profile registry and active profile management")]
+    Profile {
+        #[command(subcommand)]
+        command: ProfileCommand,
+    },
+    #[command(about = "Run configuration, auth, network, and product health diagnostics")]
+    Doctor {
+        #[command(subcommand)]
+        command: Option<DoctorCommand>,
+        #[arg(long)]
+        fix: bool,
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+    },
     #[command(about = "Licensing portal branch and API surface")]
     License {
         #[command(subcommand)]
@@ -136,6 +154,35 @@ enum Command {
         #[command(subcommand)]
         command: CatalogCommand,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum ProfileCommand {
+    List,
+    Current,
+    Show {
+        name: Option<String>,
+    },
+    Use {
+        name: String,
+    },
+    Path,
+    Migrate {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        name: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DoctorCommand {
+    Config,
+    Auth,
+    Network,
+    One,
+    Server,
+    Mongo,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1637,6 +1684,56 @@ struct CommandSpec {
 }
 
 const COMMAND_SPECS: &[CommandSpec] = &[
+    CommandSpec {
+        name: "profile list",
+        path: "profile/list",
+        summary: "List centrally managed profiles and show the active profile.",
+        output: "profile registry envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["ayx config home"],
+        notes: &["Use this to discover centrally managed profiles."],
+    },
+    CommandSpec {
+        name: "profile current",
+        path: "profile/current",
+        summary: "Show the active central profile pointer.",
+        output: "active profile envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["ayx config home"],
+        notes: &["Use this to see which profile ayx will use by default."],
+    },
+    CommandSpec {
+        name: "profile use",
+        path: "profile/use",
+        summary: "Set the active central profile.",
+        output: "state update envelope",
+        safety: "mutating-local",
+        mutating: true,
+        prerequisites: &["existing central profile"],
+        notes: &["Updates ayx state only; no remote systems are changed."],
+    },
+    CommandSpec {
+        name: "doctor",
+        path: "doctor",
+        summary: "Run the full ayx health sequence for config, auth, network, and product posture.",
+        output: "doctor aggregate envelope",
+        safety: "read-only-or-safe-local-fix",
+        mutating: false,
+        prerequisites: &["active or explicit profile"],
+        notes: &["Use --fix for safe local remediation such as creating the central config home."],
+    },
+    CommandSpec {
+        name: "doctor config",
+        path: "doctor/config",
+        summary: "Validate config home, active profile resolution, and inline secret posture.",
+        output: "config doctor envelope",
+        safety: "read-only-or-safe-local-fix",
+        mutating: false,
+        prerequisites: &["ayx config home or legacy config"],
+        notes: &["Use this first when profile resolution or local state is unclear."],
+    },
     CommandSpec {
         name: "mongo status",
         path: "mongo/status",
@@ -4930,6 +5027,21 @@ fn execute(cli: Cli) -> Result<Envelope> {
             )?;
             Envelope::ok_with_data("onboarding completed", detail)
         },
+        Command::Profile { command } => match command {
+            ProfileCommand::List => profile_list_envelope()?,
+            ProfileCommand::Current => profile_current_envelope()?,
+            ProfileCommand::Show { name } => profile_show_envelope(name.as_deref())?,
+            ProfileCommand::Use { name } => profile_use_envelope(&name)?,
+            ProfileCommand::Path => profile_path_envelope()?,
+            ProfileCommand::Migrate { profile, name } => {
+                profile_migrate_envelope(&profile, name.as_deref())?
+            }
+        },
+        Command::Doctor {
+            command,
+            fix,
+            profile,
+        } => doctor_envelope(command.as_ref(), &profile, fix, cli.environment.as_deref())?,
         Command::One { command } => match command {
             None => Envelope::ok(
                 "one commands available: platform, plans, scheduling, billing, auto-insights, desktop-exec",
@@ -7094,6 +7206,306 @@ fn one_doctor_billing_envelope(config: &Config) -> Result<Envelope> {
     ))
 }
 
+fn profile_list_envelope() -> Result<Envelope> {
+    let state = load_ayx_state()?;
+    let profiles = list_central_profiles()?;
+    Ok(Envelope::ok_with_data(
+        "profiles listed",
+        json!({
+            "config_home": ayx_config_home()?.display().to_string(),
+            "profiles_dir": ayx_profiles_dir()?.display().to_string(),
+            "active_profile": state.active_profile,
+            "profiles": profiles,
+        }),
+    ))
+}
+
+fn profile_current_envelope() -> Result<Envelope> {
+    let state = load_ayx_state()?;
+    let active_name = state
+        .active_profile
+        .clone()
+        .unwrap_or_else(|| "default".to_string());
+    let path = profile_storage_path(&active_name)?;
+    Ok(Envelope::ok_with_data(
+        "current profile resolved",
+        json!({
+            "active_profile": active_name,
+            "path": path.display().to_string(),
+            "exists": path.exists(),
+            "state_path": ayx_state_path()?.display().to_string(),
+        }),
+    ))
+}
+
+fn profile_show_envelope(name: Option<&str>) -> Result<Envelope> {
+    let state = load_ayx_state()?;
+    let name = name
+        .map(ToOwned::to_owned)
+        .or(state.active_profile)
+        .unwrap_or_else(|| "default".to_string());
+    let path = profile_storage_path(&name)?;
+    let config = Config::load_from_path(&path)?;
+    let resolution = profile_resolution_detail(&path)?;
+    Ok(Envelope::ok_with_data(
+        "profile loaded",
+        json!({
+            "name": name,
+            "path": path.display().to_string(),
+            "resolution": resolution,
+            "profile_name": config.profile_name,
+            "sections": {
+                "alteryx_one": config.alteryx_one.is_some(),
+                "server": config.server.is_some(),
+                "server_api": config.server_api.is_some(),
+                "sqlserver": config.sqlserver.is_some(),
+                "observability": config.observability.is_some(),
+            }
+        }),
+    ))
+}
+
+fn profile_use_envelope(name: &str) -> Result<Envelope> {
+    let path = profile_storage_path(name)?;
+    if !path.exists() {
+        bail!(
+            "profile '{}' not found at '{}'",
+            name,
+            path.display()
+        );
+    }
+    let mut state = load_ayx_state()?;
+    state.active_profile = Some(name.to_string());
+    save_ayx_state(&state)?;
+    Ok(Envelope::ok_with_data(
+        "active profile updated",
+        json!({
+            "active_profile": name,
+            "path": path.display().to_string(),
+            "state_path": ayx_state_path()?.display().to_string(),
+        }),
+    ))
+}
+
+fn profile_path_envelope() -> Result<Envelope> {
+    Ok(Envelope::ok_with_data(
+        "profile storage paths",
+        json!({
+            "config_home": ayx_config_home()?.display().to_string(),
+            "profiles_dir": ayx_profiles_dir()?.display().to_string(),
+            "workspaces_dir": ayx_workspaces_dir()?.display().to_string(),
+            "state_path": ayx_state_path()?.display().to_string(),
+        }),
+    ))
+}
+
+fn profile_migrate_envelope(profile: &Path, name: Option<&str>) -> Result<Envelope> {
+    if !profile.exists() {
+        bail!("profile source '{}' does not exist", profile.display());
+    }
+    let target_name = name
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            profile
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| "default".to_string());
+    let target = profile_storage_path(&target_name)?;
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(profile, &target)?;
+    let mut state = load_ayx_state()?;
+    state.active_profile = Some(target_name.clone());
+    save_ayx_state(&state)?;
+    Ok(Envelope::ok_with_data(
+        "profile migrated",
+        json!({
+            "source": profile.display().to_string(),
+            "target": target.display().to_string(),
+            "active_profile": target_name,
+            "next_steps": [
+                "Move secrets into environment variables or the central .env file next to the migrated profile",
+                "Run `ayx doctor` to validate the migrated profile",
+            ],
+        }),
+    ))
+}
+
+fn doctor_envelope(
+    command: Option<&DoctorCommand>,
+    profile: &Path,
+    fix: bool,
+    environment: Option<&str>,
+) -> Result<Envelope> {
+    match command {
+        None => doctor_full_envelope(profile, fix, environment),
+        Some(DoctorCommand::Config) => doctor_config_envelope(profile, fix),
+        Some(DoctorCommand::Auth) => doctor_auth_envelope(profile, environment),
+        Some(DoctorCommand::Network) => doctor_network_envelope(profile, environment),
+        Some(DoctorCommand::One) => doctor_one_envelope(profile, environment),
+        Some(DoctorCommand::Server) => doctor_server_envelope(profile, environment),
+        Some(DoctorCommand::Mongo) => doctor_mongo_envelope(profile, environment),
+    }
+}
+
+fn doctor_full_envelope(profile: &Path, fix: bool, environment: Option<&str>) -> Result<Envelope> {
+    let config = doctor_config_envelope(profile, fix)?;
+    let auth = doctor_auth_envelope(profile, environment)?;
+    let network = doctor_network_envelope(profile, environment)?;
+    let one = doctor_one_envelope(profile, environment)?;
+    let server = doctor_server_envelope(profile, environment)?;
+    let mongo = doctor_mongo_envelope(profile, environment)?;
+    Ok(Envelope::ok_with_data(
+        "doctor completed",
+        json!({
+            "sequence": ["config", "auth", "network", "one", "server", "mongo"],
+            "fix_applied": fix,
+            "checks": {
+                "config": config.data,
+                "auth": auth.data,
+                "network": network.data,
+                "one": one.data,
+                "server": server.data,
+                "mongo": mongo.data,
+            }
+        }),
+    ))
+}
+
+fn doctor_config_envelope(profile: &Path, fix: bool) -> Result<Envelope> {
+    if fix {
+        fs::create_dir_all(ayx_profiles_dir()?)?;
+        fs::create_dir_all(ayx_workspaces_dir()?)?;
+        if !ayx_state_path()?.exists() {
+            save_ayx_state(&AyxState::default())?;
+        }
+    }
+    let resolution = profile_resolution_detail(profile)?;
+    let inline_risks = if Path::new(&resolution.resolved_path).exists() {
+        let raw = fs::read_to_string(&resolution.resolved_path)?;
+        collect_inline_secret_warnings(&raw)
+    } else {
+        Vec::new()
+    };
+    Ok(Envelope::ok_with_data(
+        "doctor config completed",
+        json!({
+            "config_home": ayx_config_home()?.display().to_string(),
+            "profiles_dir": ayx_profiles_dir()?.display().to_string(),
+            "workspaces_dir": ayx_workspaces_dir()?.display().to_string(),
+            "state_path": ayx_state_path()?.display().to_string(),
+            "resolution": resolution,
+            "inline_secret_risks": inline_risks,
+            "fix_applied": fix,
+        }),
+    ))
+}
+
+fn doctor_auth_envelope(profile: &Path, environment: Option<&str>) -> Result<Envelope> {
+    let config = Config::load_from_path_with_environment(profile, environment)?;
+    let one = config.alteryx_one.as_ref();
+    let server = config.server.as_ref();
+    Ok(Envelope::ok_with_data(
+        "doctor auth completed",
+        json!({
+            "profile": config.profile_name,
+            "one": {
+                "configured": one.is_some(),
+                "access_token_present": one.and_then(|v| v.access_token.as_ref()).is_some_and(|v| !v.trim().is_empty()),
+                "refresh_token_present": one.and_then(|v| v.refresh_token.as_ref()).is_some_and(|v| !v.trim().is_empty()),
+                "oauth_client_id_present": one.and_then(|v| v.oauth_client_id.as_ref()).is_some_and(|v| !v.trim().is_empty()),
+            },
+            "server": {
+                "configured": server.is_some(),
+                "curator_api_key_present": server.is_some_and(|v| !v.curator_api_key.trim().is_empty()),
+                "curator_api_secret_present": server.is_some_and(|v| !v.curator_api_secret.trim().is_empty()),
+            }
+        }),
+    ))
+}
+
+fn doctor_network_envelope(profile: &Path, environment: Option<&str>) -> Result<Envelope> {
+    let config = Config::load_from_path_with_environment(profile, environment)?;
+    Ok(Envelope::ok_with_data(
+        "doctor network completed",
+        json!({
+            "profile": config.profile_name,
+            "targets": {
+                "one_token_endpoint": config.alteryx_one.as_ref().and_then(|v| v.token_endpoint_url.clone()),
+                "server_base_url": config.server.as_ref().map(|v| v.webapi_url.clone()),
+                "server_api_base_url": config.server_api.as_ref().map(|v| v.base_url.clone()),
+            },
+            "notes": [
+                "Network checks currently validate configured endpoints rather than performing invasive probes",
+            ],
+        }),
+    ))
+}
+
+fn doctor_one_envelope(profile: &Path, environment: Option<&str>) -> Result<Envelope> {
+    let config = Config::load_from_path_with_environment(profile, environment)?;
+    one_platform_auth_diagnose_envelope(&config)
+}
+
+fn doctor_server_envelope(profile: &Path, environment: Option<&str>) -> Result<Envelope> {
+    let config = Config::load_from_path_with_environment(profile, environment)?;
+    let server_ready = config.server.is_some() || config.server_api.is_some();
+    Ok(Envelope::ok_with_data(
+        "doctor server completed",
+        json!({
+            "profile": config.profile_name,
+            "configured": server_ready,
+            "server_url": config.server.as_ref().map(|v| v.webapi_url.clone()),
+            "server_api_url": config.server_api.as_ref().map(|v| v.base_url.clone()),
+            "recommendations": if server_ready {
+                vec!["Run `ayx server auth status` or `ayx server api status` for live validation"]
+            } else {
+                vec!["Add server or server_api settings to the active profile"]
+            }
+        }),
+    ))
+}
+
+fn doctor_mongo_envelope(profile: &Path, environment: Option<&str>) -> Result<Envelope> {
+    let config = Config::load_from_path_with_environment(profile, environment)?;
+    Ok(Envelope::ok_with_data(
+        "doctor mongo completed",
+        json!({
+            "profile": config.profile_name,
+            "mode": match config.mongo.mode {
+                ayx_core::profile::MongoMode::Embedded => "embedded",
+                ayx_core::profile::MongoMode::Managed => "managed",
+            },
+            "gallery_database": config.mongo.databases.gallery_name,
+            "service_database": config.mongo.databases.service_name,
+            "managed_host_present": config.mongo.managed.as_ref().and_then(|managed| managed.host.as_ref()).is_some_and(|v| !v.trim().is_empty()),
+            "managed_url_present": config.mongo.managed.as_ref().and_then(|managed| managed.url.as_ref()).is_some_and(|v| !v.trim().is_empty()),
+        }),
+    ))
+}
+
+fn collect_inline_secret_warnings(raw: &str) -> Vec<String> {
+    let mut warnings = Vec::new();
+    for key in [
+        "access_token:",
+        "refresh_token:",
+        "client_secret:",
+        "curator_api_secret:",
+        "password:",
+    ] {
+        if raw
+            .lines()
+            .any(|line| line.contains(key) && !line.contains("${"))
+        {
+            warnings.push(format!("inline secret detected for {}", key.trim_end_matches(':')));
+        }
+    }
+    warnings
+}
+
 fn one_platform_auth_status_envelope(config: &Config) -> Result<Envelope> {
     let one = config
         .alteryx_one
@@ -7293,7 +7705,7 @@ fn main() -> Result<()> {
 
 fn print_help() {
     println!(
-        "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help           Print this help message\n    --output         Output format: text or json\n    --environment    Active environment name when loading a workspace file\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server status, prechecks, connection helpers, and migration planning\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, .yxdb, and cloud conversion\n    tools          Cross-environment tools for workspace.yaml source/target workflows\n    license        Licensing portal branch and API surface\n    onboard        Interactive first-run setup for config.yaml or workspace.yaml\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
+        "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help           Print this help message\n    --output         Output format: text or json\n    --environment    Active environment name when loading a workspace file\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server status, prechecks, connection helpers, and migration planning\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, .yxdb, and cloud conversion\n    tools          Cross-environment tools for workspace.yaml source/target workflows\n    onboard        Interactive first-run setup for central profiles or workspace files\n    profile        Central profile registry and active profile management\n    doctor         Configuration, auth, network, and product health diagnostics\n    license        Licensing portal branch and API surface\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
     );
 }
 
@@ -7539,6 +7951,11 @@ mod tests {
             .iter()
             .filter_map(|item| item.get("name").and_then(Value::as_str))
             .collect();
+        assert!(names.contains(&"profile list"));
+        assert!(names.contains(&"profile current"));
+        assert!(names.contains(&"profile use"));
+        assert!(names.contains(&"doctor"));
+        assert!(names.contains(&"doctor config"));
         assert!(names.contains(&"mongo status"));
         assert!(names.contains(&"catalog list"));
         assert!(names.contains(&"license api status"));
@@ -7657,6 +8074,14 @@ mod tests {
         let env = catalog_describe_envelope("license api diagnose")
             .expect("catalog describe should work for license");
         assert_eq!(env.data["path"], "license/api/diagnose");
+
+        let env =
+            catalog_describe_envelope("profile current").expect("catalog describe should work");
+        assert_eq!(env.data["path"], "profile/current");
+
+        let env = catalog_describe_envelope("doctor config")
+            .expect("catalog describe should work for top-level doctor");
+        assert_eq!(env.data["path"], "doctor/config");
 
         let env =
             catalog_describe_envelope("one platform status").expect("catalog describe should work");

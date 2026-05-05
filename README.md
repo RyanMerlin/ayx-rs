@@ -25,7 +25,19 @@ On Windows PowerShell, use:
 iwr https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.ps1 | iex
 ```
 
-2. Create `config.yaml` and set the minimum credentials:
+2. Create a central profile and set the minimum credentials.
+
+By default, `ayx` now resolves profiles from its central config home:
+- Linux/macOS: `~/.config/ayx`
+- Windows: `%AppData%\\ayx`
+
+The fastest path is onboarding:
+
+```powershell
+ayx onboard
+```
+
+That writes the active profile to the central profile store. If you prefer to edit YAML directly, create a profile file under `profiles/default.yaml` in the config home with the minimum fields:
 
 ```yaml
 profile_name: demo
@@ -39,23 +51,18 @@ alteryx_one:
   account_email: you@example.com
 ```
 
-If you want the CLI to guide you through setup instead of editing YAML by hand, run:
-
-```powershell
-ayx onboard --profile config.yaml
-```
-
 The onboarding flow reuses existing values on later runs, masks stored secrets in its summary, and auto-discovers embedded Server runtime settings when `RuntimeSettings.xml` is available.
 For automation or agents, add `--non-interactive` to validate an existing profile without prompting.
 
-For multi-environment setups, use a `workspace.yaml` file with named environments and select the active one with `--environment <name>`.
-`ayx onboard --workspace` writes a starter `workspace.yaml` with `dev` and `prod` entries.
+For multi-environment setups, use a central `workspace.yaml` file with named environments and select the active one with `--environment <name>`.
+`ayx onboard --workspace` writes a starter workspace file with `dev` and `prod` entries.
 
 3. Run a first quick query:
 
 ```powershell
-ayx server api status --profile config.yaml
-ayx mongo status --profile config.yaml
+ayx profile current
+ayx server api status
+ayx mongo status
 ayx catalog list
 ```
 
@@ -70,16 +77,18 @@ cargo install --locked --path .
 If you want the shortest path from zero to useful output, start with:
 
 ```powershell
-ayx server api status --profile config.yaml --output json
-ayx mongo inventory --profile config.yaml --output json
+ayx server api status --output json
+ayx mongo inventory --output json
 ```
 
 ## Quick Examples
 
 The shortest path from zero to useful output is usually one of:
 
-- `ayx server api status --profile config.yaml --output json`
-- `ayx mongo inventory --profile config.yaml --output json`
+- `ayx profile current`
+- `ayx doctor`
+- `ayx server api status --output json`
+- `ayx mongo inventory --output json`
 - `ayx one platform workspace current`
 - `ayx one flows list`
 - `ayx one connections list`
@@ -98,8 +107,11 @@ The tool returns a consistent envelope model so humans and agents can parse succ
 
 ## Configuration
 
-`ayx` loads `config.yaml` by default.
-`workspace.yaml` is the canonical multi-environment file. It should contain `workspace_name`, `active_environment`, and an `environments` map of named `Config` entries. Use `--environment <name>` to override the active environment for a single run.
+`ayx` resolves profiles from its central config home by default and keeps an active-profile pointer in local state.
+Use `ayx profile current` to see the active profile, `ayx profile list` to inspect stored profiles, and `ayx profile use <name>` to switch the default profile.
+`--profile <path>` remains available for one-off overrides.
+
+`workspace.yaml` remains the canonical multi-environment file shape. It should contain `workspace_name`, `active_environment`, and an `environments` map of named `Config` entries. Use `--environment <name>` to override the active environment for a single run.
 
 Minimum expectations:
 - `profile_name`
@@ -115,7 +127,8 @@ Minimum expectations:
 - `observability.api_logging.path` to control where the shared API event log is written
 - `observability.api_logging.redact_bodies` stays on by default so secrets are not written to the log
 
-Sensitive values live in `.env` and are expanded automatically from `config.yaml`.
+Sensitive values should live in environment variables or the central `.env` file next to the profile that uses them.
+`ayx doctor config` flags inline secret fields so they can be migrated out of YAML.
 Use `.env.example` as the shareable template.
 
 Embedded Mongo discovery looks for `RuntimeSettings.xml` in the standard Alteryx locations first, then falls back to the configured path if provided.
@@ -202,6 +215,13 @@ ayx
 |   |-- list
 |   |-- describe
 |   `-- run
+|-- doctor                        configuration, auth, network, and product diagnostics
+|   |-- config
+|   |-- auth
+|   |-- network
+|   |-- one
+|   |-- server
+|   `-- mongo
 |-- license                       Licensing portal checks and API access
 |   |-- status
 |   |-- inventory
@@ -217,6 +237,13 @@ ayx
 |   |-- mutate
 |   `-- doctor
 |-- onboard                       guided first-run profile setup
+|-- profile                       central profile registry and active profile management
+|   |-- list
+|   |-- current
+|   |-- show
+|   |-- use
+|   |-- path
+|   `-- migrate
 |-- one                           Alteryx One control plane and workflow surfaces
 |   |-- status
 |   |-- inventory

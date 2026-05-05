@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -21,6 +22,34 @@ pub enum ProfileError {
     },
     #[error("invalid config: {0}")]
     Invalid(String),
+    #[error("failed to write config file '{path}': {source}")]
+    Write {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+pub const DEFAULT_PROFILE_FILE: &str = "config.yaml";
+pub const DEFAULT_WORKSPACE_FILE: &str = "workspace.yaml";
+const DEFAULT_ACTIVE_PROFILE_NAME: &str = "default";
+const DEFAULT_ACTIVE_WORKSPACE_NAME: &str = "default";
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct AyxState {
+    #[serde(default)]
+    pub active_profile: Option<String>,
+    #[serde(default)]
+    pub active_workspace: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolvedProfilePath {
+    pub requested_path: String,
+    pub resolved_path: String,
+    pub source: String,
+    pub active_profile: Option<String>,
+    pub active_workspace: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -198,6 +227,19 @@ impl ServerProfile {
 
 impl Config {
     pub fn load_from_path(path: &Path) -> Result<Self, ProfileError> {
+        let resolved = resolve_profile_path(path)?;
+        Self::load_from_resolved_path(&resolved)
+    }
+
+    pub fn load_from_path_with_environment(
+        path: &Path,
+        environment: Option<&str>,
+    ) -> Result<Self, ProfileError> {
+        let resolved = resolve_profile_or_workspace_path(path)?;
+        Self::load_from_resolved_path_with_environment(&resolved, environment)
+    }
+
+    fn load_from_resolved_path(path: &Path) -> Result<Self, ProfileError> {
         let path_str = path.display().to_string();
         let content = fs::read_to_string(path).map_err(|source| ProfileError::Read {
             path: path_str.clone(),
@@ -214,23 +256,22 @@ impl Config {
             })?;
         let expanded = expand_env_placeholders(&content, &env_values);
 
-        let config_value: serde_yaml::Value =
+        let value: serde_yaml::Value =
             serde_yaml::from_str(&expanded).map_err(|source| ProfileError::Parse {
                 path: path_str.clone(),
                 source,
             })?;
-        let config_value = flatten_alteryx_server_block(config_value);
-        let config: Self =
-            serde_yaml::from_value(config_value).map_err(|source| ProfileError::Parse {
-                path: path_str,
-                source,
-            })?;
+        let value = flatten_alteryx_server_block(value);
+        let config: Self = serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+            path: path_str,
+            source,
+        })?;
         let config = config.with_server_api_overrides()?;
         config.validate()?;
         Ok(config)
     }
 
-    pub fn load_from_path_with_environment(
+    fn load_from_resolved_path_with_environment(
         path: &Path,
         environment: Option<&str>,
     ) -> Result<Self, ProfileError> {
@@ -273,7 +314,6 @@ impl Config {
             config.validate()?;
             return Ok(config);
         }
-
         let config: Self = serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
             path: path_str,
             source,
@@ -608,10 +648,257 @@ fn is_workspace_value(value: &serde_yaml::Value) -> bool {
     })
 }
 
+pub fn ayx_config_home() -> Result<PathBuf, ProfileError> {
+    if let Some(path) = env::var_os("AYX_CONFIG_HOME") {
+        return Ok(PathBuf::from(path));
+    }
+    if let Some(path) = env::var_os("XDG_CONFIG_HOME") {
+        return Ok(PathBuf::from(path).join("ayx"));
+    }
+    if cfg!(windows) {
+        if let Some(path) = env::var_os("APPDATA") {
+            return Ok(PathBuf::from(path).join("ayx"));
+        }
+    }
+    if let Some(path) = env::var_os("HOME") {
+        return Ok(PathBuf::from(path).join(".config").join("ayx"));
+    }
+    if cfg!(windows) {
+        if let (Some(drive), Some(path)) = (env::var_os("HOMEDRIVE"), env::var_os("HOMEPATH")) {
+            return Ok(PathBuf::from(format!(
+                "{}{}",
+                PathBuf::from(drive).display(),
+                PathBuf::from(path).display()
+            ))
+            .join(".config")
+            .join("ayx"));
+        }
+    }
+    Err(ProfileError::Invalid(
+        "unable to resolve ayx config home; set AYX_CONFIG_HOME".to_string(),
+    ))
+}
+
+pub fn ayx_profiles_dir() -> Result<PathBuf, ProfileError> {
+    Ok(ayx_config_home()?.join("profiles"))
+}
+
+pub fn ayx_workspaces_dir() -> Result<PathBuf, ProfileError> {
+    Ok(ayx_config_home()?.join("workspaces"))
+}
+
+pub fn ayx_state_path() -> Result<PathBuf, ProfileError> {
+    Ok(ayx_config_home()?.join("state.yaml"))
+}
+
+pub fn load_ayx_state() -> Result<AyxState, ProfileError> {
+    let path = ayx_state_path()?;
+    if !path.exists() {
+        return Ok(AyxState::default());
+    }
+    let content = fs::read_to_string(&path).map_err(|source| ProfileError::Read {
+        path: path.display().to_string(),
+        source,
+    })?;
+    serde_yaml::from_str(&content).map_err(|source| ProfileError::Parse {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+pub fn save_ayx_state(state: &AyxState) -> Result<(), ProfileError> {
+    let path = ayx_state_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|source| ProfileError::Write {
+            path: parent.display().to_string(),
+            source,
+        })?;
+    }
+    fs::write(&path, serde_yaml::to_string(state).map_err(|source| ProfileError::Parse {
+        path: path.display().to_string(),
+        source,
+    })?)
+    .map_err(|source| ProfileError::Write {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+pub fn profile_storage_path(name: &str) -> Result<PathBuf, ProfileError> {
+    Ok(ayx_profiles_dir()?.join(format!("{name}.yaml")))
+}
+
+pub fn workspace_storage_path(name: &str) -> Result<PathBuf, ProfileError> {
+    Ok(ayx_workspaces_dir()?.join(format!("{name}.yaml")))
+}
+
+pub fn default_profile_storage_path() -> Result<PathBuf, ProfileError> {
+    let state = load_ayx_state()?;
+    profile_storage_path(
+        state
+            .active_profile
+            .as_deref()
+            .unwrap_or(DEFAULT_ACTIVE_PROFILE_NAME),
+    )
+}
+
+pub fn default_workspace_storage_path() -> Result<PathBuf, ProfileError> {
+    let state = load_ayx_state()?;
+    workspace_storage_path(
+        state
+            .active_workspace
+            .as_deref()
+            .unwrap_or(DEFAULT_ACTIVE_WORKSPACE_NAME),
+    )
+}
+
+pub fn resolve_profile_path(path: &Path) -> Result<PathBuf, ProfileError> {
+    resolve_path_internal(path, false)
+}
+
+pub fn resolve_profile_or_workspace_path(path: &Path) -> Result<PathBuf, ProfileError> {
+    resolve_path_internal(path, true)
+}
+
+pub fn profile_resolution_detail(path: &Path) -> Result<ResolvedProfilePath, ProfileError> {
+    let state = load_ayx_state()?;
+    let requested = path.display().to_string();
+    let resolved = resolve_profile_or_workspace_path(path)?;
+    let source = if resolved == path {
+        "explicit".to_string()
+    } else if is_default_workspace_request(path) {
+        "workspace-state".to_string()
+    } else if is_default_profile_request(path) {
+        "profile-state".to_string()
+    } else {
+        "resolved".to_string()
+    };
+    Ok(ResolvedProfilePath {
+        requested_path: requested,
+        resolved_path: resolved.display().to_string(),
+        source,
+        active_profile: state.active_profile,
+        active_workspace: state.active_workspace,
+    })
+}
+
+pub fn list_central_profiles() -> Result<Vec<String>, ProfileError> {
+    list_named_yaml_entries(&ayx_profiles_dir()?)
+}
+
+pub fn list_central_workspaces() -> Result<Vec<String>, ProfileError> {
+    list_named_yaml_entries(&ayx_workspaces_dir()?)
+}
+
+fn list_named_yaml_entries(dir: &Path) -> Result<Vec<String>, ProfileError> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut names = Vec::new();
+    for entry in fs::read_dir(dir).map_err(|source| ProfileError::Read {
+        path: dir.display().to_string(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| ProfileError::Read {
+            path: dir.display().to_string(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|v| v.to_str()) != Some("yaml") {
+            continue;
+        }
+        if let Some(stem) = path.file_stem().and_then(|v| v.to_str()) {
+            names.push(stem.to_string());
+        }
+    }
+    names.sort();
+    Ok(names)
+}
+
+fn resolve_path_internal(path: &Path, allow_workspace: bool) -> Result<PathBuf, ProfileError> {
+    if is_explicit_path(path) {
+        return Ok(path.to_path_buf());
+    }
+
+    if allow_workspace && is_default_workspace_request(path) {
+        if let Some(workspace) = env::var_os("AYX_WORKSPACE") {
+            return Ok(PathBuf::from(workspace));
+        }
+        let state = load_ayx_state()?;
+        if let Some(name) = state.active_workspace {
+            return Ok(workspace_storage_path(&name)?);
+        }
+        if path.exists() {
+            return Ok(path.to_path_buf());
+        }
+        return workspace_storage_path(DEFAULT_ACTIVE_WORKSPACE_NAME);
+    }
+
+    if is_default_profile_request(path) {
+        if let Some(profile) = env::var_os("AYX_PROFILE") {
+            return Ok(PathBuf::from(profile));
+        }
+        let state = load_ayx_state()?;
+        if let Some(name) = state.active_profile {
+            return Ok(profile_storage_path(&name)?);
+        }
+        if path.exists() {
+            return Ok(path.to_path_buf());
+        }
+        return profile_storage_path(DEFAULT_ACTIVE_PROFILE_NAME);
+    }
+
+    Ok(path.to_path_buf())
+}
+
+fn is_default_profile_request(path: &Path) -> bool {
+    is_single_component_file(path, DEFAULT_PROFILE_FILE)
+}
+
+fn is_default_workspace_request(path: &Path) -> bool {
+    is_single_component_file(path, DEFAULT_WORKSPACE_FILE)
+}
+
+fn is_single_component_file(path: &Path, file_name: &str) -> bool {
+    path.file_name().and_then(|v| v.to_str()) == Some(file_name)
+        && path.components().count() == 1
+}
+
+fn is_explicit_path(path: &Path) -> bool {
+    path.is_absolute()
+        || path.components().any(|component| {
+            matches!(component, Component::ParentDir | Component::CurDir | Component::RootDir)
+        })
+        || (!is_default_profile_request(path) && !is_default_workspace_request(path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(old) = &self.old {
+                std::env::set_var(self.key, old);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
 
     fn base_config(profile_name: &str, database: &str) -> Config {
         Config {
@@ -782,5 +1069,26 @@ mod tests {
             "http://host"
         );
         assert_eq!(normalize_alteryx_base_url("http://host"), "http://host");
+    }
+
+    #[test]
+    fn resolves_default_profile_from_central_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = EnvGuard::set("AYX_CONFIG_HOME", &temp.path().display().to_string());
+        let profiles_dir = temp.path().join("profiles");
+        std::fs::create_dir_all(&profiles_dir).unwrap();
+        std::fs::write(
+            temp.path().join("state.yaml"),
+            "active_profile: central\n",
+        )
+        .unwrap();
+        std::fs::write(
+            profiles_dir.join("central.yaml"),
+            serde_yaml::to_string(&base_config("central", "CentralDb")).unwrap(),
+        )
+        .unwrap();
+
+        let cfg = Config::load_from_path(Path::new("config.yaml")).unwrap();
+        assert_eq!(cfg.profile_name, "central");
     }
 }

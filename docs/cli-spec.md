@@ -1,9 +1,9 @@
-# AYX-RS Spec (v0.2)
+# AYX-RS Spec (v0.4.0)
 
 ## Global
 - Binary: `ayx`
 - Output modes: `--output text|json`
-- Default config file: `config.yaml`
+- Default profile resolution: active central profile from the ayx config home, with `--profile <path>` for one-off overrides
 - Envelope root fields: `ok`, `message`, `timestamp_utc`, `data`
 
 ## First Run
@@ -14,11 +14,12 @@ The fastest path from zero to useful output is:
 curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash
 ```
 
-Then create a small `config.yaml` with your Server and One credentials, and start with:
+Then initialize the central profile store with `ayx onboard`, or point `--profile` at a one-off YAML file, and start with:
 
 ```powershell
-ayx server api status --profile config.yaml
-ayx mongo status --profile config.yaml
+ayx profile current
+ayx server api status
+ayx mongo status
 ayx catalog list
 ayx catalog list --tag designer --format full
 ayx catalog describe designer.workflow.context
@@ -29,7 +30,16 @@ If you want the command to feed another tool, add `--output json`.
 
 ## Configuration
 
-`ayx` reads JSON/YAML profiles through `ayx-core::profile::Config`. The default `config.yaml` sample in the repo demonstrates both embedded and managed Mongo scenarios, OAuth2, the shared API observability toggle, and the required Alteryx One email. `workspace.yaml` is the canonical multi-environment form; it holds multiple named `Config` entries and an explicit `active_environment`. Replace the placeholders before committing the file for production usage. When pointing at a live Server, make sure the Mongo connection string, database names, TLS artifacts, observability path, and Alteryx One email are accurate for that environment.
+`ayx` reads JSON/YAML profiles through `ayx-core::profile::Config`. By default it resolves the active profile from the central ayx config home, then loads any adjacent `.env` file for placeholder expansion. `workspace.yaml` is the canonical multi-environment form; it holds multiple named `Config` entries and an explicit `active_environment`. Replace the placeholders before committing the file for production usage. When pointing at a live Server, make sure the Mongo connection string, database names, TLS artifacts, observability path, and Alteryx One email are accurate for that environment.
+
+Central profile commands:
+- `ayx profile list`
+- `ayx profile current`
+- `ayx profile show [name]`
+- `ayx profile use <name>`
+- `ayx profile migrate [--profile config.yaml] [--name <name>]`
+- `ayx doctor`
+- `ayx doctor config [--fix]`
 
 ### Required Config Fields
 - `profile_name`: user-friendly label surfaced in audit/output envelopes.
