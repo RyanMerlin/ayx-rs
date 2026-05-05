@@ -16,7 +16,7 @@ Licensing and Alteryx One surfaces being added in product-scoped branches:
 - system discovery and log analysis helpers
 - Server diagnosis workflows for startup, runtime settings, and network triage
 - Licensing portal diagnostics and API surface
-- Alteryx One platform as the next major product branch
+- Alteryx One workflow, connection, job, workspace, and admin surfaces
 
 ## Quick start
 
@@ -83,31 +83,49 @@ ayx mongo inventory --profile config.yaml --output json
 
 ## What the CLI gives you
 
-- `mongo` for embedded and managed Mongo operations
-  - `mongo query` for read-only collection queries
-  - `mongo doctor` for the built-in support query suite
-- `server api` for the Server web API
-- `server` for environment inspection, logs, Swagger import, and lower-level API calls
-- `server diagnose` for operator-facing Server troubleshooting flows
-- `server auth` for SAML-first auth inspection, diagnosis, simulation, and narrow legacy AD checks
-- `server doctor` for prescriptive troubleshooting workflows built on top of diagnose
-- `workflow` for local `.yxmd`, `.yxmc`, `.yxzp`, and `.yxdb` package/XML tooling
-  - `workflow scan --rules docs/workflow-recurse.example.yaml` to preflight a migration
-  - `workflow recurse --rules docs/workflow-recurse.example.yaml` for recursive migrations
-  - `workflow convert-cloud --input <file.yxmd> --output <file.json> [--fail-on-unsupported]` to convert Desktop workflows to Designer Cloud JSON
-  - `workflow yxdb --input <file> [--csv <path>]` to inspect and export YXDB data
-  - `workflow yxdb --input <file> --csv <path> --output json` to export CSV and return a structured JSON envelope
-  - `workflow publish` to hand a repackaged workflow back to the Server API
-- `one ui` for interacting with the Alteryx One visual interface - experimental
-- `--environment <name>` to pick the active environment from a workspace file when multiple named environments are present
-- `tools` for workspace-aware source/target workflows and future cross-environment automation
-- `license` for the Licensing portal and API branch
-- `one` for the Alteryx One platform branch
-- `sqlserver` for SQL Server status, prechecks, connection-string helpers, and migration planning
-- `onboard` for guided first-run profile setup and subsequent value reuse
-- `server upgrade` for upgrade path planning, prechecks, backup, apply simulation, and postchecks
-- `catalog` for machine-readable command and capability discovery
-- `update` for GitHub release self-update
+```text
+ayx
+|-- catalog          command and capability discovery
+|-- license          Licensing portal checks and API access
+|-- mongo            embedded and managed Mongo operations
+|-- onboard          guided first-run profile setup
+|-- one             Alteryx One control plane and workflow surfaces
+|   |-- api          raw One API diagnostics and transport helpers
+|   |-- auth         auth status, diagnose, and token posture
+|   |-- billing      billing and subscription surfaces
+|   |-- connections  critical-path connection and connector metadata flows
+|   |-- flows        workflow CRUD, import/export, run, and validation
+|   |-- job-groups   run artifacts, publish, pdf results, and execution support
+|   |-- output-objects flow output and wrangling surfaces
+|   |-- plans        plan lifecycle and sharing
+|   |-- platform     workspace, people, roles, tokens, and API utilities
+|   |   |-- api      open API spec and diagnostics
+|   |   |-- auth     platform auth status and diagnostics
+|   |   |-- person   people lookup and account lifecycle
+|   |   |-- role     role assignment helpers
+|   |   |-- token    access token lifecycle
+|   |   `-- workspace workspace inventory, configuration, and transfer
+|   |-- scheduling   schedule and delivery controls
+|   |-- ui           visual interface helpers
+|   |-- webhook-flow-tasks webhook task lifecycle
+|   `-- write-settings runtime write-setting helpers
+|-- server          Server API, logs, import, and lower-level helpers
+|-- sqlserver       SQL Server prechecks and migration planning
+|-- tools           workspace-aware source/target workflows
+|-- update          self-update for GitHub releases
+`-- workflow        local XML/package tooling for Desktop artifacts
+```
+
+The shortest path from zero to useful output is usually one of:
+
+- `ayx server api status --profile config.yaml --output json`
+- `ayx mongo inventory --profile config.yaml --output json`
+- `ayx one platform workspace current`
+- `ayx one flows list`
+- `ayx one connections list`
+- `ayx one job-groups list`
+- `ayx one output-objects list`
+- `ayx one platform person count`
 
 The tool returns a consistent envelope model so humans and agents can parse success, failure, and artifact paths in the same way.
 
@@ -178,6 +196,11 @@ ayx catalog describe designer.workflow.context
 ayx catalog run designer.workflow.context --json '{"workflow_path":"sample.yxmd"}'
 ayx license api status
 ayx one platform workspace current
+ayx one platform person count
+ayx one flows list
+ayx one connections list
+ayx one job-groups list
+ayx one output-objects list
 ayx one platform auth status
 ayx one platform auth diagnose
 ayx one plans list
@@ -212,21 +235,3 @@ cargo test --workspace --locked
 ## Fixtures
 
 The repository includes a `RuntimeSettings.xml` fixture for offline validation of embedded discovery paths.
-
-## Upgrade knowledge
-
-The upgrade routing and issue annotations from the archived Omni repo are preserved in:
-
-- `ayx-server/knowledge/upgrade/version_paths.yaml`
-- `ayx-server/knowledge/upgrade/known_issues.yaml`
-
-These files drive upgrade path planning and version-specific warnings in the CLI.
-
-## Preserved legacy artifacts
-
-The old `ayxm` repo is being archived, but a few reference files are kept here so the migration is auditable:
-
-- `docs/legacy/AYX_CLI_COMMANDS.yaml`
-- `docs/legacy/mongo_schema.py`
-
-These are reference artifacts only. They are not runtime dependencies of the Rust CLI.

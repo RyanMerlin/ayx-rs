@@ -777,6 +777,7 @@ enum OnePlatformTokenCommand {
 enum OnePlatformPersonCommand {
     List,
     Current,
+    Count,
     Detail {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
@@ -788,6 +789,28 @@ enum OnePlatformPersonCommand {
         profile: PathBuf,
         #[arg(long)]
         body: PathBuf,
+    },
+    Update {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        person_id: String,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Patch {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        person_id: String,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Delete {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        person_id: String,
     },
     UpdatePassword {
         #[arg(long, default_value = "config.yaml")]
@@ -808,9 +831,21 @@ enum OneWorkspaceCommand {
     List,
     Current,
     CurrentConfiguration,
+    ConfigurationV4 {
+        #[arg(long)]
+        workspace_id: String,
+    },
     SaveCurrentConfiguration {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    SaveConfigurationV4 {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        workspace_id: String,
         #[arg(long)]
         body: PathBuf,
     },
@@ -1278,6 +1313,14 @@ enum OneJobGroupCommand {
     Run {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Publish {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        job_group_id: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
@@ -1910,6 +1953,16 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to GET /v4/people/current in the One API docs."],
     },
     CommandSpec {
+        name: "one platform person count",
+        path: "one/platform/person/count",
+        summary: "Count One people.",
+        output: "one platform person count envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to GET /v4/people/count in the One API docs."],
+    },
+    CommandSpec {
         name: "one platform person detail",
         path: "one/platform/person/detail",
         summary: "Inspect a One person record by id.",
@@ -1928,6 +1981,36 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: true,
         prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
         notes: &["Maps to POST /v4/people in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform person update",
+        path: "one/platform/person/update",
+        summary: "Replace a One person record from JSON payload.",
+        output: "one platform person update envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        notes: &["Maps to PUT /v4/people/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform person patch",
+        path: "one/platform/person/patch",
+        summary: "Patch a One person record from JSON payload.",
+        output: "one platform person patch envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        notes: &["Maps to PATCH /v4/people/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform person delete",
+        path: "one/platform/person/delete",
+        summary: "Delete a One person record.",
+        output: "one platform person delete envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to DELETE /v4/people/{id} in the One API docs."],
     },
     CommandSpec {
         name: "one platform person update-password",
@@ -1970,6 +2053,16 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to GET /v4/workspaces/current/configuration in the One API docs."],
     },
     CommandSpec {
+        name: "one platform workspace configuration-v4",
+        path: "one/platform/workspace/configuration-v4",
+        summary: "Inspect a One workspace configuration by id.",
+        output: "one platform workspace configuration-v4 envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        notes: &["Maps to GET /v4/workspaces/{id}/configuration in the One API docs."],
+    },
+    CommandSpec {
         name: "one platform workspace save-current-configuration",
         path: "one/platform/workspace/save-current-configuration",
         summary: "Update the current One workspace configuration from JSON payload.",
@@ -1978,6 +2071,16 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: true,
         prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
         notes: &["Maps to PATCH /v4/workspaces/current/configuration in the One API docs."],
+    },
+    CommandSpec {
+        name: "one platform workspace save-configuration-v4",
+        path: "one/platform/workspace/save-configuration-v4",
+        summary: "Update a One workspace configuration by id from JSON payload.",
+        output: "one platform workspace save-configuration-v4 envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        notes: &["Maps to PATCH /v4/workspaces/{id}/configuration in the One API docs."],
     },
     CommandSpec {
         name: "one platform workspace list",
@@ -2679,6 +2782,16 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to POST /v4/jobGroups in the One API docs."],
     },
     CommandSpec {
+        name: "one job-group publish",
+        path: "one/job-group/publish",
+        summary: "Publish job-group results to a target.",
+        output: "one job-group publish envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["config.yaml", "server_api", "payload json"],
+        notes: &["Maps to PUT /v4/jobGroups/{id}/publish in the One API docs."],
+    },
+    CommandSpec {
         name: "one job-group detail",
         path: "one/job-group/detail",
         summary: "Inspect a One job group.",
@@ -2816,7 +2929,7 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "mutating",
         mutating: true,
         prerequisites: &["config.yaml", "server_api", "payload json"],
-        notes: &["Maps to PUT /v4/outputObjects/{id} in the One API docs."],
+        notes: &["Maps to PATCH /v4/outputObjects/{id} in the One API docs."],
     },
     CommandSpec {
         name: "one output-object delete",
@@ -4892,6 +5005,18 @@ fn execute(cli: Cli) -> Result<Envelope> {
                             &[],
                         )?
                     }
+                    OneWorkspaceCommand::ConfigurationV4 { workspace_id } => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "workspace-configuration-v4",
+                            "GET",
+                            "/v4/workspaces/{id}/configuration",
+                            false,
+                            &[("id", &workspace_id)],
+                        )?
+                    }
                     OneWorkspaceCommand::CurrentConfiguration => {
                         let config = load_profile(&PathBuf::from("config.yaml"))?;
                         one_api_live_request(
@@ -4915,6 +5040,24 @@ fn execute(cli: Cli) -> Result<Envelope> {
                             "/v4/workspaces/current/configuration",
                             true,
                             &[],
+                            Some(payload),
+                        )?
+                    }
+                    OneWorkspaceCommand::SaveConfigurationV4 {
+                        profile,
+                        workspace_id,
+                        body,
+                    } => {
+                        let config = load_profile(&profile)?;
+                        let payload = load_payload(&body)?;
+                        one_api_live_request_with_body(
+                            &config,
+                            "platform",
+                            "workspace-save-configuration-v4",
+                            "PATCH",
+                            "/v4/workspaces/{id}/configuration",
+                            true,
+                            &[("id", &workspace_id)],
                             Some(payload),
                         )?
                     }
@@ -5165,6 +5308,18 @@ fn execute(cli: Cli) -> Result<Envelope> {
                             &[],
                         )?
                     }
+                    Some(OnePlatformPersonCommand::Count) => {
+                        let config = load_profile(&PathBuf::from("config.yaml"))?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "person-count",
+                            "GET",
+                            "/v4/people/count",
+                            false,
+                            &[],
+                        )?
+                    }
                     Some(OnePlatformPersonCommand::Current) => {
                         let config = load_profile(&PathBuf::from("config.yaml"))?;
                         one_api_live_request(
@@ -5186,6 +5341,54 @@ fn execute(cli: Cli) -> Result<Envelope> {
                             "GET",
                             "/v4/people/{id}",
                             false,
+                            &[("id", &person_id)],
+                        )?
+                    }
+                    Some(OnePlatformPersonCommand::Update {
+                        profile,
+                        person_id,
+                        body,
+                    }) => {
+                        let config = load_profile(&profile)?;
+                        let payload = load_payload(&body)?;
+                        one_api_live_request_with_body(
+                            &config,
+                            "platform",
+                            "person-update",
+                            "PUT",
+                            "/v4/people/{id}",
+                            true,
+                            &[("id", &person_id)],
+                            Some(payload),
+                        )?
+                    }
+                    Some(OnePlatformPersonCommand::Patch {
+                        profile,
+                        person_id,
+                        body,
+                    }) => {
+                        let config = load_profile(&profile)?;
+                        let payload = load_payload(&body)?;
+                        one_api_live_request_with_body(
+                            &config,
+                            "platform",
+                            "person-patch",
+                            "PATCH",
+                            "/v4/people/{id}",
+                            true,
+                            &[("id", &person_id)],
+                            Some(payload),
+                        )?
+                    }
+                    Some(OnePlatformPersonCommand::Delete { profile, person_id }) => {
+                        let config = load_profile(&profile)?;
+                        one_api_live_request(
+                            &config,
+                            "platform",
+                            "person-delete",
+                            "DELETE",
+                            "/v4/people/{id}",
+                            true,
                             &[("id", &person_id)],
                         )?
                     }
@@ -5288,7 +5491,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
             },
             Some(OneCommand::JobGroups { command }) => match command {
                 None => Envelope::ok(
-                    "one job-group commands available: list, count, pdf-results, run, detail, cancel, status, inputs, outputs, jobs, publications, profile, profile-results",
+                    "one job-group commands available: list, count, pdf-results, run, publish, detail, cancel, status, inputs, outputs, jobs, publications, profile, profile-results",
                 ),
                 Some(OneJobGroupCommand::List { profile }) => {
                     let config = load_profile(&profile)?;
@@ -5317,6 +5520,26 @@ fn execute(cli: Cli) -> Result<Envelope> {
                         "/v4/jobGroups",
                         true,
                         &[],
+                        Some(payload),
+                    )?
+                }
+                Some(OneJobGroupCommand::Publish {
+                    profile,
+                    job_group_id,
+                    body,
+                }) => {
+                    let config = load_profile(&profile)?;
+                    let job_group_id =
+                        job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
+                    let payload = load_payload(&body)?;
+                    one_api_live_request_with_body(
+                        &config,
+                        "jobGroup",
+                        "publish",
+                        "PUT",
+                        "/v4/jobGroups/{id}/publish",
+                        true,
+                        &[("id", job_group_id.as_str())],
                         Some(payload),
                     )?
                 }
@@ -7325,8 +7548,12 @@ mod tests {
         assert!(names.contains(&"one platform user"));
         assert!(names.contains(&"one platform person list"));
         assert!(names.contains(&"one platform person current"));
+        assert!(names.contains(&"one platform person count"));
         assert!(names.contains(&"one platform person detail"));
         assert!(names.contains(&"one platform person create"));
+        assert!(names.contains(&"one platform person update"));
+        assert!(names.contains(&"one platform person patch"));
+        assert!(names.contains(&"one platform person delete"));
         assert!(names.contains(&"one platform person update-password"));
         assert!(names.contains(&"one platform person password-reset-request"));
         assert!(names.contains(&"one platform api status"));
@@ -7334,7 +7561,9 @@ mod tests {
         assert!(names.contains(&"one platform workspace current"));
         assert!(names.contains(&"one platform workspace list"));
         assert!(names.contains(&"one platform workspace current-configuration"));
+        assert!(names.contains(&"one platform workspace configuration-v4"));
         assert!(names.contains(&"one platform workspace save-current-configuration"));
+        assert!(names.contains(&"one platform workspace save-configuration-v4"));
         assert!(names.contains(&"one platform role list-assignments"));
         assert!(names.contains(&"one plans status"));
         assert!(names.contains(&"one plans list"));
@@ -7371,6 +7600,7 @@ mod tests {
         assert!(names.contains(&"one job-group list"));
         assert!(names.contains(&"one job-group pdf-results"));
         assert!(names.contains(&"one job-group run"));
+        assert!(names.contains(&"one job-group publish"));
         assert!(names.contains(&"one output-object list"));
         assert!(names.contains(&"one output-object count"));
         assert!(names.contains(&"one output-object create"));
@@ -7448,9 +7678,25 @@ mod tests {
             .expect("catalog describe should work for person current");
         assert_eq!(env.data["path"], "one/platform/person/current");
 
+        let env = catalog_describe_envelope("one platform person count")
+            .expect("catalog describe should work for person count");
+        assert_eq!(env.data["path"], "one/platform/person/count");
+
         let env = catalog_describe_envelope("one platform person detail")
             .expect("catalog describe should work for person detail");
         assert_eq!(env.data["path"], "one/platform/person/detail");
+
+        let env = catalog_describe_envelope("one platform person update")
+            .expect("catalog describe should work for person update");
+        assert_eq!(env.data["path"], "one/platform/person/update");
+
+        let env = catalog_describe_envelope("one platform person patch")
+            .expect("catalog describe should work for person patch");
+        assert_eq!(env.data["path"], "one/platform/person/patch");
+
+        let env = catalog_describe_envelope("one platform person delete")
+            .expect("catalog describe should work for person delete");
+        assert_eq!(env.data["path"], "one/platform/person/delete");
 
         let env = catalog_describe_envelope("one platform workspace list")
             .expect("catalog describe should work for workspace list");
@@ -7463,11 +7709,22 @@ mod tests {
             "one/platform/workspace/current-configuration"
         );
 
+        let env = catalog_describe_envelope("one platform workspace configuration-v4")
+            .expect("catalog describe should work for workspace configuration-v4");
+        assert_eq!(env.data["path"], "one/platform/workspace/configuration-v4");
+
         let env = catalog_describe_envelope("one platform workspace save-current-configuration")
             .expect("catalog describe should work for save current configuration");
         assert_eq!(
             env.data["path"],
             "one/platform/workspace/save-current-configuration"
+        );
+
+        let env = catalog_describe_envelope("one platform workspace save-configuration-v4")
+            .expect("catalog describe should work for save configuration-v4");
+        assert_eq!(
+            env.data["path"],
+            "one/platform/workspace/save-configuration-v4"
         );
 
         let env =
@@ -7560,6 +7817,10 @@ mod tests {
         let env = catalog_describe_envelope("one job-group pdf-results")
             .expect("catalog describe should work for one job-group pdf-results");
         assert_eq!(env.data["path"], "one/job-group/pdf-results");
+
+        let env = catalog_describe_envelope("one job-group publish")
+            .expect("catalog describe should work for one job-group publish");
+        assert_eq!(env.data["path"], "one/job-group/publish");
 
         let env = catalog_describe_envelope("one output-object wrangle-to-python")
             .expect("catalog describe should work for one output-object wrangle-to-python");

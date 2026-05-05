@@ -347,6 +347,11 @@ const JOB_GROUP_ENDPOINTS: &[EndpointSpec] = &[
         command: "one job-group run",
     },
     EndpointSpec {
+        method: "PUT",
+        path: "/v4/jobGroups/{id}/publish",
+        command: "one job-group publish",
+    },
+    EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}",
         command: "one job-group detail",
@@ -617,7 +622,7 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
         status: "partial",
         endpoints: JOB_GROUP_ENDPOINTS,
         notes: &[
-            "Job-group execution and inspection commands are wired.",
+            "Job-group execution, publish, and inspection commands are wired.",
             "PDF/log artifact downloads and other deeper job-library paths remain documented-only.",
         ],
     },
@@ -672,17 +677,12 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
     SurfaceSpec {
         name: "person",
         status: "partial",
-        endpoints: &[EndpointSpec {
-            method: "GET",
-            path: "/v4/people/current",
-            command: "one platform user",
-        }],
-        notes: &["Current-person lookup is wired; broader person lifecycle endpoints remain documented-only."],
-    },
-    SurfaceSpec {
-        name: "person",
-        status: "partial",
         endpoints: &[
+            EndpointSpec {
+                method: "GET",
+                path: "/v4/people/current",
+                command: "one platform user",
+            },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/people",
@@ -695,6 +695,11 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             },
             EndpointSpec {
                 method: "GET",
+                path: "/v4/people/count",
+                command: "one platform person count",
+            },
+            EndpointSpec {
+                method: "GET",
                 path: "/v4/people/{id}",
                 command: "one platform person detail",
             },
@@ -702,6 +707,21 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
                 method: "POST",
                 path: "/v4/people",
                 command: "one platform person create",
+            },
+            EndpointSpec {
+                method: "PUT",
+                path: "/v4/people/{id}",
+                command: "one platform person update",
+            },
+            EndpointSpec {
+                method: "PATCH",
+                path: "/v4/people/{id}",
+                command: "one platform person patch",
+            },
+            EndpointSpec {
+                method: "DELETE",
+                path: "/v4/people/{id}",
+                command: "one platform person delete",
             },
             EndpointSpec {
                 method: "PATCH",
@@ -714,7 +734,7 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
                 command: "one platform person password-reset-request",
             },
         ],
-        notes: &["Person list/current/detail/create/password workflows are wired; remaining person families stay documented-only."],
+        notes: &["Current lookup plus person list/count/detail/create/update/patch/delete/password workflows are wired; remaining person families stay documented-only."],
     },
     SurfaceSpec {
         name: "workspace",
@@ -724,6 +744,11 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
                 method: "GET",
                 path: "/v4/workspaces",
                 command: "one platform workspace list",
+            },
+            EndpointSpec {
+                method: "GET",
+                path: "/v4/workspaces/{id}/configuration",
+                command: "one platform workspace configuration-v4",
             },
             EndpointSpec {
                 method: "PATCH",
@@ -739,6 +764,11 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
                 method: "PATCH",
                 path: "/v4/workspaces/current/configuration",
                 command: "one platform workspace save-current-configuration",
+            },
+            EndpointSpec {
+                method: "PATCH",
+                path: "/v4/workspaces/{id}/configuration",
+                command: "one platform workspace save-configuration-v4",
             },
             EndpointSpec {
                 method: "GET",
@@ -761,7 +791,7 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
                 command: "one platform workspace delete-configuration",
             },
         ],
-        notes: &["Workspace listing, configuration, and transfer endpoints are wired; other workspace families remain documented-only."],
+        notes: &["Workspace listing, configuration, transfer, and v4 configuration-by-id endpoints are wired; other workspace families remain documented-only."],
     },
 ];
 
