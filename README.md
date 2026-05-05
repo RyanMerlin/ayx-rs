@@ -1,22 +1,15 @@
 # AYX-RS
 
-`ayx` is a Rust workspace for Alteryx administrators and automation agents.
+`ayx` is a command-line tool suite for Alteryx administrators, automation, and agentic workflows.
 
 It is designed to be:
-- fast: a single native binary with no interpreter dependency
+- administrator-friendly: clear command surfaces for common Alteryx operations
+- automation-friendly: a single native binary with predictable output and no interpreter dependency
 - secure: explicit `--apply` gates, audit artifacts, and conservative defaults
 - portable: Windows, Linux, and macOS release targets
-- agent-friendly: structured envelopes, predictable command output, and a future command/tactics/workflow registry for tools like Codex or Claude
+- agent-friendly: structured envelopes and a future command/tactics/workflow registry
 
-The current focus is Alteryx Server and Gallery administration workflows, with
-Licensing and Alteryx One surfaces being added in product-scoped branches:
-- Mongo inventory, backup, and restore
-- Server API reads and controlled mutations
-- upgrade planning and post-checks
-- system discovery and log analysis helpers
-- Server diagnosis workflows for startup, runtime settings, and network triage
-- Licensing portal diagnostics and API surface
-- Alteryx One workflow, connection, job, workspace, and admin surfaces
+Current focus: Alteryx Server and Gallery administration workflows, plus Mongo inventory, backup, and restore; Server API reads and controlled mutations; upgrade planning and post-checks; system discovery and log analysis helpers; Server diagnosis workflows for startup, runtime settings, and network triage; Licensing portal diagnostics and API access; and Alteryx One workflow, connection, job, workspace, and admin surfaces.
 
 ## Quick start
 
@@ -129,9 +122,7 @@ Embedded Mongo discovery looks for `RuntimeSettings.xml` in the standard Alteryx
 
 ## Release and install
 
-The GitHub Actions workflow at [`.github/workflows/build-release.yml`](.github/workflows/build-release.yml) builds Windows, Linux, and macOS binaries and now runs format, clippy, and tests before packaging.
-
-The workflow supports manual `workflow_dispatch` runs and tagged releases (`v*`), so you can publish a release artifact on demand or from a version tag.
+Releases are built for Windows, Linux, and macOS from GitHub Actions.
 
 Release archives:
 - Windows: `ayx-x86_64-pc-windows-msvc.zip`
@@ -187,7 +178,7 @@ Agent-oriented catalog notes:
 - `ayx catalog list --tag designer --format full` surfaces capability ids, schemas, safety, and provider type alongside the existing command catalog.
 - `ayx catalog describe <command-or-capability>` resolves either a legacy command path/name or a capability id such as `designer.tool.add`.
 - `ayx catalog run <capability> --json <payload-or-@file> [--dry-run]` is the structured execution entry point for the native capability layer.
-- The first local Designer slice is file-backed today and aligned to the `eel.dll` / Nexus localhost WebSocket contract shape so a live IPC backend can slot in later without changing the public ids.
+- The catalog layer is designed so a live IPC backend can slot in later without changing the public ids.
 
 ## Development
 
