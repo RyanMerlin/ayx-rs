@@ -4,10 +4,10 @@ This is the working plan for evolving AYX-RS into a production-grade, agent-frie
 
 Completed items are removed here rather than left to rot in the plan.
 
-## 1. Repo split and publication
-- split the repository into a private source tree and a public binary/docs tree without breaking the release path.
-- define the source-of-truth boundary so code, fixtures, and internal notes stay private while docs, install scripts, and release artifacts remain public.
-- document the sync/release workflow between the private source repo and the public mirror so the public tree never drifts silently.
+## 1. Public release hygiene
+- finish the `ayx-rs` public release cutover and remove the last old release/install references.
+- keep public fixtures and generated artifacts sanitized so they do not leak real environment state.
+- document the release workflow for building, packaging, and publishing the public binary from this repo.
 
 ## 2. Command registry
 - keep the machine-readable command catalog aligned with the live `clap` tree.
@@ -50,13 +50,13 @@ Completed items are removed here rather than left to rot in the plan.
 ## 9. Server auth
 - continue expanding `ayx server auth` with SAML-first diagnosis and simulation.
 - add targeted helpers for certificate validation, callback/redirect checks, and legacy AD only where it still matters operationally.
-- keep the auth surface focused on evidence, simulation, and guided diagnosis rather than embedding every IdP-specific KBA procedure.
+- keep the auth surface focused on evidence, simulation, and guided diagnosis rather than embedding every IdP-specific support procedure.
 
 ## 10. Product-scoped API branches
 - keep the public CLI product-first instead of reintroducing a generic top-level `api`.
 - keep Licensing as its own product branch, but prioritize Alteryx One as the next major platform branch.
 - keep API-specific command trees under their product roots (`server`, `license`, `one`) while shared HTTP/auth helpers remain internal.
-- extend the Codex plugin layer as the place for API KBA playbooks and multi-step orchestration.
+- extend the Codex plugin layer as the place for API playbooks and multi-step orchestration.
 
 ## 11. One API hardening
 - add a shared One transport helper with retries, exponential backoff, jitter, and `Retry-After` handling.
@@ -77,21 +77,26 @@ Status:
 - standardize a single JSONL API event log across Server, License, and One.
 - make API request logging opt-in through `config.yaml` so operators can enable it only when needed.
 - keep secrets, request bodies, and raw response bodies redacted by default.
-- make Walter read the same event schema instead of inventing a second logging model.
+- make the orchestration layer read the same event schema instead of inventing a second logging model.
 
 ## 13. Workspace hardening
 - make workspace identity explicit at the start of every workflow that mutates state.
 - fail closed when the requested workspace does not match the active browser or CLI context.
 - add a preflight check that resolves the current workspace and records it in evidence bundles.
 - treat stale workflow tabs and stale cached browser state as suspect until the workspace is validated.
-- keep Walter responsible for orchestration, but make `ayx-rs` expose the deterministic workspace validation and workflow-open primitives.
+- keep the workflow guidance layer responsible for orchestration, but make `ayx-rs` expose the deterministic workspace validation and workflow-open primitives.
 
 ## Current priority
-- complete the repo split plan and decide which paths stay in the private source repo vs the public docs/binary repo.
+- finish the public release cutover and keep `ayx-rs` as the published repo.
 - finish `ayx tools` source/target workflows for workspace-aware migration planning and comparison.
 - keep the command catalog aligned with the live CLI after the split.
 - finish the Mongo query registry and doctor suite before adding any Mongo remediation/mutation workflows.
-- keep Server auth focused on the SAML simulation and diagnosis primitives the KBAs actually support.
+- keep Server auth focused on the SAML simulation and diagnosis primitives the documented support cases actually support.
 - continue expanding One's remaining documented-only families before moving to the rest of the gaps.
-- keep License expansion gated on the KBA set.
+- keep License expansion gated on the documented support case set.
 - harden One API execution before adding more mutating One workflows or bulk operations.
+
+## Next phase
+- finish the remaining One partial surfaces: `connection`, `flow`, `jobGroup`, `outputObject`, `webhookFlowTask`, `writeSetting`, `apiAccessTokens`, `person`, and `workspace`.
+- keep `ui`, `auto-insights`, and `desktop-exec` reserved until their contracts are stable enough to expose publicly.
+- document any newly wired One branch in the inventory, catalog tests, and README start-here examples before moving on.

@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 if (-not $Version) { $Version = 'latest' }
 
 $repoOwner = 'RyanMerlin'
-$repoName = 'ayx-cli'
+$repoName = 'ayx-rs'
 $artifactName = 'ayx-x86_64-pc-windows-msvc.zip'
 
 function Test-OnPath {

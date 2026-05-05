@@ -122,7 +122,7 @@ enum Command {
     Update {
         #[arg(long, default_value = "RyanMerlin")]
         repo_owner: String,
-        #[arg(long, default_value = "ayx-cli")]
+        #[arg(long, default_value = "ayx-rs")]
         repo_name: String,
         #[arg(long, default_value = "ayx")]
         bin_name: String,
@@ -2305,7 +2305,7 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         prerequisites: &["config.yaml", "server_api"],
         notes: &[
             "Use before future platform API call-style workflows.",
-            "Route workflow guidance through Walter once the symptom is known.",
+            "Route workflow guidance through the orchestration layer once the symptom is known.",
         ],
     },
     CommandSpec {
@@ -6925,7 +6925,7 @@ fn one_doctor_platform_envelope(config: &Config) -> Result<Envelope> {
             ],
             "recommendations": [
                 "Use one platform workspace people/admins to drill into workspace scope",
-                "Route deeper symptom handling to Walter playbooks",
+                "Route deeper symptom handling to the workflow guidance layer",
             ]
         }),
     ))
@@ -6983,7 +6983,7 @@ fn one_doctor_discover_envelope(config: &Config) -> Result<Envelope> {
                 "Use one platform workspace current to identify the workspace context",
                 "Use one plans list/detail/run to resolve plan ids",
                 "Use one scheduling list/detail/enable/disable to resolve schedule ids",
-                "Use Walter to decide whether a symptom belongs to platform, plans, scheduling, or billing",
+                "Use the workflow guidance layer to decide whether a symptom belongs to platform, plans, scheduling, or billing",
             ]
         }),
     ))
@@ -7018,7 +7018,7 @@ fn one_doctor_plans_envelope(config: &Config) -> Result<Envelope> {
             ],
             "recommendations": [
                 "Use one plans detail/run when a specific plan id is known",
-                "Use Walter for support-case sequencing and operator guidance",
+                "Use the workflow guidance layer for support-case sequencing and operator guidance",
             ]
         }),
     ))
@@ -7053,7 +7053,7 @@ fn one_doctor_scheduling_envelope(config: &Config) -> Result<Envelope> {
             ],
             "recommendations": [
                 "Use one scheduling detail/enable/disable when a schedule id is known",
-                "Route operator selection and escalation guidance through Walter",
+                "Route operator selection and escalation guidance through the workflow guidance layer",
             ]
         }),
     ))
@@ -7088,7 +7088,7 @@ fn one_doctor_billing_envelope(config: &Config) -> Result<Envelope> {
             ],
             "recommendations": [
                 "Keep billing reference-only unless a repeatable operator workflow appears",
-                "Use Walter to decide whether billing belongs in CLI or documentation only",
+                "Use the workflow guidance layer to decide whether billing belongs in CLI or documentation only",
             ]
         }),
     ))
@@ -7209,7 +7209,7 @@ fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Envelope> {
                 "workspace_probe": workspace_probe.data,
                 "recommendations": [
                     "Use one platform workspace current or people for evidence",
-                    "Route any failing symptoms into Walter playbooks",
+                    "Route any failing symptoms into the workflow guidance layer",
                 ],
             }),
         ))

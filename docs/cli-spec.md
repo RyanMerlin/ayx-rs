@@ -11,7 +11,7 @@
 The fastest path from zero to useful output is:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-cli/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash
 ```
 
 Then create a small `config.yaml` with your Server and One credentials, and start with:
@@ -47,7 +47,7 @@ If you want the command to feed another tool, add `--output json`.
 - `mongo.embedded.runtime_settings_path` defaults to `null`; the CLI tries the documented Server location (`C:\ProgramData\Alteryx\RuntimeSettings.xml`) first, then `%ProgramData%/Alteryx/*`, `%ProgramFiles%/Alteryx/*`, `%ProgramFiles(x86)%/Alteryx/*`, and finally probes relocated drives (for example `D:\ProgramData\Alteryx\RuntimeSettings.xml`). The CLI bails with a helpful error if no candidate exists, instructing you to set the path manually.
 - `mongo.embedded.alteryx_service_path` is optional; the embedding logic derives the install root from RuntimeSettings and looks for `bin/AlteryxService.exe` before asking for an override.
 - `mongo.embedded.restore_target_path` is optional; the CLI uses the runtime payload to infer the persistence target, defaulting to `C:\ProgramData\Alteryx\Service\Persistence\MongoDB` when the XML lacks the field.
-- The repo includes `C:\code\RuntimeSettings.xml` as a fixture — copy your Server runtime settings there or point `mongo.embedded.runtime_settings_path` at your install when validating the embedded workflow locally.
+- The repo includes `examples/RuntimeSettings.xml` as a fixture — copy your Server runtime settings there or point `mongo.embedded.runtime_settings_path` at your install when validating the embedded workflow locally.
 
 ## Mongo Commands
 - `ayx mongo status --profile <path>`
@@ -102,7 +102,7 @@ upgrade:
 ## Update Command
 - `ayx update [--repo-owner <owner>] [--repo-name <repo>] [--bin-name <name>] [--target-version <tag>] [--skip-confirm]`
 
-`ayx update` checks the latest GitHub release (defaulting to `RyanMerlin/ayx-cli`) and, after prompting unless `--skip-confirm` is used, downloads and replaces the running binary with the release asset named for the current target triple. Use `--target-version` to install a specific tag instead of the latest release, and `--repo-owner/--repo-name` if you host releases in a different repo.
+`ayx update` checks the latest GitHub release (defaulting to `RyanMerlin/ayx-rs`) and, after prompting unless `--skip-confirm` is used, downloads and replaces the running binary with the release asset named for the current target triple. Use `--target-version` to install a specific tag instead of the latest release, and `--repo-owner/--repo-name` if you host releases in a different repo.
 - `ayx server api workflow-detail --profile <path> --workflow-id <id>`
 - `ayx server api workflow-jobs --profile <path> --workflow-id <id>`
 - `ayx server api schedules --profile <path> [--view Default|Full]`
@@ -182,7 +182,7 @@ The CLI is intentionally product-first:
 - `ayx one auto-insights`
 - `ayx one desktop-exec`
 
-`server` is the mature branch today. `license` and `one` are separate product roots so each Alteryx surface can grow independently. `one platform` is the managed IAM / workspace-admin entry point, `one platform auth` covers token posture and workspace reachability, `one plans` is the managed plans entry point, `one scheduling` covers schedule lifecycle, and `one billing` covers billing posture / usage export. The remaining `one` branches stay reserved until their KBA sets justify more deterministic commands.
+`server` is the mature branch today. `license` and `one` are separate product roots so each Alteryx surface can grow independently. `one platform` is the managed IAM / workspace-admin entry point, `one platform auth` covers token posture and workspace reachability, `one plans` is the managed plans entry point, `one scheduling` covers schedule lifecycle, and `one billing` covers billing posture / usage export. The remaining `one` branches stay reserved until their support use-cases justify more deterministic commands.
 
 Workspace hardening rule:
 - every mutating workflow should validate the active workspace before execution
