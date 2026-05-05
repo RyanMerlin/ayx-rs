@@ -81,40 +81,7 @@ ayx server api status --profile config.yaml --output json
 ayx mongo inventory --profile config.yaml --output json
 ```
 
-## What the CLI gives you
-
-```text
-ayx
-|-- catalog          command and capability discovery
-|-- license          Licensing portal checks and API access
-|-- mongo            embedded and managed Mongo operations
-|-- onboard          guided first-run profile setup
-|-- one             Alteryx One control plane and workflow surfaces
-|   |-- api          raw One API diagnostics and transport helpers
-|   |-- auth         auth status, diagnose, and token posture
-|   |-- billing      billing and subscription surfaces
-|   |-- connections  critical-path connection and connector metadata flows
-|   |-- flows        workflow CRUD, import/export, run, and validation
-|   |-- job-groups   run artifacts, publish, pdf results, and execution support
-|   |-- output-objects flow output and wrangling surfaces
-|   |-- plans        plan lifecycle and sharing
-|   |-- platform     workspace, people, roles, tokens, and API utilities
-|   |   |-- api      open API spec and diagnostics
-|   |   |-- auth     platform auth status and diagnostics
-|   |   |-- person   people lookup and account lifecycle
-|   |   |-- role     role assignment helpers
-|   |   |-- token    access token lifecycle
-|   |   `-- workspace workspace inventory, configuration, and transfer
-|   |-- scheduling   schedule and delivery controls
-|   |-- ui           visual interface helpers
-|   |-- webhook-flow-tasks webhook task lifecycle
-|   `-- write-settings runtime write-setting helpers
-|-- server          Server API, logs, import, and lower-level helpers
-|-- sqlserver       SQL Server prechecks and migration planning
-|-- tools           workspace-aware source/target workflows
-|-- update          self-update for GitHub releases
-`-- workflow        local XML/package tooling for Desktop artifacts
-```
+## Quick Examples
 
 The shortest path from zero to useful output is usually one of:
 
@@ -235,3 +202,297 @@ cargo test --workspace --locked
 ## Fixtures
 
 The repository includes a `RuntimeSettings.xml` fixture for offline validation of embedded discovery paths.
+
+## Full Command Tree
+
+```text
+ayx
+|-- catalog                       command and capability discovery
+|   |-- list
+|   |-- describe
+|   `-- run
+|-- license                       Licensing portal checks and API access
+|   |-- status
+|   |-- inventory
+|   `-- api
+|       |-- status
+|       `-- diagnose
+|-- mongo                         embedded and managed Mongo operations
+|   |-- status
+|   |-- inventory
+|   |-- backup
+|   |-- restore
+|   |-- query
+|   |-- mutate
+|   `-- doctor
+|-- onboard                       guided first-run profile setup
+|-- one                           Alteryx One control plane and workflow surfaces
+|   |-- status
+|   |-- inventory
+|   |-- doctor
+|   |   |-- auth
+|   |   |-- discover
+|   |   |-- platform
+|   |   |-- plans
+|   |   |-- scheduling
+|   |   `-- billing
+|   |-- platform                  workspace, people, roles, tokens, and API utilities
+|   |   |-- status
+|   |   |-- inventory
+|   |   |-- api
+|   |   |   |-- status
+|   |   |   |-- diagnose
+|   |   |   `-- open-api-spec
+|   |   |-- auth
+|   |   |   |-- status
+|   |   |   `-- diagnose
+|   |   |-- workspace
+|   |   |   |-- list
+|   |   |   |-- current
+|   |   |   |-- current-configuration
+|   |   |   |-- configuration-v4
+|   |   |   |-- save-current-configuration
+|   |   |   |-- save-configuration-v4
+|   |   |   |-- configuration
+|   |   |   |-- configuration-schema
+|   |   |   |-- current-configuration-schema
+|   |   |   |-- delete-current-configuration
+|   |   |   |-- delete-configuration
+|   |   |   |-- people
+|   |   |   |-- admins
+|   |   |   |-- invite-users
+|   |   |   |-- remove-user
+|   |   |   |-- suspend-users
+|   |   |   |-- unsuspend-users
+|   |   |   |-- transfer
+|   |   |   `-- transfer-assets
+|   |   |-- role
+|   |   |   |-- list-assignments
+|   |   |   |-- assign
+|   |   |   `-- unassign
+|   |   |-- user
+|   |   |-- token
+|   |   |   |-- list
+|   |   |   |-- create
+|   |   |   |-- detail
+|   |   |   `-- delete
+|   |   `-- person
+|   |       |-- list
+|   |       |-- current
+|   |       |-- count
+|   |       |-- detail
+|   |       |-- create
+|   |       |-- update
+|   |       |-- patch
+|   |       |-- delete
+|   |       |-- update-password
+|   |       `-- password-reset-request
+|   |-- plans
+|   |   |-- list
+|   |   |-- create
+|   |   |-- detail
+|   |   |-- full
+|   |   |-- run
+|   |   |-- count
+|   |   |-- run-parameters
+|   |   |-- schedules
+|   |   |-- export
+|   |   |-- update
+|   |   |-- delete
+|   |   |-- share
+|   |   |-- import
+|   |   `-- permissions
+|   |       `-- remove
+|   |-- flows
+|   |   |-- list
+|   |   |-- count
+|   |   |-- create
+|   |   |-- detail
+|   |   |-- update
+|   |   |-- delete
+|   |   |-- copy
+|   |   |-- run
+|   |   |-- validate
+|   |   |-- parameters
+|   |   |-- inputs
+|   |   |-- outputs
+|   |   |-- import
+|   |   |-- import-dry-run
+|   |   |-- export
+|   |   `-- export-dry-run
+|   |-- connections
+|   |   |-- list
+|   |   |-- count
+|   |   |-- create
+|   |   |-- dry-run
+|   |   |-- detail
+|   |   |-- status
+|   |   |-- update
+|   |   |-- delete
+|   |   |-- permissions
+|   |   |   |-- list
+|   |   |   |-- create
+|   |   |   |-- detail
+|   |   |   `-- delete
+|   |   `-- connector-metadata
+|   |       |-- defaults
+|   |       |-- detail
+|   |       |-- publish-info
+|   |       `-- overrides
+|   |           |-- list
+|   |           |-- create
+|   |           `-- delete
+|   |-- job-groups                    run artifacts, publish, pdf results, and execution support
+|   |   |-- list
+|   |   |-- count
+|   |   |-- run
+|   |   |-- publish
+|   |   |-- detail
+|   |   |-- cancel
+|   |   |-- status
+|   |   |-- inputs
+|   |   |-- outputs
+|   |   |-- jobs
+|   |   |-- publications
+|   |   |-- profile
+|   |   |-- profile-results
+|   |   `-- pdf-results
+|   |-- output-objects               flow output and wrangling surfaces
+|   |   |-- list
+|   |   |-- count
+|   |   |-- create
+|   |   |-- detail
+|   |   |-- update
+|   |   |-- delete
+|   |   |-- inputs
+|   |   `-- wrangle-to-python
+|   |-- webhook-flow-tasks           webhook task lifecycle
+|   |   |-- create
+|   |   |-- detail
+|   |   |-- delete
+|   |   `-- test
+|   |-- write-settings               runtime write-setting helpers
+|   |   |-- list
+|   |   |-- count
+|   |   |-- create
+|   |   |-- detail
+|   |   |-- update
+|   |   `-- delete
+|   |-- scheduling
+|   |   |-- list
+|   |   |-- detail
+|   |   |-- enable
+|   |   |-- disable
+|   |   `-- count
+|   |-- billing
+|   |   |-- current-account
+|   |   `-- usage-export
+|   |-- ui                           experimental visual interface surface
+|   |   |-- session
+|   |   |   |-- status
+|   |   |   |-- ensure
+|   |   |   |-- attach
+|   |   |   `-- inventory
+|   |   |-- workflow
+|   |   |   |-- open
+|   |   |   |-- create
+|   |   |   |-- inventory
+|   |   |   |-- pane-config
+|   |   |   |-- pane-results
+|   |   |   |-- tool-list
+|   |   |   |-- tool-select
+|   |   |   |-- tool-inspect
+|   |   |   |-- graph-get
+|   |   |   `-- graph-put
+|   |   |-- data
+|   |   |   |-- list-datasets
+|   |   |   |-- dataset-detail
+|   |   |   |-- dataset-preview
+|   |   |   |-- upload
+|   |   |   `-- list-connections
+|   |   |-- library
+|   |   |   `-- inventory
+|   |   |-- schedules
+|   |   |   `-- inventory
+|   |   `-- jobs
+|   |       `-- inventory
+|   |-- auto-insights
+|   `-- desktop-exec
+|-- server                        Server API, logs, import, and lower-level helpers
+|   |-- api
+|   |   |-- status
+|   |   |-- diagnose
+|   |   |-- import-swagger
+|   |   `-- call
+|   |-- system-info
+|   |-- runtime-settings
+|   |-- ayx-paths
+|   |-- server-logs
+|   |   |-- discover
+|   |   |-- inventory
+|   |   |-- summary
+|   |   |-- context
+|   |   |-- parse-csv
+|   |   |-- service-events
+|   |   |-- gallery-events
+|   |   |-- tail
+|   |   `-- recent
+|   |-- diagnose
+|   |   |-- startup
+|   |   |-- logs
+|   |   |-- network
+|   |   |-- tls
+|   |   `-- runtime-settings
+|   |-- auth
+|   |   |-- status
+|   |   |-- diagnose
+|   |   |   |-- saml
+|   |   |   |-- saml-logs
+|   |   |   |-- certificate
+|   |   |   `-- ad-legacy
+|   |   `-- simulate
+|   |       `-- saml
+|   |-- doctor
+|   |   |-- startup
+|   |   |-- logs
+|   |   |-- network
+|   |   `-- runtime-settings
+|   |-- upgrade
+|   |   |-- path
+|   |   |-- precheck
+|   |   |-- backup
+|   |   |-- plan
+|   |   |-- apply
+|   |   |-- postcheck
+|   |   `-- bundle
+|   |-- backup-plan
+|   `-- backup
+|-- sqlserver                     SQL Server prechecks and migration planning
+|   |-- status
+|   |-- inventory
+|   |-- precheck
+|   |-- validate-strings
+|   |-- connection-string
+|   |-- migrate
+|   `-- prepare
+|-- tools                         workspace-aware source/target workflows
+|   `-- workspace
+|       |-- init
+|       |-- resolve
+|       |-- compare
+|       |-- migrate-workflows
+|       `-- check-dcm-connections
+|-- update                        self-update from GitHub releases
+`-- workflow                      local XML/package tooling for Desktop artifacts
+    |-- inspect
+    |-- unpack
+    |-- validate
+    |-- replace
+    |-- repackage
+    |-- migrate
+    |-- recurse
+    |-- scan
+    |-- convert-cloud
+    |-- publish
+    `-- yxdb
+```
