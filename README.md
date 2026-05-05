@@ -9,7 +9,7 @@ It is designed to be:
 - portable: Windows, Linux, and macOS release targets
 - agent-friendly: structured envelopes and a future command/tactics/workflow registry
 
-`ayx` covers Server and Gallery administration, Mongo operations, upgrade planning, Licensing, and Alteryx One workflows.
+`ayx` is designed to operate across the Alteryx ecosystem and enable sophisticated operations.
 
 ## Quick start
 
