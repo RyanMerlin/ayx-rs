@@ -9,7 +9,7 @@ It is designed to be:
 - portable: Windows, Linux, and macOS release targets
 - agent-friendly: structured envelopes and a future command/tactics/workflow registry
 
-Current focus: Alteryx Server and Gallery administration workflows, plus Mongo inventory, backup, and restore; Server API reads and controlled mutations; upgrade planning and post-checks; system discovery and log analysis helpers; Server diagnosis workflows for startup, runtime settings, and network triage; Licensing portal diagnostics and API access; and Alteryx One workflow, connection, job, workspace, and admin surfaces.
+`ayx` covers Server and Gallery administration, Mongo operations, upgrade planning, Licensing, and Alteryx One workflows.
 
 ## Quick start
 
