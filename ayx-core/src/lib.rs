@@ -4,3 +4,4 @@ pub mod definitions;
 pub mod envelope;
 pub mod observability;
 pub mod profile;
+pub mod secrets;

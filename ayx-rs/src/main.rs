@@ -7316,7 +7316,12 @@ fn profile_migrate_envelope(profile: &Path, name: Option<&str>) -> Result<Envelo
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::copy(profile, &target)?;
+    let mut config = Config::load_from_path(profile)?;
+    let secret_refs = onboard::secretize_config(&mut config, &target_name)?;
+    fs::write(
+        &target,
+        serde_yaml::to_string(&ayx_core::profile::canonical_profile_value(&config)?)?,
+    )?;
     let mut state = load_ayx_state()?;
     state.active_profile = Some(target_name.clone());
     save_ayx_state(&state)?;
@@ -7326,8 +7331,9 @@ fn profile_migrate_envelope(profile: &Path, name: Option<&str>) -> Result<Envelo
             "source": profile.display().to_string(),
             "target": target.display().to_string(),
             "active_profile": target_name,
+            "secret_refs": secret_refs.keys().collect::<Vec<_>>(),
             "next_steps": [
-                "Move secrets into environment variables or the central .env file next to the migrated profile",
+                "Secrets were moved to the OS keyring when available; run `ayx doctor config` to verify refs",
                 "Run `ayx doctor` to validate the migrated profile",
             ],
         }),
@@ -7419,11 +7425,23 @@ fn doctor_auth_envelope(profile: &Path, environment: Option<&str>) -> Result<Env
                 "access_token_present": one.and_then(|v| v.access_token.as_ref()).is_some_and(|v| !v.trim().is_empty()),
                 "refresh_token_present": one.and_then(|v| v.refresh_token.as_ref()).is_some_and(|v| !v.trim().is_empty()),
                 "oauth_client_id_present": one.and_then(|v| v.oauth_client_id.as_ref()).is_some_and(|v| !v.trim().is_empty()),
+                "access_token_source": secret_source(
+                    one.and_then(|v| v.access_token_ref.as_ref()),
+                    one.and_then(|v| v.access_token.as_deref()),
+                ),
+                "refresh_token_source": secret_source(
+                    one.and_then(|v| v.refresh_token_ref.as_ref()),
+                    one.and_then(|v| v.refresh_token.as_deref()),
+                ),
             },
             "server": {
                 "configured": server.is_some(),
                 "curator_api_key_present": server.is_some_and(|v| !v.curator_api_key.trim().is_empty()),
                 "curator_api_secret_present": server.is_some_and(|v| !v.curator_api_secret.trim().is_empty()),
+                "curator_api_secret_source": secret_source(
+                    server.and_then(|v| v.curator_api_secret_ref.as_ref()),
+                    server.map(|v| v.curator_api_secret.as_str()),
+                ),
             }
         }),
     ))
@@ -7506,6 +7524,22 @@ fn collect_inline_secret_warnings(raw: &str) -> Vec<String> {
         }
     }
     warnings
+}
+
+fn secret_source(reference: Option<&String>, value: Option<&str>) -> &'static str {
+    if let Some(reference) = reference {
+        if reference.starts_with("keyring:") {
+            return "keyring";
+        }
+        if reference.starts_with("env:") {
+            return "env";
+        }
+        return "reference";
+    }
+    if value.is_some_and(|value| !value.trim().is_empty()) {
+        return "inline";
+    }
+    "missing"
 }
 
 fn one_platform_auth_status_envelope(config: &Config) -> Result<Envelope> {
@@ -7934,7 +7968,9 @@ mod tests {
                 oauth_client_id: Some("client-123".to_string()),
                 token_endpoint_url: Some(server_url),
                 access_token,
+                access_token_ref: None,
                 refresh_token: Some("refresh-abc".to_string()),
+                refresh_token_ref: None,
             }),
             observability: None,
             server_api: None,

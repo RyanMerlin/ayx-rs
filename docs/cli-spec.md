@@ -28,7 +28,7 @@ If you want the command to feed another tool, add `--output json`.
 
 ## Configuration
 
-`ayx` reads JSON/YAML profiles through `ayx-core::profile::Config`. By default it resolves the active profile from the central ayx config home, then loads any adjacent `.env` file for placeholder expansion. `workspace.yaml` is the canonical multi-environment form; it holds multiple named `Config` entries and an explicit `active_environment`. Replace the placeholders before committing the file for production usage. When pointing at a live Server, make sure the `server` object is internally consistent across API, storage kind, Mongo, SQL Server, observability, and Alteryx One fields.
+`ayx` reads JSON/YAML profiles through `ayx-core::profile::Config`. By default it resolves the active profile from the central ayx config home, then loads any adjacent `.env` file for placeholder expansion and resolves keyring-backed secret refs. `workspace.yaml` is the canonical multi-environment form; it holds multiple named `Config` entries and an explicit `active_environment`. Replace the placeholders before committing the file for production usage. When pointing at a live Server, make sure the `server` object is internally consistent across API, storage kind, Mongo, SQL Server, observability, and Alteryx One fields.
 
 Central profile commands:
 - `ayx profile list`
@@ -42,13 +42,13 @@ Central profile commands:
 ### Required Config Fields
 - `profile_name`: user-friendly label surfaced in audit/output envelopes.
 - `alteryx_one.account_email` is the Alteryx One identity used throughout owner-transfer and gallery operations.
-- `server.api.base_url` plus OAuth2 client-credential inputs (`server.api.client_id`, `server.api.client_secret`) for the Server API surface.
+- `server.api.base_url` plus OAuth2 client-credential inputs (`server.api.client_id`, `server.api.client_secret` or `server.api.client_secret_ref`) for the Server API surface.
 - `server.storage.kind` selects the primary server storage mode.
 - `server.storage.mongo.mode`: `embedded` or `managed`.
 - `server.storage.mongo.databases.gallery_name` and `server.storage.mongo.databases.service_name`: required database names so every operation knows which namespaces to touch.
 - For embedded mode, `server.storage.mongo.embedded.runtime_settings_path` may remain null; runtime discovery handles the default Server layout.
 - In managed mode, provide `server.storage.mongo.managed.url` or `server.storage.mongo.managed.host` plus `server.storage.mongo.managed.port`. TLS and credentials control how `mongodump/mongorestore` authenticate.
-- `server.storage.sqlserver.controller.*` and `server.storage.sqlserver.server_ui.*` are used when the deployment uses SQL-backed storage.
+- `server.storage.sqlserver.controller.*` and `server.storage.sqlserver.server_ui.*` are used when the deployment uses SQL-backed storage, and their password fields may use keyring refs.
 - future product API branches will carry their own config blocks under the product root.
 
 ## Embedded RuntimeSettings Discovery

@@ -14,6 +14,7 @@ use ayx_core::profile::{
     MongoDatabases, MongoEmbedded, MongoManaged, MongoMode, MongoProfile, ServerProfile,
     SqlServerConnectionProfile, SqlServerProfile, TlsConfig, WorkspaceConfig,
 };
+use ayx_core::secrets::{keyring_account, store_keyring_secret};
 use ayx_server::util::runtime_settings_summary;
 
 pub fn run_onboarding(
@@ -40,7 +41,7 @@ pub fn run_onboarding(
     }
     let existing = load_existing_config(&resolved_path, environment).ok();
     let mut config = existing.unwrap_or_else(default_config);
-    let mut env_updates = BTreeMap::new();
+    let mut secret_refs = BTreeMap::new();
 
     if non_interactive {
         let validation = summarize_onboarding_validation(&config);
@@ -50,7 +51,7 @@ pub fn run_onboarding(
             "mode": "non-interactive",
             "summary": summarize_config(&config),
             "validation": validation,
-            "env_updates": [],
+            "secret_refs": [],
             "notes": [
                 "Non-interactive onboarding validates an existing config without prompting",
                 "Use interactive onboarding to create or repair missing secrets and values",
@@ -209,10 +210,6 @@ pub fn run_onboarding(
                 "stored",
                 "AYX_MONGO_MANAGED_PASSWORD",
             )?);
-            env_updates.insert(
-                "AYX_MONGO_MANAGED_PASSWORD".to_string(),
-                managed.password.clone().unwrap_or_default(),
-            );
             managed.tls.enabled = prompt_yes_no("Enable TLS", managed.tls.enabled, true)?;
             if managed.tls.enabled {
                 managed.tls.ca_path = prompt_optional_path(
@@ -245,14 +242,14 @@ pub fn run_onboarding(
             let controller = prompt_sql_connection(
                 "Controller",
                 sqlserver.controller.take(),
-                &mut env_updates,
+                &mut secret_refs,
                 "AYX_SQL_CONTROLLER_PASSWORD",
                 true,
             )?;
             let server_ui = prompt_sql_connection(
                 "Server UI",
                 sqlserver.server_ui.take(),
-                &mut env_updates,
+                &mut secret_refs,
                 "AYX_SQL_SERVER_UI_PASSWORD",
                 false,
             )?;
@@ -263,7 +260,7 @@ pub fn run_onboarding(
     }
 
     let validation = summarize_onboarding_validation(&config);
-    write_config(&resolved_path, &config, &env_updates)?;
+    let stored_refs = write_config(&resolved_path, &config, &secret_refs)?;
 
     Ok(json!({
         "profile": resolved_path.display().to_string(),
@@ -271,7 +268,7 @@ pub fn run_onboarding(
         "mode": "interactive",
         "summary": summarize_config(&config),
         "validation": validation,
-        "env_updates": env_updates.keys().collect::<Vec<_>>(),
+        "secret_refs": stored_refs.keys().collect::<Vec<_>>(),
         "warnings": collect_onboarding_warnings(&config),
     }))
 }
@@ -327,6 +324,7 @@ fn template_config_with_profile(profile_name: &str) -> Config {
         webapi_url: "http://localhost/".to_string(),
         curator_api_key: "replace-me".to_string(),
         curator_api_secret: "replace-me".to_string(),
+        curator_api_secret_ref: None,
         verify_tls: Some(true),
     });
     config
@@ -335,6 +333,75 @@ fn template_config_with_profile(profile_name: &str) -> Config {
 fn load_existing_config(profile_path: &Path, environment: Option<&str>) -> Result<Config> {
     ayx_core::profile::Config::load_from_path_with_environment(profile_path, environment)
         .map_err(|err| anyhow::anyhow!(err))
+}
+
+fn secret_scope(scope: &str, field: &str) -> String {
+    keyring_account(scope, field)
+}
+
+pub(crate) fn secretize_config(config: &mut Config, scope: &str) -> Result<BTreeMap<String, String>> {
+    let mut refs = BTreeMap::new();
+
+    if let Some(one) = config.alteryx_one.as_mut() {
+        if let Some(value) = one.access_token.take() {
+            let account = secret_scope(scope, "alteryx_one.access_token");
+            let reference = store_keyring_secret(&account, &value)?;
+            one.access_token_ref = Some(reference.clone());
+            refs.insert("alteryx_one.access_token".to_string(), reference);
+        }
+        if let Some(value) = one.refresh_token.take() {
+            let account = secret_scope(scope, "alteryx_one.refresh_token");
+            let reference = store_keyring_secret(&account, &value)?;
+            one.refresh_token_ref = Some(reference.clone());
+            refs.insert("alteryx_one.refresh_token".to_string(), reference);
+        }
+    }
+
+    if let Some(api) = config.api.as_mut() {
+        if let Some(value) = api.auth.client_secret.take() {
+            let account = secret_scope(scope, "server.api.client_secret");
+            let reference = store_keyring_secret(&account, &value)?;
+            api.auth.client_secret_ref = Some(reference.clone());
+            refs.insert("server.api.client_secret".to_string(), reference);
+        }
+    }
+
+    if let Some(server) = config.server.as_mut() {
+        if !server.curator_api_secret.trim().is_empty() {
+            let value = std::mem::take(&mut server.curator_api_secret);
+            let account = secret_scope(scope, "server.curator_api_secret");
+            let reference = store_keyring_secret(&account, &value)?;
+            server.curator_api_secret_ref = Some(reference.clone());
+            refs.insert("server.curator_api_secret".to_string(), reference);
+        }
+    }
+
+    if let Some(mongo) = config.mongo.managed.as_mut() {
+        if let Some(value) = mongo.password.take() {
+            let account = secret_scope(scope, "server.storage.mongo.managed.password");
+            let reference = store_keyring_secret(&account, &value)?;
+            mongo.password_ref = Some(reference.clone());
+            refs.insert("server.storage.mongo.managed.password".to_string(), reference);
+        }
+    }
+
+    if let Some(sql) = config.sqlserver.as_mut() {
+        for (label, conn) in [
+            ("server.storage.sqlserver.controller.password", sql.controller.as_mut()),
+            ("server.storage.sqlserver.server_ui.password", sql.server_ui.as_mut()),
+        ] {
+            if let Some(conn) = conn {
+                if let Some(value) = conn.password.take() {
+                    let account = secret_scope(scope, label);
+                    let reference = store_keyring_secret(&account, &value)?;
+                    conn.password_ref = Some(reference.clone());
+                    refs.insert(label.to_string(), reference);
+                }
+            }
+        }
+    }
+
+    Ok(refs)
 }
 
 fn default_config() -> Config {
@@ -368,6 +435,7 @@ fn default_server() -> ServerProfile {
         webapi_url: "http://localhost/".to_string(),
         curator_api_key: String::new(),
         curator_api_secret: String::new(),
+        curator_api_secret_ref: None,
         verify_tls: Some(true),
     }
 }
@@ -388,6 +456,7 @@ fn default_managed_mongo() -> MongoManaged {
         auth_database: None,
         username: None,
         password: None,
+        password_ref: None,
         tls: TlsConfig {
             enabled: false,
             ca_path: None,
@@ -429,6 +498,7 @@ fn default_sql_connection(
         database: Some(database.to_string()),
         username: Some("sa".to_string()),
         password: None,
+        password_ref: None,
         password_env: Some(password_env.to_string()),
         integrated_security: Some(!controller),
         encrypt: Some(true),
@@ -446,7 +516,9 @@ fn update_or_create_one(
         oauth_client_id: None,
         token_endpoint_url: None,
         access_token: None,
+        access_token_ref: None,
         refresh_token: None,
+        refresh_token_ref: None,
     });
     one.account_email = account_email;
     one
@@ -486,7 +558,7 @@ enum BackendChoice {
 fn prompt_sql_connection(
     label: &str,
     existing: Option<SqlServerConnectionProfile>,
-    env_updates: &mut BTreeMap<String, String>,
+    secret_refs: &mut BTreeMap<String, String>,
     env_key: &str,
     use_driver: bool,
 ) -> Result<SqlServerConnectionProfile> {
@@ -526,7 +598,7 @@ fn prompt_sql_connection(
         "stored",
         env_key,
     )?;
-    env_updates.insert(env_key.to_string(), secret.clone());
+    secret_refs.insert(env_key.to_string(), "keyring".to_string());
     conn.password = Some(secret);
     conn.password_env = Some(env_key.to_string());
     conn.integrated_security = Some(prompt_yes_no(
@@ -566,58 +638,16 @@ fn prompt_sql_connection(
 fn write_config(
     path: &Path,
     config: &Config,
-    env_updates: &BTreeMap<String, String>,
-) -> Result<()> {
+    secret_refs: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, serde_yaml::to_string(&canonical_profile_value(config)?)?)?;
-
-    let env_path = path.parent().unwrap_or_else(|| Path::new(".")).join(".env");
-    let mut current = read_env_map(&env_path)?;
-    for (k, v) in env_updates {
-        current.insert(k.clone(), v.clone());
-    }
-    write_env_map(&env_path, &current)?;
-    Ok(())
-}
-
-fn read_env_map(path: &Path) -> Result<BTreeMap<String, String>> {
-    let mut values = BTreeMap::new();
-    if !path.exists() {
-        return Ok(values);
-    }
-    let content = fs::read_to_string(path)?;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let mut parts = trimmed.splitn(2, '=');
-        let key = parts.next().unwrap_or("").trim();
-        let value = parts
-            .next()
-            .unwrap_or("")
-            .trim()
-            .trim_matches('"')
-            .trim_matches('\'');
-        if !key.is_empty() {
-            values.insert(key.to_string(), value.to_string());
-        }
-    }
-    Ok(values)
-}
-
-fn write_env_map(path: &Path, values: &BTreeMap<String, String>) -> Result<()> {
-    let mut out = String::new();
-    for (k, v) in values {
-        out.push_str(k);
-        out.push('=');
-        out.push_str(v);
-        out.push('\n');
-    }
-    fs::write(path, out)?;
-    Ok(())
+    let mut export = config.clone();
+    let refs = secretize_config(&mut export, &config.profile_name)?;
+    fs::write(path, serde_yaml::to_string(&canonical_profile_value(&export)?)?)?;
+    let _ = secret_refs;
+    Ok(refs)
 }
 
 fn summarize_config(config: &Config) -> Value {
@@ -941,6 +971,7 @@ mod tests {
                     database: Some("AlteryxService".to_string()),
                     username: Some("svc".to_string()),
                     password: Some("secret".to_string()),
+                    password_ref: None,
                     password_env: Some("AYX_SQL_CONTROLLER_PASSWORD".to_string()),
                     integrated_security: Some(false),
                     encrypt: Some(true),
@@ -954,6 +985,7 @@ mod tests {
                     database: Some("AlteryxServerUI".to_string()),
                     username: Some("svc".to_string()),
                     password: Some("secret".to_string()),
+                    password_ref: None,
                     password_env: Some("AYX_SQL_SERVER_UI_PASSWORD".to_string()),
                     integrated_security: Some(false),
                     encrypt: Some(true),

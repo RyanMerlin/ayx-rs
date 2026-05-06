@@ -134,9 +134,9 @@ Minimum expectations:
 - `observability.api_logging.path` to control where the shared API event log is written
 - `observability.api_logging.redact_bodies` stays on by default so secrets are not written to the log
 
-Sensitive values should live in environment variables or the central `.env` file next to the profile that uses them.
-`ayx doctor config` flags inline secret fields so they can be migrated out of YAML.
-Use `.env.example` as the shareable template.
+Sensitive values should live in the OS keyring by default, with environment variables remaining first-class for automation.
+`ayx doctor config` flags inline secret fields so they can be migrated into keyring-backed refs.
+Use `.env.example` only as a non-secret template for local overrides and automation.
 
 Embedded Mongo discovery looks for `RuntimeSettings.xml` in the standard Alteryx locations first, then falls back to the configured path if provided.
 

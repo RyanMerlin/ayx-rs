@@ -6,6 +6,8 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::secrets::resolve_secret_ref;
+
 #[derive(Debug, Error)]
 pub enum ProfileError {
     #[error("failed to read config file '{path}': {source}")]
@@ -137,6 +139,8 @@ pub struct MongoManaged {
     pub auth_database: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
+    #[serde(default)]
+    pub password_ref: Option<String>,
     pub tls: TlsConfig,
     pub timeout_ms: Option<u64>,
     pub retry_count: Option<u32>,
@@ -165,6 +169,8 @@ pub struct ApiAuth {
     pub pat: Option<String>,
     pub client_id: Option<String>,
     pub client_secret: Option<String>,
+    #[serde(default)]
+    pub client_secret_ref: Option<String>,
     pub scope: Option<String>,
 }
 
@@ -201,7 +207,11 @@ pub struct AlteryxOneProfile {
     pub oauth_client_id: Option<String>,
     pub token_endpoint_url: Option<String>,
     pub access_token: Option<String>,
+    #[serde(default)]
+    pub access_token_ref: Option<String>,
     pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub refresh_token_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -209,6 +219,8 @@ pub struct ServerProfile {
     pub webapi_url: String,
     pub curator_api_key: String,
     pub curator_api_secret: String,
+    #[serde(default)]
+    pub curator_api_secret_ref: Option<String>,
     pub verify_tls: Option<bool>,
 }
 
@@ -235,6 +247,8 @@ pub struct SqlServerConnectionProfile {
     pub database: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
+    #[serde(default)]
+    pub password_ref: Option<String>,
     pub password_env: Option<String>,
     pub integrated_security: Option<bool>,
     pub encrypt: Option<bool>,
@@ -289,7 +303,7 @@ impl Config {
             path: path_str,
             source,
         })?;
-        let config = config.with_server_api_overrides()?;
+        let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
         config.validate()?;
         Ok(config)
     }
@@ -333,7 +347,7 @@ impl Config {
                     workspace.workspace_name, active
                 ))
             })?;
-            let config = config.clone().with_server_api_overrides()?;
+            let config = config.clone().with_server_api_overrides()?.resolve_secret_refs()?;
             config.validate()?;
             return Ok(config);
         }
@@ -341,7 +355,7 @@ impl Config {
             path: path_str,
             source,
         })?;
-        let config = config.with_server_api_overrides()?;
+        let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
         config.validate()?;
         Ok(config)
     }
@@ -356,6 +370,7 @@ impl Config {
                         pat: None,
                         client_id: Some(shared.client_id.clone()),
                         client_secret: Some(shared.client_secret.clone()),
+                        client_secret_ref: None,
                         scope: Some(String::new()),
                     },
                     timeout_ms: None,
@@ -367,8 +382,65 @@ impl Config {
                     webapi_url: normalize_alteryx_base_url(&shared.base_url),
                     curator_api_key: shared.client_id.clone(),
                     curator_api_secret: shared.client_secret.clone(),
+                    curator_api_secret_ref: None,
                     verify_tls: None,
                 });
+            }
+        }
+
+        Ok(self)
+    }
+
+    fn resolve_secret_refs(mut self) -> Result<Self, ProfileError> {
+        if self.alteryx_one.is_some() {
+            let one = self.alteryx_one.as_mut().unwrap();
+            if one.access_token.is_none() {
+                if let Some(reference) = one.access_token_ref.as_deref() {
+                    one.access_token = resolve_secret_ref(reference)?;
+                }
+            }
+            if one.refresh_token.is_none() {
+                if let Some(reference) = one.refresh_token_ref.as_deref() {
+                    one.refresh_token = resolve_secret_ref(reference)?;
+                }
+            }
+        }
+
+        if let Some(api) = self.api.as_mut() {
+            if api.auth.client_secret.is_none() {
+                if let Some(reference) = api.auth.client_secret_ref.as_deref() {
+                    api.auth.client_secret = resolve_secret_ref(reference)?;
+                }
+            }
+        }
+
+        if let Some(server) = self.server.as_mut() {
+            if server.curator_api_secret.is_empty() {
+                if let Some(reference) = server.curator_api_secret_ref.as_deref() {
+                    if let Some(secret) = resolve_secret_ref(reference)? {
+                        server.curator_api_secret = secret;
+                    }
+                }
+            }
+        }
+
+        if let Some(sqlserver) = self.sqlserver.as_mut() {
+            for conn in [sqlserver.controller.as_mut(), sqlserver.server_ui.as_mut()] {
+                if let Some(conn) = conn {
+                    if conn.password.is_none() {
+                        if let Some(reference) = conn.password_ref.as_deref() {
+                            conn.password = resolve_secret_ref(reference)?;
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(mongo) = self.mongo.managed.as_mut() {
+            if mongo.password.is_none() {
+                if let Some(reference) = mongo.password_ref.as_deref() {
+                    mongo.password = resolve_secret_ref(reference)?;
+                }
             }
         }
 
@@ -1240,7 +1312,9 @@ mod tests {
                 oauth_client_id: None,
                 token_endpoint_url: None,
                 access_token: None,
+                access_token_ref: None,
                 refresh_token: None,
+                refresh_token_ref: None,
             }),
             observability: None,
             server_api: Some(ServerApiProfile {
@@ -1258,6 +1332,7 @@ mod tests {
                     database: Some(database.to_string()),
                     username: Some("sa".to_string()),
                     password: Some("secret".to_string()),
+                    password_ref: None,
                     password_env: Some("AYX_SQL_CONTROLLER_PASSWORD".to_string()),
                     integrated_security: Some(false),
                     encrypt: Some(true),
@@ -1271,6 +1346,7 @@ mod tests {
                     database: Some("AlteryxServerUI".to_string()),
                     username: Some("sa".to_string()),
                     password: Some("secret".to_string()),
+                    password_ref: None,
                     password_env: Some("AYX_SQL_SERVER_UI_PASSWORD".to_string()),
                     integrated_security: Some(false),
                     encrypt: Some(true),
