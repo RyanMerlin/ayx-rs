@@ -15,8 +15,8 @@ use ayx_core::profile::{
 };
 
 use crate::onboard::{
-    default_config, load_existing_config, summarize_config, summarize_onboarding_validation,
-    write_config, write_workspace_config,
+    default_config, summarize_config, summarize_onboarding_validation, write_config,
+    write_workspace_config,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -509,7 +509,8 @@ impl App {
         let profiles = list_central_profiles().map_err(anyhow::Error::from)?;
         let workspaces = load_workspace_entries()?;
         let target_path = default_profile_storage_path().map_err(anyhow::Error::from)?;
-        let current_config = load_existing_config(&target_path, None).unwrap_or_else(|_| default_config());
+        let current_config = Config::load_from_path_with_environment_lenient(&target_path, None)
+            .unwrap_or_else(|_| default_config());
         let resolution = profile_resolution_detail(Path::new("config.yaml")).map_err(anyhow::Error::from)?;
 
         let mut sidebar = ListState::default();
@@ -1069,8 +1070,13 @@ impl App {
         kind: TargetKind,
     ) -> Result<()> {
         let config = match kind {
-            TargetKind::Profile => load_existing_config(&path, None).unwrap_or_else(|_| default_config()),
-            TargetKind::Workspace => load_existing_config(&path, environment.as_deref())?,
+            TargetKind::Profile => {
+                Config::load_from_path_with_environment_lenient(&path, None)
+                    .unwrap_or_else(|_| default_config())
+            }
+            TargetKind::Workspace => {
+                Config::load_from_path_with_environment_lenient(&path, environment.as_deref())?
+            }
         };
         self.target_kind = kind;
         self.target_path = path;
@@ -1166,7 +1172,10 @@ impl App {
                 write_workspace_config(&self.target_path, &workspace)?;
             }
         }
-        self.current_config = load_existing_config(&self.target_path, self.target_environment.as_deref())?;
+        self.current_config = Config::load_from_path_with_environment_lenient(
+            &self.target_path,
+            self.target_environment.as_deref(),
+        )?;
         self.config_form = ConfigForm::from_config(&self.current_config);
         self.credentials = CredentialsForm::from_config(&self.current_config);
         self.refresh_connectivity();

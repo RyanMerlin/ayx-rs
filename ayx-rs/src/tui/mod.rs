@@ -164,7 +164,19 @@ fn render_screen_content(frame: &mut Frame, app: &App, screen: Screen, area: Rec
 }
 
 fn render_inspect_popup(frame: &mut Frame, app: &App, area: Rect) {
-    render_inspect(frame, app, area);
+    frame.render_widget(
+        Block::default()
+            .title(" Inspect ")
+            .borders(Borders::ALL)
+            .border_style(theme::accent_bold())
+            .style(theme::panel()),
+        area,
+    );
+    let inner = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    render_inspect(frame, app, inner);
 }
 
 fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {

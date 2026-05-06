@@ -277,7 +277,26 @@ impl Config {
         Self::load_from_resolved_path_with_environment(&resolved, environment)
     }
 
+    pub fn load_from_path_lenient(path: &Path) -> Result<Self, ProfileError> {
+        let resolved = resolve_profile_path(path)?;
+        Self::load_from_resolved_path_lenient(&resolved)
+    }
+
+    pub fn load_from_path_with_environment_lenient(
+        path: &Path,
+        environment: Option<&str>,
+    ) -> Result<Self, ProfileError> {
+        let resolved = resolve_profile_or_workspace_path(path)?;
+        Self::load_from_resolved_path_with_environment_lenient(&resolved, environment)
+    }
+
     fn load_from_resolved_path(path: &Path) -> Result<Self, ProfileError> {
+        let config = Self::load_from_resolved_path_lenient(path)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    fn load_from_resolved_path_lenient(path: &Path) -> Result<Self, ProfileError> {
         let path_str = path.display().to_string();
         let content = fs::read_to_string(path).map_err(|source| ProfileError::Read {
             path: path_str.clone(),
@@ -305,11 +324,19 @@ impl Config {
         })?;
         let config = apply_env_fallbacks(config, &env_values);
         let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
-        config.validate()?;
         Ok(config)
     }
 
     fn load_from_resolved_path_with_environment(
+        path: &Path,
+        environment: Option<&str>,
+    ) -> Result<Self, ProfileError> {
+        let config = Self::load_from_resolved_path_with_environment_lenient(path, environment)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    fn load_from_resolved_path_with_environment_lenient(
         path: &Path,
         environment: Option<&str>,
     ) -> Result<Self, ProfileError> {
@@ -349,7 +376,6 @@ impl Config {
             })?;
             let config = apply_env_fallbacks(config.clone(), &env_values);
             let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
-            config.validate()?;
             return Ok(config);
         }
         let config: Self = serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
@@ -358,7 +384,6 @@ impl Config {
         })?;
         let config = apply_env_fallbacks(config, &env_values);
         let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
-        config.validate()?;
         Ok(config)
     }
 
