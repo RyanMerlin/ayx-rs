@@ -1,4 +1,5 @@
 use std::fs::{self, OpenOptions};
+use std::error::Error as StdError;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -128,4 +129,55 @@ pub fn response_shape(value: &Value) -> &'static str {
         Value::Array(_) => "array",
         Value::Object(_) => "object",
     }
+}
+
+pub fn transport_error_summary(error: &dyn StdError) -> Value {
+    let chain = error_chain(error);
+    let error_text = chain.first().cloned().unwrap_or_else(|| error.to_string());
+    let error_text_lower = error_text.to_lowercase();
+    let error_kind = if error_text_lower.contains("timeout") {
+        "timeout"
+    } else if error_text_lower.contains("dns") || error_text_lower.contains("resolve") {
+        "dns"
+    } else if error_text_lower.contains("tls") || error_text_lower.contains("certificate") {
+        "tls"
+    } else if error_text_lower.contains("connect") {
+        "connect"
+    } else if error_text_lower.contains("status") {
+        "status"
+    } else {
+        "transport"
+    };
+    let request_url = chain.iter().find_map(|entry| extract_url(entry));
+    let mut hints = Vec::new();
+    match error_kind {
+        "dns" => hints.push("DNS resolution failed; check VPN, corporate DNS, and proxy settings.".to_string()),
+        "timeout" => hints.push("Request timed out; check network latency and proxy behavior.".to_string()),
+        "tls" => hints.push("TLS handshake failed; verify trust roots and HTTPS interception.".to_string()),
+        "connect" => hints.push("Connection failed before an HTTP response was received.".to_string()),
+        _ => hints.push("Inspect the error chain and resolved URL for the underlying transport problem.".to_string()),
+    }
+    json!({
+        "error": error_text,
+        "error_kind": error_kind,
+        "error_chain": chain,
+        "error_hints": hints,
+        "request_url": request_url,
+    })
+}
+
+fn error_chain(error: &dyn StdError) -> Vec<String> {
+    let mut chain = vec![error.to_string()];
+    let mut current = error.source();
+    while let Some(source) = current {
+        chain.push(source.to_string());
+        current = source.source();
+    }
+    chain
+}
+
+fn extract_url(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .find(|part| part.starts_with("http://") || part.starts_with("https://"))
+        .map(|value| value.trim_matches(|ch| matches!(ch, '\'' | '"' | ')' | '(' | ',' | '.')).to_string())
 }

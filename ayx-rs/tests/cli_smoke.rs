@@ -15,6 +15,32 @@ fn ayx_help_renders() {
     assert!(stdout.contains("server"));
     assert!(stdout.contains("mongo"));
     assert!(stdout.contains("workflow"));
+    assert!(stdout.contains("tui"));
+}
+
+#[test]
+fn tui_help_renders() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["tui", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Interactive TUI"));
+    assert!(stdout.contains("profile setup"));
+}
+
+#[test]
+fn onboard_help_renders() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["onboard", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("environments"));
 }
 
 #[test]

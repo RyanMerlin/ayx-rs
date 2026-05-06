@@ -28,7 +28,7 @@ If you want the command to feed another tool, add `--output json`.
 
 ## Configuration
 
-`ayx` reads JSON/YAML profiles through `ayx-core::profile::Config`. By default it resolves the active profile from the central ayx config home, then loads any adjacent `.env` file for placeholder expansion and resolves keyring-backed secret refs. `workspace.yaml` is the canonical multi-environment form; it holds multiple named `Config` entries and an explicit `active_environment`. Replace the placeholders before committing the file for production usage. When pointing at a live Server, make sure the `server` object is internally consistent across API, storage kind, Mongo, SQL Server, observability, and Alteryx One fields.
+`ayx` reads JSON/YAML profiles through `ayx-core::profile::Config`. By default it resolves the active profile from the central ayx config home, then loads any adjacent `.env` file for placeholder expansion and resolves keyring-backed secret refs. `environments.yaml` is the canonical multi-environment form; it holds multiple named `Config` entries and an explicit `active_environment`. Replace the placeholders before committing the file for production usage. When pointing at a live Server, make sure the `server` object is internally consistent across API, storage kind, Mongo, SQL Server, observability, and Alteryx One fields.
 
 Central profile commands:
 - `ayx profile list`
@@ -232,8 +232,8 @@ Ownership transfer is API-first through `PUT /v3/workflows/{workflowId}/transfer
 - `workflow yxdb --input <file> --csv <path> --output json` exports CSV and returns a structured JSON envelope with path, field, row, and CSV metadata.
 - `workflow convert-cloud --input <file.yxmd> --output <file.json> [--fail-on-unsupported]` converts Desktop workflows to Designer Cloud JSON, preserves unsupported tools generically, and emits warnings in the CLI envelope.
 - `onboard --profile <file> --non-interactive` validates an existing profile and returns a machine-readable summary without prompting.
-- `onboard --profile workspace.yaml --workspace` writes a starter workspace file with `dev` and `prod` entries.
-- `--environment <name>` selects the active environment when loading a workspace file with multiple named environments.
-- `tools workspace init --output workspace.yaml` writes the canonical workspace template, while `tools workspace resolve --workspace workspace.yaml --source dev --target prod` resolves explicit source/target environments for future cross-environment operations.
+- `onboard --profile environments.yaml --environments` writes a starter environments file with `dev` and `prod` entries.
+- `--environment <name>` selects the active environment when loading an environments file with multiple named environments.
+- `tools workspace init --output environments.yaml` writes the canonical environments template, while `tools workspace resolve --workspace environments.yaml --source dev --target prod` resolves explicit source/target environments for future cross-environment operations.
 - `workflow-package` saves the yxzp to the filesystem (default `<workflowId>.yxzp`) and accepts an optional `versionId`.
 - Payload files are supplied via `--payload-file <path>` and only evaluated when `--apply` is supplied; otherwise the CLI emits a dry-run envelope pointing to the payload file.

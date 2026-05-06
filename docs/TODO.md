@@ -23,7 +23,7 @@ Completed items are removed here rather than left to rot in the plan.
 ## 3. Workspace and environment tooling
 - finish `ayx tools` cross-environment commands so source/target workflows become first-class for migrations and comparisons.
 - add concrete `tools` subcommands for workflow migration, DCM connection comparison, and environment validation.
-- add tests and examples for `workspace.yaml` resolution with multiple environments and explicit active-environment overrides.
+- add tests and examples for `environments.yaml` resolution with multiple environments and explicit active-environment overrides.
 - decide whether workspace generation should live only in `onboard` or also in a dedicated `workspace init` path for automation.
 
 ## 4. Mongo query registry

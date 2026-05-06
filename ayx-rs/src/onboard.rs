@@ -24,7 +24,7 @@ pub fn run_onboarding(
     workspace_mode: bool,
 ) -> Result<Value> {
     let resolved_path = if workspace_mode {
-        if profile_path == Path::new("workspace.yaml") {
+        if profile_path == Path::new("environments.yaml") || profile_path == Path::new("workspace.yaml") {
             default_workspace_storage_path().map_err(anyhow::Error::from)?
         } else {
             profile_path.to_path_buf()
@@ -293,29 +293,33 @@ pub fn write_workspace_template(
             ),
         ]),
     };
-
-    if let Some(parent) = profile_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(
-        profile_path,
-        serde_yaml::to_string(&canonical_workspace_value(&workspace)?)?,
-    )?;
+    write_workspace_config(profile_path, &workspace)?;
 
     Ok(json!({
-        "profile": profile_path.display().to_string(),
+            "profile": profile_path.display().to_string(),
             "saved": true,
-            "mode": "workspace-template",
-            "workspace": {
+            "mode": "environments-template",
+            "environments_file": {
                 "workspace_name": workspace.workspace_name,
                 "active_environment": workspace.active_environment,
                 "environments": [source_environment, target_environment],
             },
             "notes": [
-                "workspace.yaml is the canonical multi-environment file",
+                "environments.yaml is the canonical multi-environment file",
             "Use --environment dev or --environment prod to select the active environment for a run",
         ],
     }))
+}
+
+pub(crate) fn write_workspace_config(path: &Path, workspace: &WorkspaceConfig) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(
+        path,
+        serde_yaml::to_string(&canonical_workspace_value(workspace)?)?,
+    )?;
+    Ok(())
 }
 
 fn template_config_with_profile(profile_name: &str) -> Config {
@@ -330,7 +334,7 @@ fn template_config_with_profile(profile_name: &str) -> Config {
     config
 }
 
-fn load_existing_config(profile_path: &Path, environment: Option<&str>) -> Result<Config> {
+pub(crate) fn load_existing_config(profile_path: &Path, environment: Option<&str>) -> Result<Config> {
     ayx_core::profile::Config::load_from_path_with_environment(profile_path, environment)
         .map_err(|err| anyhow::anyhow!(err))
 }
@@ -404,7 +408,7 @@ pub(crate) fn secretize_config(config: &mut Config, scope: &str) -> Result<BTree
     Ok(refs)
 }
 
-fn default_config() -> Config {
+pub(crate) fn default_config() -> Config {
     default_config_with_profile("local")
 }
 
@@ -635,10 +639,10 @@ fn prompt_sql_connection(
     Ok(conn)
 }
 
-fn write_config(
+pub(crate) fn write_config(
     path: &Path,
     config: &Config,
-    secret_refs: &BTreeMap<String, String>,
+    _secret_refs: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, String>> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -646,11 +650,10 @@ fn write_config(
     let mut export = config.clone();
     let refs = secretize_config(&mut export, &config.profile_name)?;
     fs::write(path, serde_yaml::to_string(&canonical_profile_value(&export)?)?)?;
-    let _ = secret_refs;
     Ok(refs)
 }
 
-fn summarize_config(config: &Config) -> Value {
+pub(crate) fn summarize_config(config: &Config) -> Value {
     json!({
         "profile_name": config.profile_name,
         "server": config.server.as_ref().map(|server| json!({
@@ -822,7 +825,7 @@ fn prompt_raw(prompt: &str) -> Result<String> {
     Ok(buf)
 }
 
-fn summarize_onboarding_validation(config: &Config) -> Value {
+pub(crate) fn summarize_onboarding_validation(config: &Config) -> Value {
     let mut missing = Vec::new();
     if let Some(sqlserver) = &config.sqlserver {
         if let Err(err) = validate_connection_profile_for_onboarding(
@@ -937,9 +940,10 @@ fn detect_alteryx_service_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use ayx_core::profile::{
-        Config, MongoDatabases, MongoEmbedded, MongoMode, MongoProfile, SqlServerConnectionProfile,
-        SqlServerProfile,
+        load_workspace_config, Config, MongoDatabases, MongoEmbedded, MongoMode, MongoProfile,
+        SqlServerConnectionProfile, SqlServerProfile, WorkspaceConfig,
     };
 
     fn base_config() -> Config {
@@ -1031,15 +1035,39 @@ mod tests {
     }
 
     #[test]
-    fn workspace_template_writes_named_environments() {
+    fn environments_template_writes_named_environments() {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("workspace.yaml");
+        let path = temp.path().join("environments.yaml");
         let detail = write_workspace_template(&path, "prod", "dev", "prod").unwrap();
-        assert_eq!(detail["mode"], "workspace-template");
+        assert_eq!(detail["mode"], "environments-template");
         let loaded = Config::load_from_path_with_environment(&path, Some("prod")).unwrap();
         assert_eq!(loaded.profile_name, "prod");
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("workspace_name"));
         assert!(content.contains("active_environment"));
+    }
+
+    #[test]
+    fn workspace_config_save_preserves_environment_shape() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("environments.yaml");
+        let workspace = WorkspaceConfig {
+            workspace_name: "lab".to_string(),
+            active_environment: "dev".to_string(),
+            environments: HashMap::from([
+                ("dev".to_string(), template_config_with_profile("dev")),
+                ("prod".to_string(), template_config_with_profile("prod")),
+            ]),
+        };
+        write_workspace_config(&path, &workspace).unwrap();
+
+        let loaded = load_workspace_config(&path).unwrap();
+        assert_eq!(loaded.active_environment, "dev");
+        assert_eq!(loaded.environments.len(), 2);
+        assert_eq!(loaded.environments["prod"].profile_name, "prod");
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("environments:"));
+        assert!(content.contains("dev:"));
+        assert!(content.contains("prod:"));
     }
 }

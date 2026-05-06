@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use ayx_core::envelope::Envelope;
-use ayx_core::observability::{record_api_event, response_shape, ApiEvent};
+use ayx_core::observability::{record_api_event, response_shape, transport_error_summary, ApiEvent};
 use ayx_core::profile::Config;
 use reqwest::blocking::multipart::{Form, Part};
 use reqwest::blocking::Client;
@@ -238,6 +238,7 @@ pub fn one_api_live_request_with_body(
                 continue;
             }
             Err(err) => {
+                let transport = transport_error_summary(&err);
                 if mutating || attempt >= max_attempts {
                     let envelope = Envelope::ok_with_data(
                         format!("{} {} failed", surface, operation),
@@ -251,7 +252,11 @@ pub fn one_api_live_request_with_body(
                             "ok": false,
                             "status_code": last_status.map(|s| s.as_u16()),
                             "retry_after_seconds": retry_after_seconds,
-                            "error": err.to_string(),
+                            "error": transport["error"].clone(),
+                            "error_kind": transport["error_kind"].clone(),
+                            "error_hints": transport["error_hints"].clone(),
+                            "error_chain": transport["error_chain"].clone(),
+                            "request_url": transport["request_url"].clone(),
                             "response": Value::Null,
                         }),
                     );

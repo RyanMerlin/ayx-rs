@@ -33,7 +33,8 @@ pub enum ProfileError {
 }
 
 pub const DEFAULT_PROFILE_FILE: &str = "config.yaml";
-pub const DEFAULT_WORKSPACE_FILE: &str = "workspace.yaml";
+pub const DEFAULT_ENVIRONMENTS_FILE: &str = "environments.yaml";
+const LEGACY_WORKSPACE_FILE: &str = "workspace.yaml";
 const DEFAULT_ACTIVE_PROFILE_NAME: &str = "default";
 const DEFAULT_ACTIVE_WORKSPACE_NAME: &str = "default";
 
@@ -609,6 +610,11 @@ impl Config {
     }
 }
 
+pub fn load_workspace_config(path: &Path) -> Result<WorkspaceConfig, ProfileError> {
+    let resolved = resolve_profile_or_workspace_path(path)?;
+    load_workspace_config_from_resolved(&resolved)
+}
+
 pub fn normalize_alteryx_base_url(raw: &str) -> String {
     let trimmed = raw.trim().trim_end_matches('/');
     let stripped = trimmed
@@ -950,9 +956,17 @@ pub fn canonical_workspace_value(
         })?,
     );
     let mut env_map = serde_yaml::Mapping::new();
-    for (name, config) in &workspace.environments {
+    let mut env_names = workspace.environments.keys().cloned().collect::<Vec<_>>();
+    env_names.sort();
+    for name in env_names {
+        let config = workspace.environments.get(&name).ok_or_else(|| {
+            ProfileError::Invalid(format!(
+                "workspace '{}' is missing environment '{}'",
+                workspace.workspace_name, name
+            ))
+        })?;
         env_map.insert(
-            serde_yaml::Value::String(name.clone()),
+            serde_yaml::Value::String(name),
             canonical_profile_value(config)?,
         );
     }
@@ -1157,8 +1171,8 @@ pub fn profile_resolution_detail(path: &Path) -> Result<ResolvedProfilePath, Pro
     let resolved = resolve_profile_or_workspace_path(path)?;
     let source = if resolved == path {
         "explicit".to_string()
-    } else if is_default_workspace_request(path) {
-        "workspace-state".to_string()
+    } else if is_default_environments_request(path) {
+        "environments-state".to_string()
     } else if is_default_profile_request(path) {
         "profile-state".to_string()
     } else {
@@ -1211,7 +1225,7 @@ fn resolve_path_internal(path: &Path, allow_workspace: bool) -> Result<PathBuf, 
         return Ok(path.to_path_buf());
     }
 
-    if allow_workspace && is_default_workspace_request(path) {
+    if allow_workspace && is_default_environments_request(path) {
         if let Some(workspace) = env::var_os("AYX_WORKSPACE") {
             return Ok(PathBuf::from(workspace));
         }
@@ -1246,8 +1260,9 @@ fn is_default_profile_request(path: &Path) -> bool {
     is_single_component_file(path, DEFAULT_PROFILE_FILE)
 }
 
-fn is_default_workspace_request(path: &Path) -> bool {
-    is_single_component_file(path, DEFAULT_WORKSPACE_FILE)
+fn is_default_environments_request(path: &Path) -> bool {
+    is_single_component_file(path, DEFAULT_ENVIRONMENTS_FILE)
+        || is_single_component_file(path, LEGACY_WORKSPACE_FILE)
 }
 
 fn is_single_component_file(path: &Path, file_name: &str) -> bool {
@@ -1260,7 +1275,46 @@ fn is_explicit_path(path: &Path) -> bool {
         || path.components().any(|component| {
             matches!(component, Component::ParentDir | Component::CurDir | Component::RootDir)
         })
-        || (!is_default_profile_request(path) && !is_default_workspace_request(path))
+        || (!is_default_profile_request(path) && !is_default_environments_request(path))
+}
+
+fn load_workspace_config_from_resolved(path: &Path) -> Result<WorkspaceConfig, ProfileError> {
+    let path_str = path.display().to_string();
+    let content = fs::read_to_string(path).map_err(|source| ProfileError::Read {
+        path: path_str.clone(),
+        source,
+    })?;
+    let env_path = path
+        .parent()
+        .map(|parent| parent.join(".env"))
+        .unwrap_or_else(|| Path::new(".env").to_path_buf());
+    let env_values = read_env_file_if_present(&env_path).map_err(|source| ProfileError::Read {
+        path: env_path.display().to_string(),
+        source,
+    })?;
+    let expanded = expand_env_placeholders(&content, &env_values);
+
+    let value: serde_yaml::Value =
+        serde_yaml::from_str(&expanded).map_err(|source| ProfileError::Parse {
+            path: path_str.clone(),
+            source,
+        })?;
+    let value = normalize_profile_value(value)?;
+    let workspace: WorkspaceConfig =
+        serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+            path: path_str,
+            source,
+        })?;
+    if !workspace
+        .environments
+        .contains_key(&workspace.active_environment)
+    {
+        return Err(ProfileError::Invalid(format!(
+            "workspace '{}' does not contain active environment '{}'",
+            workspace.workspace_name, workspace.active_environment
+        )));
+    }
+    Ok(workspace)
 }
 
 #[cfg(test)]

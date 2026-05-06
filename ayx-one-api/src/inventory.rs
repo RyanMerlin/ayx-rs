@@ -20,7 +20,7 @@ struct SurfaceSpec {
 const IAM_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
-        path: "/iam/v1/workspaces/current",
+        path: "/v4/workspaces/current",
         command: "one platform workspace current",
     },
     EndpointSpec {

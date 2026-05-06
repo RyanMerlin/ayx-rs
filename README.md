@@ -55,8 +55,8 @@ server:
 The onboarding flow reuses existing values on later runs, masks stored secrets in its summary, and auto-discovers embedded Server runtime settings when `RuntimeSettings.xml` is available.
 For automation or agents, add `--non-interactive` to validate an existing profile without prompting.
 
-For multi-environment setups, use a central `workspace.yaml` file with named environments and select the active one with `--environment <name>`.
-`ayx onboard --workspace` writes a starter workspace file with `dev` and `prod` entries.
+For multi-environment setups, use a central `environments.yaml` file with named environments and select the active one with `--environment <name>`.
+`ayx onboard --environments` writes a starter environments file with `dev` and `prod` entries.
 
 3. Run a first quick query:
 
@@ -113,7 +113,7 @@ The tool returns a consistent envelope model so humans and agents can parse succ
 Use `ayx profile current` to see the active profile, `ayx profile list` to inspect stored profiles, and `ayx profile use <name>` to switch the default profile.
 `--profile <path>` remains available for one-off overrides.
 
-`workspace.yaml` remains the canonical multi-environment file shape. It should contain `workspace_name`, `active_environment`, and an `environments` map of named `Config` entries. Use `--environment <name>` to override the active environment for a single run.
+`environments.yaml` is the canonical multi-environment file shape. It should contain `workspace_name`, `active_environment`, and an `environments` map of named `Config` entries. Use `--environment <name>` to override the active environment for a single run.
 For promotion-style workflows with multiple Server instances, keep one environment per instance and use `tools workspace resolve`, `compare`, or the migration helpers to make source/target selection explicit.
 
 Minimum expectations:

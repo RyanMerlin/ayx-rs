@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::envelope::Envelope;
+use ayx_core::observability::transport_error_summary;
 use ayx_core::profile::{
     ayx_config_home, ayx_profiles_dir, ayx_state_path, ayx_workspaces_dir, list_central_profiles,
     load_ayx_state, profile_resolution_detail, profile_shape_label, profile_storage_path,
@@ -58,6 +59,7 @@ use self_update::Status;
 
 mod capability;
 mod onboard;
+mod tui;
 
 #[derive(Parser, Debug)]
 #[command(name = "ayx")]
@@ -101,22 +103,24 @@ enum Command {
         #[command(subcommand)]
         command: Option<WorkflowCommand>,
     },
-    #[command(about = "Cross-environment tools for workspace.yaml source/target workflows")]
+    #[command(about = "Cross-environment tools for environments.yaml source/target workflows")]
     Tools {
         #[command(subcommand)]
         command: Option<ToolsCommand>,
     },
     #[command(
-        about = "Interactive first-run setup for config.yaml or workspace.yaml with validation and secret reuse"
+        about = "Interactive first-run setup for config.yaml or environments.yaml with validation and secret reuse"
     )]
     Onboard {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
-        #[arg(long)]
-        workspace: bool,
+        #[arg(long, alias = "workspace")]
+        environments: bool,
         #[arg(long)]
         non_interactive: bool,
     },
+    #[command(about = "Interactive TUI for profile setup, One credentials, and connectivity checks")]
+    Tui,
     #[command(about = "Central profile registry and active profile management")]
     Profile {
         #[command(subcommand)]
@@ -648,7 +652,7 @@ enum ToolsCommand {
 #[derive(Subcommand, Debug)]
 enum ToolsWorkspaceCommand {
     Init {
-        #[arg(long, default_value = "workspace.yaml")]
+        #[arg(long, default_value = "environments.yaml")]
         output: PathBuf,
         #[arg(long, default_value = "dev")]
         active_environment: String,
@@ -658,7 +662,7 @@ enum ToolsWorkspaceCommand {
         target_environment: String,
     },
     Resolve {
-        #[arg(long, default_value = "workspace.yaml")]
+        #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
         #[arg(long)]
         source: String,
@@ -666,7 +670,7 @@ enum ToolsWorkspaceCommand {
         target: String,
     },
     Compare {
-        #[arg(long, default_value = "workspace.yaml")]
+        #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
         #[arg(long)]
         source: String,
@@ -674,7 +678,7 @@ enum ToolsWorkspaceCommand {
         target: String,
     },
     MigrateWorkflows {
-        #[arg(long, default_value = "workspace.yaml")]
+        #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
         #[arg(long)]
         source: String,
@@ -682,7 +686,7 @@ enum ToolsWorkspaceCommand {
         target: String,
     },
     CheckDcmConnections {
-        #[arg(long, default_value = "workspace.yaml")]
+        #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
         #[arg(long)]
         source: String,
@@ -2137,7 +2141,7 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["config.yaml", "server_api"],
-        notes: &["Maps to GET /iam/v1/workspaces/current in managed-iam-v1.yaml."],
+        notes: &["Maps to GET /v4/workspaces/current in the One API docs."],
     },
     CommandSpec {
         name: "one platform workspace current-configuration",
@@ -3667,13 +3671,13 @@ fn tools_workspace_init_envelope(
         target_environment,
     )?;
     Ok(Envelope::ok_with_data(
-        "workspace template written",
+        "environments template written",
         json!({
-            "workspace": output.display().to_string(),
+            "environments_file": output.display().to_string(),
             "active_environment": active_environment,
             "environments": [source_environment, target_environment],
             "notes": [
-                "workspace.yaml is the canonical multi-environment file",
+                "environments.yaml is the canonical multi-environment file",
                 "Use --environment to override the active environment for a run",
             ],
         }),
@@ -5016,17 +5020,18 @@ fn execute(cli: Cli) -> Result<Envelope> {
         },
         Command::Onboard {
             profile,
-            workspace,
+            environments,
             non_interactive,
         } => {
             let detail = onboard::run_onboarding(
                 &profile,
                 cli.environment.as_deref(),
                 non_interactive,
-                workspace,
+                environments,
             )?;
             Envelope::ok_with_data("onboarding completed", detail)
         },
+        Command::Tui => return tui::run(),
         Command::Profile { command } => match command {
             ProfileCommand::List => profile_list_envelope()?,
             ProfileCommand::Current => profile_current_envelope()?,
@@ -5180,7 +5185,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                             "platform",
                             "workspace-current",
                             "GET",
-                            "/iam/v1/workspaces/current",
+                            "/v4/workspaces/current",
                             false,
                             &[],
                         )?
@@ -7023,7 +7028,7 @@ fn one_doctor_platform_envelope(config: &Config) -> Result<Envelope> {
         "platform",
         "doctor-workspace-current",
         "GET",
-        "/iam/v1/workspaces/current",
+        "/v4/workspaces/current",
         false,
         &[],
     )?;
@@ -7049,7 +7054,7 @@ fn one_doctor_discover_envelope(config: &Config) -> Result<Envelope> {
         "platform",
         "discover-workspace-current",
         "GET",
-        "/iam/v1/workspaces/current",
+        "/v4/workspaces/current",
         false,
         &[],
     )?;
@@ -7568,7 +7573,7 @@ fn one_platform_auth_status_envelope(config: &Config) -> Result<Envelope> {
             "platform",
             "auth-status",
             "GET",
-            "/iam/v1/workspaces/current",
+        "/v4/workspaces/current",
             false,
             &[],
         )?)
@@ -7592,7 +7597,7 @@ fn one_platform_auth_status_envelope(config: &Config) -> Result<Envelope> {
             } else {
                 "missing"
             },
-            "validation_target": "/iam/v1/workspaces/current",
+            "validation_target": "/v4/workspaces/current",
             "workspace_probe": workspace_probe.as_ref().map(|probe| probe.data.clone()),
             "message": "One API token posture captured",
         }),
@@ -7618,7 +7623,7 @@ fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Envelope> {
             "platform",
             "auth-diagnose",
             "GET",
-            "/iam/v1/workspaces/current",
+            "/v4/workspaces/current",
             false,
             &[],
         )?
@@ -7725,7 +7730,8 @@ fn main() -> Result<()> {
             let err_env = Envelope::err_with_data(
                 "command failed",
                 json!({
-                    "error": err.to_string()
+                    "error": err.to_string(),
+                    "transport": transport_error_summary(err.as_ref()),
                 }),
             );
             if output_json {
@@ -7741,7 +7747,7 @@ fn main() -> Result<()> {
 
 fn print_help() {
     println!(
-        "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help           Print this help message\n    --output         Output format: text or json\n    --environment    Active environment name when loading a workspace file\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server status, prechecks, connection helpers, and migration planning\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, .yxdb, and cloud conversion\n    tools          Cross-environment tools for workspace.yaml source/target workflows\n    onboard        Interactive first-run setup for central profiles or workspace files\n    profile        Central profile registry and active profile management\n    doctor         Configuration, auth, network, and product health diagnostics\n    license        Licensing portal branch and API surface\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
+        "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help           Print this help message\n    --output         Output format: text or json\n    --environment    Active environment name when loading an environments file\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server status, prechecks, connection helpers, and migration planning\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, .yxdb, and cloud conversion\n    tools          Cross-environment tools for environments.yaml source/target workflows\n    onboard        Interactive first-run setup for central profiles or environments files\n    tui            Interactive TUI for profile setup, One credentials, and connectivity checks\n    profile        Central profile registry and active profile management\n    doctor         Configuration, auth, network, and product health diagnostics\n    license        Licensing portal branch and API surface\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
     );
 }
 
