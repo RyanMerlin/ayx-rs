@@ -9,10 +9,10 @@ use serde_json::{json, Value};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::profile::{
-    default_profile_storage_path, default_workspace_storage_path, normalize_alteryx_base_url,
-    AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded, MongoManaged, MongoMode,
-    MongoProfile, ServerProfile, SqlServerConnectionProfile, SqlServerProfile, TlsConfig,
-    WorkspaceConfig,
+    canonical_profile_value, canonical_workspace_value, default_profile_storage_path,
+    default_workspace_storage_path, normalize_alteryx_base_url, AlteryxOneProfile, Config,
+    MongoDatabases, MongoEmbedded, MongoManaged, MongoMode, MongoProfile, ServerProfile,
+    SqlServerConnectionProfile, SqlServerProfile, TlsConfig, WorkspaceConfig,
 };
 use ayx_server::util::runtime_settings_summary;
 
@@ -288,11 +288,11 @@ pub fn write_workspace_template(
         environments: HashMap::from([
             (
                 source_environment.to_string(),
-                default_config_with_profile("dev"),
+                template_config_with_profile("dev"),
             ),
             (
                 target_environment.to_string(),
-                default_config_with_profile("prod"),
+                template_config_with_profile("prod"),
             ),
         ]),
     };
@@ -300,7 +300,10 @@ pub fn write_workspace_template(
     if let Some(parent) = profile_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(profile_path, serde_yaml::to_string(&workspace)?)?;
+    fs::write(
+        profile_path,
+        serde_yaml::to_string(&canonical_workspace_value(&workspace)?)?,
+    )?;
 
     Ok(json!({
         "profile": profile_path.display().to_string(),
@@ -316,6 +319,17 @@ pub fn write_workspace_template(
             "Use --environment dev or --environment prod to select the active environment for a run",
         ],
     }))
+}
+
+fn template_config_with_profile(profile_name: &str) -> Config {
+    let mut config = default_config_with_profile(profile_name);
+    config.server = Some(ServerProfile {
+        webapi_url: "http://localhost/".to_string(),
+        curator_api_key: "replace-me".to_string(),
+        curator_api_secret: "replace-me".to_string(),
+        verify_tls: Some(true),
+    });
+    config
 }
 
 fn load_existing_config(profile_path: &Path, environment: Option<&str>) -> Result<Config> {
@@ -557,7 +571,7 @@ fn write_config(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, serde_yaml::to_string(config)?)?;
+    fs::write(path, serde_yaml::to_string(&canonical_profile_value(config)?)?)?;
 
     let env_path = path.parent().unwrap_or_else(|| Path::new(".")).join(".env");
     let mut current = read_env_map(&env_path)?;

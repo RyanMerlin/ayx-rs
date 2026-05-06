@@ -79,6 +79,29 @@ pub struct WorkspaceConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ServerDeploymentProfile {
+    pub api: ServerApiProfile,
+    pub storage: ServerStorageProfile,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ServerStorageProfile {
+    pub kind: ServerStorageKind,
+    #[serde(default)]
+    pub mongo: Option<MongoProfile>,
+    #[serde(default)]
+    pub sqlserver: Option<SqlServerProfile>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ServerStorageKind {
+    EmbeddedMongo,
+    ManagedMongo,
+    SqlServer,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MongoProfile {
     pub mode: MongoMode,
     pub databases: MongoDatabases,
@@ -261,7 +284,7 @@ impl Config {
                 path: path_str.clone(),
                 source,
             })?;
-        let value = flatten_alteryx_server_block(value);
+        let value = normalize_profile_value(value)?;
         let config: Self = serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
             path: path_str,
             source,
@@ -296,7 +319,7 @@ impl Config {
                 path: path_str.clone(),
                 source,
             })?;
-        let value = flatten_alteryx_server_block(value);
+        let value = normalize_profile_value(value)?;
         if is_workspace_value(&value) {
             let workspace: WorkspaceConfig =
                 serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
@@ -645,6 +668,302 @@ fn is_workspace_value(value: &serde_yaml::Value) -> bool {
         map.contains_key(serde_yaml::Value::String("workspace_name".to_string()))
             && map.contains_key(serde_yaml::Value::String("active_environment".to_string()))
             && map.contains_key(serde_yaml::Value::String("environments".to_string()))
+    })
+}
+
+fn normalize_profile_value(value: serde_yaml::Value) -> Result<serde_yaml::Value, ProfileError> {
+    let value = normalize_canonical_server_block(value)?;
+    let value = flatten_alteryx_server_block(value);
+    if let Some(workspace_value) = value.as_mapping() {
+        if workspace_value.contains_key(serde_yaml::Value::String("environments".to_string())) {
+            return normalize_workspace_environments(value);
+        }
+    }
+    Ok(value)
+}
+
+pub fn profile_shape_label(value: &serde_yaml::Value) -> &'static str {
+    let Some(root) = value.as_mapping() else {
+        return "unknown";
+    };
+    if root.contains_key(serde_yaml::Value::String("workspace_name".to_string())) {
+        if let Some(environments) = root
+            .get(serde_yaml::Value::String("environments".to_string()))
+            .and_then(|value| value.as_mapping())
+        {
+            if environments.values().any(|env| {
+                env.as_mapping().is_some_and(|map| {
+                    map.contains_key(serde_yaml::Value::String("server".to_string()))
+                })
+            }) {
+                return "workspace-canonical";
+            }
+        }
+        return "workspace-legacy";
+    }
+    if let Some(server) = root
+        .get(serde_yaml::Value::String("server".to_string()))
+        .and_then(|value| value.as_mapping())
+    {
+        if server.contains_key(serde_yaml::Value::String("api".to_string()))
+            || server.contains_key(serde_yaml::Value::String("storage".to_string()))
+        {
+            return "canonical";
+        }
+        return "legacy";
+    }
+    if root.contains_key(serde_yaml::Value::String("alteryx_server".to_string()))
+        || root.contains_key(serde_yaml::Value::String("server_api".to_string()))
+        || root.contains_key(serde_yaml::Value::String("mongo".to_string()))
+        || root.contains_key(serde_yaml::Value::String("sqlserver".to_string()))
+    {
+        return "legacy";
+    }
+    "unknown"
+}
+
+fn normalize_workspace_environments(
+    value: serde_yaml::Value,
+) -> Result<serde_yaml::Value, ProfileError> {
+    let Some(root) = value.as_mapping() else {
+        return Ok(value);
+    };
+    let mut merged = root.clone();
+    let env_key = serde_yaml::Value::String("environments".to_string());
+    let Some(envs_value) = merged.get_mut(&env_key) else {
+        return Ok(serde_yaml::Value::Mapping(merged));
+    };
+    let Some(envs_map) = envs_value.as_mapping_mut() else {
+        return Err(ProfileError::Invalid(
+            "workspace.environments must be a mapping".to_string(),
+        ));
+    };
+    for env_value in envs_map.values_mut() {
+        let normalized = normalize_canonical_server_block(env_value.clone())?;
+        *env_value = flatten_alteryx_server_block(normalized);
+    }
+    Ok(serde_yaml::Value::Mapping(merged))
+}
+
+fn normalize_canonical_server_block(
+    value: serde_yaml::Value,
+) -> Result<serde_yaml::Value, ProfileError> {
+    let Some(root) = value.as_mapping() else {
+        return Ok(value);
+    };
+
+    let server_key = serde_yaml::Value::String("server".to_string());
+    let Some(server_value) = root.get(&server_key) else {
+        return Ok(value);
+    };
+    let Some(server_map) = server_value.as_mapping() else {
+        return Ok(value);
+    };
+
+    let api_key = serde_yaml::Value::String("api".to_string());
+    let storage_key = serde_yaml::Value::String("storage".to_string());
+    if !server_map.contains_key(&api_key) && !server_map.contains_key(&storage_key) {
+        return Ok(value);
+    }
+
+    let mut merged = root.clone();
+    let mut legacy_server_api = None;
+    let mut legacy_mongo = None;
+    let mut legacy_sqlserver = None;
+
+    if let Some(api_value) = server_map.get(&api_key) {
+        legacy_server_api = Some(api_value.clone());
+    }
+
+    if let Some(storage_value) = server_map.get(&storage_key) {
+        let Some(storage_map) = storage_value.as_mapping() else {
+            return Err(ProfileError::Invalid("server.storage must be a mapping".to_string()));
+        };
+        let kind_key = serde_yaml::Value::String("kind".to_string());
+        let kind = storage_map
+            .get(&kind_key)
+            .and_then(|value| value.as_str())
+            .unwrap_or("embedded-mongo");
+        let mongo_key = serde_yaml::Value::String("mongo".to_string());
+        let sqlserver_key = serde_yaml::Value::String("sqlserver".to_string());
+        if let Some(mongo_value) = storage_map.get(&mongo_key) {
+            legacy_mongo = Some(mongo_value.clone());
+        }
+        if let Some(sql_value) = storage_map.get(&sqlserver_key) {
+            legacy_sqlserver = Some(sql_value.clone());
+        }
+        match kind {
+            "embedded-mongo" | "managed-mongo" | "sqlserver" => {}
+            other => {
+                return Err(ProfileError::Invalid(format!(
+                    "server.storage.kind '{}' is not supported",
+                    other
+                )));
+            }
+        }
+    }
+
+    merged.remove(&server_key);
+    if let Some(value) = legacy_server_api {
+        merged.insert(serde_yaml::Value::String("server_api".to_string()), value);
+    }
+    if let Some(value) = legacy_mongo {
+        merged.insert(serde_yaml::Value::String("mongo".to_string()), value);
+    }
+    if let Some(value) = legacy_sqlserver {
+        merged.insert(serde_yaml::Value::String("sqlserver".to_string()), value);
+    }
+    Ok(serde_yaml::Value::Mapping(merged))
+}
+
+pub fn canonical_profile_value(config: &Config) -> Result<serde_yaml::Value, ProfileError> {
+    let mut root = serde_yaml::Mapping::new();
+    root.insert(
+        serde_yaml::Value::String("profile_name".to_string()),
+        serde_yaml::to_value(&config.profile_name).map_err(|source| ProfileError::Parse {
+            path: "profile_name".to_string(),
+            source,
+        })?,
+    );
+    if let Some(one) = &config.alteryx_one {
+        root.insert(
+            serde_yaml::Value::String("alteryx_one".to_string()),
+            serde_yaml::to_value(one).map_err(|source| ProfileError::Parse {
+                path: "alteryx_one".to_string(),
+                source,
+            })?,
+        );
+    }
+    if let Some(observability) = &config.observability {
+        root.insert(
+            serde_yaml::Value::String("observability".to_string()),
+            serde_yaml::to_value(observability).map_err(|source| ProfileError::Parse {
+                path: "observability".to_string(),
+                source,
+            })?,
+        );
+    }
+    if let Some(upgrade) = &config.upgrade {
+        root.insert(
+            serde_yaml::Value::String("upgrade".to_string()),
+            serde_yaml::to_value(upgrade).map_err(|source| ProfileError::Parse {
+                path: "upgrade".to_string(),
+                source,
+            })?,
+        );
+    }
+    root.insert(
+        serde_yaml::Value::String("server".to_string()),
+        canonical_server_value(config)?,
+    );
+    Ok(serde_yaml::Value::Mapping(root))
+}
+
+pub fn canonical_workspace_value(
+    workspace: &WorkspaceConfig,
+) -> Result<serde_yaml::Value, ProfileError> {
+    let mut root = serde_yaml::Mapping::new();
+    root.insert(
+        serde_yaml::Value::String("workspace_name".to_string()),
+        serde_yaml::to_value(&workspace.workspace_name).map_err(|source| ProfileError::Parse {
+            path: "workspace_name".to_string(),
+            source,
+        })?,
+    );
+    root.insert(
+        serde_yaml::Value::String("active_environment".to_string()),
+        serde_yaml::to_value(&workspace.active_environment).map_err(|source| ProfileError::Parse {
+            path: "active_environment".to_string(),
+            source,
+        })?,
+    );
+    let mut env_map = serde_yaml::Mapping::new();
+    for (name, config) in &workspace.environments {
+        env_map.insert(
+            serde_yaml::Value::String(name.clone()),
+            canonical_profile_value(config)?,
+        );
+    }
+    root.insert(
+        serde_yaml::Value::String("environments".to_string()),
+        serde_yaml::Value::Mapping(env_map),
+    );
+    Ok(serde_yaml::Value::Mapping(root))
+}
+
+fn canonical_server_value(config: &Config) -> Result<serde_yaml::Value, ProfileError> {
+    let api = config.server_api.clone().or_else(|| {
+        config
+            .api
+            .as_ref()
+            .and_then(api_profile_to_server_api)
+            .or_else(|| {
+                config.server.as_ref().map(|server| ServerApiProfile {
+                    base_url: server.webapi_url.clone(),
+                    client_id: server.curator_api_key.clone(),
+                    client_secret: server.curator_api_secret.clone(),
+                })
+            })
+    });
+    let api = api.ok_or_else(|| {
+        ProfileError::Invalid("server.api requires server_api or api credentials".to_string())
+    })?;
+
+    let mut storage = serde_yaml::Mapping::new();
+    let kind = if config.sqlserver.is_some() {
+        ServerStorageKind::SqlServer
+    } else {
+        match config.mongo.mode {
+            MongoMode::Embedded => ServerStorageKind::EmbeddedMongo,
+            MongoMode::Managed => ServerStorageKind::ManagedMongo,
+        }
+    };
+    storage.insert(
+        serde_yaml::Value::String("kind".to_string()),
+        serde_yaml::to_value(kind).map_err(|source| ProfileError::Parse {
+            path: "server.storage.kind".to_string(),
+            source,
+        })?,
+    );
+    storage.insert(
+        serde_yaml::Value::String("mongo".to_string()),
+        serde_yaml::to_value(&config.mongo).map_err(|source| ProfileError::Parse {
+            path: "server.storage.mongo".to_string(),
+            source,
+        })?,
+    );
+    if let Some(sqlserver) = &config.sqlserver {
+        storage.insert(
+            serde_yaml::Value::String("sqlserver".to_string()),
+            serde_yaml::to_value(sqlserver).map_err(|source| ProfileError::Parse {
+                path: "server.storage.sqlserver".to_string(),
+                source,
+            })?,
+        );
+    }
+
+    let mut server = serde_yaml::Mapping::new();
+    server.insert(
+        serde_yaml::Value::String("api".to_string()),
+        serde_yaml::to_value(api).map_err(|source| ProfileError::Parse {
+            path: "server.api".to_string(),
+            source,
+        })?,
+    );
+    server.insert(
+        serde_yaml::Value::String("storage".to_string()),
+        serde_yaml::Value::Mapping(storage),
+    );
+    Ok(serde_yaml::Value::Mapping(server))
+}
+
+fn api_profile_to_server_api(api: &ApiProfile) -> Option<ServerApiProfile> {
+    let client_id = api.auth.client_id.as_ref()?.clone();
+    let client_secret = api.auth.client_secret.as_ref()?.clone();
+    Some(ServerApiProfile {
+        base_url: api.base_url.clone(),
+        client_id,
+        client_secret,
     })
 }
 
@@ -1069,6 +1388,40 @@ mod tests {
             "http://host"
         );
         assert_eq!(normalize_alteryx_base_url("http://host"), "http://host");
+    }
+
+    #[test]
+    fn loads_canonical_server_shape() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let canonical = r#"
+profile_name: canonical
+alteryx_one:
+  account_email: user@example.com
+server:
+  api:
+    base_url: http://localhost/webapi
+    client_id: client
+    client_secret: secret
+  storage:
+    kind: embedded-mongo
+    mongo:
+      mode: embedded
+      databases:
+        gallery_name: AlteryxGallery
+        service_name: AlteryxService
+      embedded:
+        runtime_settings_path: RuntimeSettings.xml
+"#;
+        std::fs::write(temp.path(), canonical).unwrap();
+        let cfg = Config::load_from_path(temp.path()).unwrap();
+        assert_eq!(cfg.profile_name, "canonical");
+        assert_eq!(cfg.server.as_ref().unwrap().webapi_url, "http://localhost");
+        assert_eq!(
+            cfg.server_api.as_ref().unwrap().base_url,
+            "http://localhost/webapi"
+        );
+        assert!(matches!(cfg.mongo.mode, MongoMode::Embedded));
+        assert!(cfg.server.is_some());
     }
 
     #[test]

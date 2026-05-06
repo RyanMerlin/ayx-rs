@@ -13,8 +13,8 @@ use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::envelope::Envelope;
 use ayx_core::profile::{
     ayx_config_home, ayx_profiles_dir, ayx_state_path, ayx_workspaces_dir, list_central_profiles,
-    load_ayx_state, profile_resolution_detail, profile_storage_path, save_ayx_state, AyxState,
-    Config, ServerProfile,
+    load_ayx_state, profile_resolution_detail, profile_shape_label, profile_storage_path,
+    save_ayx_state, AyxState, Config, ServerProfile,
 };
 use ayx_one::{
     api_diagnose_envelope, api_inventory_envelope, api_status_envelope,
@@ -7384,11 +7384,12 @@ fn doctor_config_envelope(profile: &Path, fix: bool) -> Result<Envelope> {
         }
     }
     let resolution = profile_resolution_detail(profile)?;
-    let inline_risks = if Path::new(&resolution.resolved_path).exists() {
+    let (shape, inline_risks) = if Path::new(&resolution.resolved_path).exists() {
         let raw = fs::read_to_string(&resolution.resolved_path)?;
-        collect_inline_secret_warnings(&raw)
+        let value: serde_yaml::Value = serde_yaml::from_str(&raw)?;
+        (profile_shape_label(&value), collect_inline_secret_warnings(&raw))
     } else {
-        Vec::new()
+        ("missing", Vec::new())
     };
     Ok(Envelope::ok_with_data(
         "doctor config completed",
@@ -7398,6 +7399,7 @@ fn doctor_config_envelope(profile: &Path, fix: bool) -> Result<Envelope> {
             "workspaces_dir": ayx_workspaces_dir()?.display().to_string(),
             "state_path": ayx_state_path()?.display().to_string(),
             "resolution": resolution,
+            "shape": shape,
             "inline_secret_risks": inline_risks,
             "fix_applied": fix,
         }),

@@ -2,14 +2,12 @@
 
 `ayx` is a command-line tool suite for Alteryx administrators, automation, and agentic workflows.
 
-It is designed to be:
+It is designed to operate across the Alteryx surface and enable sophisticated operations.
 - administrator-friendly: clear command surfaces for common Alteryx operations
 - automation-friendly: a single native binary with predictable output and no interpreter dependency
 - secure: explicit `--apply` gates, audit artifacts, and conservative defaults
 - portable: Windows, Linux, and macOS release targets
 - agent-friendly: structured envelopes and a future command/tactics/workflow registry
-
-`ayx` is designed to operate across the Alteryx ecosystem and enable sophisticated operations.
 
 ## Quick start
 
@@ -41,14 +39,17 @@ That writes the active profile to the central profile store. If you prefer to ed
 
 ```yaml
 profile_name: demo
-mongo:
-  mode: embedded
-server_api:
-  base_url: https://your-server.example.com
-  client_id: your-client-id
-  client_secret: your-client-secret
 alteryx_one:
   account_email: you@example.com
+server:
+  api:
+    base_url: https://your-server.example.com
+    client_id: your-client-id
+    client_secret: your-client-secret
+  storage:
+    kind: embedded-mongo
+    mongo:
+      mode: embedded
 ```
 
 The onboarding flow reuses existing values on later runs, masks stored secrets in its summary, and auto-discovers embedded Server runtime settings when `RuntimeSettings.xml` is available.
@@ -61,9 +62,9 @@ For multi-environment setups, use a central `workspace.yaml` file with named env
 
 ```powershell
 ayx profile current
+ayx one platform workspace current
+ayx one flows list
 ayx server api status
-ayx mongo status
-ayx catalog list
 ```
 
 4. Build from source if you want to hack on it locally:
@@ -77,8 +78,9 @@ cargo install --locked --path .
 If you want the shortest path from zero to useful output, start with:
 
 ```powershell
+ayx one platform workspace current --output json
+ayx one connections list --output json
 ayx server api status --output json
-ayx mongo inventory --output json
 ```
 
 ## Quick Examples
@@ -87,11 +89,11 @@ The shortest path from zero to useful output is usually one of:
 
 - `ayx profile current`
 - `ayx doctor`
-- `ayx server api status --output json`
-- `ayx mongo inventory --output json`
 - `ayx one platform workspace current`
 - `ayx one flows list`
 - `ayx one connections list`
+- `ayx server api status --output json`
+- `ayx mongo inventory --output json`
 - `ayx one job-groups list`
 - `ayx one output-objects list`
 - `ayx one platform person count`
@@ -112,17 +114,22 @@ Use `ayx profile current` to see the active profile, `ayx profile list` to inspe
 `--profile <path>` remains available for one-off overrides.
 
 `workspace.yaml` remains the canonical multi-environment file shape. It should contain `workspace_name`, `active_environment`, and an `environments` map of named `Config` entries. Use `--environment <name>` to override the active environment for a single run.
+For promotion-style workflows with multiple Server instances, keep one environment per instance and use `tools workspace resolve`, `compare`, or the migration helpers to make source/target selection explicit.
 
 Minimum expectations:
 - `profile_name`
-- `mongo.mode`
-- `mongo.databases.gallery_name`
-- `mongo.databases.service_name`
-- `server_api.base_url`, `server_api.client_id`, and `server_api.client_secret`
 - `alteryx_one.account_email` when using ownership-transfer and related automation
 - `alteryx_one.oauth_client_id` and `alteryx_one.token_endpoint_url` for One OAuth token posture
 - `alteryx_one.access_token` when using One API commands
 - `alteryx_one.refresh_token` when you want to keep the token pair together locally
+- `server.api.base_url`, `server.api.client_id`, and `server.api.client_secret`
+- `server.storage.kind`
+- `server.storage.mongo.mode`
+- `server.storage.mongo.databases.gallery_name`
+- `server.storage.mongo.databases.service_name`
+- `server.storage.mongo.embedded.runtime_settings_path` when you need to pin the embedded Server runtime path
+- `server.storage.mongo.managed.*` when you target a managed MongoDB
+- `server.storage.sqlserver.controller.*` and `server.storage.sqlserver.server_ui.*` when you use SQL-backed storage
 - `observability.api_logging.enabled` when you want shared JSONL API request logging across Server, License, and One
 - `observability.api_logging.path` to control where the shared API event log is written
 - `observability.api_logging.redact_bodies` stays on by default so secrets are not written to the log
@@ -165,7 +172,6 @@ ayx catalog list
 ayx catalog describe mongo/backup
 ayx catalog describe designer.workflow.context
 ayx catalog run designer.workflow.context --json '{"workflow_path":"sample.yxmd"}'
-ayx license api status
 ayx one platform workspace current
 ayx one platform person count
 ayx one flows list
@@ -176,6 +182,7 @@ ayx one platform auth status
 ayx one platform auth diagnose
 ayx one plans list
 ayx one scheduling list
+ayx license api status
 ayx server diagnose startup --error "Failed to register Service URL"
 ayx server auth status
 ayx server auth diagnose saml --metadata-url https://idp.example.com/metadata

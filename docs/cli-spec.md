@@ -18,19 +18,17 @@ Then initialize the central profile store with `ayx onboard`, or point `--profil
 
 ```powershell
 ayx profile current
+ayx one platform workspace current
+ayx one flows list
 ayx server api status
-ayx mongo status
 ayx catalog list
-ayx catalog list --tag designer --format full
-ayx catalog describe designer.workflow.context
-ayx catalog run designer.workflow.context --json '{"workflow_path":"sample.yxmd"}'
 ```
 
 If you want the command to feed another tool, add `--output json`.
 
 ## Configuration
 
-`ayx` reads JSON/YAML profiles through `ayx-core::profile::Config`. By default it resolves the active profile from the central ayx config home, then loads any adjacent `.env` file for placeholder expansion. `workspace.yaml` is the canonical multi-environment form; it holds multiple named `Config` entries and an explicit `active_environment`. Replace the placeholders before committing the file for production usage. When pointing at a live Server, make sure the Mongo connection string, database names, TLS artifacts, observability path, and Alteryx One email are accurate for that environment.
+`ayx` reads JSON/YAML profiles through `ayx-core::profile::Config`. By default it resolves the active profile from the central ayx config home, then loads any adjacent `.env` file for placeholder expansion. `workspace.yaml` is the canonical multi-environment form; it holds multiple named `Config` entries and an explicit `active_environment`. Replace the placeholders before committing the file for production usage. When pointing at a live Server, make sure the `server` object is internally consistent across API, storage kind, Mongo, SQL Server, observability, and Alteryx One fields.
 
 Central profile commands:
 - `ayx profile list`
@@ -43,27 +41,28 @@ Central profile commands:
 
 ### Required Config Fields
 - `profile_name`: user-friendly label surfaced in audit/output envelopes.
-- `mongo.mode`: `embedded` or `managed`.
-- `mongo.databases.gallery_name` and `mongo.databases.service_name`: required database names so every operation knows which namespaces to touch.
-- For embedded mode, `mongo.embedded.runtime_settings_path` may remain null; runtime discovery handles the default Server layout.
-- In managed mode, provide `mongo.managed.url` or `mongo.managed.host` plus `mongo.managed.port`. TLS (`mongo.managed.tls`) and credentials (`username`, `password`, `auth_database`) control how `mongodump/mongorestore` authenticate.
-- `server_api.base_url` plus OAuth2 client-credential inputs (`server_api.client_id`, `server_api.client_secret`) for the Server API surface.
-- `server_api` keeps the public config model product-scoped instead of using a generic top-level `api` section.
-- future product API branches will carry their own config blocks under the product root.
 - `alteryx_one.account_email` is the Alteryx One identity used throughout owner-transfer and gallery operations.
+- `server.api.base_url` plus OAuth2 client-credential inputs (`server.api.client_id`, `server.api.client_secret`) for the Server API surface.
+- `server.storage.kind` selects the primary server storage mode.
+- `server.storage.mongo.mode`: `embedded` or `managed`.
+- `server.storage.mongo.databases.gallery_name` and `server.storage.mongo.databases.service_name`: required database names so every operation knows which namespaces to touch.
+- For embedded mode, `server.storage.mongo.embedded.runtime_settings_path` may remain null; runtime discovery handles the default Server layout.
+- In managed mode, provide `server.storage.mongo.managed.url` or `server.storage.mongo.managed.host` plus `server.storage.mongo.managed.port`. TLS and credentials control how `mongodump/mongorestore` authenticate.
+- `server.storage.sqlserver.controller.*` and `server.storage.sqlserver.server_ui.*` are used when the deployment uses SQL-backed storage.
+- future product API branches will carry their own config blocks under the product root.
 
 ## Embedded RuntimeSettings Discovery
 
-- `mongo.embedded.runtime_settings_path` defaults to `null`; the CLI tries the documented Server location (`C:\ProgramData\Alteryx\RuntimeSettings.xml`) first, then `%ProgramData%/Alteryx/*`, `%ProgramFiles%/Alteryx/*`, `%ProgramFiles(x86)%/Alteryx/*`, and finally probes relocated drives (for example `D:\ProgramData\Alteryx\RuntimeSettings.xml`). The CLI bails with a helpful error if no candidate exists, instructing you to set the path manually.
-- `mongo.embedded.alteryx_service_path` is optional; the embedding logic derives the install root from RuntimeSettings and looks for `bin/AlteryxService.exe` before asking for an override.
-- `mongo.embedded.restore_target_path` is optional; the CLI uses the runtime payload to infer the persistence target, defaulting to `C:\ProgramData\Alteryx\Service\Persistence\MongoDB` when the XML lacks the field.
-- The repo includes `examples/RuntimeSettings.xml` as a fixture — copy your Server runtime settings there or point `mongo.embedded.runtime_settings_path` at your install when validating the embedded workflow locally.
+- `server.storage.mongo.embedded.runtime_settings_path` defaults to `null`; the CLI tries the documented Server location (`C:\ProgramData\Alteryx\RuntimeSettings.xml`) first, then `%ProgramData%/Alteryx/*`, `%ProgramFiles%/Alteryx/*`, `%ProgramFiles(x86)%/Alteryx/*`, and finally probes relocated drives (for example `D:\ProgramData\Alteryx\RuntimeSettings.xml`). The CLI bails with a helpful error if no candidate exists, instructing you to set the path manually.
+- `server.storage.mongo.embedded.alteryx_service_path` is optional; the embedding logic derives the install root from RuntimeSettings and looks for `bin/AlteryxService.exe` before asking for an override.
+- `server.storage.mongo.embedded.restore_target_path` is optional; the CLI uses the runtime payload to infer the persistence target, defaulting to `C:\ProgramData\Alteryx\Service\Persistence\MongoDB` when the XML lacks the field.
+- The repo includes `examples/RuntimeSettings.xml` as a fixture — copy your Server runtime settings there or point `server.storage.mongo.embedded.runtime_settings_path` at your install when validating the embedded workflow locally.
 
 ## Mongo Commands
 - `ayx mongo status --profile <path>`
 - `ayx mongo inventory --profile <path>`
--- `ayx mongo backup --profile <path> --output-dir <dir> [--apply] [--audit-dir <dir>]`
--- `ayx mongo restore --profile <path> --input-path <path> [--apply] [--audit-dir <dir>]`
+- `ayx mongo backup --profile <path> --output-dir <dir> [--apply] [--audit-dir <dir>]`
+- `ayx mongo restore --profile <path> --input-path <path> [--apply] [--audit-dir <dir>]`
 
 Mutating commands (`backup`, `restore`) default to dry-run and require `--apply` to execute. Every mutating command writes an audit artifact JSON file.
 
@@ -71,7 +70,7 @@ Execution behavior:
 - Embedded mode uses the AlteryxService wrappers:
   - `emongodump=path`
   - `emongorestore=source,target`
-- Managed mode uses the MongoDB CLI tools (`mongodump`, `mongorestore`) and honors the TLS flags, credentials, and connection-time tuning parameters configured in `mongo.managed`.
+- Managed mode uses the MongoDB CLI tools (`mongodump`, `mongorestore`) and honors the TLS flags, credentials, and connection-time tuning parameters configured in `server.storage.mongo.managed`.
 
 ## API Commands
 - `ayx server api status --profile <path>`
@@ -176,7 +175,7 @@ upgrade:
 - `ayx server api import-swagger --profile <path> --url <url> [--version 3] [--cache-dir .omni/swagger]`
 - `ayx server api call --profile <path> --operation-id <id> [--version 3] [--cache-dir .omni/swagger] [--swagger <path>] [--param KEY=VALUE ...] [--body <path>]`
 
-Server commands reuse `config.yaml` but require the `alteryx_server.server_api` block illustrated above (`base_url`, `client_id`, `client_secret`) in addition to the Server-specific settings already flattened by the config loader. `import-swagger` downloads the OpenAPI document for the requested version and caches it under `cache-dir/<profile>_swagger_v<version>.json`. `call` loads the cached Swagger, resolves the `operationId`, substitutes path/query parameters supplied via `--param`, and exchanges JSON payloads with the Server API using the curator credentials so automation can inspect `status_code`, `url`, and the parsed response.
+Server commands reuse the active profile but require the `server` object illustrated above. The loader still accepts the old flattened `server_api`, `mongo`, and `sqlserver` shapes for compatibility. `import-swagger` downloads the OpenAPI document for the requested version and caches it under `cache-dir/<profile>_swagger_v<version>.json`. `call` loads the cached Swagger, resolves the `operationId`, substitutes path/query parameters supplied via `--param`, and exchanges JSON payloads with the Server API using the curator credentials so automation can inspect `status_code`, `url`, and the parsed response.
 
 ## Product-Scoped API Branches
 

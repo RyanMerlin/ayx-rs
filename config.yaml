@@ -7,6 +7,62 @@ alteryx_one:
   access_token: ${AYX_ONE_API_ACCESS_TOKEN}
   refresh_token: ${AYX_ONE_API_REFRESH_TOKEN}
 
+server:
+  api:
+    base_url: ${AYX_SERVER_BASE_URL}
+    client_id: ${AYX_SERVER_API_KEY}
+    client_secret: ${AYX_SERVER_API_SECRET}
+  storage:
+    kind: embedded-mongo  # switch to managed-mongo or sqlserver when that is the active server storage model.
+    mongo:
+      mode: embedded  # switch to 'managed' and fill server.storage.mongo.managed.* when targeting an external MongoDB.
+      databases:
+        gallery_name: AlteryxGallery
+        service_name: AlteryxService
+      embedded:
+        runtime_settings_path: null     # auto-discovered from ProgramData/ProgramFiles when null; set explicitly to override.
+        alteryx_service_path: null      # auto-resolves from RuntimeSettings install paths but can be pinned.
+        restore_target_path: null       # derived from RuntimeSettings when available.
+      managed:
+        url: null                      # prefer a MongoDB URI when hitting a managed cluster.
+        host: localhost
+        port: 27017
+        auth_database: admin
+        username: user
+        password: ${AYX_MONGO_MANAGED_PASSWORD}
+        tls:
+          enabled: false
+          ca_path: null
+          cert_path: null
+          key_path: null
+          allow_invalid_hostnames: false
+        timeout_ms: 15000
+        retry_count: 2
+        max_pool_size: 20
+    sqlserver:
+      controller:
+        host: localhost
+        port: 1433
+        database: AlteryxService
+        username: sa
+        password: ${AYX_SQL_CONTROLLER_PASSWORD}
+        password_env: AYX_SQL_CONTROLLER_PASSWORD
+        integrated_security: false
+        encrypt: true
+        trust_server_certificate: false
+        multi_subnet_failover: false
+      server_ui:
+        host: localhost
+        port: 1433
+        database: AlteryxServerUI
+        username: sa
+        password: ${AYX_SQL_SERVER_UI_PASSWORD}
+        password_env: AYX_SQL_SERVER_UI_PASSWORD
+        integrated_security: false
+        encrypt: true
+        trust_server_certificate: false
+        multi_subnet_failover: false
+
 observability:
   api_logging:
     enabled: false  # enable when you want shared JSONL API request logging across server, license, and one.
@@ -15,36 +71,6 @@ observability:
     log_requests: false
     log_responses: false
 
-alteryx_server:
-  server_api:
-    base_url: ${AYX_SERVER_BASE_URL}
-    client_id: ${AYX_SERVER_API_KEY}
-    client_secret: ${AYX_SERVER_API_SECRET}
-  mongo:
-    mode: embedded  # switch to 'managed' and fill mongo.managed.* when targeting an external MongoDB.
-    databases:
-      gallery_name: AlteryxGallery
-      service_name: AlteryxService
-    embedded:
-      runtime_settings_path: null     # auto-discovered from ProgramData/ProgramFiles when null; set explicitly to override.
-      alteryx_service_path: null     # auto-resolves from RuntimeSettings install paths but can be pinned.
-      restore_target_path: null      # derived from RuntimeSettings when available.
-    managed:
-      url: null                      # prefer a MongoDB URI when hitting a managed cluster.
-      host: localhost
-      port: 27017
-      auth_database: admin
-      username: user
-      password: ${AYX_MONGO_MANAGED_PASSWORD}
-      tls:
-        enabled: false
-        ca_path: null
-        cert_path: null
-        key_path: null
-        allow_invalid_hostnames: false
-      timeout_ms: 15000
-      retry_count: 2
-      max_pool_size: 20
 upgrade:
   target_version: "2025.2"
   deployment: embedded-mongo
