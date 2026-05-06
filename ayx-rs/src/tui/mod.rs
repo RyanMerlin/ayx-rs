@@ -76,7 +76,15 @@ fn render(frame: &mut Frame, app: &App) {
 
     let body = Layout::horizontal([Constraint::Length(20), Constraint::Min(0)]).split(vertical[1]);
     render_sidebar(frame, app, body[0]);
-    render_content(frame, app, body[1]);
+    if app.screen == Screen::Inspect {
+        let base = app.inspect_return.unwrap_or(Screen::Profiles);
+        render_screen_content(frame, app, base, body[1]);
+        let popup = centered_rect(88, 78, body[1]);
+        frame.render_widget(Clear, popup);
+        render_inspect_popup(frame, app, popup);
+    } else {
+        render_screen_content(frame, app, app.screen, body[1]);
+    }
     render_footer(frame, app, vertical[2]);
 
     if let Some(toast) = app.toast.as_ref() {
@@ -143,8 +151,8 @@ fn render_sidebar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(list, area);
 }
 
-fn render_content(frame: &mut Frame, app: &App, area: Rect) {
-    match app.screen {
+fn render_screen_content(frame: &mut Frame, app: &App, screen: Screen, area: Rect) {
+    match screen {
         Screen::Profiles => render_profiles(frame, app, area),
         Screen::Config => render_config(frame, app, area),
         Screen::Credentials => render_credentials(frame, app, area),
@@ -153,6 +161,10 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
         Screen::One => render_one_browser(frame, app, area),
         Screen::Help => render_help(frame, area),
     }
+}
+
+fn render_inspect_popup(frame: &mut Frame, app: &App, area: Rect) {
+    render_inspect(frame, app, area);
 }
 
 fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
@@ -317,9 +329,7 @@ fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
     detail_lines.push(Line::from("s saves the current target using the canonical file format."));
     detail_lines.push(Line::from(""));
     detail_lines.push(Line::from(Span::styled("Summary", theme::accent())));
-    for line in serde_json::to_string_pretty(&app.current_summary())
-        .unwrap_or_default()
-        .lines()
+    for line in yaml_lines(&app.current_summary())
         .take(12)
     {
         detail_lines.push(Line::from(line.to_string()));
@@ -384,7 +394,7 @@ fn render_credentials(frame: &mut Frame, app: &App, area: Rect) {
         layout[0],
     );
 
-    let validation = serde_json::to_string_pretty(&app.current_validation()).unwrap_or_default();
+    let validation = yaml_lines(&app.current_validation()).collect::<Vec<_>>().join("\n");
     let notes = vec![
         Line::from(vec![
             Span::styled("Mode: ", theme::field_label()),
@@ -503,7 +513,7 @@ fn render_config(frame: &mut Frame, app: &App, area: Rect) {
         layout[0],
     );
 
-    let validation = serde_json::to_string_pretty(&app.current_validation()).unwrap_or_default();
+    let validation = yaml_lines(&app.current_validation()).collect::<Vec<_>>().join("\n");
     let notes = vec![
         Line::from(vec![
             Span::styled("Mode: ", theme::field_label()),
@@ -668,8 +678,8 @@ fn render_inspect(frame: &mut Frame, app: &App, area: Rect) {
         left[1],
     );
 
-    let validation = serde_json::to_string_pretty(&app.current_validation()).unwrap_or_default();
-    let summary = serde_json::to_string_pretty(&app.current_summary()).unwrap_or_default();
+    let validation = yaml_lines(&app.current_validation()).collect::<Vec<_>>().join("\n");
+    let summary = yaml_lines(&app.current_summary()).collect::<Vec<_>>().join("\n");
     let mut status_lines = vec![
         Line::from(vec![
             Span::styled("Selected profile: ", theme::field_label()),
@@ -1018,7 +1028,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
             Span::styled("Inspect", theme::accent_bold()),
             Span::raw("     "),
             Span::styled("i", theme::accent()),
-            Span::raw(" open inspector for the current target"),
+            Span::raw(" open/close inspector popup for the current target"),
         ]),
         Line::from(vec![
             Span::styled("One", theme::accent_bold()),
@@ -1081,34 +1091,34 @@ fn render_help(frame: &mut Frame, area: Rect) {
 
 fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
     let help = match app.screen {
-        Screen::Profiles => "Tab cycle panes · Enter activate · i inspect · r reload",
+        Screen::Profiles => "Arrows move · Enter activate · Tab cycle panes · i inspect · Esc back",
         Screen::Config => {
             if app.config_form.editing {
                 "Enter save buffer · Esc cancel · Backspace delete"
             } else {
-                "e edit · s save · c clear · r reload"
+                "Arrows move · e edit · s save · c clear · r reload · Esc back"
             }
         }
         Screen::Credentials => {
             if app.credentials.editing {
                 "Enter save buffer · Esc cancel · Backspace delete"
             } else {
-                "e edit · s save · c clear · r reload"
+                "Arrows move · e edit · s save · c clear · r reload · Esc back"
             }
         }
-        Screen::Connectivity => "r/t rerun checks",
-        Screen::Inspect => "Enter back to Profiles · r reload indexes",
+        Screen::Connectivity => "r/t rerun checks · Esc back",
+        Screen::Inspect => "Esc close popup · Enter close · r reload indexes",
         Screen::One => {
             if app.one_browser.prompt.is_some() {
                 "Type id · Enter run · Esc cancel"
             } else {
                 match app.one_browser.pane {
-                    app::OneBrowserPane::Resources => "Arrows browse resources · Enter refresh/prompt/drill · Tab items · b back",
-                    app::OneBrowserPane::Items => "Arrows browse items · Enter drill down · Tab resources · b back",
+                    app::OneBrowserPane::Resources => "Arrows browse resources · Enter refresh/prompt/drill · Tab items · b back · Esc back",
+                    app::OneBrowserPane::Items => "Arrows browse items · Enter drill down · Tab resources · b back · Esc back",
                 }
             }
         }
-        Screen::Help => "q quit",
+        Screen::Help => "q quit · Esc back",
     };
     let line = Line::from(vec![
         Span::styled("status ", theme::field_label()),
@@ -1139,6 +1149,15 @@ fn render_toast(frame: &mut Frame, message: &str, is_error: bool) {
             .wrap(Wrap { trim: false }),
         area,
     );
+}
+
+fn yaml_lines(value: &serde_json::Value) -> std::vec::IntoIter<String> {
+    serde_yaml::to_string(value)
+        .unwrap_or_else(|_| value.to_string())
+        .lines()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .into_iter()
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {

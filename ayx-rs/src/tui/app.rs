@@ -493,6 +493,7 @@ pub struct App {
     pub target_path: PathBuf,
     pub target_environment: Option<String>,
     pub resolution_source: String,
+    pub inspect_return: Option<Screen>,
     pub current_config: Config,
     pub config_form: ConfigForm,
     pub credentials: CredentialsForm,
@@ -540,6 +541,7 @@ impl App {
             target_path,
             target_environment: None,
             resolution_source: resolution.source,
+            inspect_return: None,
             config_form: ConfigForm::from_config(&current_config),
             credentials: CredentialsForm::from_config(&current_config),
             current_config,
@@ -605,6 +607,15 @@ impl App {
 
         if self.credentials.editing {
             self.handle_credentials_edit_key(key);
+            return;
+        }
+
+        if key.code == KeyCode::Esc {
+            if self.screen == Screen::Inspect {
+                self.close_inspect();
+            } else if self.focus == Focus::Content {
+                self.focus = Focus::Sidebar;
+            }
             return;
         }
 
@@ -802,14 +813,15 @@ impl App {
 
     fn handle_inspect_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Left | KeyCode::Char('h') => self.focus = Focus::Sidebar,
+            KeyCode::Esc
+            | KeyCode::Left
+            | KeyCode::Char('h')
+            | KeyCode::Enter
+            | KeyCode::Char('i') => self.close_inspect(),
             KeyCode::Char('r') => {
                 if let Err(err) = self.reload_indexes() {
                     self.push_toast(err.to_string(), true);
                 }
-            }
-            KeyCode::Char('i') | KeyCode::Enter => {
-                self.select_screen(Screen::Profiles);
             }
             _ => {}
         }
@@ -896,8 +908,21 @@ impl App {
     }
 
     fn select_screen(&mut self, screen: Screen) {
+        if screen == Screen::Inspect && self.screen != Screen::Inspect {
+            self.inspect_return = Some(self.screen);
+        } else if screen != Screen::Inspect {
+            self.inspect_return = None;
+        }
         self.screen = screen;
         self.sidebar.select(Some(screen.index()));
+    }
+
+    fn close_inspect(&mut self) {
+        if self.screen == Screen::Inspect {
+            let next = self.inspect_return.take().unwrap_or(Screen::Profiles);
+            self.screen = next;
+            self.sidebar.select(Some(next.index()));
+        }
     }
 
     fn move_one_browser_cursor(&mut self, delta: isize) {
@@ -1354,7 +1379,7 @@ impl App {
         let panel = match result {
             Ok(value) => PanelState {
                 title: title.to_string(),
-                lines: pretty_lines(&value),
+                lines: pretty_yaml_lines(&value),
                 is_error: false,
                 raw: Some(value),
             },
@@ -1436,7 +1461,7 @@ fn render_envelope_panel(title: &str, value: Result<Value>) -> PanelState {
     match value {
         Ok(value) => PanelState {
             title: title.to_string(),
-            lines: pretty_lines(&value),
+            lines: pretty_yaml_lines(&value),
             is_error: false,
             raw: Some(value),
         },
@@ -1449,8 +1474,8 @@ fn render_envelope_panel(title: &str, value: Result<Value>) -> PanelState {
     }
 }
 
-fn pretty_lines(value: &Value) -> Vec<String> {
-    serde_json::to_string_pretty(value)
+fn pretty_yaml_lines(value: &Value) -> Vec<String> {
+    serde_yaml::to_string(value)
         .unwrap_or_else(|_| value.to_string())
         .lines()
         .map(|line| line.to_string())

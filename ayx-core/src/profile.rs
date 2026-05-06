@@ -287,11 +287,10 @@ impl Config {
             .parent()
             .map(|parent| parent.join(".env"))
             .unwrap_or_else(|| Path::new(".env").to_path_buf());
-        let env_values =
-            read_env_file_if_present(&env_path).map_err(|source| ProfileError::Read {
-                path: env_path.display().to_string(),
-                source,
-            })?;
+        let env_values = collect_env_overrides(path).map_err(|source| ProfileError::Read {
+            path: env_path.display().to_string(),
+            source,
+        })?;
         let expanded = expand_env_placeholders(&content, &env_values);
 
         let value: serde_yaml::Value =
@@ -304,6 +303,7 @@ impl Config {
             path: path_str,
             source,
         })?;
+        let config = apply_env_fallbacks(config, &env_values);
         let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
         config.validate()?;
         Ok(config)
@@ -322,11 +322,10 @@ impl Config {
             .parent()
             .map(|parent| parent.join(".env"))
             .unwrap_or_else(|| Path::new(".env").to_path_buf());
-        let env_values =
-            read_env_file_if_present(&env_path).map_err(|source| ProfileError::Read {
-                path: env_path.display().to_string(),
-                source,
-            })?;
+        let env_values = collect_env_overrides(path).map_err(|source| ProfileError::Read {
+            path: env_path.display().to_string(),
+            source,
+        })?;
         let expanded = expand_env_placeholders(&content, &env_values);
 
         let value: serde_yaml::Value =
@@ -348,7 +347,8 @@ impl Config {
                     workspace.workspace_name, active
                 ))
             })?;
-            let config = config.clone().with_server_api_overrides()?.resolve_secret_refs()?;
+            let config = apply_env_fallbacks(config.clone(), &env_values);
+            let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
             config.validate()?;
             return Ok(config);
         }
@@ -356,6 +356,7 @@ impl Config {
             path: path_str,
             source,
         })?;
+        let config = apply_env_fallbacks(config, &env_values);
         let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
         config.validate()?;
         Ok(config)
@@ -684,6 +685,17 @@ fn read_env_file_if_present(path: &Path) -> std::io::Result<HashMap<String, Stri
     Ok(values)
 }
 
+fn collect_env_overrides(profile_path: &Path) -> std::io::Result<HashMap<String, String>> {
+    let mut values = HashMap::new();
+    if let Ok(cwd) = env::current_dir() {
+        values.extend(read_env_file_if_present(&cwd.join(".env"))?);
+    }
+    if let Some(parent) = profile_path.parent() {
+        values.extend(read_env_file_if_present(&parent.join(".env"))?);
+    }
+    Ok(values)
+}
+
 fn expand_env_placeholders(input: &str, env_values: &HashMap<String, String>) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
@@ -747,6 +759,69 @@ fn is_workspace_value(value: &serde_yaml::Value) -> bool {
             && map.contains_key(serde_yaml::Value::String("active_environment".to_string()))
             && map.contains_key(serde_yaml::Value::String("environments".to_string()))
     })
+}
+
+fn env_value(env_values: &HashMap<String, String>, name: &str) -> Option<String> {
+    env_values.get(name).cloned().or_else(|| env::var(name).ok())
+}
+
+fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>) -> Config {
+    let account_email = env_value(env_values, "AYX_ACCOUNT_EMAIL");
+    let oauth_client_id = env_value(env_values, "AYX_ONE_OAUTH_CLIENT_ID");
+    let token_endpoint_url = env_value(env_values, "AYX_ONE_TOKEN_ENDPOINT_URL");
+    let access_token = env_value(env_values, "AYX_ONE_API_ACCESS_TOKEN");
+    let refresh_token = env_value(env_values, "AYX_ONE_API_REFRESH_TOKEN");
+
+    if account_email.is_some()
+        || oauth_client_id.is_some()
+        || token_endpoint_url.is_some()
+        || access_token.is_some()
+        || refresh_token.is_some()
+    {
+        let mut one = config.alteryx_one.unwrap_or(AlteryxOneProfile {
+            account_email: account_email.clone().unwrap_or_default(),
+            oauth_client_id: None,
+            token_endpoint_url: None,
+            access_token: None,
+            access_token_ref: None,
+            refresh_token: None,
+            refresh_token_ref: None,
+        });
+        if let Some(value) = account_email {
+            one.account_email = value;
+        }
+        if one
+            .oauth_client_id
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            one.oauth_client_id = oauth_client_id;
+        }
+        if one
+            .token_endpoint_url
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            one.token_endpoint_url = token_endpoint_url;
+        }
+        if one
+            .access_token
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            one.access_token = access_token;
+        }
+        if one
+            .refresh_token
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            one.refresh_token = refresh_token;
+        }
+        config.alteryx_one = Some(one);
+    }
+
+    config
 }
 
 fn normalize_profile_value(value: serde_yaml::Value) -> Result<serde_yaml::Value, ProfileError> {
