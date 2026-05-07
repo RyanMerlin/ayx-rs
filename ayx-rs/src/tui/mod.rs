@@ -927,7 +927,7 @@ fn render_one_browser(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("Action: ", theme::field_label()),
-            Span::styled("Enter refresh/drill · Tab switch pane · i return to Inspect", theme::muted()),
+            Span::styled("Enter refresh/drill · Tab switch pane · b back · Esc back", theme::muted()),
         ]),
         Line::from(""),
     ];

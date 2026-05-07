@@ -31,13 +31,12 @@ pub enum Screen {
 }
 
 impl Screen {
-    pub fn all() -> [Screen; 7] {
+    pub fn all() -> [Screen; 6] {
         [
             Screen::Profiles,
             Screen::Config,
             Screen::Credentials,
             Screen::Connectivity,
-            Screen::Inspect,
             Screen::One,
             Screen::Help,
         ]
@@ -65,9 +64,9 @@ impl Screen {
             Screen::Config => 1,
             Screen::Credentials => 2,
             Screen::Connectivity => 3,
-            Screen::Inspect => 4,
-            Screen::One => 5,
-            Screen::Help => 6,
+            Screen::One => 4,
+            Screen::Help => 5,
+            Screen::Inspect => 0,
         }
     }
 }
@@ -628,9 +627,8 @@ impl App {
             KeyCode::Char('2') => self.select_screen(Screen::Config),
             KeyCode::Char('3') => self.select_screen(Screen::Credentials),
             KeyCode::Char('4') => self.select_screen(Screen::Connectivity),
-            KeyCode::Char('5') => self.select_screen(Screen::Inspect),
-            KeyCode::Char('6') => self.select_screen(Screen::One),
-            KeyCode::Char('7') => self.select_screen(Screen::Help),
+            KeyCode::Char('5') => self.select_screen(Screen::One),
+            KeyCode::Char('6') => self.select_screen(Screen::Help),
             _ => match self.focus {
                 Focus::Sidebar => self.handle_sidebar_key(key),
                 Focus::Content => self.handle_content_key(key),
@@ -903,7 +901,6 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char('i') => self.select_screen(Screen::Inspect),
             _ => {}
         }
     }
@@ -911,11 +908,16 @@ impl App {
     fn select_screen(&mut self, screen: Screen) {
         if screen == Screen::Inspect && self.screen != Screen::Inspect {
             self.inspect_return = Some(self.screen);
+            self.screen = Screen::Inspect;
+            self.focus = Focus::Content;
+            return;
         } else if screen != Screen::Inspect {
             self.inspect_return = None;
         }
         self.screen = screen;
-        self.sidebar.select(Some(screen.index()));
+        if screen != Screen::Inspect {
+            self.sidebar.select(Some(screen.index()));
+        }
     }
 
     fn close_inspect(&mut self) {
