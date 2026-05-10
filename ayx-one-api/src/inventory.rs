@@ -951,6 +951,7 @@ mod tests {
             },
             alteryx_one: Some(AlteryxOneProfile {
                 account_email: "test@example.com".to_string(),
+                base_url: Some("https://us1.alteryxcloud.com".to_string()),
                 oauth_client_id: Some("client-123".to_string()),
                 token_endpoint_url: Some("https://example.invalid/token".to_string()),
                 access_token: Some("token".to_string()),

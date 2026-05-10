@@ -24,7 +24,9 @@ pub fn run_onboarding(
     workspace_mode: bool,
 ) -> Result<Value> {
     let resolved_path = if workspace_mode {
-        if profile_path == Path::new("environments.yaml") || profile_path == Path::new("workspace.yaml") {
+        if profile_path == Path::new("environments.yaml")
+            || profile_path == Path::new("workspace.yaml")
+        {
             default_workspace_storage_path().map_err(anyhow::Error::from)?
         } else {
             profile_path.to_path_buf()
@@ -334,7 +336,10 @@ fn template_config_with_profile(profile_name: &str) -> Config {
     config
 }
 
-pub(crate) fn load_existing_config(profile_path: &Path, environment: Option<&str>) -> Result<Config> {
+pub(crate) fn load_existing_config(
+    profile_path: &Path,
+    environment: Option<&str>,
+) -> Result<Config> {
     ayx_core::profile::Config::load_from_path_with_environment(profile_path, environment)
         .map_err(|err| anyhow::anyhow!(err))
 }
@@ -343,7 +348,10 @@ fn secret_scope(scope: &str, field: &str) -> String {
     keyring_account(scope, field)
 }
 
-pub(crate) fn secretize_config(config: &mut Config, scope: &str) -> Result<BTreeMap<String, String>> {
+pub(crate) fn secretize_config(
+    config: &mut Config,
+    scope: &str,
+) -> Result<BTreeMap<String, String>> {
     let mut refs = BTreeMap::new();
 
     if let Some(one) = config.alteryx_one.as_mut() {
@@ -385,14 +393,23 @@ pub(crate) fn secretize_config(config: &mut Config, scope: &str) -> Result<BTree
             let account = secret_scope(scope, "server.storage.mongo.managed.password");
             let reference = store_keyring_secret(&account, &value)?;
             mongo.password_ref = Some(reference.clone());
-            refs.insert("server.storage.mongo.managed.password".to_string(), reference);
+            refs.insert(
+                "server.storage.mongo.managed.password".to_string(),
+                reference,
+            );
         }
     }
 
     if let Some(sql) = config.sqlserver.as_mut() {
         for (label, conn) in [
-            ("server.storage.sqlserver.controller.password", sql.controller.as_mut()),
-            ("server.storage.sqlserver.server_ui.password", sql.server_ui.as_mut()),
+            (
+                "server.storage.sqlserver.controller.password",
+                sql.controller.as_mut(),
+            ),
+            (
+                "server.storage.sqlserver.server_ui.password",
+                sql.server_ui.as_mut(),
+            ),
         ] {
             if let Some(conn) = conn {
                 if let Some(value) = conn.password.take() {
@@ -517,6 +534,7 @@ fn update_or_create_one(
 ) -> AlteryxOneProfile {
     let mut one = existing.unwrap_or(AlteryxOneProfile {
         account_email: account_email.clone(),
+        base_url: None,
         oauth_client_id: None,
         token_endpoint_url: None,
         access_token: None,
@@ -649,7 +667,10 @@ pub(crate) fn write_config(
     }
     let mut export = config.clone();
     let refs = secretize_config(&mut export, &config.profile_name)?;
-    fs::write(path, serde_yaml::to_string(&canonical_profile_value(&export)?)?)?;
+    fs::write(
+        path,
+        serde_yaml::to_string(&canonical_profile_value(&export)?)?,
+    )?;
     Ok(refs)
 }
 
@@ -940,11 +961,11 @@ fn detect_alteryx_service_path(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use ayx_core::profile::{
         load_workspace_config, Config, MongoDatabases, MongoEmbedded, MongoMode, MongoProfile,
         SqlServerConnectionProfile, SqlServerProfile, WorkspaceConfig,
     };
+    use std::collections::HashMap;
 
     fn base_config() -> Config {
         Config {

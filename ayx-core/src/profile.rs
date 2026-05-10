@@ -205,14 +205,60 @@ pub struct ApiLoggingProfile {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AlteryxOneProfile {
     pub account_email: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_endpoint_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access_token: Option<String>,
     #[serde(default)]
     pub access_token_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
     #[serde(default)]
     pub refresh_token_ref: Option<String>,
+}
+
+impl AlteryxOneProfile {
+    pub fn normalized_base_url(&self) -> Option<String> {
+        self.base_url
+            .as_deref()
+            .and_then(normalize_alteryx_one_base_url)
+            .or_else(|| {
+                self.token_endpoint_url
+                    .as_deref()
+                    .and_then(infer_alteryx_one_base_url)
+            })
+    }
+
+    pub fn effective_token_endpoint_url(&self) -> Option<String> {
+        if let Some(url) = self
+            .token_endpoint_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(url.to_string());
+        }
+        self.normalized_base_url()
+            .map(|base_url| derive_alteryx_one_token_endpoint(&base_url))
+    }
+
+    pub fn canonicalize(&mut self) {
+        if let Some(base_url) = self.normalized_base_url() {
+            self.base_url = Some(base_url.clone());
+            if self
+                .token_endpoint_url
+                .as_deref()
+                .and_then(infer_alteryx_one_base_url)
+                .is_some_and(|inferred| inferred == base_url)
+            {
+                self.token_endpoint_url = None;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -376,7 +422,7 @@ impl Config {
             })?;
             let config = apply_env_fallbacks(config.clone(), &env_values);
             let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
-            return Ok(config);
+            return Ok(overlay_active_profile_one(config));
         }
         let config: Self = serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
             path: path_str,
@@ -384,7 +430,7 @@ impl Config {
         })?;
         let config = apply_env_fallbacks(config, &env_values);
         let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
-        Ok(config)
+        Ok(overlay_active_profile_one(config))
     }
 
     fn with_server_api_overrides(mut self) -> Result<Self, ProfileError> {
@@ -431,6 +477,7 @@ impl Config {
                     one.refresh_token = resolve_secret_ref(reference)?;
                 }
             }
+            one.canonicalize();
         }
 
         if let Some(api) = self.api.as_mut() {
@@ -564,10 +611,22 @@ impl Config {
                     "alteryx_one.account_email must be a valid email".to_string(),
                 ));
             }
+            if one.normalized_base_url().is_none() {
+                return Err(ProfileError::Invalid(
+                    "alteryx_one.base_url is required".to_string(),
+                ));
+            }
             if let Some(client_id) = &one.oauth_client_id {
                 if client_id.trim().is_empty() {
                     return Err(ProfileError::Invalid(
                         "alteryx_one.oauth_client_id cannot be empty when set".to_string(),
+                    ));
+                }
+            }
+            if let Some(url) = &one.base_url {
+                if url.trim().is_empty() {
+                    return Err(ProfileError::Invalid(
+                        "alteryx_one.base_url cannot be empty when set".to_string(),
                     ));
                 }
             }
@@ -648,6 +707,22 @@ pub fn normalize_alteryx_base_url(raw: &str) -> String {
         .or_else(|| trimmed.strip_suffix("/gallery"))
         .unwrap_or(trimmed);
     stripped.trim_end_matches('/').to_string()
+}
+
+pub fn normalize_alteryx_one_base_url(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_end_matches('/');
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+pub fn derive_alteryx_one_token_endpoint(base_url: &str) -> String {
+    format!("{}/as/token", base_url.trim().trim_end_matches('/'))
+}
+
+pub fn infer_alteryx_one_base_url(token_endpoint_url: &str) -> Option<String> {
+    let trimmed = token_endpoint_url.trim().trim_end_matches('/');
+    trimmed
+        .strip_suffix("/as/token")
+        .and_then(normalize_alteryx_one_base_url)
 }
 
 fn validate_sql_connection(
@@ -787,17 +862,22 @@ fn is_workspace_value(value: &serde_yaml::Value) -> bool {
 }
 
 fn env_value(env_values: &HashMap<String, String>, name: &str) -> Option<String> {
-    env_values.get(name).cloned().or_else(|| env::var(name).ok())
+    env_values
+        .get(name)
+        .cloned()
+        .or_else(|| env::var(name).ok())
 }
 
 fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>) -> Config {
     let account_email = env_value(env_values, "AYX_ACCOUNT_EMAIL");
+    let base_url = env_value(env_values, "AYX_ONE_BASE_URL");
     let oauth_client_id = env_value(env_values, "AYX_ONE_OAUTH_CLIENT_ID");
     let token_endpoint_url = env_value(env_values, "AYX_ONE_TOKEN_ENDPOINT_URL");
     let access_token = env_value(env_values, "AYX_ONE_API_ACCESS_TOKEN");
     let refresh_token = env_value(env_values, "AYX_ONE_API_REFRESH_TOKEN");
 
     if account_email.is_some()
+        || base_url.is_some()
         || oauth_client_id.is_some()
         || token_endpoint_url.is_some()
         || access_token.is_some()
@@ -805,6 +885,7 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
     {
         let mut one = config.alteryx_one.unwrap_or(AlteryxOneProfile {
             account_email: account_email.clone().unwrap_or_default(),
+            base_url: None,
             oauth_client_id: None,
             token_endpoint_url: None,
             access_token: None,
@@ -814,6 +895,13 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         });
         if let Some(value) = account_email {
             one.account_email = value;
+        }
+        if one
+            .base_url
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            one.base_url = base_url;
         }
         if one
             .oauth_client_id
@@ -843,10 +931,89 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         {
             one.refresh_token = refresh_token;
         }
+        one.canonicalize();
         config.alteryx_one = Some(one);
     }
 
     config
+}
+
+fn overlay_active_profile_one(mut config: Config) -> Config {
+    let Some(shared_one) = load_active_profile_one() else {
+        return config;
+    };
+
+    config.alteryx_one = match config.alteryx_one.take() {
+        Some(current_one) => Some(merge_one_profiles(current_one, &shared_one)),
+        None => Some(shared_one),
+    };
+
+    config
+}
+
+fn load_active_profile_one() -> Option<AlteryxOneProfile> {
+    let state = load_ayx_state().ok()?;
+    let profile_name = state.active_profile?;
+    let path = profile_storage_path(&profile_name).ok()?;
+    Config::load_from_path_lenient(&path)
+        .ok()?
+        .alteryx_one
+        .map(|mut one| {
+            one.canonicalize();
+            one
+        })
+}
+
+fn merge_one_profiles(
+    mut current: AlteryxOneProfile,
+    fallback: &AlteryxOneProfile,
+) -> AlteryxOneProfile {
+    if current.account_email.trim().is_empty() {
+        current.account_email = fallback.account_email.clone();
+    }
+    if current
+        .base_url
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        current.base_url = fallback.base_url.clone();
+    }
+    if current
+        .oauth_client_id
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        current.oauth_client_id = fallback.oauth_client_id.clone();
+    }
+    if current
+        .token_endpoint_url
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        current.token_endpoint_url = fallback.token_endpoint_url.clone();
+    }
+    if current
+        .access_token
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        current.access_token = fallback.access_token.clone();
+    }
+    if current.access_token_ref.is_none() {
+        current.access_token_ref = fallback.access_token_ref.clone();
+    }
+    if current
+        .refresh_token
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        current.refresh_token = fallback.refresh_token.clone();
+    }
+    if current.refresh_token_ref.is_none() {
+        current.refresh_token_ref = fallback.refresh_token_ref.clone();
+    }
+    current.canonicalize();
+    current
 }
 
 fn normalize_profile_value(value: serde_yaml::Value) -> Result<serde_yaml::Value, ProfileError> {
@@ -955,7 +1122,9 @@ fn normalize_canonical_server_block(
 
     if let Some(storage_value) = server_map.get(&storage_key) {
         let Some(storage_map) = storage_value.as_mapping() else {
-            return Err(ProfileError::Invalid("server.storage must be a mapping".to_string()));
+            return Err(ProfileError::Invalid(
+                "server.storage must be a mapping".to_string(),
+            ));
         };
         let kind_key = serde_yaml::Value::String("kind".to_string());
         let kind = storage_map
@@ -1030,10 +1199,9 @@ pub fn canonical_profile_value(config: &Config) -> Result<serde_yaml::Value, Pro
             })?,
         );
     }
-    root.insert(
-        serde_yaml::Value::String("server".to_string()),
-        canonical_server_value(config)?,
-    );
+    if let Some(server) = canonical_server_value(config)? {
+        root.insert(serde_yaml::Value::String("server".to_string()), server);
+    }
     Ok(serde_yaml::Value::Mapping(root))
 }
 
@@ -1050,9 +1218,11 @@ pub fn canonical_workspace_value(
     );
     root.insert(
         serde_yaml::Value::String("active_environment".to_string()),
-        serde_yaml::to_value(&workspace.active_environment).map_err(|source| ProfileError::Parse {
-            path: "active_environment".to_string(),
-            source,
+        serde_yaml::to_value(&workspace.active_environment).map_err(|source| {
+            ProfileError::Parse {
+                path: "active_environment".to_string(),
+                source,
+            }
         })?,
     );
     let mut env_map = serde_yaml::Mapping::new();
@@ -1077,7 +1247,7 @@ pub fn canonical_workspace_value(
     Ok(serde_yaml::Value::Mapping(root))
 }
 
-fn canonical_server_value(config: &Config) -> Result<serde_yaml::Value, ProfileError> {
+fn canonical_server_value(config: &Config) -> Result<Option<serde_yaml::Value>, ProfileError> {
     let api = config.server_api.clone().or_else(|| {
         config
             .api
@@ -1091,9 +1261,9 @@ fn canonical_server_value(config: &Config) -> Result<serde_yaml::Value, ProfileE
                 })
             })
     });
-    let api = api.ok_or_else(|| {
-        ProfileError::Invalid("server.api requires server_api or api credentials".to_string())
-    })?;
+    let Some(api) = api else {
+        return Ok(None);
+    };
 
     let mut storage = serde_yaml::Mapping::new();
     let kind = if config.sqlserver.is_some() {
@@ -1140,7 +1310,7 @@ fn canonical_server_value(config: &Config) -> Result<serde_yaml::Value, ProfileE
         serde_yaml::Value::String("storage".to_string()),
         serde_yaml::Value::Mapping(storage),
     );
-    Ok(serde_yaml::Value::Mapping(server))
+    Ok(Some(serde_yaml::Value::Mapping(server)))
 }
 
 fn api_profile_to_server_api(api: &ApiProfile) -> Option<ServerApiProfile> {
@@ -1219,10 +1389,13 @@ pub fn save_ayx_state(state: &AyxState) -> Result<(), ProfileError> {
             source,
         })?;
     }
-    fs::write(&path, serde_yaml::to_string(state).map_err(|source| ProfileError::Parse {
-        path: path.display().to_string(),
-        source,
-    })?)
+    fs::write(
+        &path,
+        serde_yaml::to_string(state).map_err(|source| ProfileError::Parse {
+            path: path.display().to_string(),
+            source,
+        })?,
+    )
     .map_err(|source| ProfileError::Write {
         path: path.display().to_string(),
         source,
@@ -1366,14 +1539,16 @@ fn is_default_environments_request(path: &Path) -> bool {
 }
 
 fn is_single_component_file(path: &Path, file_name: &str) -> bool {
-    path.file_name().and_then(|v| v.to_str()) == Some(file_name)
-        && path.components().count() == 1
+    path.file_name().and_then(|v| v.to_str()) == Some(file_name) && path.components().count() == 1
 }
 
 fn is_explicit_path(path: &Path) -> bool {
     path.is_absolute()
         || path.components().any(|component| {
-            matches!(component, Component::ParentDir | Component::CurDir | Component::RootDir)
+            matches!(
+                component,
+                Component::ParentDir | Component::CurDir | Component::RootDir
+            )
         })
         || (!is_default_profile_request(path) && !is_default_environments_request(path))
 }
@@ -1421,6 +1596,9 @@ fn load_workspace_config_from_resolved(path: &Path) -> Result<WorkspaceConfig, P
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::sync::{Mutex, OnceLock};
+
+    static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     struct EnvGuard {
         key: &'static str,
@@ -1445,6 +1623,10 @@ mod tests {
         }
     }
 
+    fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        TEST_ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
     fn base_config(profile_name: &str, database: &str) -> Config {
         Config {
             profile_name: profile_name.to_string(),
@@ -1463,6 +1645,7 @@ mod tests {
             },
             alteryx_one: Some(AlteryxOneProfile {
                 account_email: "user@example.com".to_string(),
+                base_url: Some("https://us1.alteryxcloud.com".to_string()),
                 oauth_client_id: None,
                 token_endpoint_url: None,
                 access_token: None,
@@ -1608,6 +1791,60 @@ mod tests {
     }
 
     #[test]
+    fn workspace_inherits_active_profile_one_credentials() {
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let config_home = temp.path().join("ayx-home");
+        fs::create_dir_all(config_home.join("profiles")).unwrap();
+        fs::create_dir_all(config_home.join("workspaces")).unwrap();
+
+        let _guard = EnvGuard::set("AYX_CONFIG_HOME", config_home.to_str().unwrap());
+        let state = AyxState {
+            active_profile: Some("shared".to_string()),
+            active_workspace: Some("lab".to_string()),
+        };
+        save_ayx_state(&state).unwrap();
+
+        let mut profile = base_config("shared", "SharedService");
+        profile.alteryx_one.as_mut().unwrap().account_email = "shared@example.com".to_string();
+        let profile_path = profile_storage_path("shared").unwrap();
+        fs::write(&profile_path, serde_yaml::to_string(&profile).unwrap()).unwrap();
+
+        let mut workspace_env = base_config("dev", "DevService");
+        workspace_env.alteryx_one = None;
+        let workspace = WorkspaceConfig {
+            workspace_name: "lab".to_string(),
+            active_environment: "dev".to_string(),
+            environments: HashMap::from([(String::from("dev"), workspace_env)]),
+        };
+        let workspace_path = workspace_storage_path("lab").unwrap();
+        fs::write(&workspace_path, serde_yaml::to_string(&workspace).unwrap()).unwrap();
+
+        let cfg = Config::load_from_path_with_environment(
+            std::path::Path::new("environments.yaml"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.alteryx_one
+                .as_ref()
+                .map(|one| one.account_email.as_str()),
+            Some("shared@example.com")
+        );
+        assert_eq!(
+            cfg.sqlserver
+                .as_ref()
+                .unwrap()
+                .controller
+                .as_ref()
+                .unwrap()
+                .database
+                .as_deref(),
+            Some("DevService")
+        );
+    }
+
+    #[test]
     fn normalizes_alteryx_base_urls() {
         assert_eq!(
             normalize_alteryx_base_url("http://host/webapi/"),
@@ -1627,6 +1864,7 @@ mod tests {
 profile_name: canonical
 alteryx_one:
   account_email: user@example.com
+  base_url: https://us1.alteryxcloud.com
 server:
   api:
     base_url: http://localhost/webapi
@@ -1656,15 +1894,12 @@ server:
 
     #[test]
     fn resolves_default_profile_from_central_state() {
+        let _lock = test_env_lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = EnvGuard::set("AYX_CONFIG_HOME", &temp.path().display().to_string());
         let profiles_dir = temp.path().join("profiles");
         std::fs::create_dir_all(&profiles_dir).unwrap();
-        std::fs::write(
-            temp.path().join("state.yaml"),
-            "active_profile: central\n",
-        )
-        .unwrap();
+        std::fs::write(temp.path().join("state.yaml"), "active_profile: central\n").unwrap();
         std::fs::write(
             profiles_dir.join("central.yaml"),
             serde_yaml::to_string(&base_config("central", "CentralDb")).unwrap(),

@@ -7,11 +7,14 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 use serde_json::Value;
 
+use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::profile::{
     default_profile_storage_path, list_central_profiles, list_central_workspaces, load_ayx_state,
-    load_workspace_config, profile_resolution_detail, profile_storage_path, save_ayx_state,
-    workspace_storage_path, ApiLoggingProfile, AlteryxOneProfile, Config, ObservabilityProfile,
-    ServerProfile, WorkspaceConfig,
+    load_workspace_config, normalize_alteryx_base_url, normalize_alteryx_one_base_url,
+    profile_resolution_detail, profile_storage_path, save_ayx_state, workspace_storage_path,
+    AlteryxOneProfile, ApiAuth, ApiAuthMode, ApiLoggingProfile, ApiProfile, Config, MongoEmbedded,
+    MongoManaged, MongoMode, MongoProfile, ObservabilityProfile, ServerApiProfile, ServerProfile,
+    SqlServerConnectionProfile, SqlServerProfile, TlsConfig, WorkspaceConfig,
 };
 
 use crate::onboard::{
@@ -22,8 +25,8 @@ use crate::onboard::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Profiles,
-    Config,
     Credentials,
+    Config,
     Connectivity,
     Inspect,
     One,
@@ -34,8 +37,8 @@ impl Screen {
     pub fn all() -> [Screen; 6] {
         [
             Screen::Profiles,
-            Screen::Config,
             Screen::Credentials,
+            Screen::Config,
             Screen::Connectivity,
             Screen::One,
             Screen::Help,
@@ -45,8 +48,8 @@ impl Screen {
     pub fn label(self) -> &'static str {
         match self {
             Screen::Profiles => "Profiles",
-            Screen::Config => "Config",
-            Screen::Credentials => "One Credentials",
+            Screen::Credentials => "Alteryx One",
+            Screen::Config => "Alteryx Server",
             Screen::Connectivity => "Connectivity",
             Screen::Inspect => "Inspect",
             Screen::One => "One Browser",
@@ -61,8 +64,8 @@ impl Screen {
     pub fn index(self) -> usize {
         match self {
             Screen::Profiles => 0,
-            Screen::Config => 1,
-            Screen::Credentials => 2,
+            Screen::Credentials => 1,
+            Screen::Config => 2,
             Screen::Connectivity => 3,
             Screen::One => 4,
             Screen::Help => 5,
@@ -118,6 +121,49 @@ pub struct FieldState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigSection {
+    Overview,
+    ServerApi,
+    Mongo,
+    SqlServer,
+    Observability,
+}
+
+impl ConfigSection {
+    pub fn all() -> [ConfigSection; 5] {
+        [
+            ConfigSection::Overview,
+            ConfigSection::ServerApi,
+            ConfigSection::Mongo,
+            ConfigSection::SqlServer,
+            ConfigSection::Observability,
+        ]
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ConfigSection::Overview => "Overview",
+            ConfigSection::ServerApi => "Server API",
+            ConfigSection::Mongo => "Mongo",
+            ConfigSection::SqlServer => "SQL Server",
+            ConfigSection::Observability => "Observability",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        let all = Self::all();
+        let index = all.iter().position(|section| *section == self).unwrap_or(0);
+        all[(index + 1) % all.len()]
+    }
+
+    pub fn prev(self) -> Self {
+        let all = Self::all();
+        let index = all.iter().position(|section| *section == self).unwrap_or(0);
+        all[(index + all.len() - 1) % all.len()]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigFieldKind {
     Text,
     Bool,
@@ -129,11 +175,31 @@ pub struct ConfigFieldState {
     pub value: String,
     pub placeholder: &'static str,
     pub kind: ConfigFieldKind,
+    pub secret: bool,
+}
+
+impl ConfigFieldState {
+    pub fn visible_value(&self) -> String {
+        if self.secret {
+            if self.value.trim().is_empty() {
+                String::new()
+            } else {
+                "stored".to_string()
+            }
+        } else {
+            self.value.clone()
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ConfigForm {
-    pub fields: Vec<ConfigFieldState>,
+    pub section: ConfigSection,
+    pub overview_fields: Vec<ConfigFieldState>,
+    pub server_api_fields: Vec<ConfigFieldState>,
+    pub mongo_fields: Vec<ConfigFieldState>,
+    pub sqlserver_fields: Vec<ConfigFieldState>,
+    pub observability_fields: Vec<ConfigFieldState>,
     pub cursor: usize,
     pub editing: bool,
     pub edit_buffer: String,
@@ -142,46 +208,238 @@ pub struct ConfigForm {
 
 impl ConfigForm {
     pub fn from_config(config: &Config) -> Self {
+        let overview_fields = vec![
+            ConfigFieldState {
+                label: "Profile Name",
+                value: config.profile_name.clone(),
+                placeholder: "local",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Alteryx Server Base URL",
+                value: config
+                    .server
+                    .as_ref()
+                    .map(|server| server.webapi_url.clone())
+                    .unwrap_or_default(),
+                placeholder: "https://server.example.com/",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Verify TLS",
+                value: config
+                    .server
+                    .as_ref()
+                    .map(|server| server.verify_tls().to_string())
+                    .unwrap_or_else(|| "true".to_string()),
+                placeholder: "true|false",
+                kind: ConfigFieldKind::Bool,
+                secret: false,
+            },
+        ];
+
+        let server_api_source = config
+            .server_api
+            .clone()
+            .or_else(|| config.api.as_ref().and_then(api_profile_to_server_api_ref))
+            .or_else(|| config.server.as_ref().and_then(server_profile_to_server_api_ref));
+        let server_api_fields = vec![
+            ConfigFieldState {
+                label: "Base URL",
+                value: server_api_source
+                    .as_ref()
+                    .map(|api| api.base_url.clone())
+                    .unwrap_or_default(),
+                placeholder: "https://server.example.com/",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Client ID",
+                value: server_api_source
+                    .as_ref()
+                    .map(|api| api.client_id.clone())
+                    .unwrap_or_default(),
+                placeholder: "client-id",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Client Secret",
+                value: server_api_source
+                    .as_ref()
+                    .map(|api| api.client_secret.clone())
+                    .unwrap_or_default(),
+                placeholder: "stored in keyring on save",
+                kind: ConfigFieldKind::Text,
+                secret: true,
+            },
+        ];
+
+        let mongo = &config.mongo;
+        let (embedded_runtime, embedded_service, embedded_restore, managed_url, managed_host,
+            managed_port, managed_auth_db, managed_username, managed_password, managed_tls_enabled,
+            managed_tls_ca, managed_tls_cert, managed_tls_key, managed_tls_invalid_hostnames,
+            managed_timeout, managed_retry, managed_pool) = mongo_values(mongo);
+        let mongo_fields = vec![
+            ConfigFieldState {
+                label: "Mode",
+                value: match mongo.mode {
+                    ayx_core::profile::MongoMode::Embedded => "embedded",
+                    ayx_core::profile::MongoMode::Managed => "managed",
+                }
+                .to_string(),
+                placeholder: "embedded|managed",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Gallery DB",
+                value: mongo.databases.gallery_name.clone(),
+                placeholder: "AlteryxGallery",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Service DB",
+                value: mongo.databases.service_name.clone(),
+                placeholder: "AlteryxService",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Embedded RuntimeSettings",
+                value: embedded_runtime,
+                placeholder: "/path/to/RuntimeSettings.xml",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Embedded Service Path",
+                value: embedded_service,
+                placeholder: "/path/to/AlteryxService.exe",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Embedded Restore Path",
+                value: embedded_restore,
+                placeholder: "/path/to/restore",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Managed URL",
+                value: managed_url,
+                placeholder: "mongodb://...",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Managed Host",
+                value: managed_host,
+                placeholder: "mongo.example.com",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Managed Port",
+                value: managed_port,
+                placeholder: "27017",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Auth DB",
+                value: managed_auth_db,
+                placeholder: "admin",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Managed Username",
+                value: managed_username,
+                placeholder: "username",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Managed Password",
+                value: managed_password,
+                placeholder: "stored in keyring on save",
+                kind: ConfigFieldKind::Text,
+                secret: true,
+            },
+            ConfigFieldState {
+                label: "TLS Enabled",
+                value: managed_tls_enabled,
+                placeholder: "true|false",
+                kind: ConfigFieldKind::Bool,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "TLS CA Path",
+                value: managed_tls_ca,
+                placeholder: "/path/to/ca.pem",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "TLS Cert Path",
+                value: managed_tls_cert,
+                placeholder: "/path/to/cert.pem",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "TLS Key Path",
+                value: managed_tls_key,
+                placeholder: "/path/to/key.pem",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Allow Invalid Hostnames",
+                value: managed_tls_invalid_hostnames,
+                placeholder: "true|false",
+                kind: ConfigFieldKind::Bool,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Timeout ms",
+                value: managed_timeout,
+                placeholder: "5000",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Retry Count",
+                value: managed_retry,
+                placeholder: "3",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+            ConfigFieldState {
+                label: "Pool Size",
+                value: managed_pool,
+                placeholder: "10",
+                kind: ConfigFieldKind::Text,
+                secret: false,
+            },
+        ];
+
+        let sqlserver_fields = sqlserver_fields(config);
+        let observability_fields = observability_fields(config);
+
         Self {
-            fields: vec![
-                ConfigFieldState {
-                    label: "Profile Name",
-                    value: config.profile_name.clone(),
-                    placeholder: "local",
-                    kind: ConfigFieldKind::Text,
-                },
-                ConfigFieldState {
-                    label: "Server Base URL",
-                    value: config
-                        .server
-                        .as_ref()
-                        .map(|server| server.webapi_url.clone())
-                        .unwrap_or_default(),
-                    placeholder: "https://server.example.com/",
-                    kind: ConfigFieldKind::Text,
-                },
-                ConfigFieldState {
-                    label: "Verify TLS",
-                    value: config
-                        .server
-                        .as_ref()
-                        .map(|server| server.verify_tls().to_string())
-                        .unwrap_or_else(|| "true".to_string()),
-                    placeholder: "true|false",
-                    kind: ConfigFieldKind::Bool,
-                },
-                ConfigFieldState {
-                    label: "API Logging",
-                    value: config
-                        .observability
-                        .as_ref()
-                        .and_then(|obs| obs.api_logging.as_ref())
-                        .map(|logging| logging.enabled.to_string())
-                        .unwrap_or_else(|| "false".to_string()),
-                    placeholder: "true|false",
-                    kind: ConfigFieldKind::Bool,
-                },
-            ],
+            section: ConfigSection::Overview,
+            overview_fields,
+            server_api_fields,
+            mongo_fields,
+            sqlserver_fields,
+            observability_fields,
             cursor: 0,
             editing: false,
             edit_buffer: String::new(),
@@ -189,16 +447,41 @@ impl ConfigForm {
         }
     }
 
+    pub fn active_section(&self) -> ConfigSection {
+        self.section
+    }
+
     pub fn active_field(&self) -> &ConfigFieldState {
-        &self.fields[self.cursor]
+        &self.active_fields()[self.cursor]
     }
 
     pub fn active_field_mut(&mut self) -> &mut ConfigFieldState {
-        &mut self.fields[self.cursor]
+        let cursor = self.cursor;
+        &mut self.active_fields_mut()[cursor]
     }
 
     pub fn display_value(&self, index: usize) -> String {
-        self.fields[index].value.clone()
+        self.active_fields()[index].visible_value()
+    }
+
+    pub fn active_fields(&self) -> &[ConfigFieldState] {
+        match self.section {
+            ConfigSection::Overview => &self.overview_fields,
+            ConfigSection::ServerApi => &self.server_api_fields,
+            ConfigSection::Mongo => &self.mongo_fields,
+            ConfigSection::SqlServer => &self.sqlserver_fields,
+            ConfigSection::Observability => &self.observability_fields,
+        }
+    }
+
+    pub fn active_fields_mut(&mut self) -> &mut Vec<ConfigFieldState> {
+        match self.section {
+            ConfigSection::Overview => &mut self.overview_fields,
+            ConfigSection::ServerApi => &mut self.server_api_fields,
+            ConfigSection::Mongo => &mut self.mongo_fields,
+            ConfigSection::SqlServer => &mut self.sqlserver_fields,
+            ConfigSection::Observability => &mut self.observability_fields,
+        }
     }
 
     pub fn begin_edit(&mut self) {
@@ -225,9 +508,22 @@ impl ConfigForm {
     }
 
     pub fn move_cursor(&mut self, delta: isize) {
-        let len = self.fields.len() as isize;
+        let len = self.active_fields().len() as isize;
         let next = (self.cursor as isize + delta).clamp(0, len - 1);
         self.cursor = next as usize;
+    }
+
+    pub fn move_section(&mut self, delta: isize) {
+        if delta > 0 {
+            for _ in 0..delta as usize {
+                self.section = self.section.next();
+            }
+        } else if delta < 0 {
+            for _ in 0..(-delta) as usize {
+                self.section = self.section.prev();
+            }
+        }
+        self.cursor = 0;
     }
 }
 
@@ -246,9 +542,17 @@ impl CredentialsForm {
         Self {
             fields: vec![
                 FieldState {
-                    label: "Account Email",
+                    label: "Alteryx One Account Email",
                     value: one.map(|v| v.account_email.clone()).unwrap_or_default(),
                     placeholder: "operator@example.com",
+                    secret: false,
+                },
+                FieldState {
+                    label: "Alteryx One Base URL",
+                    value: one
+                        .and_then(|v| v.normalized_base_url())
+                        .unwrap_or_default(),
+                    placeholder: "https://us1.alteryxcloud.com",
                     secret: false,
                 },
                 FieldState {
@@ -260,22 +564,16 @@ impl CredentialsForm {
                     secret: false,
                 },
                 FieldState {
-                    label: "Token Endpoint URL",
-                    value: one
-                        .and_then(|v| v.token_endpoint_url.clone())
-                        .unwrap_or_default(),
-                    placeholder: "https://.../oauth/token",
-                    secret: false,
-                },
-                FieldState {
-                    label: "Access Token",
+                    label: "Alteryx One Access Token",
                     value: one.and_then(|v| v.access_token.clone()).unwrap_or_default(),
                     placeholder: "stored in keyring on save",
                     secret: true,
                 },
                 FieldState {
-                    label: "Refresh Token",
-                    value: one.and_then(|v| v.refresh_token.clone()).unwrap_or_default(),
+                    label: "Alteryx One Refresh Token",
+                    value: one
+                        .and_then(|v| v.refresh_token.clone())
+                        .unwrap_or_default(),
                     placeholder: "stored in keyring on save",
                     secret: true,
                 },
@@ -423,7 +721,6 @@ impl OneBrowserResource {
                 | OneBrowserResource::ConnectionList
         )
     }
-
 }
 
 #[derive(Debug, Clone, Default)]
@@ -510,7 +807,8 @@ impl App {
         let target_path = default_profile_storage_path().map_err(anyhow::Error::from)?;
         let current_config = Config::load_from_path_with_environment_lenient(&target_path, None)
             .unwrap_or_else(|_| default_config());
-        let resolution = profile_resolution_detail(Path::new("config.yaml")).map_err(anyhow::Error::from)?;
+        let resolution =
+            profile_resolution_detail(Path::new("config.yaml")).map_err(anyhow::Error::from)?;
 
         let mut sidebar = ListState::default();
         sidebar.select(Some(Screen::Profiles.index()));
@@ -599,6 +897,41 @@ impl App {
         summarize_config(&self.current_config)
     }
 
+    pub fn config_storage_target_label(&self) -> String {
+        match self.target_kind {
+            TargetKind::Profile => {
+                let target = self
+                    .target_path
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("profile");
+                format!("profile {target}")
+            }
+            TargetKind::Workspace => {
+                let workspace = self
+                    .selected_workspace()
+                    .map(|entry| entry.name.clone())
+                    .unwrap_or_else(|| "workspace".to_string());
+                let env = self.target_environment.as_deref().unwrap_or("active");
+                format!("workspace {workspace} env {env}")
+            }
+        }
+    }
+
+    pub fn credentials_storage_target_label(&self) -> String {
+        if matches!(self.target_kind, TargetKind::Workspace) {
+            if let Some(profile_name) = self.active_profile.as_deref() {
+                return format!("active profile {profile_name}");
+            }
+        }
+        let target = self
+            .target_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("profile");
+        format!("profile {target}")
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) {
         if self.config_form.editing {
             self.handle_config_edit_key(key);
@@ -624,8 +957,8 @@ impl App {
             KeyCode::Tab => self.handle_tab(),
             KeyCode::BackTab => self.handle_backtab(),
             KeyCode::Char('1') => self.select_screen(Screen::Profiles),
-            KeyCode::Char('2') => self.select_screen(Screen::Config),
-            KeyCode::Char('3') => self.select_screen(Screen::Credentials),
+            KeyCode::Char('2') => self.select_screen(Screen::Credentials),
+            KeyCode::Char('3') => self.select_screen(Screen::Config),
             KeyCode::Char('4') => self.select_screen(Screen::Connectivity),
             KeyCode::Char('5') => self.select_screen(Screen::One),
             KeyCode::Char('6') => self.select_screen(Screen::Help),
@@ -639,7 +972,9 @@ impl App {
     fn handle_credentials_edit_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => self.credentials.cancel_edit(),
-            KeyCode::Enter | KeyCode::Char('\r') | KeyCode::Char('\n') => self.credentials.commit_edit(),
+            KeyCode::Enter | KeyCode::Char('\r') | KeyCode::Char('\n') => {
+                self.credentials.commit_edit()
+            }
             KeyCode::Backspace => {
                 self.credentials.edit_buffer.pop();
             }
@@ -656,7 +991,9 @@ impl App {
     fn handle_config_edit_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => self.config_form.cancel_edit(),
-            KeyCode::Enter | KeyCode::Char('\r') | KeyCode::Char('\n') => self.config_form.commit_edit(),
+            KeyCode::Enter | KeyCode::Char('\r') | KeyCode::Char('\n') => {
+                self.config_form.commit_edit()
+            }
             KeyCode::Backspace => {
                 self.config_form.edit_buffer.pop();
             }
@@ -676,6 +1013,8 @@ impl App {
             Focus::Content => {
                 if self.screen == Screen::Profiles {
                     self.profiles_pane = self.profiles_pane.next();
+                } else if self.screen == Screen::Config {
+                    self.config_form.move_section(1);
                 } else {
                     self.focus = Focus::Sidebar;
                 }
@@ -691,6 +1030,9 @@ impl App {
                     ProfilesPane::Workspaces => ProfilesPane::Profiles,
                     ProfilesPane::Environments => ProfilesPane::Workspaces,
                 };
+            }
+            Focus::Content if self.screen == Screen::Config => {
+                self.config_form.move_section(-1);
             }
             Focus::Content => self.focus = Focus::Sidebar,
             Focus::Sidebar => self.focus = Focus::Content,
@@ -862,10 +1204,12 @@ impl App {
                     self.push_toast(err.to_string(), true);
                 }
             }
-            KeyCode::Tab => self.one_browser.pane = match self.one_browser.pane {
-                OneBrowserPane::Resources => OneBrowserPane::Items,
-                OneBrowserPane::Items => OneBrowserPane::Resources,
-            },
+            KeyCode::Tab => {
+                self.one_browser.pane = match self.one_browser.pane {
+                    OneBrowserPane::Resources => OneBrowserPane::Items,
+                    OneBrowserPane::Items => OneBrowserPane::Resources,
+                }
+            }
             KeyCode::Up | KeyCode::Char('k') => match self.one_browser.pane {
                 OneBrowserPane::Resources => self.move_one_browser_cursor(-1),
                 OneBrowserPane::Items => self.move_one_browser_item_cursor(-1),
@@ -877,30 +1221,28 @@ impl App {
             KeyCode::Char('r') => {
                 self.refresh_one_browser();
             }
-            KeyCode::Enter => {
-                match self.one_browser.pane {
-                    OneBrowserPane::Resources => {
-                        let resource = OneBrowserResource::all()[self.one_browser.cursor];
-                        if resource.accepts_selected_item() {
-                            if let Err(err) = self.open_selected_one_browser_item() {
-                                self.push_toast(err.to_string(), true);
-                            }
-                        } else if resource.needs_id() {
-                            self.one_browser.prompt = Some(OneBrowserPrompt {
-                                resource,
-                                buffer: String::new(),
-                            });
-                        } else {
-                            self.refresh_one_browser();
-                        }
-                    }
-                    OneBrowserPane::Items => {
+            KeyCode::Enter => match self.one_browser.pane {
+                OneBrowserPane::Resources => {
+                    let resource = OneBrowserResource::all()[self.one_browser.cursor];
+                    if resource.accepts_selected_item() {
                         if let Err(err) = self.open_selected_one_browser_item() {
                             self.push_toast(err.to_string(), true);
                         }
+                    } else if resource.needs_id() {
+                        self.one_browser.prompt = Some(OneBrowserPrompt {
+                            resource,
+                            buffer: String::new(),
+                        });
+                    } else {
+                        self.refresh_one_browser();
                     }
                 }
-            }
+                OneBrowserPane::Items => {
+                    if let Err(err) = self.open_selected_one_browser_item() {
+                        self.push_toast(err.to_string(), true);
+                    }
+                }
+            },
             _ => {}
         }
     }
@@ -996,7 +1338,9 @@ impl App {
 
     fn move_profiles_cursor(&mut self, delta: isize) {
         match self.profiles_pane {
-            ProfilesPane::Profiles => move_list_state(&mut self.profiles_state, self.profiles.len(), delta),
+            ProfilesPane::Profiles => {
+                move_list_state(&mut self.profiles_state, self.profiles.len(), delta)
+            }
             ProfilesPane::Workspaces => {
                 move_list_state(&mut self.workspaces_state, self.workspaces.len(), delta);
                 self.sync_workspace_env_cursor();
@@ -1060,7 +1404,11 @@ impl App {
         let Some(env) = workspace.environments.get(env_index).cloned() else {
             return Ok(());
         };
-        self.load_target(workspace.path.clone(), Some(env.clone()), TargetKind::Workspace)?;
+        self.load_target(
+            workspace.path.clone(),
+            Some(env.clone()),
+            TargetKind::Workspace,
+        )?;
         self.status_message = format!("Workspace {} environment set to {env}", workspace.name);
         Ok(())
     }
@@ -1072,10 +1420,8 @@ impl App {
         kind: TargetKind,
     ) -> Result<()> {
         let config = match kind {
-            TargetKind::Profile => {
-                Config::load_from_path_with_environment_lenient(&path, None)
-                    .unwrap_or_else(|_| default_config())
-            }
+            TargetKind::Profile => Config::load_from_path_with_environment_lenient(&path, None)
+                .unwrap_or_else(|_| default_config()),
             TargetKind::Workspace => {
                 Config::load_from_path_with_environment_lenient(&path, environment.as_deref())?
             }
@@ -1094,11 +1440,20 @@ impl App {
 
     fn save_config(&mut self) -> Result<()> {
         let mut config = self.current_config.clone();
-        config.profile_name = self.config_form.fields[0].value.trim().to_string();
+        config.profile_name = field_value(&self.config_form.overview_fields, "Profile Name")
+            .trim()
+            .to_string();
 
-        let server_base_url = self.config_form.fields[1].value.trim().to_string();
-        let verify_tls = parse_bool_field(&self.config_form.fields[2].value, true)?;
-        let api_logging_enabled = parse_bool_field(&self.config_form.fields[3].value, false)?;
+        let server_base_url = field_value(
+            &self.config_form.overview_fields,
+            "Alteryx Server Base URL",
+        )
+        .trim()
+        .to_string();
+        let verify_tls = parse_bool_field(
+            field_value(&self.config_form.overview_fields, "Verify TLS"),
+            true,
+        )?;
 
         if !server_base_url.is_empty() || config.server.is_some() {
             let mut server = config.server.unwrap_or_else(default_server_profile);
@@ -1107,36 +1462,300 @@ impl App {
             }
             server.verify_tls = Some(verify_tls);
             config.server = Some(server);
+        } else {
+            config.server = None;
         }
 
-        if api_logging_enabled || config.observability.is_some() {
-            let mut observability = config.observability.unwrap_or(ObservabilityProfile {
-                api_logging: None,
+        let server_api_base = field_value(&self.config_form.server_api_fields, "Base URL")
+            .trim()
+            .to_string();
+        let server_api_client_id = field_value(&self.config_form.server_api_fields, "Client ID")
+            .trim()
+            .to_string();
+        let server_api_client_secret = field_value(
+            &self.config_form.server_api_fields,
+            "Client Secret",
+        )
+        .trim()
+        .to_string();
+        if !server_api_base.is_empty()
+            || !server_api_client_id.is_empty()
+            || !server_api_client_secret.is_empty()
+            || config.api.is_some()
+        {
+            let mut api = config.api.unwrap_or(ApiProfile {
+                base_url: String::new(),
+                auth: ApiAuth {
+                    mode: ApiAuthMode::Oauth2ClientCredentials,
+                    pat: None,
+                    client_id: None,
+                    client_secret: None,
+                    client_secret_ref: None,
+                    scope: Some(String::new()),
+                },
+                timeout_ms: None,
             });
-            let mut api_logging = observability
-                .api_logging
-                .unwrap_or(ApiLoggingProfile {
-                    enabled: false,
-                    path: None,
-                    redact_bodies: None,
-                    log_requests: None,
-                    log_responses: None,
-                });
+            if !server_api_base.is_empty() {
+                api.base_url = normalize_alteryx_base_url(&server_api_base);
+            }
+            api.auth.mode = ApiAuthMode::Oauth2ClientCredentials;
+            api.auth.client_id = option_string(&server_api_client_id);
+            api.auth.client_secret = option_string(&server_api_client_secret);
+            api.auth.client_secret_ref = None;
+            api.auth.pat = None;
+            config.api = Some(api);
+        } else {
+            config.api = None;
+        }
+        config.server_api = None;
+
+        let mongo_mode = field_value(&self.config_form.mongo_fields, "Mode")
+            .trim()
+            .to_ascii_lowercase();
+        config.mongo.databases.gallery_name =
+            field_value(&self.config_form.mongo_fields, "Gallery DB")
+                .trim()
+                .to_string();
+        config.mongo.databases.service_name =
+            field_value(&self.config_form.mongo_fields, "Service DB")
+                .trim()
+                .to_string();
+
+        match mongo_mode.as_str() {
+            "embedded" => {
+                config.mongo.mode = MongoMode::Embedded;
+                let mut embedded = config.mongo.embedded.unwrap_or_else(default_mongo_embedded);
+                embedded.runtime_settings_path =
+                    parse_optional_text_field(&self.config_form.mongo_fields, "Embedded RuntimeSettings");
+                embedded.alteryx_service_path =
+                    parse_optional_text_field(&self.config_form.mongo_fields, "Embedded Service Path");
+                embedded.restore_target_path =
+                    parse_optional_text_field(&self.config_form.mongo_fields, "Embedded Restore Path");
+                config.mongo.embedded = Some(embedded);
+                config.mongo.managed = None;
+            }
+            "managed" => {
+                config.mongo.mode = MongoMode::Managed;
+                let mut managed = config.mongo.managed.unwrap_or_else(default_mongo_managed);
+                let managed_url = parse_optional_text_field(&self.config_form.mongo_fields, "Managed URL");
+                let managed_host = parse_optional_text_field(&self.config_form.mongo_fields, "Managed Host");
+                if managed_url.is_some() {
+                    managed.url = managed_url;
+                    managed.host = None;
+                } else {
+                    managed.url = None;
+                    managed.host = managed_host;
+                }
+                managed.port = parse_u16_field(&self.config_form.mongo_fields, "Managed Port", managed.port)?;
+                managed.auth_database =
+                    parse_optional_text_field(&self.config_form.mongo_fields, "Auth DB");
+                managed.username =
+                    parse_optional_text_field(&self.config_form.mongo_fields, "Managed Username");
+                managed.password =
+                    parse_optional_text_field(&self.config_form.mongo_fields, "Managed Password");
+                managed.tls.enabled = parse_bool_field(
+                    field_value(&self.config_form.mongo_fields, "TLS Enabled"),
+                    false,
+                )?;
+                if managed.tls.enabled {
+                    managed.tls.ca_path =
+                        parse_optional_text_field(&self.config_form.mongo_fields, "TLS CA Path");
+                    managed.tls.cert_path =
+                        parse_optional_text_field(&self.config_form.mongo_fields, "TLS Cert Path");
+                    managed.tls.key_path =
+                        parse_optional_text_field(&self.config_form.mongo_fields, "TLS Key Path");
+                    managed.tls.allow_invalid_hostnames = Some(parse_bool_field(
+                        field_value(
+                            &self.config_form.mongo_fields,
+                            "Allow Invalid Hostnames",
+                        ),
+                        false,
+                    )?);
+                } else {
+                    managed.tls.ca_path = None;
+                    managed.tls.cert_path = None;
+                    managed.tls.key_path = None;
+                    managed.tls.allow_invalid_hostnames = None;
+                }
+                managed.timeout_ms =
+                    parse_u64_field(&self.config_form.mongo_fields, "Timeout ms")?;
+                managed.retry_count =
+                    parse_u32_field(&self.config_form.mongo_fields, "Retry Count")?;
+                managed.max_pool_size =
+                    parse_u32_field(&self.config_form.mongo_fields, "Pool Size")?;
+                config.mongo.managed = Some(managed);
+                config.mongo.embedded = None;
+            }
+            "" => {}
+            other => {
+                return Err(anyhow!(
+                    "expected mongo mode to be embedded or managed, got '{other}'"
+                ));
+            }
+        }
+
+        let sqlserver_has_input = self
+            .config_form
+            .sqlserver_fields
+            .iter()
+            .any(|field| {
+                matches!(
+                    field.label,
+                    "Controller Host"
+                        | "Controller Port"
+                        | "Controller Database"
+                        | "Controller Username"
+                        | "Controller Password"
+                        | "Controller Conn Str"
+                        | "Server UI Host"
+                        | "Server UI Port"
+                        | "Server UI Database"
+                        | "Server UI Username"
+                        | "Server UI Password"
+                        | "Server UI Conn Str"
+                        | "Legacy Conn Str"
+                ) && !field.value.trim().is_empty()
+            })
+            || parse_bool_field(
+                field_value(&self.config_form.sqlserver_fields, "Controller Integrated"),
+                false,
+            )?
+            || parse_bool_field(
+                field_value(&self.config_form.sqlserver_fields, "Controller Encrypt"),
+                false,
+            )?
+            || parse_bool_field(
+                field_value(&self.config_form.sqlserver_fields, "Controller Trust Cert"),
+                false,
+            )?
+            || parse_bool_field(
+                field_value(&self.config_form.sqlserver_fields, "Controller MultiSubnet"),
+                false,
+            )?
+            || parse_bool_field(
+                field_value(&self.config_form.sqlserver_fields, "Server UI Integrated"),
+                false,
+            )?
+            || parse_bool_field(
+                field_value(&self.config_form.sqlserver_fields, "Server UI Encrypt"),
+                false,
+            )?
+            || parse_bool_field(
+                field_value(&self.config_form.sqlserver_fields, "Server UI Trust Cert"),
+                false,
+            )?
+            || parse_bool_field(
+                field_value(&self.config_form.sqlserver_fields, "Server UI MultiSubnet"),
+                false,
+            )?;
+        if config.sqlserver.is_some() || sqlserver_has_input {
+            let mut sqlserver = config.sqlserver.unwrap_or_else(default_sqlserver_profile);
+            sqlserver.controller = Some(update_sql_connection(
+                sqlserver.controller.take(),
+                "Controller",
+                "AYX_SQL_CONTROLLER_PASSWORD",
+                &self.config_form.sqlserver_fields,
+            )?);
+            sqlserver.server_ui = Some(update_sql_connection(
+                sqlserver.server_ui.take(),
+                "Server UI",
+                "AYX_SQL_SERVER_UI_PASSWORD",
+                &self.config_form.sqlserver_fields,
+            )?);
+            sqlserver.legacy_connection_string = parse_optional_text_field(
+                &self.config_form.sqlserver_fields,
+                "Legacy Conn Str",
+            );
+            config.sqlserver = Some(sqlserver);
+        } else {
+            config.sqlserver = None;
+        }
+
+        let observability_has_input = config.observability.is_some()
+            || parse_bool_field(
+                field_value(&self.config_form.observability_fields, "API Logging Enabled"),
+                false,
+            )?
+            || !field_value(&self.config_form.observability_fields, "API Logging Path")
+                .trim()
+                .is_empty()
+            || parse_bool_field(
+                field_value(&self.config_form.observability_fields, "Redact Bodies"),
+                false,
+            )?
+            || parse_bool_field(
+                field_value(&self.config_form.observability_fields, "Log Requests"),
+                false,
+            )?
+            || parse_bool_field(
+                field_value(&self.config_form.observability_fields, "Log Responses"),
+                false,
+            )?;
+        if observability_has_input {
+            let api_logging_enabled = parse_bool_field(
+                field_value(&self.config_form.observability_fields, "API Logging Enabled"),
+                false,
+            )?;
+            let mut observability = config
+                .observability
+                .unwrap_or(ObservabilityProfile { api_logging: None });
+            let mut api_logging = observability.api_logging.unwrap_or(ApiLoggingProfile {
+                enabled: false,
+                path: None,
+                redact_bodies: None,
+                log_requests: None,
+                log_responses: None,
+            });
             api_logging.enabled = api_logging_enabled;
+            api_logging.path = parse_optional_text_field(
+                &self.config_form.observability_fields,
+                "API Logging Path",
+            );
+            api_logging.redact_bodies = Some(parse_bool_field(
+                field_value(&self.config_form.observability_fields, "Redact Bodies"),
+                false,
+            )?);
+            api_logging.log_requests = Some(parse_bool_field(
+                field_value(&self.config_form.observability_fields, "Log Requests"),
+                false,
+            )?);
+            api_logging.log_responses = Some(parse_bool_field(
+                field_value(&self.config_form.observability_fields, "Log Responses"),
+                false,
+            )?);
             observability.api_logging = Some(api_logging);
             config.observability = Some(observability);
+        } else {
+            config.observability = None;
         }
 
         self.persist_current_config(config)?;
-        self.status_message = "Config saved".to_string();
-        self.push_toast("Config saved with canonical profile persistence".to_string(), false);
+        self.status_message = "Alteryx Server config saved".to_string();
+        self.push_toast(
+            "Alteryx Server config saved with canonical profile persistence".to_string(),
+            false,
+        );
         Ok(())
     }
 
     fn save_credentials(&mut self) -> Result<()> {
-        let mut config = self.current_config.clone();
+        let mut config = match self.target_kind {
+            TargetKind::Workspace => {
+                if let Some(profile_name) = self.active_profile.as_ref() {
+                    let path = profile_storage_path(profile_name).map_err(anyhow::Error::from)?;
+                    let mut config = Config::load_from_path_with_environment_lenient(&path, None)
+                        .unwrap_or_else(|_| default_config());
+                    config.profile_name = profile_name.clone();
+                    config
+                } else {
+                    self.current_config.clone()
+                }
+            }
+            TargetKind::Profile => self.current_config.clone(),
+        };
         let mut one = config.alteryx_one.unwrap_or(AlteryxOneProfile {
             account_email: String::new(),
+            base_url: None,
             oauth_client_id: None,
             token_endpoint_url: None,
             access_token: None,
@@ -1146,15 +1765,76 @@ impl App {
         });
 
         one.account_email = self.credentials.fields[0].value.clone();
-        one.oauth_client_id = option_string(&self.credentials.fields[1].value);
-        one.token_endpoint_url = option_string(&self.credentials.fields[2].value);
+        one.base_url = normalize_alteryx_one_base_url(&self.credentials.fields[1].value);
+        one.oauth_client_id = option_string(&self.credentials.fields[2].value);
+        one.token_endpoint_url = None;
         one.access_token = option_string(&self.credentials.fields[3].value);
         one.refresh_token = option_string(&self.credentials.fields[4].value);
         config.alteryx_one = Some(one);
 
-        self.persist_current_config(config)?;
-        self.status_message = "One credentials saved".to_string();
-        self.push_toast("Credentials saved with canonical profile persistence".to_string(), false);
+        let saved_to_profile =
+            matches!(self.target_kind, TargetKind::Workspace) && self.active_profile.is_some();
+        self.persist_one_config(config)?;
+        self.status_message = if saved_to_profile {
+            "Alteryx One credentials saved to active profile".to_string()
+        } else {
+            "Alteryx One credentials saved".to_string()
+        };
+        self.push_toast(
+            if saved_to_profile {
+                "Credentials saved to the active profile; workspace config keeps server-specific settings only".to_string()
+            } else {
+                "Credentials saved with canonical profile persistence".to_string()
+            },
+            false,
+        );
+        Ok(())
+    }
+
+    fn persist_one_config(&mut self, config: Config) -> Result<()> {
+        let mut secret_refs: BTreeMap<String, String> = BTreeMap::new();
+        let reload_path = match self.target_kind {
+            TargetKind::Profile => self.target_path.clone(),
+            TargetKind::Workspace => {
+                if let Some(profile_name) = self.active_profile.as_ref() {
+                    profile_storage_path(profile_name).map_err(anyhow::Error::from)?
+                } else {
+                    self.target_path.clone()
+                }
+            }
+        };
+        match self.target_kind {
+            TargetKind::Profile => {
+                secret_refs = write_config(&self.target_path, &config, &secret_refs)?;
+            }
+            TargetKind::Workspace => {
+                if let Some(profile_name) = self.active_profile.as_ref() {
+                    let profile_path =
+                        profile_storage_path(profile_name).map_err(anyhow::Error::from)?;
+                    secret_refs = write_config(&profile_path, &config, &secret_refs)?;
+                } else {
+                    secret_refs = write_config(&self.target_path, &config, &secret_refs)?;
+                }
+            }
+        }
+        self.current_config = Config::load_from_path_with_environment_lenient(
+            &reload_path,
+            self.target_environment.as_deref(),
+        )?;
+        self.config_form = ConfigForm::from_config(&self.current_config);
+        self.credentials = CredentialsForm::from_config(&self.current_config);
+        self.refresh_connectivity();
+        self.refresh_one_browser();
+        if secret_refs
+            .values()
+            .any(|reference| reference.starts_with("inline:"))
+        {
+            self.push_toast(
+                "Saved with inline secret refs because the keyring backend was unavailable."
+                    .to_string(),
+                false,
+            );
+        }
         Ok(())
     }
 
@@ -1165,12 +1845,17 @@ impl App {
                 write_config(&self.target_path, &config, &secret_refs)?;
             }
             TargetKind::Workspace => {
-                let mut workspace = load_workspace_config(&self.target_path).map_err(anyhow::Error::from)?;
+                let mut workspace =
+                    load_workspace_config(&self.target_path).map_err(anyhow::Error::from)?;
                 let env_name = self
                     .target_environment
                     .clone()
                     .unwrap_or_else(|| workspace.active_environment.clone());
-                workspace.environments.insert(env_name, config.clone());
+                let mut persisted = config.clone();
+                if self.active_profile.is_some() {
+                    persisted.alteryx_one = None;
+                }
+                workspace.environments.insert(env_name, persisted);
                 write_workspace_config(&self.target_path, &workspace)?;
             }
         }
@@ -1297,9 +1982,15 @@ impl App {
         id: Option<&str>,
     ) -> Result<Value> {
         let envelope = match resource {
-            OneBrowserResource::AuthStatus => crate::one_platform_auth_status_envelope(&self.current_config)?,
-            OneBrowserResource::AuthDiagnose => crate::one_platform_auth_diagnose_envelope(&self.current_config)?,
-            OneBrowserResource::SurfaceInventory => crate::one_surface_inventory_envelope(&self.current_config)?,
+            OneBrowserResource::AuthStatus => {
+                crate::one_platform_auth_status_envelope(&self.current_config)?
+            }
+            OneBrowserResource::AuthDiagnose => {
+                crate::one_platform_auth_diagnose_envelope(&self.current_config)?
+            }
+            OneBrowserResource::SurfaceInventory => {
+                crate::one_surface_inventory_envelope(&self.current_config)?
+            }
             OneBrowserResource::WorkspaceCurrent => crate::one_api_live_request(
                 &self.current_config,
                 "platform",
@@ -1418,12 +2109,424 @@ impl App {
     }
 }
 
+fn api_profile_to_server_api_ref(api: &ApiProfile) -> Option<ServerApiProfile> {
+    let client_id = api.auth.client_id.as_ref()?.clone();
+    let client_secret = api.auth.client_secret.as_ref()?.clone();
+    Some(ServerApiProfile {
+        base_url: api.base_url.clone(),
+        client_id,
+        client_secret,
+    })
+}
+
+fn server_profile_to_server_api_ref(server: &ServerProfile) -> Option<ServerApiProfile> {
+    Some(ServerApiProfile {
+        base_url: server.webapi_url.clone(),
+        client_id: server.curator_api_key.clone(),
+        client_secret: server.curator_api_secret.clone(),
+    })
+}
+
+fn mongo_values(
+    mongo: &MongoProfile,
+) -> (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+) {
+    let embedded = mongo.embedded.as_ref();
+    let managed = mongo.managed.as_ref();
+    (
+        embedded
+            .and_then(|value| value.runtime_settings_path.clone())
+            .unwrap_or_default(),
+        embedded
+            .and_then(|value| value.alteryx_service_path.clone())
+            .unwrap_or_default(),
+        embedded
+            .and_then(|value| value.restore_target_path.clone())
+            .unwrap_or_default(),
+        managed
+            .and_then(|value| value.url.clone())
+            .unwrap_or_default(),
+        managed
+            .and_then(|value| value.host.clone())
+            .unwrap_or_default(),
+        managed
+            .map(|value| value.port.to_string())
+            .unwrap_or_default(),
+        managed
+            .and_then(|value| value.auth_database.clone())
+            .unwrap_or_default(),
+        managed
+            .and_then(|value| value.username.clone())
+            .unwrap_or_default(),
+        managed
+            .and_then(|value| value.password.clone())
+            .unwrap_or_default(),
+        managed
+            .map(|value| value.tls.enabled.to_string())
+            .unwrap_or_else(|| "false".to_string()),
+        managed
+            .and_then(|value| value.tls.ca_path.clone())
+            .unwrap_or_default(),
+        managed
+            .and_then(|value| value.tls.cert_path.clone())
+            .unwrap_or_default(),
+        managed
+            .and_then(|value| value.tls.key_path.clone())
+            .unwrap_or_default(),
+        managed
+            .and_then(|value| value.tls.allow_invalid_hostnames)
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "false".to_string()),
+        managed
+            .and_then(|value| value.timeout_ms)
+            .map(|value| value.to_string())
+            .unwrap_or_default(),
+        managed
+            .and_then(|value| value.retry_count)
+            .map(|value| value.to_string())
+            .unwrap_or_default(),
+        managed
+        .and_then(|value| value.max_pool_size)
+            .map(|value| value.to_string())
+            .unwrap_or_default(),
+    )
+}
+
+fn sqlserver_fields(config: &Config) -> Vec<ConfigFieldState> {
+    let sql = config.sqlserver.as_ref();
+    let controller = sql.and_then(|value| value.controller.as_ref());
+    let server_ui = sql.and_then(|value| value.server_ui.as_ref());
+
+    vec![
+        ConfigFieldState {
+            label: "Controller Host",
+            value: controller
+                .and_then(|value| value.host.clone())
+                .unwrap_or_default(),
+            placeholder: "localhost",
+            kind: ConfigFieldKind::Text,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Controller Port",
+            value: controller
+                .and_then(|value| value.port.map(|port| port.to_string()))
+                .unwrap_or_default(),
+            placeholder: "1433",
+            kind: ConfigFieldKind::Text,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Controller Database",
+            value: controller
+                .and_then(|value| value.database.clone())
+                .unwrap_or_default(),
+            placeholder: "AlteryxService",
+            kind: ConfigFieldKind::Text,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Controller Username",
+            value: controller
+                .and_then(|value| value.username.clone())
+                .unwrap_or_default(),
+            placeholder: "sa",
+            kind: ConfigFieldKind::Text,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Controller Password",
+            value: controller
+                .and_then(|value| value.password.clone())
+                .unwrap_or_default(),
+            placeholder: "stored in keyring on save",
+            kind: ConfigFieldKind::Text,
+            secret: true,
+        },
+        ConfigFieldState {
+            label: "Controller Integrated",
+            value: controller
+                .and_then(|value| value.integrated_security)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "false".to_string()),
+            placeholder: "true|false",
+            kind: ConfigFieldKind::Bool,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Controller Encrypt",
+            value: controller
+                .and_then(|value| value.encrypt)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "false".to_string()),
+            placeholder: "true|false",
+            kind: ConfigFieldKind::Bool,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Controller Trust Cert",
+            value: controller
+                .and_then(|value| value.trust_server_certificate)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "false".to_string()),
+            placeholder: "true|false",
+            kind: ConfigFieldKind::Bool,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Controller MultiSubnet",
+            value: controller
+                .and_then(|value| value.multi_subnet_failover)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "false".to_string()),
+            placeholder: "true|false",
+            kind: ConfigFieldKind::Bool,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Controller Conn Str",
+            value: controller
+                .and_then(|value| value.connection_string.clone())
+                .unwrap_or_default(),
+            placeholder: "connection string",
+            kind: ConfigFieldKind::Text,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Server UI Host",
+            value: server_ui
+                .and_then(|value| value.host.clone())
+                .unwrap_or_default(),
+            placeholder: "localhost",
+            kind: ConfigFieldKind::Text,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Server UI Port",
+            value: server_ui
+                .and_then(|value| value.port.map(|port| port.to_string()))
+                .unwrap_or_default(),
+            placeholder: "1433",
+            kind: ConfigFieldKind::Text,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Server UI Database",
+            value: server_ui
+                .and_then(|value| value.database.clone())
+                .unwrap_or_default(),
+            placeholder: "AlteryxServerUI",
+            kind: ConfigFieldKind::Text,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Server UI Username",
+            value: server_ui
+                .and_then(|value| value.username.clone())
+                .unwrap_or_default(),
+            placeholder: "sa",
+            kind: ConfigFieldKind::Text,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Server UI Password",
+            value: server_ui
+                .and_then(|value| value.password.clone())
+                .unwrap_or_default(),
+            placeholder: "stored in keyring on save",
+            kind: ConfigFieldKind::Text,
+            secret: true,
+        },
+        ConfigFieldState {
+            label: "Server UI Integrated",
+            value: server_ui
+                .and_then(|value| value.integrated_security)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "false".to_string()),
+            placeholder: "true|false",
+            kind: ConfigFieldKind::Bool,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Server UI Encrypt",
+            value: server_ui
+                .and_then(|value| value.encrypt)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "false".to_string()),
+            placeholder: "true|false",
+            kind: ConfigFieldKind::Bool,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Server UI Trust Cert",
+            value: server_ui
+                .and_then(|value| value.trust_server_certificate)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "false".to_string()),
+            placeholder: "true|false",
+            kind: ConfigFieldKind::Bool,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Server UI MultiSubnet",
+            value: server_ui
+                .and_then(|value| value.multi_subnet_failover)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "false".to_string()),
+            placeholder: "true|false",
+            kind: ConfigFieldKind::Bool,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Server UI Conn Str",
+            value: server_ui
+                .and_then(|value| value.connection_string.clone())
+                .unwrap_or_default(),
+            placeholder: "connection string",
+            kind: ConfigFieldKind::Text,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Legacy Conn Str",
+            value: sql
+                .and_then(|value| value.legacy_connection_string.clone())
+                .unwrap_or_default(),
+            placeholder: "legacy connection string",
+            kind: ConfigFieldKind::Text,
+            secret: false,
+        },
+    ]
+}
+
+fn observability_fields(config: &Config) -> Vec<ConfigFieldState> {
+    let api_logging = config
+        .observability
+        .as_ref()
+        .and_then(|value| value.api_logging.as_ref());
+    vec![
+        ConfigFieldState {
+            label: "API Logging Enabled",
+            value: api_logging
+                .map(|value| value.enabled.to_string())
+                .unwrap_or_else(|| "false".to_string()),
+            placeholder: "true|false",
+            kind: ConfigFieldKind::Bool,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "API Logging Path",
+            value: api_logging
+                .and_then(|value| value.path.clone())
+                .unwrap_or_default(),
+            placeholder: "/path/to/logs",
+            kind: ConfigFieldKind::Text,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Redact Bodies",
+            value: api_logging
+                .and_then(|value| value.redact_bodies)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "false".to_string()),
+            placeholder: "true|false",
+            kind: ConfigFieldKind::Bool,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Log Requests",
+            value: api_logging
+                .and_then(|value| value.log_requests)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "false".to_string()),
+            placeholder: "true|false",
+            kind: ConfigFieldKind::Bool,
+            secret: false,
+        },
+        ConfigFieldState {
+            label: "Log Responses",
+            value: api_logging
+                .and_then(|value| value.log_responses)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "false".to_string()),
+            placeholder: "true|false",
+            kind: ConfigFieldKind::Bool,
+            secret: false,
+        },
+    ]
+}
+
 fn normalize_server_url(url: &str) -> String {
     let trimmed = url.trim();
     if trimmed.ends_with('/') {
         trimmed.to_string()
     } else {
         format!("{trimmed}/")
+    }
+}
+
+fn field_value<'a>(fields: &'a [ConfigFieldState], label: &str) -> &'a str {
+    fields
+        .iter()
+        .find(|field| field.label == label)
+        .map(|field| field.value.as_str())
+        .unwrap_or("")
+}
+
+fn parse_u16_field(fields: &[ConfigFieldState], label: &str, default: u16) -> Result<u16> {
+    let value = field_value(fields, label).trim();
+    if value.is_empty() {
+        return Ok(default);
+    }
+    value
+        .parse::<u16>()
+        .map_err(|_| anyhow!("expected a whole number for {label}"))
+}
+
+fn parse_u32_field(fields: &[ConfigFieldState], label: &str) -> Result<Option<u32>> {
+    let value = field_value(fields, label).trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    value
+        .parse::<u32>()
+        .map(Some)
+        .map_err(|_| anyhow!("expected a whole number for {label}"))
+}
+
+fn parse_u64_field(fields: &[ConfigFieldState], label: &str) -> Result<Option<u64>> {
+    let value = field_value(fields, label).trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    value
+        .parse::<u64>()
+        .map(Some)
+        .map_err(|_| anyhow!("expected a whole number for {label}"))
+}
+
+fn parse_optional_text_field(fields: &[ConfigFieldState], label: &str) -> Option<String> {
+    let value = field_value(fields, label).trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
     }
 }
 
@@ -1437,6 +2540,122 @@ fn parse_bool_field(value: &str, default: bool) -> Result<bool> {
         "false" | "no" | "n" | "0" | "off" => Ok(false),
         _ => Err(anyhow!("expected true/false value")),
     }
+}
+
+fn default_mongo_embedded() -> MongoEmbedded {
+    MongoEmbedded {
+        runtime_settings_path: Some(DEFAULT_RUNTIME_SETTINGS_PATH.to_string()),
+        alteryx_service_path: None,
+        restore_target_path: None,
+    }
+}
+
+fn default_mongo_managed() -> MongoManaged {
+    MongoManaged {
+        url: None,
+        host: None,
+        port: 27017,
+        auth_database: None,
+        username: None,
+        password: None,
+        password_ref: None,
+        tls: TlsConfig {
+            enabled: false,
+            ca_path: None,
+            cert_path: None,
+            key_path: None,
+            allow_invalid_hostnames: None,
+        },
+        timeout_ms: None,
+        retry_count: None,
+        max_pool_size: None,
+    }
+}
+
+fn default_sqlserver_profile() -> SqlServerProfile {
+    SqlServerProfile {
+        controller: Some(SqlServerConnectionProfile {
+            connection_string: None,
+            host: Some("localhost".to_string()),
+            port: Some(1433),
+            database: Some("AlteryxService".to_string()),
+            username: Some("sa".to_string()),
+            password: None,
+            password_ref: None,
+            password_env: Some("AYX_SQL_CONTROLLER_PASSWORD".to_string()),
+            integrated_security: Some(true),
+            encrypt: Some(true),
+            trust_server_certificate: Some(false),
+            multi_subnet_failover: Some(false),
+        }),
+        server_ui: Some(SqlServerConnectionProfile {
+            connection_string: None,
+            host: Some("localhost".to_string()),
+            port: Some(1433),
+            database: Some("AlteryxServerUI".to_string()),
+            username: Some("sa".to_string()),
+            password: None,
+            password_ref: None,
+            password_env: Some("AYX_SQL_SERVER_UI_PASSWORD".to_string()),
+            integrated_security: Some(false),
+            encrypt: Some(true),
+            trust_server_certificate: Some(false),
+            multi_subnet_failover: Some(false),
+        }),
+        legacy_connection_string: None,
+    }
+}
+
+fn update_sql_connection(
+    existing: Option<SqlServerConnectionProfile>,
+    label: &str,
+    password_env: &str,
+    fields: &[ConfigFieldState],
+) -> Result<SqlServerConnectionProfile> {
+    let mut conn = existing.unwrap_or_else(|| SqlServerConnectionProfile {
+        connection_string: None,
+        host: None,
+        port: None,
+        database: None,
+        username: None,
+        password: None,
+        password_ref: None,
+        password_env: Some(password_env.to_string()),
+        integrated_security: Some(false),
+        encrypt: Some(true),
+        trust_server_certificate: Some(false),
+        multi_subnet_failover: Some(false),
+    });
+    conn.host = parse_optional_text_field(fields, &format!("{label} Host"));
+    conn.port = Some(parse_u16_field(
+        fields,
+        &format!("{label} Port"),
+        conn.port.unwrap_or(1433),
+    )?);
+    conn.database = parse_optional_text_field(fields, &format!("{label} Database"));
+    conn.username = parse_optional_text_field(fields, &format!("{label} Username"));
+    conn.password = parse_optional_text_field(fields, &format!("{label} Password"));
+    conn.integrated_security = Some(parse_bool_field(
+        field_value(fields, &format!("{label} Integrated")),
+        conn.integrated_security.unwrap_or(false),
+    )?);
+    conn.encrypt = Some(parse_bool_field(
+        field_value(fields, &format!("{label} Encrypt")),
+        conn.encrypt.unwrap_or(true),
+    )?);
+    conn.trust_server_certificate = Some(parse_bool_field(
+        field_value(fields, &format!("{label} Trust Cert")),
+        conn.trust_server_certificate.unwrap_or(false),
+    )?);
+    conn.multi_subnet_failover = Some(parse_bool_field(
+        field_value(fields, &format!("{label} MultiSubnet")),
+        conn.multi_subnet_failover.unwrap_or(false),
+    )?);
+    conn.connection_string = parse_optional_text_field(fields, &format!("{label} Conn Str"));
+    if conn.password_env.is_none() {
+        conn.password_env = Some(password_env.to_string());
+    }
+    Ok(conn)
 }
 
 fn default_server_profile() -> ServerProfile {
@@ -1582,7 +2801,8 @@ fn preferred_item_array<'a>(resource: OneBrowserResource, value: &'a Value) -> O
             "deferred_surfaces",
         ]
         .as_slice(),
-        OneBrowserResource::WorkspaceCurrentConfiguration | OneBrowserResource::WorkspaceCurrentConfigurationSchema => &["environments"],
+        OneBrowserResource::WorkspaceCurrentConfiguration
+        | OneBrowserResource::WorkspaceCurrentConfigurationSchema => &["environments"],
         OneBrowserResource::WorkspaceList
         | OneBrowserResource::WorkspaceDetail
         | OneBrowserResource::ConnectionList
@@ -1622,8 +2842,7 @@ fn find_first_object_array(value: &Value) -> Option<&[Value]> {
 }
 
 fn string_field<'a>(object: &'a serde_json::Map<String, Value>, keys: &[&str]) -> Option<&'a str> {
-    keys.iter()
-        .find_map(|key| object.get(*key)?.as_str())
+    keys.iter().find_map(|key| object.get(*key)?.as_str())
 }
 
 impl OneBrowserResource {

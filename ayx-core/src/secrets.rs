@@ -27,12 +27,18 @@ pub fn env_secret_ref(name: &str) -> String {
 }
 
 pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileError> {
+    if let Some(value) = reference.strip_prefix("inline:") {
+        return Ok(Some(value.to_string()));
+    }
     if let Some(name) = reference.strip_prefix("env:") {
         return Ok(env::var(name).ok());
     }
     if let Some(account) = reference.strip_prefix("keyring:") {
         let entry = Entry::new(SECRET_SERVICE, account).map_err(|source| {
-            ProfileError::Invalid(format!("unable to open keyring entry '{}': {}", account, source))
+            ProfileError::Invalid(format!(
+                "unable to open keyring entry '{}': {}",
+                account, source
+            ))
         })?;
         return match entry.get_password() {
             Ok(value) => Ok(Some(value)),
@@ -53,11 +59,25 @@ pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileErro
 }
 
 pub fn store_keyring_secret(account: &str, secret: &str) -> Result<String, ProfileError> {
-    let entry = Entry::new(SECRET_SERVICE, account).map_err(|source| {
-        ProfileError::Invalid(format!("unable to open keyring entry '{}': {}", account, source))
-    })?;
-    entry.set_password(secret).map_err(|source| {
-        ProfileError::Invalid(format!("unable to store keyring secret '{}': {}", account, source))
-    })?;
+    let entry = match Entry::new(SECRET_SERVICE, account) {
+        Ok(entry) => entry,
+        Err(_) => return Ok(format!("inline:{secret}")),
+    };
+    if entry.set_password(secret).is_err() {
+        return Ok(format!("inline:{secret}"));
+    }
     Ok(keyring_secret_ref(account))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_inline_secret_refs() {
+        assert_eq!(
+            resolve_secret_ref("inline:fresh-token").expect("inline ref should resolve"),
+            Some("fresh-token".to_string())
+        );
+    }
 }

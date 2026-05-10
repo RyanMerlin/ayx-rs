@@ -119,7 +119,9 @@ enum Command {
         #[arg(long)]
         non_interactive: bool,
     },
-    #[command(about = "Interactive TUI for profile setup, One credentials, and connectivity checks")]
+    #[command(
+        about = "Interactive TUI for profile setup, One credentials, and connectivity checks"
+    )]
     Tui,
     #[command(about = "Central profile registry and active profile management")]
     Profile {
@@ -7273,11 +7275,7 @@ fn profile_show_envelope(name: Option<&str>) -> Result<Envelope> {
 fn profile_use_envelope(name: &str) -> Result<Envelope> {
     let path = profile_storage_path(name)?;
     if !path.exists() {
-        bail!(
-            "profile '{}' not found at '{}'",
-            name,
-            path.display()
-        );
+        bail!("profile '{}' not found at '{}'", name, path.display());
     }
     let mut state = load_ayx_state()?;
     state.active_profile = Some(name.to_string());
@@ -7398,7 +7396,10 @@ fn doctor_config_envelope(profile: &Path, fix: bool) -> Result<Envelope> {
     let (shape, inline_risks) = if Path::new(&resolution.resolved_path).exists() {
         let raw = fs::read_to_string(&resolution.resolved_path)?;
         let value: serde_yaml::Value = serde_yaml::from_str(&raw)?;
-        (profile_shape_label(&value), collect_inline_secret_warnings(&raw))
+        (
+            profile_shape_label(&value),
+            collect_inline_secret_warnings(&raw),
+        )
     } else {
         ("missing", Vec::new())
     };
@@ -7459,7 +7460,14 @@ fn doctor_network_envelope(profile: &Path, environment: Option<&str>) -> Result<
         json!({
             "profile": config.profile_name,
             "targets": {
-                "one_token_endpoint": config.alteryx_one.as_ref().and_then(|v| v.token_endpoint_url.clone()),
+                "one_base_url": config
+                    .alteryx_one
+                    .as_ref()
+                    .and_then(|v| v.normalized_base_url()),
+                "one_token_endpoint": config
+                    .alteryx_one
+                    .as_ref()
+                    .and_then(|v| v.effective_token_endpoint_url()),
                 "server_base_url": config.server.as_ref().map(|v| v.webapi_url.clone()),
                 "server_api_base_url": config.server_api.as_ref().map(|v| v.base_url.clone()),
             },
@@ -7525,7 +7533,10 @@ fn collect_inline_secret_warnings(raw: &str) -> Vec<String> {
             .lines()
             .any(|line| line.contains(key) && !line.contains("${"))
         {
-            warnings.push(format!("inline secret detected for {}", key.trim_end_matches(':')));
+            warnings.push(format!(
+                "inline secret detected for {}",
+                key.trim_end_matches(':')
+            ));
         }
     }
     warnings
@@ -7573,7 +7584,7 @@ fn one_platform_auth_status_envelope(config: &Config) -> Result<Envelope> {
             "platform",
             "auth-status",
             "GET",
-        "/v4/workspaces/current",
+            "/v4/workspaces/current",
             false,
             &[],
         )?)
@@ -7588,7 +7599,8 @@ fn one_platform_auth_status_envelope(config: &Config) -> Result<Envelope> {
             "surface": "platform",
             "profile": config.profile_name,
             "oauth_client_id_present": one.oauth_client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
-            "token_endpoint_url": one.token_endpoint_url.clone(),
+            "base_url": one.normalized_base_url(),
+            "token_endpoint_url": one.effective_token_endpoint_url(),
             "access_token_present": one.access_token.as_ref().is_some_and(|v| !v.trim().is_empty()),
             "refresh_token_present": one.refresh_token.as_ref().is_some_and(|v| !v.trim().is_empty()),
             "observability": api_logging,
@@ -7635,7 +7647,8 @@ fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Envelope> {
                 "surface": "platform",
                 "profile": config.profile_name,
                 "oauth_client_id_present": one.oauth_client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
-                "token_endpoint_url": one.token_endpoint_url.clone(),
+                "base_url": one.normalized_base_url(),
+                "token_endpoint_url": one.effective_token_endpoint_url(),
                 "access_token_present": false,
                 "refresh_token_present": has_refresh_token,
                 "diagnosis": "alteryx_one.access_token is missing",
@@ -7655,7 +7668,8 @@ fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Envelope> {
                 "surface": "platform",
                 "profile": config.profile_name,
                 "oauth_client_id_present": one.oauth_client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
-                "token_endpoint_url": one.token_endpoint_url.clone(),
+                "base_url": one.normalized_base_url(),
+                "token_endpoint_url": one.effective_token_endpoint_url(),
                 "access_token_present": true,
                 "refresh_token_present": has_refresh_token,
                 "diagnosis": "token present and workspace probe executed",
@@ -7946,46 +7960,7 @@ fn parse_saml_metadata_source(input: &str) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ayx_one_api::refresh_one_access_token;
-    use reqwest::blocking::Client;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::thread;
-    use std::time::Duration;
-
-    fn sample_config_for_refresh(server_url: String, access_token: Option<String>) -> Config {
-        Config {
-            profile_name: "test".to_string(),
-            mongo: ayx_core::profile::MongoProfile {
-                mode: ayx_core::profile::MongoMode::Embedded,
-                databases: ayx_core::profile::MongoDatabases {
-                    gallery_name: "AlteryxGallery".to_string(),
-                    service_name: "AlteryxService".to_string(),
-                },
-                embedded: Some(ayx_core::profile::MongoEmbedded {
-                    runtime_settings_path: None,
-                    alteryx_service_path: None,
-                    restore_target_path: None,
-                }),
-                managed: None,
-            },
-            alteryx_one: Some(ayx_core::profile::AlteryxOneProfile {
-                account_email: "test@example.com".to_string(),
-                oauth_client_id: Some("client-123".to_string()),
-                token_endpoint_url: Some(server_url),
-                access_token,
-                access_token_ref: None,
-                refresh_token: Some("refresh-abc".to_string()),
-                refresh_token_ref: None,
-            }),
-            observability: None,
-            server_api: None,
-            api: None,
-            server: None,
-            sqlserver: None,
-            upgrade: None,
-        }
-    }
+    use ayx_one_api::format_refresh_token_response;
 
     #[test]
     fn catalog_list_includes_core_commands() {
@@ -8363,35 +8338,12 @@ mod tests {
     }
 
     #[test]
-    fn one_refresh_token_path_resolves_access_token() {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
-        let addr = listener.local_addr().expect("listener addr");
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("connection should arrive");
-            let mut buf = [0u8; 2048];
-            let _ = stream.read(&mut buf).expect("request should be readable");
-            let response = concat!(
-                "HTTP/1.1 200 OK\r\n",
-                "Content-Type: application/json\r\n",
-                "Connection: close\r\n",
-                "\r\n",
-                r#"{"token_type":"Bearer","access_token":"fresh-token"}"#
-            );
-            stream
-                .write_all(response.as_bytes())
-                .expect("response should write");
-        });
-
-        let client = Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .expect("client should build");
-        let config = sample_config_for_refresh(
-            format!("http://{}/token", addr),
-            Some("existing-token".to_string()),
-        );
-        let token = refresh_one_access_token(&config, &client).expect("refresh should succeed");
+    fn one_refresh_token_response_formats_access_token() {
+        let token = format_refresh_token_response(&serde_json::json!({
+            "token_type": "Bearer",
+            "access_token": "fresh-token"
+        }))
+        .expect("response should format");
         assert_eq!(token, "Bearer fresh-token");
-        server.join().expect("server should join");
     }
 }

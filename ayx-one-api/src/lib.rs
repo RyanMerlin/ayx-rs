@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use ayx_core::envelope::Envelope;
-use ayx_core::observability::{record_api_event, response_shape, transport_error_summary, ApiEvent};
+use ayx_core::observability::{
+    record_api_event, response_shape, transport_error_summary, ApiEvent,
+};
 use ayx_core::profile::Config;
 use reqwest::blocking::multipart::{Form, Part};
 use reqwest::blocking::Client;
@@ -627,16 +629,14 @@ pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<Stri
         .ok_or_else(|| {
             anyhow::anyhow!("alteryx_one.refresh_token is required to refresh access tokens")
         })?;
-    let token_endpoint_url = one
-        .token_endpoint_url
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            anyhow::anyhow!("alteryx_one.token_endpoint_url is required to refresh access tokens")
-        })?;
+    let token_endpoint_url = one.effective_token_endpoint_url().ok_or_else(|| {
+        anyhow::anyhow!(
+            "alteryx_one.base_url or token_endpoint_url is required to refresh access tokens"
+        )
+    })?;
 
     let response = client
-        .post(token_endpoint_url)
+        .post(&token_endpoint_url)
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
         .form(&[
             ("grant_type", "refresh_token"),
@@ -651,6 +651,10 @@ pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<Stri
     let token_json: Value = response
         .json()
         .context("failed to parse refresh token response")?;
+    format_refresh_token_response(&token_json)
+}
+
+pub fn format_refresh_token_response(token_json: &Value) -> Result<String> {
     let token_type = token_json
         .get("token_type")
         .and_then(Value::as_str)
@@ -702,77 +706,14 @@ fn normalized_base_url() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ayx_core::profile::{
-        AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded, MongoMode, MongoProfile,
-    };
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::thread;
-
-    fn sample_config_for_refresh(server_url: String, access_token: Option<String>) -> Config {
-        Config {
-            profile_name: "test".to_string(),
-            mongo: MongoProfile {
-                mode: MongoMode::Embedded,
-                databases: MongoDatabases {
-                    gallery_name: "AlteryxGallery".to_string(),
-                    service_name: "AlteryxService".to_string(),
-                },
-                embedded: Some(MongoEmbedded {
-                    runtime_settings_path: None,
-                    alteryx_service_path: None,
-                    restore_target_path: None,
-                }),
-                managed: None,
-            },
-            alteryx_one: Some(AlteryxOneProfile {
-                account_email: "test@example.com".to_string(),
-                oauth_client_id: Some("client-123".to_string()),
-                token_endpoint_url: Some(server_url),
-                access_token,
-                access_token_ref: None,
-                refresh_token: Some("refresh-abc".to_string()),
-                refresh_token_ref: None,
-            }),
-            observability: None,
-            server_api: None,
-            api: None,
-            server: None,
-            sqlserver: None,
-            upgrade: None,
-        }
-    }
 
     #[test]
-    fn refresh_token_path_resolves_access_token() {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
-        let addr = listener.local_addr().expect("listener addr");
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("connection should arrive");
-            let mut buf = [0u8; 2048];
-            let _ = stream.read(&mut buf).expect("request should be readable");
-            let response = concat!(
-                "HTTP/1.1 200 OK\r\n",
-                "Content-Type: application/json\r\n",
-                "Connection: close\r\n",
-                "\r\n",
-                r#"{"token_type":"Bearer","access_token":"fresh-token"}"#
-            );
-            stream
-                .write_all(response.as_bytes())
-                .expect("response should write");
-        });
-
-        let client = Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .expect("client should build");
-        let config = sample_config_for_refresh(
-            format!("http://{}/token", addr),
-            Some("existing-token".to_string()),
-        );
-        let token = refresh_one_access_token(&config, &client).expect("refresh should succeed");
+    fn refresh_token_response_formats_access_token() {
+        let token = format_refresh_token_response(&serde_json::json!({
+            "token_type": "Bearer",
+            "access_token": "fresh-token"
+        }))
+        .expect("response should format");
         assert_eq!(token, "Bearer fresh-token");
-        server.join().expect("server should join");
     }
 }

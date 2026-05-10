@@ -12,9 +12,10 @@ use ratatui::{
 };
 use serde_json::Value;
 
+use ayx_core::profile::derive_alteryx_one_token_endpoint;
 use ayx_core::envelope::Envelope;
 
-use self::app::{App, Focus, OneBrowserResource, ProfilesPane, Screen};
+use self::app::{App, ConfigSection, Focus, OneBrowserResource, ProfilesPane, Screen};
 
 mod app;
 mod theme;
@@ -125,7 +126,11 @@ fn render_sidebar(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(index, screen)| {
-            let prefix = if app.screen.index() == index { "▶ " } else { "  " };
+            let prefix = if app.screen.index() == index {
+                "▶ "
+            } else {
+                "  "
+            };
             ListItem::new(Line::from(vec![
                 if app.screen.index() == index {
                     Span::styled(prefix, theme::accent())
@@ -186,10 +191,12 @@ fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
         Constraint::Percentage(40),
     ])
     .split(area);
-    let profile_focused = app.focus == Focus::Content && app.profiles_pane == ProfilesPane::Profiles;
+    let profile_focused =
+        app.focus == Focus::Content && app.profiles_pane == ProfilesPane::Profiles;
     let workspace_focused =
         app.focus == Focus::Content && app.profiles_pane == ProfilesPane::Workspaces;
-    let env_focused = app.focus == Focus::Content && app.profiles_pane == ProfilesPane::Environments;
+    let env_focused =
+        app.focus == Focus::Content && app.profiles_pane == ProfilesPane::Environments;
 
     let profiles = app
         .profiles
@@ -215,7 +222,7 @@ fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
             .highlight_style(theme::selected())
             .block(
                 Block::default()
-                    .title(" Profiles ")
+                    .title(" Profiles · shared One ")
                     .borders(Borders::ALL)
                     .border_style(theme::border(profile_focused))
                     .style(theme::panel()),
@@ -249,7 +256,7 @@ fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
             .highlight_style(theme::selected())
             .block(
                 Block::default()
-                    .title(" Workspaces ")
+                    .title(" Workspaces · Server envs ")
                     .borders(Borders::ALL)
                     .border_style(theme::border(workspace_focused))
                     .style(theme::panel()),
@@ -275,7 +282,32 @@ fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
         ]));
     }
     detail_lines.push(Line::from(""));
-    detail_lines.push(Line::from(Span::styled("Selected workspace", theme::accent())));
+    detail_lines.push(Line::from(Span::styled("Ownership", theme::accent())));
+    detail_lines.push(Line::from(vec![
+        Span::styled("One owner: ", theme::field_label()),
+        Span::styled(
+            format!(
+                "{} · shared credentials",
+                app.credentials_storage_target_label()
+            ),
+            theme::status_line(false),
+        ),
+    ]));
+    detail_lines.push(Line::from(vec![
+        Span::styled("Server owner: ", theme::field_label()),
+        Span::styled(
+            format!(
+                "{} · environment-specific",
+                app.config_storage_target_label()
+            ),
+            theme::status_line(false),
+        ),
+    ]));
+    detail_lines.push(Line::from(""));
+    detail_lines.push(Line::from(Span::styled(
+        "Selected workspace",
+        theme::accent(),
+    )));
     if let Some(workspace) = app.selected_workspace() {
         detail_lines.push(Line::from(vec![
             Span::styled("Name: ", theme::field_label()),
@@ -286,7 +318,11 @@ fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(workspace.active_environment.clone(), theme::field_value()),
         ]));
         for (index, env) in workspace.environments.iter().enumerate() {
-            let marker = if workspace.active_environment == *env { "●" } else { "○" };
+            let marker = if workspace.active_environment == *env {
+                "●"
+            } else {
+                "○"
+            };
             let line_style = if app.environments_state.selected() == Some(index) && env_focused {
                 theme::selected()
             } else if app.target_environment.as_deref() == Some(env.as_str()) {
@@ -336,22 +372,31 @@ fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
     ]));
     detail_lines.push(Line::from(""));
     detail_lines.push(Line::from(Span::styled("Actions", theme::accent())));
-    detail_lines.push(Line::from("Enter activates the selected profile, workspace, or environment."));
-    detail_lines.push(Line::from("e edits the selected config or credentials field."));
-    detail_lines.push(Line::from("s saves the current target using the canonical file format."));
+    detail_lines.push(Line::from(
+        "Enter activates the selected profile, workspace, or environment.",
+    ));
+    detail_lines.push(Line::from(
+        "e edits the selected config or credentials field.",
+    ));
+    detail_lines.push(Line::from(
+        "s saves the current target using the canonical file format.",
+    ));
     detail_lines.push(Line::from(""));
     detail_lines.push(Line::from(Span::styled("Summary", theme::accent())));
-    for line in yaml_lines(&app.current_summary())
-        .take(12)
-    {
-        detail_lines.push(Line::from(line.to_string()));
+    for line in yaml_lines(&app.current_summary()).into_iter().take(12) {
+        detail_lines.push(line);
     }
     let block = Block::default()
         .title(" Detail ")
         .borders(Borders::ALL)
         .border_style(theme::border(env_focused))
         .style(theme::panel());
-    frame.render_widget(Paragraph::new(detail_lines).block(block).wrap(Wrap { trim: false }), panes[2]);
+    frame.render_widget(
+        Paragraph::new(detail_lines)
+            .block(block)
+            .wrap(Wrap { trim: false }),
+        panes[2],
+    );
 }
 
 fn render_credentials(frame: &mut Frame, app: &App, area: Rect) {
@@ -389,9 +434,15 @@ fn render_credentials(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let title = if app.credentials.editing {
-        " One Credentials (editing) "
+        format!(
+            " Alteryx One ({}) ",
+            app.credentials_storage_target_label()
+        )
     } else {
-        " One Credentials "
+        format!(
+            " Alteryx One [{}] ",
+            app.credentials_storage_target_label()
+        )
     };
     frame.render_widget(
         Paragraph::new(lines)
@@ -406,12 +457,16 @@ fn render_credentials(frame: &mut Frame, app: &App, area: Rect) {
         layout[0],
     );
 
-    let validation = yaml_lines(&app.current_validation()).collect::<Vec<_>>().join("\n");
+    let validation = yaml_lines(&app.current_validation());
     let notes = vec![
         Line::from(vec![
             Span::styled("Mode: ", theme::field_label()),
             Span::styled(
-                if app.credentials.editing { "edit" } else { "browse" },
+                if app.credentials.editing {
+                    "edit"
+                } else {
+                    "browse"
+                },
                 if app.credentials.editing {
                     theme::warn()
                 } else {
@@ -421,10 +476,7 @@ fn render_credentials(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("Selected: ", theme::field_label()),
-            Span::styled(
-                app.credentials.active_field().label,
-                theme::accent_bold(),
-            ),
+            Span::styled(app.credentials.active_field().label, theme::accent_bold()),
         ]),
         Line::from(vec![
             Span::styled("Action: ", theme::field_label()),
@@ -437,10 +489,32 @@ fn render_credentials(frame: &mut Frame, app: &App, area: Rect) {
                 theme::muted(),
             ),
         ]),
+        Line::from(vec![
+            Span::styled("Stored in: ", theme::field_label()),
+            Span::styled(app.credentials_storage_target_label(), theme::accent()),
+        ]),
+        Line::from(vec![
+            Span::styled("Derived token endpoint: ", theme::field_label()),
+            Span::styled(
+                app.current_config
+                    .alteryx_one
+                    .as_ref()
+                    .and_then(|one| one.effective_token_endpoint_url())
+                    .unwrap_or_else(|| {
+                        let base_url = app.credentials.fields[1].value.trim();
+                        if base_url.is_empty() {
+                            "enter a base URL to derive /as/token".to_string()
+                        } else {
+                            derive_alteryx_one_token_endpoint(base_url)
+                        }
+                    }),
+                theme::accent(),
+            ),
+        ]),
         Line::from(""),
         Line::from(vec![
             Span::styled("Save mode: ", theme::field_label()),
-            Span::styled("canonical YAML + keyring refs", theme::accent()),
+            Span::styled("canonical YAML + derived token endpoint", theme::accent()),
         ]),
         Line::from(vec![
             Span::styled("Dirty: ", theme::field_label()),
@@ -457,14 +531,14 @@ fn render_credentials(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(Span::styled("Validation", theme::accent())),
     ];
     let mut text = notes;
-    for line in validation.lines() {
-        text.push(Line::from(line.to_string()));
+    for line in validation {
+        text.push(line);
     }
     frame.render_widget(
         Paragraph::new(text)
             .block(
                 Block::default()
-                    .title(" Profile Status ")
+                    .title(" Alteryx One Status ")
                     .borders(Borders::ALL)
                     .border_style(theme::border(false))
                     .style(theme::panel()),
@@ -475,10 +549,76 @@ fn render_credentials(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_config(frame: &mut Frame, app: &App, area: Rect) {
-    let layout = Layout::vertical([Constraint::Min(10), Constraint::Length(8)]).split(area);
+    let columns = Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
+        .split(area);
+    let left = Layout::vertical([Constraint::Length(4), Constraint::Min(0)]).split(columns[0]);
+    let body = Layout::vertical([Constraint::Min(0), Constraint::Length(12)]).split(left[1]);
+    let right_rows =
+        Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).split(columns[1]);
+    let right_top =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(right_rows[0]);
+    let right_bottom =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(right_rows[1]);
+
+    let mut tab_lines = vec![Line::from(vec![
+        Span::styled("Sections: ", theme::field_label()),
+        Span::styled(
+            ConfigSection::all()
+                .iter()
+                .map(|section| {
+                    if *section == app.config_form.active_section() {
+                        format!("[{}]", section.label())
+                    } else {
+                        section.label().to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("  "),
+            theme::accent_bold(),
+        ),
+    ])];
+    tab_lines.push(Line::from(vec![
+        Span::styled("Tab/Shift-Tab ", theme::accent()),
+        Span::styled("cycle sections", theme::muted()),
+    ]));
+    frame.render_widget(
+        Paragraph::new(tab_lines)
+            .block(
+                Block::default()
+                    .title(" Alteryx Server Editor ")
+                    .borders(Borders::ALL)
+                    .border_style(theme::border(app.focus == Focus::Content))
+                    .style(theme::panel()),
+            )
+            .wrap(Wrap { trim: false }),
+        left[0],
+    );
+
+    let fields = app.config_form.active_fields();
+    let available_lines = body[0].height.saturating_sub(3) as usize;
+    let visible_fields = (available_lines / 2).max(1);
+    let (start, end) = visible_field_window(fields.len(), app.config_form.cursor, visible_fields);
 
     let mut lines = Vec::new();
-    for (index, field) in app.config_form.fields.iter().enumerate() {
+    lines.push(Line::from(vec![
+        Span::styled("Section: ", theme::field_label()),
+        Span::styled(app.config_form.active_section().label(), theme::accent_bold()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Action: ", theme::field_label()),
+        Span::styled(
+            "e edit · c clear · s save · r reload",
+            theme::muted(),
+        ),
+    ]));
+    lines.push(Line::from(""));
+    if start > 0 {
+        lines.push(Line::from(vec![
+            Span::styled("...", theme::muted()),
+            Span::styled(" more above ", theme::muted()),
+        ]));
+    }
+    for (index, field) in fields.iter().enumerate().skip(start).take(end - start) {
         let value = if app.config_form.editing && app.config_form.cursor == index {
             format!("{}▏", app.config_form.edit_buffer)
         } else {
@@ -506,11 +646,25 @@ fn render_config(frame: &mut Frame, app: &App, area: Rect) {
         ]));
         lines.push(Line::from(""));
     }
+    if end < fields.len() {
+        lines.push(Line::from(vec![
+            Span::styled("...", theme::muted()),
+            Span::styled(" more below ", theme::muted()),
+        ]));
+    }
 
     let title = if app.config_form.editing {
-        " Config (editing) "
+        format!(
+            " Alteryx Server [{}] ({}) ",
+            app.config_form.active_section().label(),
+            app.config_storage_target_label()
+        )
     } else {
-        " Config "
+        format!(
+            " Alteryx Server [{}] [{}] ",
+            app.config_form.active_section().label(),
+            app.config_storage_target_label()
+        )
     };
     frame.render_widget(
         Paragraph::new(lines)
@@ -522,15 +676,19 @@ fn render_config(frame: &mut Frame, app: &App, area: Rect) {
                     .style(theme::panel()),
             )
             .wrap(Wrap { trim: false }),
-        layout[0],
+            body[0],
     );
 
-    let validation = yaml_lines(&app.current_validation()).collect::<Vec<_>>().join("\n");
+    let validation = yaml_lines(&app.current_validation());
     let notes = vec![
         Line::from(vec![
             Span::styled("Mode: ", theme::field_label()),
             Span::styled(
-                if app.config_form.editing { "edit" } else { "browse" },
+                if app.config_form.editing {
+                    "edit"
+                } else {
+                    "browse"
+                },
                 if app.config_form.editing {
                     theme::warn()
                 } else {
@@ -553,6 +711,21 @@ fn render_config(frame: &mut Frame, app: &App, area: Rect) {
                 theme::muted(),
             ),
         ]),
+        Line::from(vec![
+            Span::styled("Stored in: ", theme::field_label()),
+            Span::styled(app.config_storage_target_label(), theme::accent()),
+        ]),
+        Line::from(vec![
+            Span::styled("Scope: ", theme::field_label()),
+            Span::styled(
+                "overview and the four server subsections are editable",
+                theme::muted(),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Sections: ", theme::field_label()),
+            Span::styled("Overview, Server API, Mongo, SQL Server, Observability", theme::muted()),
+        ]),
         Line::from(""),
         Line::from(vec![
             Span::styled("Validation: ", theme::field_label()),
@@ -560,26 +733,53 @@ fn render_config(frame: &mut Frame, app: &App, area: Rect) {
         ]),
     ];
     let mut text = notes;
-    for line in validation.lines() {
-        text.push(Line::from(line.to_string()));
+    for line in validation {
+        text.push(line);
     }
     frame.render_widget(
         Paragraph::new(text)
             .block(
                 Block::default()
-                    .title(" Config Status ")
+                    .title(" Alteryx Server Status ")
                     .borders(Borders::ALL)
                     .border_style(theme::border(false))
                     .style(theme::panel()),
             )
             .wrap(Wrap { trim: false }),
-        layout[1],
+            body[1],
+    );
+
+    render_config_section(
+        frame,
+        "Server API",
+        right_top[0],
+        render_server_api_summary(app),
+    );
+    render_config_section(
+        frame,
+        "Mongo",
+        right_top[1],
+        render_mongo_summary(app),
+    );
+    render_config_section(
+        frame,
+        "SQL Server",
+        right_bottom[0],
+        render_sqlserver_summary(app),
+    );
+    render_config_section(
+        frame,
+        "Observability",
+        right_bottom[1],
+        render_observability_summary(app),
     );
 }
 
 fn render_connectivity(frame: &mut Frame, app: &App, area: Rect) {
-    let rows = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area);
-    let top = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[0]);
+    let rows =
+        Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area);
+    let top =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[0]);
     let bottom =
         Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[1]);
     let chunks = [top[0], top[1], bottom[0], bottom[1]];
@@ -602,7 +802,8 @@ fn render_connectivity(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_inspect(frame: &mut Frame, app: &App, area: Rect) {
-    let columns = Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).split(area);
+    let columns =
+        Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).split(area);
     let left = Layout::vertical([Constraint::Length(10), Constraint::Min(0)]).split(columns[0]);
     let right = Layout::vertical([Constraint::Length(12), Constraint::Min(0)]).split(columns[1]);
 
@@ -614,7 +815,11 @@ fn render_inspect(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("Kind: ", theme::field_label()),
             Span::styled(
-                if app.is_workspace_target() { "workspace" } else { "profile" },
+                if app.is_workspace_target() {
+                    "workspace"
+                } else {
+                    "profile"
+                },
                 theme::field_value(),
             ),
         ]),
@@ -646,9 +851,10 @@ fn render_inspect(frame: &mut Frame, app: &App, area: Rect) {
         left[0],
     );
 
-    let mut env_lines = vec![
-        Line::from(Span::styled("Workspace environments", theme::accent())),
-    ];
+    let mut env_lines = vec![Line::from(Span::styled(
+        "Workspace environments",
+        theme::accent(),
+    ))];
     if let Some(workspace) = app.selected_workspace() {
         env_lines.push(Line::from(vec![
             Span::styled("Name: ", theme::field_label()),
@@ -660,7 +866,11 @@ fn render_inspect(frame: &mut Frame, app: &App, area: Rect) {
         ]));
         env_lines.push(Line::from(""));
         for env in &workspace.config.environments {
-            let marker = if workspace.active_environment == *env.0 { "●" } else { "○" };
+            let marker = if workspace.active_environment == *env.0 {
+                "●"
+            } else {
+                "○"
+            };
             let style = if app.target_environment.as_deref() == Some(env.0.as_str()) {
                 theme::accent()
             } else {
@@ -690,8 +900,8 @@ fn render_inspect(frame: &mut Frame, app: &App, area: Rect) {
         left[1],
     );
 
-    let validation = yaml_lines(&app.current_validation()).collect::<Vec<_>>().join("\n");
-    let summary = yaml_lines(&app.current_summary()).collect::<Vec<_>>().join("\n");
+    let validation = yaml_lines(&app.current_validation());
+    let summary = yaml_lines(&app.current_summary());
     let mut status_lines = vec![
         Line::from(vec![
             Span::styled("Selected profile: ", theme::field_label()),
@@ -713,7 +923,10 @@ fn render_inspect(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("Action: ", theme::field_label()),
-            Span::styled("Enter returns to Profiles, r reloads indexes", theme::muted()),
+            Span::styled(
+                "Enter returns to Profiles, r reloads indexes",
+                theme::muted(),
+            ),
         ]),
         Line::from(""),
         Line::from(Span::styled("Browser status", theme::accent())),
@@ -721,16 +934,14 @@ fn render_inspect(frame: &mut Frame, app: &App, area: Rect) {
     if let Some(panel) = app.one_browser.panels.first() {
         status_lines.extend(render_panel_summary(panel));
     }
-    status_lines.extend([
-        Line::from(Span::styled("Validation", theme::accent())),
-    ]);
-    for line in validation.lines() {
-        status_lines.push(Line::from(line.to_string()));
+    status_lines.extend([Line::from(Span::styled("Validation", theme::accent()))]);
+    for line in validation {
+        status_lines.push(line);
     }
     status_lines.push(Line::from(""));
     status_lines.push(Line::from(Span::styled("Current summary", theme::accent())));
-    for line in summary.lines().take(16) {
-        status_lines.push(Line::from(line.to_string()));
+    for line in summary.into_iter().take(16) {
+        status_lines.push(line);
     }
 
     frame.render_widget(
@@ -785,7 +996,7 @@ fn render_panel_body(panel: &crate::tui::app::PanelState) -> Vec<Line<'static>> 
         if panel.is_error {
             lines.push(Line::from(Span::styled(line.clone(), theme::danger())));
         } else {
-            lines.push(Line::from(line.clone()));
+            lines.push(yaml_text_line(line));
         }
     }
     lines
@@ -857,6 +1068,255 @@ fn render_panel_summary(panel: &crate::tui::app::PanelState) -> Vec<Line<'static
     lines
 }
 
+fn render_config_section(
+    frame: &mut Frame,
+    title: &str,
+    area: Rect,
+    lines: Vec<Line<'static>>,
+) {
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .title(format!(" {} ", title))
+                    .borders(Borders::ALL)
+                    .border_style(theme::border(false))
+                    .style(theme::panel()),
+            )
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn visible_field_window(
+    len: usize,
+    cursor: usize,
+    capacity: usize,
+) -> (usize, usize) {
+    if len <= capacity {
+        return (0, len);
+    }
+    let capacity = capacity.max(1);
+    let half = capacity / 2;
+    let mut start = cursor.saturating_sub(half);
+    if start + capacity > len {
+        start = len - capacity;
+    }
+    (start, start + capacity)
+}
+
+fn render_server_api_summary(app: &App) -> Vec<Line<'static>> {
+    let config = &app.current_config;
+    let base_url = config
+        .server_api
+        .as_ref()
+        .map(|api| api.base_url.clone())
+        .or_else(|| config.api.as_ref().map(|api| api.base_url.clone()))
+        .or_else(|| config.server.as_ref().map(|server| server.webapi_url.clone()));
+    let client_id = config
+        .server_api
+        .as_ref()
+        .map(|api| api.client_id.clone())
+        .or_else(|| config.api.as_ref().and_then(|api| api.auth.client_id.clone()))
+        .or_else(|| config.server.as_ref().map(|server| server.curator_api_key.clone()));
+    let client_secret_present = config
+        .server_api
+        .as_ref()
+        .map(|api| !api.client_secret.trim().is_empty())
+        .or_else(|| {
+            config
+                .api
+                .as_ref()
+                .map(|api| !api.auth.client_secret.as_deref().unwrap_or("").trim().is_empty())
+        })
+        .or_else(|| {
+            config
+                .server
+                .as_ref()
+                .map(|server| !server.curator_api_secret.trim().is_empty())
+        })
+        .unwrap_or(false);
+
+    vec![
+        section_kv_line(
+            "Base URL",
+            base_url.unwrap_or_else(|| "missing".to_string()),
+            if config.server_api.is_some() || config.api.is_some() || config.server.is_some() {
+                theme::field_value()
+            } else {
+                theme::warn()
+            },
+        ),
+        section_kv_line(
+            "Client ID",
+            client_id.unwrap_or_else(|| "missing".to_string()),
+            if config.server_api.is_some() || config.api.is_some() || config.server.is_some() {
+                theme::field_value()
+            } else {
+                theme::warn()
+            },
+        ),
+        section_kv_line(
+            "Client Secret",
+            if client_secret_present {
+                "stored".to_string()
+            } else {
+                "missing".to_string()
+            },
+            if client_secret_present {
+                theme::ok()
+            } else {
+                theme::warn()
+            },
+        ),
+        section_kv_line(
+            "Auth Mode",
+            config
+                .api
+                .as_ref()
+                .map(|api| format!("{:?}", api.auth.mode))
+                .unwrap_or_else(|| "server_api".to_string()),
+            theme::accent(),
+        ),
+    ]
+}
+
+fn render_mongo_summary(app: &App) -> Vec<Line<'static>> {
+    let config = &app.current_config;
+    let mongo = &config.mongo;
+    let mut lines = vec![
+        section_kv_line("Mode", format!("{:?}", mongo.mode), theme::accent()),
+        section_kv_line("Gallery DB", mongo.databases.gallery_name.clone(), theme::field_value()),
+        section_kv_line("Service DB", mongo.databases.service_name.clone(), theme::field_value()),
+    ];
+    match mongo.mode {
+        ayx_core::profile::MongoMode::Embedded => {
+            let embedded = mongo.embedded.as_ref();
+            lines.push(section_kv_line(
+                "Runtime",
+                embedded
+                    .and_then(|v| v.runtime_settings_path.clone())
+                    .unwrap_or_else(|| "missing".to_string()),
+                if embedded
+                    .and_then(|v| v.runtime_settings_path.as_ref())
+                    .is_some()
+                {
+                    theme::field_value()
+                } else {
+                    theme::warn()
+                },
+            ));
+        }
+        ayx_core::profile::MongoMode::Managed => {
+            let managed = mongo.managed.as_ref();
+            let host_or_url = managed
+                .and_then(|v| v.url.clone().or_else(|| v.host.clone()))
+                .unwrap_or_else(|| "missing".to_string());
+            let port = managed
+                .and_then(|v| Some(v.port.to_string()))
+                .unwrap_or_else(|| "missing".to_string());
+            lines.push(section_kv_line(
+                "Host/URL",
+                host_or_url,
+                if managed.is_some() {
+                    theme::field_value()
+                } else {
+                    theme::warn()
+                },
+            ));
+            lines.push(section_kv_line(
+                "Port",
+                port,
+                if managed.is_some() {
+                    theme::field_value()
+                } else {
+                    theme::warn()
+                },
+            ));
+        }
+    }
+    lines
+}
+
+fn render_sqlserver_summary(app: &App) -> Vec<Line<'static>> {
+    let config = &app.current_config;
+    if let Some(sqlserver) = config.sqlserver.as_ref() {
+        vec![
+            section_kv_line(
+                "Controller",
+                connection_summary(sqlserver.controller.as_ref()),
+                theme::field_value(),
+            ),
+            section_kv_line(
+                "Server UI",
+                connection_summary(sqlserver.server_ui.as_ref()),
+                theme::field_value(),
+            ),
+        ]
+    } else {
+        vec![section_kv_line("Status", "not configured".to_string(), theme::warn())]
+    }
+}
+
+fn render_observability_summary(app: &App) -> Vec<Line<'static>> {
+    let config = &app.current_config;
+    if let Some(observability) = config.observability.as_ref() {
+        let api_logging = observability.api_logging.as_ref();
+        vec![
+            section_kv_line(
+                "API Logging",
+                api_logging
+                    .map(|value| value.enabled.to_string())
+                    .unwrap_or_else(|| "missing".to_string()),
+                api_logging
+                    .map(|value| if value.enabled { theme::ok() } else { theme::warn() })
+                    .unwrap_or_else(theme::warn),
+            ),
+            section_kv_line(
+                "Path",
+                api_logging
+                    .and_then(|value| value.path.clone())
+                    .unwrap_or_else(|| "missing".to_string()),
+                theme::field_value(),
+            ),
+            section_kv_line(
+                "Redact",
+                api_logging
+                    .and_then(|value| value.redact_bodies)
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "missing".to_string()),
+                theme::field_value(),
+            ),
+        ]
+    } else {
+        vec![section_kv_line("Status", "not configured".to_string(), theme::warn())]
+    }
+}
+
+fn connection_summary(conn: Option<&ayx_core::profile::SqlServerConnectionProfile>) -> String {
+    let Some(conn) = conn else {
+        return "missing".to_string();
+    };
+    let host = conn.host.as_deref().unwrap_or("host");
+    let port = conn
+        .port
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "port".to_string());
+    let database = conn.database.as_deref().unwrap_or("database");
+    format!("{host}:{port} / {database}")
+}
+
+fn section_kv_line(
+    label: &str,
+    value: String,
+    value_style: ratatui::style::Style,
+) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{:>12} ", label), theme::field_label()),
+        Span::styled(value, value_style),
+    ])
+}
+
 fn render_one_browser(frame: &mut Frame, app: &App, area: Rect) {
     let layout = Layout::horizontal([Constraint::Length(28), Constraint::Min(0)]).split(area);
     let focused = app.focus == Focus::Content;
@@ -890,12 +1350,13 @@ fn render_one_browser(frame: &mut Frame, app: &App, area: Rect) {
                     .borders(Borders::ALL)
                     .border_style(theme::border(focused))
                     .style(theme::panel()),
-        ),
+            ),
         layout[0],
         &mut state,
     );
 
-    let right = Layout::vertical([Constraint::Percentage(62), Constraint::Percentage(38)]).split(layout[1]);
+    let right =
+        Layout::vertical([Constraint::Percentage(62), Constraint::Percentage(38)]).split(layout[1]);
 
     let mut lines = vec![
         Line::from(vec![
@@ -927,7 +1388,10 @@ fn render_one_browser(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("Action: ", theme::field_label()),
-            Span::styled("Enter refresh/drill · Tab switch pane · b back · Esc back", theme::muted()),
+            Span::styled(
+                "Enter refresh/drill · Tab switch pane · b back · Esc back",
+                theme::muted(),
+            ),
         ]),
         Line::from(""),
     ];
@@ -975,7 +1439,8 @@ fn render_one_browser(frame: &mut Frame, app: &App, area: Rect) {
             .iter()
             .enumerate()
             .flat_map(|(index, item)| {
-                let active = app.one_browser.item_cursor == index && app.one_browser.pane == app::OneBrowserPane::Items;
+                let active = app.one_browser.item_cursor == index
+                    && app.one_browser.pane == app::OneBrowserPane::Items;
                 let marker = if active { "▶ " } else { "  " };
                 let mut row = vec![Line::from(vec![
                     if active {
@@ -983,12 +1448,16 @@ fn render_one_browser(frame: &mut Frame, app: &App, area: Rect) {
                     } else {
                         Span::styled(marker, theme::muted())
                     },
-                    Span::styled(&item.label, if active { theme::accent_bold() } else { theme::field_value() }),
-                    Span::raw(" "),
                     Span::styled(
-                        item.id.as_deref().unwrap_or(""),
-                        theme::muted(),
+                        &item.label,
+                        if active {
+                            theme::accent_bold()
+                        } else {
+                            theme::field_value()
+                        },
                     ),
+                    Span::raw(" "),
+                    Span::styled(item.id.as_deref().unwrap_or(""), theme::muted()),
                 ])];
                 if !item.summary.is_empty() {
                     row.push(Line::from(vec![
@@ -1043,16 +1512,16 @@ fn render_help(frame: &mut Frame, area: Rect) {
             Span::raw(" open/close inspector popup for the current target"),
         ]),
         Line::from(vec![
-            Span::styled("One", theme::accent_bold()),
+            Span::styled("Alteryx One", theme::accent_bold()),
             Span::raw("         "),
-            Span::styled("6", theme::accent()),
+            Span::styled("2", theme::accent()),
             Span::raw(" browse live One resources and responses"),
         ]),
         Line::from(vec![
-            Span::styled("Config", theme::accent_bold()),
+            Span::styled("Alteryx Server", theme::accent_bold()),
             Span::raw("       "),
-            Span::styled("e", theme::accent()),
-            Span::raw(" edit config fields, "),
+            Span::styled("3", theme::accent()),
+            Span::raw(" edit Alteryx Server config fields, "),
             Span::styled("s", theme::accent()),
             Span::raw(" save"),
         ]),
@@ -1060,9 +1529,9 @@ fn render_help(frame: &mut Frame, area: Rect) {
             Span::styled("Edit", theme::accent_bold()),
             Span::raw("        "),
             Span::styled("e", theme::accent()),
-            Span::raw(" edit field, "),
+            Span::raw(" edit selected field, "),
             Span::styled("s", theme::accent()),
-            Span::raw(" save, "),
+            Span::raw(" save to the selected target, "),
             Span::styled("c", theme::accent()),
             Span::raw(" clear selected field"),
         ]),
@@ -1082,7 +1551,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "Workspace-backed targets persist the selected environment back into the workspace file using the same canonical config shape.",
+            "Workspace-backed targets keep server settings in the workspace file, while One credentials are stored in the active profile and inherited when the workspace loads.",
             theme::muted(),
         )),
     ];
@@ -1108,14 +1577,14 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
             if app.config_form.editing {
                 "Enter save buffer · Esc cancel · Backspace delete"
             } else {
-                "Arrows move · e edit · s save · c clear · r reload · Esc back"
+                "Arrows move · Tab/Shift-Tab cycle sections · e edit · s save · c clear · r reload"
             }
         }
         Screen::Credentials => {
             if app.credentials.editing {
                 "Enter save buffer · Esc cancel · Backspace delete"
             } else {
-                "Arrows move · e edit · s save · c clear · r reload · Esc back"
+                "Arrows move · e edit · s save to active profile · c clear · r reload · Esc back"
             }
         }
         Screen::Connectivity => "r/t rerun checks · Esc back",
@@ -1163,13 +1632,58 @@ fn render_toast(frame: &mut Frame, message: &str, is_error: bool) {
     );
 }
 
-fn yaml_lines(value: &serde_json::Value) -> std::vec::IntoIter<String> {
+fn yaml_lines(value: &serde_json::Value) -> Vec<Line<'static>> {
     serde_yaml::to_string(value)
         .unwrap_or_else(|_| value.to_string())
         .lines()
-        .map(|line| line.to_string())
-        .collect::<Vec<_>>()
-        .into_iter()
+        .map(yaml_text_line)
+        .collect()
+}
+
+fn yaml_text_line(line: &str) -> Line<'static> {
+    let trimmed = line.trim_start();
+    let indent = line.len().saturating_sub(trimmed.len());
+    if trimmed.is_empty() {
+        return Line::from(String::new());
+    }
+
+    let mut spans = Vec::new();
+    if indent > 0 {
+        spans.push(Span::raw(" ".repeat(indent)));
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("- ") {
+        spans.push(Span::styled("- ", theme::accent()));
+        spans.extend(yaml_value_spans(rest));
+        return Line::from(spans);
+    }
+
+    if let Some((key, value)) = trimmed.split_once(": ") {
+        spans.push(Span::styled(format!("{key}:"), theme::accent_bold()));
+        spans.push(Span::raw(" "));
+        spans.extend(yaml_value_spans(value));
+        return Line::from(spans);
+    }
+
+    if trimmed.ends_with(':') {
+        spans.push(Span::styled(trimmed.to_string(), theme::accent_bold()));
+        return Line::from(spans);
+    }
+
+    spans.push(Span::styled(trimmed.to_string(), theme::field_value()));
+    Line::from(spans)
+}
+
+fn yaml_value_spans(value: &str) -> Vec<Span<'static>> {
+    let style = match value.trim() {
+        "true" => theme::ok(),
+        "false" => theme::warn(),
+        "null" | "~" => theme::muted(),
+        other if other.parse::<i64>().is_ok() || other.parse::<f64>().is_ok() => theme::accent(),
+        other if other.starts_with('"') || other.starts_with('\'') => theme::field_value(),
+        _ => theme::field_value(),
+    };
+    vec![Span::styled(value.to_string(), style)]
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
