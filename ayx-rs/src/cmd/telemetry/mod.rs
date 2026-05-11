@@ -19,6 +19,7 @@ use crate::load_profile_with_env;
 pub mod aggregate;
 pub mod errors;
 pub mod jobs;
+pub mod permissions;
 pub mod plans;
 pub mod server;
 pub mod source;
@@ -86,6 +87,11 @@ pub enum TelemetryCommand {
     Queue {
         #[command(subcommand)]
         command: TelemetryQueueCommand,
+    },
+    /// Who has access to which connections, workflows, and collections.
+    Permissions {
+        #[command(subcommand)]
+        command: TelemetryPermissionsCommand,
     },
     /// One-shot overview composing the above into a single envelope.
     Summary {
@@ -159,6 +165,42 @@ pub enum TelemetryErrorsCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum TelemetryPermissionsCommand {
+    /// DCM connections and the subjects with access to each.
+    Connections {
+        #[command(flatten)]
+        args: TelemetryArgs,
+        /// Expand per-connection by iterating
+        /// `/v4/connections/{id}/permissions`. Cost is O(connections); on
+        /// large tenants pair with `--max-pages` to cap blast radius.
+        #[arg(long)]
+        deep: bool,
+    },
+    /// Who has workflow access. On One that's workspace people (no per-flow
+    /// ACL endpoint); on Server it's the collections.appinfos surface.
+    Workflows {
+        #[command(flatten)]
+        args: TelemetryArgs,
+        /// Workspace id for `/iam/v1/workspaces/{id}/people` (One only).
+        /// Falls back to `alteryx_one.expected_workspace_id` if unset.
+        #[arg(long)]
+        workspace_id: Option<String>,
+    },
+    /// Collections / Gallery item-membership ACLs (Server only).
+    Collections {
+        #[command(flatten)]
+        args: TelemetryArgs,
+    },
+    /// Roll up access counts: connections per subject, people per workspace.
+    Summary {
+        #[command(flatten)]
+        args: TelemetryArgs,
+        #[arg(long)]
+        workspace_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum TelemetryQueueCommand {
     /// Currently running + queued jobs (Server side).
     Status {
@@ -223,6 +265,20 @@ pub fn execute(environment: Option<&str>, command: TelemetryCommand) -> Result<E
                     ));
                 }
                 server::queue_wait_time(&config, &args)
+            }
+        },
+        TelemetryCommand::Permissions { command } => match command {
+            TelemetryPermissionsCommand::Connections { args, deep } => {
+                permissions::connections(environment, &args, deep)
+            }
+            TelemetryPermissionsCommand::Workflows { args, workspace_id } => {
+                permissions::workflows(environment, &args, workspace_id.as_deref())
+            }
+            TelemetryPermissionsCommand::Collections { args } => {
+                permissions::collections(environment, &args)
+            }
+            TelemetryPermissionsCommand::Summary { args, workspace_id } => {
+                permissions::summary(environment, &args, workspace_id.as_deref())
             }
         },
         TelemetryCommand::Summary { args } => summary::summary(environment, &args),
