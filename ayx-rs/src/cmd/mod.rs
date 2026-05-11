@@ -13,6 +13,7 @@
 pub mod confirm;
 pub mod mongo;
 pub mod registry;
+pub mod server;
 pub mod sqlserver;
 pub mod tools;
 pub mod workflow;
