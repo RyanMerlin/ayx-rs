@@ -162,7 +162,10 @@ jobs:
       - build-windows
       - build-linux
       - build-macos
-      - sbom
+    # `sbom` is not in `needs` so a billing block or transient sbom failure
+    # doesn't prevent the binaries + checksums + cosign bundles from being
+    # published. The download-artifact step below tolerates a missing sbom
+    # artifact (the bundling block guards on `-d`).
     runs-on: ubuntu-latest
     # OIDC token for sigstore keyless signing + GH artifact attestations.
     # Both rely on workflow identity (no long-lived secrets / keys).
