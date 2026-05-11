@@ -24,7 +24,7 @@ ayx-one = { path = "../ayx-one" }
 ayx_one_api = { package = "ayx-one-api", path = "../ayx-one-api" }
 ayx-server = { path = "../ayx-server" }
 ayx-registry = { path = "../ayx-registry" }
-self_update = "0.43.1"
+self_update = "0.44.0"
 
 [dev-dependencies]
 tempfile.workspace = true
