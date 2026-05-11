@@ -220,7 +220,11 @@ jobs:
           ls -la *.sigstore
       # GitHub-native build provenance (SLSA L3). Independent of cosign.
       # Verifiable with: gh attestation verify <file> --repo RyanMerlin/ayx-rs
+      # Non-fatal: this feature requires a public repo (or paid plan) and is
+      # otherwise a clean failure; the rest of the release pipeline produces
+      # the same verifiable provenance via the sigstore .sigstore bundles.
       - name: Attest build provenance for every release artifact
+        continue-on-error: true
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |

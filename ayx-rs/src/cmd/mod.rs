@@ -12,6 +12,7 @@
 
 pub mod confirm;
 pub mod mongo;
+pub mod one;
 pub mod registry;
 pub mod server;
 pub mod sqlserver;
