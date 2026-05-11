@@ -667,7 +667,7 @@ fn mongo_doctor_queries(config: &Config) -> Result<Vec<MongoQueryTemplate>> {
     Ok(queries)
 }
 
-fn mongo_query_spec_from_name(name: &str) -> Result<MongoQuerySpec> {
+pub fn mongo_query_spec_from_name(name: &str) -> Result<MongoQuerySpec> {
     let template = mongo_query_templates()?
         .into_iter()
         .find(|query| query.name == name)
@@ -744,7 +744,7 @@ fn mongo_query_spec_from_template(template: &MongoQueryTemplate) -> Result<Mongo
     })
 }
 
-fn mongo_query_templates() -> Result<Vec<MongoQueryTemplate>> {
+pub fn mongo_query_templates() -> Result<Vec<MongoQueryTemplate>> {
     let registry: MongoQueryRegistry =
         serde_yaml::from_str(include_str!("../knowledge/mongo/queries.yaml"))?;
     Ok(registry.queries)

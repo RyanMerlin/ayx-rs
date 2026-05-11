@@ -20,6 +20,7 @@ pub mod aggregate;
 pub mod errors;
 pub mod jobs;
 pub mod plans;
+pub mod server;
 pub mod source;
 pub mod summary;
 pub mod weekly;
@@ -80,6 +81,11 @@ pub enum TelemetryCommand {
     Weekly {
         #[command(subcommand)]
         command: TelemetryWeeklyCommand,
+    },
+    /// Queue depth and wait-time stats (Server source only in Phase 2).
+    Queue {
+        #[command(subcommand)]
+        command: TelemetryQueueCommand,
     },
     /// One-shot overview composing the above into a single envelope.
     Summary {
@@ -153,6 +159,20 @@ pub enum TelemetryErrorsCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum TelemetryQueueCommand {
+    /// Currently running + queued jobs (Server side).
+    Status {
+        #[command(flatten)]
+        args: TelemetryArgs,
+    },
+    /// Wait-time stats over recent queue entries.
+    WaitTime {
+        #[command(flatten)]
+        args: TelemetryArgs,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum TelemetryWeeklyCommand {
     /// Emit a stable 168-bucket run-count matrix (day_of_week × hour).
     RunCounts {
@@ -184,6 +204,26 @@ pub fn execute(environment: Option<&str>, command: TelemetryCommand) -> Result<E
         },
         TelemetryCommand::Weekly { command } => match command {
             TelemetryWeeklyCommand::RunCounts { args } => weekly::run_counts(environment, &args),
+        },
+        TelemetryCommand::Queue { command } => match command {
+            TelemetryQueueCommand::Status { args } => {
+                let (config, src) = load_and_pick_source(&args, environment)?;
+                if src != source::TelemetrySource::Server {
+                    return Err(anyhow::anyhow!(
+                        "validation: telemetry queue requires --source server; the One surface does not expose a queue endpoint"
+                    ));
+                }
+                server::queue_status(&config)
+            }
+            TelemetryQueueCommand::WaitTime { args } => {
+                let (config, src) = load_and_pick_source(&args, environment)?;
+                if src != source::TelemetrySource::Server {
+                    return Err(anyhow::anyhow!(
+                        "validation: telemetry queue requires --source server; the One surface does not expose a queue endpoint"
+                    ));
+                }
+                server::queue_wait_time(&config, &args)
+            }
         },
         TelemetryCommand::Summary { args } => summary::summary(environment, &args),
     }

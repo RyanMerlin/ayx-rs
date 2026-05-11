@@ -1,12 +1,13 @@
 //! `telemetry errors recent` — failed job groups in the window, newest first,
 //! with error messages truncated to a sane length for table rendering.
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use chrono::Utc;
 use serde_json::{json, Value};
 
 use super::jobs::{duration_ms, fetch_job_groups, is_failure_status, within_window};
+use super::server;
 use super::source::TelemetrySource;
 use super::window::Window;
 use super::{load_and_pick_source, TelemetryArgs};
@@ -15,10 +16,8 @@ const MAX_ERROR_PREVIEW: usize = 160;
 
 pub fn recent(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelope> {
     let (config, src) = load_and_pick_source(args, environment)?;
-    if src != TelemetrySource::One {
-        return Err(anyhow!(
-            "validation: telemetry errors on `server` source not implemented in this phase; pass --source one"
-        ));
+    if src == TelemetrySource::Server {
+        return server::errors_recent(&config, args);
     }
     let window = Window::parse(&args.since)?;
     let page = fetch_job_groups(&config, args)?;

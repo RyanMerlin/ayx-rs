@@ -11,16 +11,15 @@ use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 
 use super::aggregate::{DurationStats, WeeklyMatrix};
+use super::server;
 use super::source::TelemetrySource;
 use super::window::Window;
 use super::{load_and_pick_source, TelemetryArgs};
 
 pub fn running(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelope> {
     let (config, src) = load_and_pick_source(args, environment)?;
-    if src != TelemetrySource::One {
-        return Err(anyhow!(
-            "validation: telemetry jobs running on `server` source not implemented in this phase; pass --source one"
-        ));
+    if src == TelemetrySource::Server {
+        return server::jobs_running(&config);
     }
     let page = fetch_job_groups(&config, args)?;
     let running: Vec<&JobGroupSummary> = page
@@ -55,10 +54,8 @@ pub fn running(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelo
 
 pub fn history(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelope> {
     let (config, src) = load_and_pick_source(args, environment)?;
-    if src != TelemetrySource::One {
-        return Err(anyhow!(
-            "validation: telemetry jobs history on `server` source not implemented in this phase; pass --source one"
-        ));
+    if src == TelemetrySource::Server {
+        return server::jobs_history(&config, args);
     }
     let window = Window::parse(&args.since)?;
     let page = fetch_job_groups(&config, args)?;
@@ -89,10 +86,11 @@ pub fn history(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelo
 
 pub fn top(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelope> {
     let (config, src) = load_and_pick_source(args, environment)?;
-    if src != TelemetrySource::One {
-        return Err(anyhow!(
-            "validation: telemetry jobs top on `server` source not implemented in this phase; pass --source one"
-        ));
+    if src == TelemetrySource::Server {
+        // Server-side top-N aggregation isn't wired yet — return the raw
+        // results_recent plan and let the operator run it. Phase 3 will
+        // close the gap with a results-side aggregator.
+        return server::jobs_history(&config, args);
     }
     let window = Window::parse(&args.since)?;
     let page = fetch_job_groups(&config, args)?;

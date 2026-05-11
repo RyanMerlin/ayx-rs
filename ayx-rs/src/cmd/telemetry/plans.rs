@@ -3,7 +3,7 @@
 //! Plans are first-class on the One side; jobs reference their parent plan
 //! via the `plan_id` field on `JobGroupSummary`. We aggregate by `plan_id`.
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use chrono::Utc;
 use serde_json::{json, Value};
@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 
 use super::aggregate::DurationStats;
 use super::jobs::{duration_ms, fetch_job_groups, is_failure_status, pct, within_window};
+use super::server;
 use super::source::TelemetrySource;
 use super::window::Window;
 use super::{load_and_pick_source, TelemetryArgs};
@@ -29,10 +30,10 @@ fn aggregate_plans(
     by_p95: bool,
 ) -> Result<Envelope> {
     let (config, src) = load_and_pick_source(args, environment)?;
-    if src != TelemetrySource::One {
-        return Err(anyhow!(
-            "validation: telemetry plans on `server` source not implemented in this phase; pass --source one"
-        ));
+    if src == TelemetrySource::Server {
+        // Server-side plan analytics live in Schedules; return the
+        // schedule_run_history_raw plan envelope for downstream consumption.
+        return server::plans_history(&config, args);
     }
     let window = Window::parse(&args.since)?;
     let page = fetch_job_groups(&config, args)?;

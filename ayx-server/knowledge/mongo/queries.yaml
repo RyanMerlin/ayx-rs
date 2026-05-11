@@ -70,3 +70,90 @@ queries:
       - bulk email domain migration
       - user remediation
     read_only: false
+
+  # ─── Telemetry templates (Phase 2: ayx telemetry --source server) ──────
+  # All read-only. Filters intentionally permissive so client-side
+  # aggregation (cmd/telemetry/aggregate.rs) handles time-window slicing
+  # without forcing the templates to embed BSON ISODate literals.
+  - name: queue_running
+    database: AlteryxService
+    collection: AS_Queue
+    filter:
+      State:
+        $in:
+          - 0
+          - 1
+    sort:
+      EnteredQueueDateTime: -1
+    limit: 1000
+    purpose: List currently running and queued jobs for telemetry
+    kba_refs:
+      - AS_Queue
+      - queue depth
+    read_only: true
+
+  - name: queue_recent
+    database: AlteryxService
+    collection: AS_Queue
+    filter: {}
+    sort:
+      EnteredQueueDateTime: -1
+    limit: 10000
+    purpose: Recent queue entries for client-side window + wait-time stats
+    kba_refs:
+      - AS_Queue
+      - wait time
+    read_only: true
+
+  - name: results_recent
+    database: AlteryxService
+    collection: AS_Results
+    filter: {}
+    sort:
+      ResultDateTime: -1
+    limit: 10000
+    purpose: Recent job results for telemetry history + percentile aggregation
+    kba_refs:
+      - AS_Results
+      - run history
+    read_only: true
+
+  - name: results_errored
+    database: AlteryxService
+    collection: AS_Results
+    filter:
+      Status:
+        $in:
+          - Error
+          - Failed
+          - Failure
+    sort:
+      ResultDateTime: -1
+    limit: 5000
+    purpose: Failed job results for telemetry errors recent
+    kba_refs:
+      - AS_Results
+      - job failures
+    read_only: true
+
+  - name: schedule_run_history_raw
+    database: AlteryxGallery
+    collection: Schedules
+    filter: {}
+    projection:
+      frequency: 1
+      iteration: 1
+      lastRunTime: 1
+      runCount: 1
+      lastError: 1
+      enabled: 1
+      appInfoId: 1
+      ownerId: 1
+    sort:
+      lastRunTime: -1
+    limit: 5000
+    purpose: Schedule run-history projection for telemetry plan-level stats
+    kba_refs:
+      - Schedules
+      - schedule health
+    read_only: true
