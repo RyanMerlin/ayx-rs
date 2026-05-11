@@ -225,7 +225,7 @@ jobs:
       # the same verifiable provenance via the sigstore .sigstore bundles.
       - name: Attest build provenance for every release artifact
         continue-on-error: true
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             release/ayx-x86_64-pc-windows-msvc.zip
