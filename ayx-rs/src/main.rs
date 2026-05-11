@@ -3,7 +3,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
-use chrono::Utc;
 use clap::{Parser, Subcommand};
 use reqwest::blocking::Client;
 use roxmltree::Document;
@@ -29,10 +28,7 @@ use ayx_server::logs::{
     discover_log_inventory, extract_context, parse_gallery_csv, parse_gallery_events,
     parse_service_events, recent_log_candidates, summarize_log_file, tail_log_file,
 };
-use ayx_server::mongo::{
-    backup_envelope, doctor_envelope as mongo_doctor_envelope, inventory_envelope,
-    query_envelope as mongo_query_envelope, restore_envelope, status_envelope,
-};
+// mongo helpers moved to cmd/mongo.rs in the cmd/ split.
 // sqlserver helpers moved to cmd/sqlserver.rs in the cmd/ split.
 use ayx_server::upgrade::{
     compute_path, run_apply, run_backup, run_bundle, run_plan, run_postcheck, run_precheck,
@@ -42,14 +38,7 @@ use ayx_server::util::{
     write_runtime_settings_json,
 };
 use ayx_server::{call_operation, diagnose_api, import_swagger};
-use ayx_server_api::workflow_version_upload_envelope;
-use ayx_workflow::{
-    convert_desktop_to_cloud, inspect as inspect_workflow, load_rules as load_workflow_rules,
-    migrate as migrate_workflow, read_yxdb as read_yxdb_workflow, recurse as recurse_workflow,
-    repackage_dir as repackage_workflow, replace as replace_workflow, scan as scan_workflow,
-    unpack_package as unpack_workflow, validate as validate_workflow, CloudConversionOptions,
-    WorkflowReplacement,
-};
+// workflow helpers + workflow_version_upload_envelope moved to cmd/workflow.rs.
 use self_update::backends::github::Update as GitHubUpdate;
 use self_update::Status;
 
@@ -386,7 +375,7 @@ enum DoctorCommand {
 }
 
 #[derive(Subcommand, Debug)]
-enum MongoCommand {
+pub(crate) enum MongoCommand {
     Status {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
@@ -575,7 +564,7 @@ pub(crate) enum SqlserverCommand {
 }
 
 #[derive(Subcommand, Debug)]
-enum WorkflowCommand {
+pub(crate) enum WorkflowCommand {
     Inspect {
         #[arg(long)]
         input: PathBuf,
@@ -4147,87 +4136,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
     let load_profile =
         |path: &Path| -> Result<Config> { load_profile_with_env(path, environment.as_deref()) };
     let envelope = match cli.command {
-        Command::Mongo { command } => match command {
-            MongoCommand::Status { profile } => {
-                let profile = load_profile(&profile)?;
-                status_envelope(&profile)?
-            }
-            MongoCommand::Inventory { profile } => {
-                let profile = load_profile(&profile)?;
-                inventory_envelope(&profile)?
-            }
-            MongoCommand::Backup {
-                profile,
-                output_dir,
-                apply,
-                audit_dir,
-            } => {
-                let profile = load_profile(&profile)?;
-                backup_envelope(&profile, &output_dir, apply, &audit_dir)?
-            }
-            MongoCommand::Restore {
-                profile,
-                input_path,
-                apply,
-                audit_dir,
-            } => {
-                let profile = load_profile(&profile)?;
-                restore_envelope(&profile, &input_path, apply, &audit_dir)?
-            }
-            MongoCommand::Query {
-                profile,
-                database,
-                collection,
-                filter,
-                projection,
-                sort,
-                limit,
-                print,
-                apply,
-                template,
-            } => {
-                let profile = load_profile(&profile)?;
-                let spec = ayx_server::mongo::resolve_query_spec(
-                    &profile,
-                    database.as_deref(),
-                    collection.as_deref(),
-                    filter.as_deref(),
-                    projection.as_deref(),
-                    sort.as_deref(),
-                    limit,
-                    template.as_deref(),
-                )?;
-                mongo_query_envelope(&profile, &spec, print, apply)?
-            }
-            MongoCommand::Doctor { profile } => {
-                let profile = load_profile(&profile)?;
-                mongo_doctor_envelope(&profile)?
-            }
-            MongoCommand::Mutate {
-                profile,
-                database,
-                collection,
-                filter,
-                update,
-                template,
-                print,
-                apply,
-                accept_mutation_risk,
-            } => {
-                let profile = load_profile(&profile)?;
-                ayx_server::mongo::mutate_envelope(
-                    &profile,
-                    database.as_deref(),
-                    collection.as_deref(),
-                    filter.as_deref(),
-                    update.as_deref(),
-                    template.as_deref(),
-                    print,
-                    apply,
-                    accept_mutation_risk,
-                )?
-            }
-        },
+        Command::Mongo { command } => cmd::mongo::execute(cli.environment.as_deref(), command)?,
         Command::Server { command } => match command {
             None => Envelope::ok("server commands: api, system-info, runtime-settings, ayx-paths, server-logs, backup-plan, backup"),
             Some(ServerCommand::Api { command }) => match command {
@@ -4998,256 +4907,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
         Command::Sqlserver { command } => {
             cmd::sqlserver::execute(cli.environment.as_deref(), command)?
         }
-        Command::Workflow { command } => match command {
-            None => Envelope::ok(
-                "workflow commands available: inspect, unpack, validate, replace, repackage, recurse, scan, convert-cloud, publish, migrate, yxdb",
-            ),
-            Some(WorkflowCommand::Inspect { input }) => {
-                let detail = inspect_workflow(&input)?;
-                Envelope::ok_with_data(
-                    "workflow inspection completed",
-                    json!({
-                        "input": input.display().to_string(),
-                        "data": detail,
-                    }),
-                )
-            }
-            Some(WorkflowCommand::Unpack { input, output_dir }) => {
-                let detail = unpack_workflow(&input, &output_dir)?;
-                Envelope::ok_with_data(
-                    "workflow package unpacked",
-                    json!({
-                        "input": input.display().to_string(),
-                        "output_dir": output_dir.display().to_string(),
-                        "data": detail,
-                    }),
-                )
-            }
-            Some(WorkflowCommand::Validate { input }) => {
-                let detail = validate_workflow(&input)?;
-                Envelope::ok_with_data(
-                    "workflow validation completed",
-                    json!({
-                        "input": input.display().to_string(),
-                        "data": detail,
-                    }),
-                )
-            }
-            Some(WorkflowCommand::Replace {
-                input,
-                output,
-                find,
-                replace,
-                validate,
-            }) => {
-                let detail = replace_workflow(
-                    &input,
-                    &output,
-                    &[WorkflowReplacement { find, replace }],
-                    validate,
-                )?;
-                Envelope::ok_with_data(
-                    "workflow replacement completed",
-                    json!({
-                        "input": input.display().to_string(),
-                        "output": output.display().to_string(),
-                        "data": detail,
-                    }),
-                )
-            }
-            Some(WorkflowCommand::Repackage { input_dir, output }) => {
-                let detail = repackage_workflow(&input_dir, &output)?;
-                Envelope::ok_with_data(
-                    "workflow package rebuilt",
-                    json!({
-                        "input_dir": input_dir.display().to_string(),
-                        "output": output.display().to_string(),
-                        "data": detail,
-                    }),
-                )
-            }
-            Some(WorkflowCommand::Recurse {
-                input,
-                output,
-                rules,
-                find,
-                replace,
-                validate,
-            }) => {
-                let replacements = if let Some(rules) = rules.as_ref() {
-                    let rules = load_workflow_rules(rules)?;
-                    rules.replacements
-                } else {
-                    if find.len() != replace.len() {
-                        bail!(
-                            "workflow recurse requires the same number of --find and --replace values"
-                        );
-                    }
-                    find.into_iter()
-                        .zip(replace)
-                        .map(|(find, replace)| WorkflowReplacement { find, replace })
-                        .collect()
-                };
-                let detail = recurse_workflow(&input, &output, &replacements, validate)?;
-                Envelope::ok_with_data(
-                    "workflow recursion completed",
-                    json!({
-                        "input": input.display().to_string(),
-                        "output": output.display().to_string(),
-                        "data": detail,
-                    }),
-                )
-            }
-            Some(WorkflowCommand::Migrate {
-                input,
-                output,
-                find,
-                replace,
-                validate,
-            }) => {
-                let detail = migrate_workflow(
-                    &input,
-                    &output,
-                    &[WorkflowReplacement { find, replace }],
-                    validate,
-                )?;
-                Envelope::ok_with_data(
-                    "workflow migration completed",
-                    json!({
-                        "input": input.display().to_string(),
-                        "output": output.display().to_string(),
-                    "data": detail,
-                }),
-                )
-            }
-            Some(WorkflowCommand::Yxdb { input, csv }) => {
-                let detail = read_yxdb_workflow(&input, csv.as_deref())?;
-                Envelope::ok_with_data(
-                    "workflow yxdb read completed",
-                    json!({
-                        "input": input.display().to_string(),
-                        "csv": csv.as_ref().map(|path| path.display().to_string()),
-                        "data": detail,
-                    }),
-                )
-            }
-            Some(WorkflowCommand::Scan {
-                input,
-                rules,
-                find,
-                replace,
-            }) => {
-                let replacements = if let Some(rules) = rules.as_ref() {
-                    let rules = load_workflow_rules(rules)?;
-                    rules.replacements
-                } else {
-                    if find.len() != replace.len() {
-                        bail!(
-                            "workflow scan requires the same number of --find and --replace values"
-                        );
-                    }
-                    find.into_iter()
-                        .zip(replace)
-                        .map(|(find, replace)| WorkflowReplacement { find, replace })
-                        .collect()
-                };
-                let detail = scan_workflow(&input, &replacements)?;
-                Envelope::ok_with_data(
-                    "workflow scan completed",
-                    json!({
-                        "input": input.display().to_string(),
-                        "data": detail,
-                    }),
-                )
-            }
-            Some(WorkflowCommand::ConvertCloud {
-                input,
-                output,
-                fail_on_unsupported,
-            }) => {
-                let report = convert_desktop_to_cloud(
-                    &input,
-                    CloudConversionOptions {
-                        fail_on_unsupported,
-                    },
-                )?;
-                fs::write(&output, serde_json::to_string_pretty(&report.content)? + "\n")
-                    .with_context(|| format!("failed to write '{}'", output.display()))?;
-                Envelope::ok_with_data(
-                    "workflow cloud conversion completed",
-                    json!({
-                        "input": input.display().to_string(),
-                        "output": output.display().to_string(),
-                        "content_checksum": report.content_checksum,
-                        "warning_count": report.warnings.len(),
-                        "warnings": report.warnings,
-                        "unsupported_tools": report.unsupported_tools,
-                        "removed_tools": report.removed_tools,
-                        "converted_tool_count": report.converted_tool_count,
-                    }),
-                )
-            }
-            Some(WorkflowCommand::Publish {
-                profile,
-                input,
-                workflow_id,
-                name,
-                owner_id,
-                others_may_download,
-                others_can_execute,
-                execution_mode,
-                has_private_data_exemption,
-                comments,
-                make_published,
-                workflow_credential_type,
-                credential_id,
-                bypass_workflow_version_check,
-            }) => {
-                let config = load_profile(&profile)?;
-                let package_path = if input
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|s| s.eq_ignore_ascii_case("yxzp"))
-                    .unwrap_or(false)
-                {
-                    input.clone()
-                } else if input.is_dir() {
-                    let temp_package = std::env::temp_dir().join(format!(
-                        "ayx-workflow-publish-{}-{}.yxzp",
-                        std::process::id(),
-                        Utc::now().timestamp_nanos_opt().unwrap_or_default()
-                    ));
-                    repackage_workflow(&input, &temp_package)?;
-                    temp_package
-                } else {
-                    bail!("workflow publish expects a .yxzp package or directory");
-                };
-                let detail = workflow_version_upload_envelope(
-                    &config,
-                    &workflow_id,
-                    &name,
-                    &owner_id,
-                    &package_path,
-                    others_may_download,
-                    others_can_execute,
-                    &execution_mode,
-                    has_private_data_exemption,
-                    comments.as_deref(),
-                    make_published,
-                    &workflow_credential_type,
-                    credential_id.as_deref(),
-                    bypass_workflow_version_check,
-                )?;
-                Envelope::ok_with_data(
-                    "workflow publish requested",
-                    json!({
-                        "input": input.display().to_string(),
-                        "package_path": package_path.display().to_string(),
-                        "data": detail,
-                    }),
-                )
-            }
-        },
+        Command::Workflow { command } => cmd::workflow::execute(cli.environment.as_deref(), command)?,
         Command::Tools { command } => cmd::tools::execute(command)?,
         Command::Onboard {
             profile,
@@ -8943,12 +8603,16 @@ mod tests {
         )
         .expect("write sample");
 
-        let env = catalog_run_envelope(
-            "designer.workflow.context",
-            &format!(r#"{{"workflow_path":"{}"}}"#, input.display()),
-            false,
-        )
-        .expect("catalog run should succeed");
+        // Use serde_json to build the JSON literal so backslashes in Windows
+        // paths (e.g. `D:\a\...`) are escaped properly. The previous
+        // `format!(r#"...{}"#)` interpolation produced invalid JSON on
+        // Windows CI runners.
+        let json_input = serde_json::to_string(&json!({
+            "workflow_path": input.display().to_string(),
+        }))
+        .expect("serialize");
+        let env = catalog_run_envelope("designer.workflow.context", &json_input, false)
+            .expect("catalog run should succeed");
         assert_eq!(env.data["capability"]["id"], "designer.workflow.context");
         assert_eq!(env.data["result"]["workflow"]["tool_count"], 1);
     }

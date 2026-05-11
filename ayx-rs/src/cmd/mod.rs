@@ -11,6 +11,8 @@
 //! reaching back into a shared `cli` struct, so the boundary is explicit.
 
 pub mod confirm;
+pub mod mongo;
 pub mod registry;
 pub mod sqlserver;
 pub mod tools;
+pub mod workflow;
