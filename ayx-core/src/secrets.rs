@@ -58,15 +58,50 @@ pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileErro
     Ok(None)
 }
 
+/// Store a secret in the OS keyring.
+///
+/// On failure (no keyring backend, denied access, etc.) returns an error so
+/// callers must decide explicitly whether to fall back. Use
+/// [`store_secret_with_fallback`] when an inline fallback is acceptable.
 pub fn store_keyring_secret(account: &str, secret: &str) -> Result<String, ProfileError> {
-    let entry = match Entry::new(SECRET_SERVICE, account) {
-        Ok(entry) => entry,
-        Err(_) => return Ok(format!("inline:{secret}")),
-    };
-    if entry.set_password(secret).is_err() {
-        return Ok(format!("inline:{secret}"));
-    }
+    let entry = Entry::new(SECRET_SERVICE, account).map_err(|source| {
+        ProfileError::Invalid(format!(
+            "unable to open keyring entry '{}': {}. Set AYX_ALLOW_INLINE_SECRETS=1 to store in YAML instead, or configure a keyring backend.",
+            account, source
+        ))
+    })?;
+    entry.set_password(secret).map_err(|source| {
+        ProfileError::Invalid(format!(
+            "unable to write keyring secret '{}': {}. Set AYX_ALLOW_INLINE_SECRETS=1 to store in YAML instead, or configure a keyring backend.",
+            account, source
+        ))
+    })?;
     Ok(keyring_secret_ref(account))
+}
+
+/// Store a secret, preferring the OS keyring and falling back to an inline
+/// reference only when the caller has opted in (`allow_inline = true` or the
+/// `AYX_ALLOW_INLINE_SECRETS` env var is truthy). Returns the reference plus a
+/// flag indicating whether inline fallback was used so the caller can warn.
+pub fn store_secret_with_fallback(
+    account: &str,
+    secret: &str,
+    allow_inline: bool,
+) -> Result<(String, bool), ProfileError> {
+    match store_keyring_secret(account, secret) {
+        Ok(reference) => Ok((reference, false)),
+        Err(err) => {
+            let env_opt_in = matches!(
+                env::var("AYX_ALLOW_INLINE_SECRETS").ok().as_deref(),
+                Some("1") | Some("true") | Some("yes") | Some("TRUE") | Some("YES")
+            );
+            if allow_inline || env_opt_in {
+                Ok((format!("inline:{secret}"), true))
+            } else {
+                Err(err)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -840,6 +840,22 @@ const SURFACES: &[SurfaceSpec] = &[
     },
 ];
 
+/// Returns every (method, path-template) pair declared in the inventory.
+///
+/// Used by drift-detection tests to verify that every endpoint string
+/// hard-coded into the CLI dispatcher (`main.rs`) has a corresponding entry
+/// in the inventory. When the inventory and the wiring diverge, the CLI
+/// catalog lies to operators — tests must catch this.
+pub fn inventory_endpoints() -> Vec<(&'static str, &'static str)> {
+    SURFACES
+        .iter()
+        .chain(PARTIAL_SURFACES.iter())
+        .chain(DOCUMENTED_ONLY_SURFACES.iter())
+        .chain(DEFERRED_SURFACES.iter())
+        .flat_map(|s| s.endpoints.iter().map(|e| (e.method, e.path)))
+        .collect()
+}
+
 pub fn one_surface_inventory_envelope(config: &Config) -> Result<Envelope> {
     let implemented = SURFACES
         .iter()
@@ -958,6 +974,7 @@ mod tests {
                 access_token_ref: None,
                 refresh_token: Some("refresh".to_string()),
                 refresh_token_ref: None,
+                expected_workspace_id: None,
             }),
             observability: None,
             server_api: None,

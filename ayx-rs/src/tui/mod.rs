@@ -1,3 +1,7 @@
+// See tui/app.rs for the rationale. Stage 3 of the audit roadmap will split
+// this module and drop these allows.
+#![allow(clippy::clone_on_copy, clippy::bind_instead_of_map)]
+
 use std::io;
 
 use anyhow::Result;
@@ -12,13 +16,17 @@ use ratatui::{
 };
 use serde_json::Value;
 
-use ayx_core::profile::derive_alteryx_one_token_endpoint;
 use ayx_core::envelope::Envelope;
+use ayx_core::profile::derive_alteryx_one_token_endpoint;
 
 use self::app::{App, ConfigSection, Focus, OneBrowserResource, ProfilesPane, Screen};
 
 mod app;
+mod forms;
+mod one_browser;
+mod render_helpers;
 mod theme;
+mod worker;
 
 pub fn run() -> Result<Envelope> {
     let mut app = App::new()?;
@@ -78,7 +86,10 @@ fn render(frame: &mut Frame, app: &App) {
     let body = Layout::horizontal([Constraint::Length(20), Constraint::Min(0)]).split(vertical[1]);
     render_sidebar(frame, app, body[0]);
     if app.screen == Screen::Inspect {
-        let base = app.inspect_return.unwrap_or(Screen::Profiles);
+        let base = app
+            .inspect_return
+            .map(|(s, _)| s)
+            .unwrap_or(Screen::Profiles);
         render_screen_content(frame, app, base, body[1]);
         let popup = centered_rect(88, 78, body[1]);
         frame.render_widget(Clear, popup);
@@ -434,15 +445,9 @@ fn render_credentials(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let title = if app.credentials.editing {
-        format!(
-            " Alteryx One ({}) ",
-            app.credentials_storage_target_label()
-        )
+        format!(" Alteryx One ({}) ", app.credentials_storage_target_label())
     } else {
-        format!(
-            " Alteryx One [{}] ",
-            app.credentials_storage_target_label()
-        )
+        format!(" Alteryx One [{}] ", app.credentials_storage_target_label())
     };
     frame.render_widget(
         Paragraph::new(lines)
@@ -549,16 +554,16 @@ fn render_credentials(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_config(frame: &mut Frame, app: &App, area: Rect) {
-    let columns = Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
-        .split(area);
+    let columns =
+        Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).split(area);
     let left = Layout::vertical([Constraint::Length(4), Constraint::Min(0)]).split(columns[0]);
     let body = Layout::vertical([Constraint::Min(0), Constraint::Length(12)]).split(left[1]);
-    let right_rows =
-        Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).split(columns[1]);
-    let right_top =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(right_rows[0]);
-    let right_bottom =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(right_rows[1]);
+    let right_rows = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(columns[1]);
+    let right_top = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(right_rows[0]);
+    let right_bottom = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(right_rows[1]);
 
     let mut tab_lines = vec![Line::from(vec![
         Span::styled("Sections: ", theme::field_label()),
@@ -602,14 +607,14 @@ fn render_config(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines = Vec::new();
     lines.push(Line::from(vec![
         Span::styled("Section: ", theme::field_label()),
-        Span::styled(app.config_form.active_section().label(), theme::accent_bold()),
+        Span::styled(
+            app.config_form.active_section().label(),
+            theme::accent_bold(),
+        ),
     ]));
     lines.push(Line::from(vec![
         Span::styled("Action: ", theme::field_label()),
-        Span::styled(
-            "e edit · c clear · s save · r reload",
-            theme::muted(),
-        ),
+        Span::styled("e edit · c clear · s save · r reload", theme::muted()),
     ]));
     lines.push(Line::from(""));
     if start > 0 {
@@ -676,7 +681,7 @@ fn render_config(frame: &mut Frame, app: &App, area: Rect) {
                     .style(theme::panel()),
             )
             .wrap(Wrap { trim: false }),
-            body[0],
+        body[0],
     );
 
     let validation = yaml_lines(&app.current_validation());
@@ -724,7 +729,10 @@ fn render_config(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("Sections: ", theme::field_label()),
-            Span::styled("Overview, Server API, Mongo, SQL Server, Observability", theme::muted()),
+            Span::styled(
+                "Overview, Server API, Mongo, SQL Server, Observability",
+                theme::muted(),
+            ),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -746,7 +754,7 @@ fn render_config(frame: &mut Frame, app: &App, area: Rect) {
                     .style(theme::panel()),
             )
             .wrap(Wrap { trim: false }),
-            body[1],
+        body[1],
     );
 
     render_config_section(
@@ -755,12 +763,7 @@ fn render_config(frame: &mut Frame, app: &App, area: Rect) {
         right_top[0],
         render_server_api_summary(app),
     );
-    render_config_section(
-        frame,
-        "Mongo",
-        right_top[1],
-        render_mongo_summary(app),
-    );
+    render_config_section(frame, "Mongo", right_top[1], render_mongo_summary(app));
     render_config_section(
         frame,
         "SQL Server",
@@ -1068,12 +1071,7 @@ fn render_panel_summary(panel: &crate::tui::app::PanelState) -> Vec<Line<'static
     lines
 }
 
-fn render_config_section(
-    frame: &mut Frame,
-    title: &str,
-    area: Rect,
-    lines: Vec<Line<'static>>,
-) {
+fn render_config_section(frame: &mut Frame, title: &str, area: Rect, lines: Vec<Line<'static>>) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(
@@ -1088,11 +1086,7 @@ fn render_config_section(
     );
 }
 
-fn visible_field_window(
-    len: usize,
-    cursor: usize,
-    capacity: usize,
-) -> (usize, usize) {
+fn visible_field_window(len: usize, cursor: usize, capacity: usize) -> (usize, usize) {
     if len <= capacity {
         return (0, len);
     }
@@ -1112,22 +1106,41 @@ fn render_server_api_summary(app: &App) -> Vec<Line<'static>> {
         .as_ref()
         .map(|api| api.base_url.clone())
         .or_else(|| config.api.as_ref().map(|api| api.base_url.clone()))
-        .or_else(|| config.server.as_ref().map(|server| server.webapi_url.clone()));
+        .or_else(|| {
+            config
+                .server
+                .as_ref()
+                .map(|server| server.webapi_url.clone())
+        });
     let client_id = config
         .server_api
         .as_ref()
         .map(|api| api.client_id.clone())
-        .or_else(|| config.api.as_ref().and_then(|api| api.auth.client_id.clone()))
-        .or_else(|| config.server.as_ref().map(|server| server.curator_api_key.clone()));
+        .or_else(|| {
+            config
+                .api
+                .as_ref()
+                .and_then(|api| api.auth.client_id.clone())
+        })
+        .or_else(|| {
+            config
+                .server
+                .as_ref()
+                .map(|server| server.curator_api_key.clone())
+        });
     let client_secret_present = config
         .server_api
         .as_ref()
         .map(|api| !api.client_secret.trim().is_empty())
         .or_else(|| {
-            config
-                .api
-                .as_ref()
-                .map(|api| !api.auth.client_secret.as_deref().unwrap_or("").trim().is_empty())
+            config.api.as_ref().map(|api| {
+                !api.auth
+                    .client_secret
+                    .as_deref()
+                    .unwrap_or("")
+                    .trim()
+                    .is_empty()
+            })
         })
         .or_else(|| {
             config
@@ -1186,8 +1199,16 @@ fn render_mongo_summary(app: &App) -> Vec<Line<'static>> {
     let mongo = &config.mongo;
     let mut lines = vec![
         section_kv_line("Mode", format!("{:?}", mongo.mode), theme::accent()),
-        section_kv_line("Gallery DB", mongo.databases.gallery_name.clone(), theme::field_value()),
-        section_kv_line("Service DB", mongo.databases.service_name.clone(), theme::field_value()),
+        section_kv_line(
+            "Gallery DB",
+            mongo.databases.gallery_name.clone(),
+            theme::field_value(),
+        ),
+        section_kv_line(
+            "Service DB",
+            mongo.databases.service_name.clone(),
+            theme::field_value(),
+        ),
     ];
     match mongo.mode {
         ayx_core::profile::MongoMode::Embedded => {
@@ -1254,7 +1275,11 @@ fn render_sqlserver_summary(app: &App) -> Vec<Line<'static>> {
             ),
         ]
     } else {
-        vec![section_kv_line("Status", "not configured".to_string(), theme::warn())]
+        vec![section_kv_line(
+            "Status",
+            "not configured".to_string(),
+            theme::warn(),
+        )]
     }
 }
 
@@ -1269,7 +1294,13 @@ fn render_observability_summary(app: &App) -> Vec<Line<'static>> {
                     .map(|value| value.enabled.to_string())
                     .unwrap_or_else(|| "missing".to_string()),
                 api_logging
-                    .map(|value| if value.enabled { theme::ok() } else { theme::warn() })
+                    .map(|value| {
+                        if value.enabled {
+                            theme::ok()
+                        } else {
+                            theme::warn()
+                        }
+                    })
                     .unwrap_or_else(theme::warn),
             ),
             section_kv_line(
@@ -1289,7 +1320,11 @@ fn render_observability_summary(app: &App) -> Vec<Line<'static>> {
             ),
         ]
     } else {
-        vec![section_kv_line("Status", "not configured".to_string(), theme::warn())]
+        vec![section_kv_line(
+            "Status",
+            "not configured".to_string(),
+            theme::warn(),
+        )]
     }
 }
 

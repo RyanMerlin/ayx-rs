@@ -1,0 +1,38 @@
+id: one.flow.promote
+title: Promote a single Alteryx One flow between environments
+summary: |
+  Lift one flow from dev to prod (or any source → target pair). Cleaner
+  than a full workspace migration when you only need to move a handful of
+  flows for a release.
+safety: mutating
+trigger:
+  task_keywords:
+    - promote flow
+    - release flow
+    - dev to prod
+    - publish flow
+  tags:
+    - one
+    - flow
+    - promotion
+    - release
+steps:
+  - kind: command
+    cmd: "ayx --environment <source> one flows detail --flow-id <flow_id> --output json"
+    why: "Inspect the source flow shape and confirm the id."
+  - kind: command
+    cmd: "ayx --environment <source> one flows export --flow-id <flow_id> --output-path ./flow-<flow_id>.zip"
+    why: "Package the flow + its dependencies into a portable zip."
+  - kind: command
+    cmd: "ayx --environment <target> one flows import-dry-run --input-path ./flow-<flow_id>.zip"
+    why: "Server-side dry-run import. Reports conflicts before touching state."
+  - kind: command
+    cmd: "ayx --environment <target> --apply one flows import --input-path ./flow-<flow_id>.zip"
+    why: "Live import. Workspace identity preflight + --apply gate both engage."
+validations:
+  - describe: "Target environment shows the flow in `one flows list` and a matching detail envelope."
+rollback: |
+  If the import landed but the flow is broken: delete the target-side flow
+  (`ayx --apply one flows delete --flow-id <new_id>`) and re-export from
+  source after fixing the underlying issue. The export zip is your immutable
+  source of truth — keep it until you're confident in the promotion.

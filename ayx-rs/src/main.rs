@@ -10,7 +10,7 @@ use roxmltree::Document;
 use serde_json::{json, Value};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
-use ayx_core::envelope::Envelope;
+use ayx_core::envelope::{Envelope, ErrorCode};
 use ayx_core::observability::transport_error_summary;
 use ayx_core::profile::{
     ayx_config_home, ayx_profiles_dir, ayx_state_path, ayx_workspaces_dir, list_central_profiles,
@@ -58,17 +58,57 @@ use self_update::backends::github::Update as GitHubUpdate;
 use self_update::Status;
 
 mod capability;
+mod cmd;
 mod onboard;
+mod render;
 mod tui;
 
 #[derive(Parser, Debug)]
-#[command(name = "ayx")]
-#[command(about = "AYX Rust CLI")]
+#[command(
+    name = "ayx",
+    version,
+    about = "Operator CLI and TUI for the Alteryx ecosystem (Server, One, Mongo, Designer workflows).",
+    long_about = "ayx is a single-binary, agent-friendly CLI for Alteryx administrators and \
+                  automation. It produces a uniform JSON envelope (use --output json), gates \
+                  mutating One API calls behind --apply (dry-run by default), records audit \
+                  artifacts for destructive operations, and resolves profiles from a central \
+                  config home so promotion-style workflows can switch environments cleanly. \
+                  See `ayx <command> --help` for branch-specific help, and `ayx catalog list` \
+                  for the machine-readable command registry.",
+    disable_help_subcommand = true
+)]
 struct Cli {
     #[arg(long, default_value = "text")]
     output: String,
     #[arg(long)]
     environment: Option<String>,
+    /// Global apply flag for mutating One API commands.
+    ///
+    /// Without `--apply`, mutating One requests (POST/PUT/PATCH/DELETE) return
+    /// a structured dry-run envelope describing the request that would be sent
+    /// but do not contact the server. Read-only commands ignore this flag.
+    /// Per-command `--apply` flags (e.g. on `mongo backup`) take precedence.
+    #[arg(long, global = true)]
+    apply: bool,
+    /// Enable verbose human-readable progress output to stderr. Independent
+    /// of `--output`; useful with `--output json` to see what's happening
+    /// without polluting the structured stdout payload.
+    #[arg(long, short = 'v', global = true)]
+    verbose: bool,
+    /// Enable debug-level logging to stderr. Implies `--verbose`. Use this
+    /// when reporting bugs or for in-depth troubleshooting.
+    #[arg(long, global = true)]
+    debug: bool,
+    /// Disable TLS certificate verification globally. Use only for local
+    /// development / lab environments; never in production. Equivalent to
+    /// setting `verify_tls = false` on every API surface.
+    #[arg(long, global = true)]
+    no_verify_tls: bool,
+    /// Skip the TTY confirmation prompt on destructive operations. Required
+    /// for non-interactive automation (CI / pipes) that runs destructive
+    /// commands. Has no effect on read-only or non-destructive flows.
+    #[arg(long, global = true)]
+    yes: bool,
 
     #[command(subcommand)]
     command: Command,
@@ -160,6 +200,160 @@ enum Command {
         #[command(subcommand)]
         command: CatalogCommand,
     },
+    #[command(about = "Generate shell completion scripts (bash, zsh, fish, powershell, elvish)")]
+    Completions {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+    #[command(
+        about = "Show active profile, account email, workspace, and environment in one shot."
+    )]
+    Whoami {
+        /// Override profile path. Defaults to the central profile resolver.
+        #[arg(long)]
+        profile: Option<PathBuf>,
+    },
+    #[command(
+        about = "Audit artifact management — list, sweep, retention. Audit files live under ${AYX_CONFIG_HOME}/audits/ by default."
+    )]
+    Audit {
+        #[command(subcommand)]
+        command: AuditCommand,
+    },
+    #[command(
+        about = "Tactical registry — named playbooks with safety, validation, and rollback notes"
+    )]
+    Tactics {
+        #[command(subcommand)]
+        command: TacticsCommand,
+    },
+    #[command(about = "Workflow registry — higher-order skills composing tactics")]
+    Workflows {
+        #[command(subcommand)]
+        command: WorkflowsCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum AuditCommand {
+    /// Show the resolved audit directory and a quick file count / size summary.
+    Status {
+        /// Override the audit dir. Defaults to ${AYX_CONFIG_HOME}/audits.
+        #[arg(long)]
+        audit_dir: Option<PathBuf>,
+    },
+    /// Delete audit artifacts older than `--retain-days`. Dry-run by default.
+    Sweep {
+        /// Audit dir to sweep. Defaults to ${AYX_CONFIG_HOME}/audits.
+        #[arg(long)]
+        audit_dir: Option<PathBuf>,
+        /// Keep files newer than this many days; delete the rest.
+        #[arg(long, default_value = "30")]
+        retain_days: u32,
+        /// Actually delete. Without --apply the command reports what *would* be removed.
+        #[arg(long)]
+        apply: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum TacticsCommand {
+    /// List every tactic, with title, safety classification, and tags.
+    List {
+        /// Filter by tag (substring match).
+        #[arg(long)]
+        tag: Option<String>,
+        /// Filter by safety classification: read_only | mutating | destructive.
+        #[arg(long)]
+        safety: Option<String>,
+    },
+    /// Describe a single tactic: steps, validations, rollback.
+    Describe {
+        /// Tactic id, e.g. `mongo.backup-restore`.
+        id: String,
+    },
+    /// Resolve a free-text task description to a ranked list of candidate tactics.
+    Resolve {
+        /// The task description, e.g. "back up mongo before a migration".
+        #[arg(long)]
+        task: String,
+        /// Cap returned hits.
+        #[arg(long, default_value = "5")]
+        limit: usize,
+    },
+    /// Execute a tactic. Without `--apply`, mutating/destructive tactics
+    /// emit a structured plan and never invoke a subprocess. Read-only
+    /// tactics always run.
+    Run {
+        /// Tactic id.
+        id: String,
+        /// Provide a placeholder value, e.g. `--param profile=prod`. Repeat
+        /// for each placeholder referenced by the tactic.
+        #[arg(long = "param", value_parser = parse_param_kv, action = clap::ArgAction::Append)]
+        param: Vec<(String, String)>,
+        /// Load params from a YAML file (`key: value` map). Merged with
+        /// `--param` flags; explicit `--param` wins on conflict.
+        #[arg(long)]
+        param_file: Option<PathBuf>,
+        /// Write per-step audit JSON to this directory (mode 0o700/0o600).
+        /// Default: ${AYX_CONFIG_HOME}/audits/.
+        #[arg(long)]
+        audit_dir: Option<PathBuf>,
+        /// On a TTY, prompt interactively for any params that the tactic
+        /// requires but were not provided via --param or --param-file.
+        /// Always off on stdin redirection / CI (we detect TTY).
+        #[arg(long)]
+        prompt_missing: bool,
+    },
+    /// Cross-check every step in every loaded tactic against the catalog.
+    /// Emits warnings for unknown command paths, capability ids, and
+    /// dangling workflow → tactic references. Read-only.
+    Validate,
+    /// Print a tactic's full YAML so an operator can fork it into their
+    /// config home (`${AYX_CONFIG_HOME}/registry/`) to override the bundled
+    /// stdlib version.
+    Export {
+        /// Tactic id.
+        id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum WorkflowsCommand {
+    /// List every workflow with its title, safety, and tactic count.
+    List {
+        #[arg(long)]
+        tag: Option<String>,
+    },
+    /// Explain a workflow: title, safety, ordered tactic ids with summaries.
+    Explain {
+        /// Workflow id, e.g. `governance.go-live`.
+        id: String,
+    },
+    /// Execute a workflow as an ordered chain of tactics. Honors the same
+    /// `--apply` semantics as `tactics run`.
+    Run {
+        /// Workflow id.
+        id: String,
+        #[arg(long = "param", value_parser = parse_param_kv, action = clap::ArgAction::Append)]
+        param: Vec<(String, String)>,
+        #[arg(long)]
+        param_file: Option<PathBuf>,
+        #[arg(long)]
+        audit_dir: Option<PathBuf>,
+        #[arg(long)]
+        prompt_missing: bool,
+    },
+}
+
+fn parse_param_kv(s: &str) -> Result<(String, String), String> {
+    let (k, v) = s
+        .split_once('=')
+        .ok_or_else(|| format!("expected key=value, got '{s}'"))?;
+    if k.is_empty() {
+        return Err(format!("empty key in '{s}'"));
+    }
+    Ok((k.to_string(), v.to_string()))
 }
 
 #[derive(Subcommand, Debug)]
@@ -189,6 +383,10 @@ enum DoctorCommand {
     One,
     Server,
     Mongo,
+    /// Run every applicable diagnostic in sequence and return one merged envelope.
+    /// Surfaces per-check status (ok / warn / fail / skipped); skipped indicates
+    /// the active profile doesn't have that surface configured.
+    All,
 }
 
 #[derive(Subcommand, Debug)]
@@ -828,7 +1026,18 @@ enum OnePlatformTokenCommand {
 
 #[derive(Subcommand, Debug)]
 enum OnePlatformPersonCommand {
-    List,
+    List {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        page_token: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        max_pages: Option<u32>,
+    },
     Current,
     Count,
     Detail {
@@ -881,7 +1090,18 @@ enum OnePlatformPersonCommand {
 
 #[derive(Subcommand, Debug)]
 enum OneWorkspaceCommand {
-    List,
+    List {
+        #[arg(long, default_value = "config.yaml")]
+        profile: PathBuf,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        page_token: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        max_pages: Option<u32>,
+    },
     Current,
     CurrentConfiguration,
     ConfigurationV4 {
@@ -1010,6 +1230,14 @@ enum OnePlansCommand {
     List {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        page_token: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        max_pages: Option<u32>,
     },
     Create {
         #[arg(long, default_value = "config.yaml")]
@@ -1098,6 +1326,22 @@ enum OneFlowsCommand {
     List {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        /// Cap results per page (server-side limit). Default is the server's
+        /// own page size (typically 100 for /v4/flows).
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Fetch a specific page; pass the `nextPageToken` returned by a
+        /// previous call.
+        #[arg(long)]
+        page_token: Option<String>,
+        /// Automatically follow `nextPageToken` until all pages are fetched.
+        /// Capped by `--max-pages` (default 50).
+        #[arg(long)]
+        all: bool,
+        /// Hard cap on pages when `--all` is set. Prevents runaway loops
+        /// against very large tenants.
+        #[arg(long)]
+        max_pages: Option<u32>,
     },
     Count {
         #[arg(long, default_value = "config.yaml")]
@@ -1216,6 +1460,14 @@ enum OneConnectionsCommand {
     List {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        page_token: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        max_pages: Option<u32>,
     },
     Count {
         #[arg(long, default_value = "config.yaml")]
@@ -1358,6 +1610,14 @@ enum OneJobGroupCommand {
     List {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        page_token: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        max_pages: Option<u32>,
     },
     Count {
         #[arg(long, default_value = "config.yaml")]
@@ -1444,6 +1704,14 @@ enum OneOutputObjectCommand {
     List {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        page_token: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        max_pages: Option<u32>,
     },
     Count {
         #[arg(long, default_value = "config.yaml")]
@@ -1524,6 +1792,14 @@ enum OneWriteSettingCommand {
     List {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        page_token: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        max_pages: Option<u32>,
     },
     Count {
         #[arg(long, default_value = "config.yaml")]
@@ -1562,6 +1838,14 @@ enum OneSchedulingCommand {
     List {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        page_token: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        max_pages: Option<u32>,
     },
     Detail {
         #[arg(long, default_value = "config.yaml")]
@@ -1678,18 +1962,18 @@ enum CatalogCommand {
 }
 
 #[derive(Debug)]
-struct CommandSpec {
-    name: &'static str,
-    path: &'static str,
-    summary: &'static str,
-    output: &'static str,
-    safety: &'static str,
-    mutating: bool,
-    prerequisites: &'static [&'static str],
-    notes: &'static [&'static str],
+pub(crate) struct CommandSpec {
+    pub name: &'static str,
+    pub path: &'static str,
+    pub summary: &'static str,
+    pub output: &'static str,
+    pub safety: &'static str,
+    pub mutating: bool,
+    pub prerequisites: &'static [&'static str],
+    pub notes: &'static [&'static str],
 }
 
-const COMMAND_SPECS: &[CommandSpec] = &[
+pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "profile list",
         path: "profile/list",
@@ -3284,6 +3568,51 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
+        name: "server-logs discover",
+        path: "server-logs/discover",
+        summary: "Inventory every Server log file the profile knows about.",
+        output: "log inventory envelope (paths, sizes, mtimes)",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml", "server install path"],
+        notes: &[
+            "First step in any log triage. Surfaces canonical paths so context queries can target them.",
+        ],
+    },
+    CommandSpec {
+        name: "server-logs context",
+        path: "server-logs/context",
+        summary: "Extract surrounding lines around every occurrence of a query string in a log file.",
+        output: "context envelope (matches with before/after windows)",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["log file path", "query string"],
+        notes: &[
+            "Use --before / --after to widen the window.",
+            "Pair with `server-logs discover` to enumerate log paths first.",
+        ],
+    },
+    CommandSpec {
+        name: "server-logs inventory",
+        path: "server-logs/inventory",
+        summary: "Aggregate counts and time ranges across all Server logs.",
+        output: "inventory envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["config.yaml"],
+        notes: &["Coarser than `discover`; intended for at-a-glance posture."],
+    },
+    CommandSpec {
+        name: "server-logs summary",
+        path: "server-logs/summary",
+        summary: "Summarize a single log file (line count, error count, time range).",
+        output: "summary envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["log file path"],
+        notes: &["Quick triage before drilling in with `context`."],
+    },
+    CommandSpec {
         name: "server auth status",
         path: "server/auth/status",
         summary: "Summarize Server authentication configuration.",
@@ -3796,12 +4125,31 @@ fn parse_key_value_params(items: &[String]) -> Result<HashMap<String, String>> {
 }
 
 fn execute(cli: Cli) -> Result<Envelope> {
-    let load_profile = |path: &Path| -> Result<Config> {
-        Ok(Config::load_from_path_with_environment(
-            path,
-            cli.environment.as_deref(),
-        )?)
-    };
+    // Plumb the global gates to BOTH transports. Mutating requests
+    // short-circuit to dry-run envelopes unless --apply was passed.
+    ayx_one_api::set_one_apply(cli.apply);
+    ayx_server_api::set_server_apply(cli.apply);
+    ayx_one_api::set_no_verify_tls(cli.no_verify_tls);
+    ayx_server_api::set_no_verify_tls(cli.no_verify_tls);
+    if cli.debug {
+        ayx_one_api::set_debug_trace(true);
+        ayx_server_api::set_debug_trace(true);
+        eprintln!(
+            "[debug] apply={} environment={:?} no_verify_tls={} verbose={}",
+            cli.apply, cli.environment, cli.no_verify_tls, cli.verbose
+        );
+    }
+
+    // `load_profile` is intentionally a tiny shim around the environment-aware
+    // Config loader. Lifting it from a captured closure to a `let`-bound
+    // fn-pointer-shaped closure (still capturing `cli.environment`) keeps
+    // every existing call-site `load_profile(&path)` working unchanged, while
+    // the parallel free function `load_profile_with_env` (below `execute`)
+    // is the canonical entry point for code under `cmd/` modules that
+    // doesn't have `cli` in scope.
+    let environment = cli.environment.clone();
+    let load_profile =
+        |path: &Path| -> Result<Config> { load_profile_with_env(path, environment.as_deref()) };
     let envelope = match cli.command {
         Command::Mongo { command } => match command {
             MongoCommand::Status { profile } => {
@@ -5112,16 +5460,25 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     one_surface_inventory_envelope(&config)?
                 }
                 Some(OnePlatformCommand::Workspace { command }) => match command {
-                    OneWorkspaceCommand::List => {
-                        let config = load_profile(&PathBuf::from("config.yaml"))?;
-                        one_api_live_request(
+                    OneWorkspaceCommand::List {
+                        profile,
+                        limit,
+                        page_token,
+                        all,
+                        max_pages,
+                    } => {
+                        let config = load_profile(&profile)?;
+                        let params = ayx_one_api::OneListParams::new()
+                            .with_limit(limit)
+                            .with_page_token(page_token)
+                            .with_all(all, max_pages);
+                        ayx_one_api::one_api_list_request(
                             &config,
                             "platform",
                             "workspace-list",
-                            "GET",
                             "/v4/workspaces",
-                            false,
                             &[],
+                            &params,
                         )?
                     }
                     OneWorkspaceCommand::ConfigurationV4 { workspace_id } => {
@@ -5415,7 +5772,9 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     )?
                 }
                 Some(OnePlatformCommand::Person { command }) => match command {
-                    None | Some(OnePlatformPersonCommand::List) => {
+                    None => {
+                        // Bare `ayx one platform person` runs an unpaginated list
+                        // against the default config.yaml for back-compat.
                         let config = load_profile(&PathBuf::from("config.yaml"))?;
                         one_api_live_request(
                             &config,
@@ -5425,6 +5784,27 @@ fn execute(cli: Cli) -> Result<Envelope> {
                             "/v4/people",
                             false,
                             &[],
+                        )?
+                    }
+                    Some(OnePlatformPersonCommand::List {
+                        profile,
+                        limit,
+                        page_token,
+                        all,
+                        max_pages,
+                    }) => {
+                        let config = load_profile(&profile)?;
+                        let params = ayx_one_api::OneListParams::new()
+                            .with_limit(limit)
+                            .with_page_token(page_token)
+                            .with_all(all, max_pages);
+                        ayx_one_api::one_api_list_request(
+                            &config,
+                            "platform",
+                            "person-list",
+                            "/v4/people",
+                            &[],
+                            &params,
                         )?
                     }
                     Some(OnePlatformPersonCommand::Count) => {
@@ -5501,6 +5881,12 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     }
                     Some(OnePlatformPersonCommand::Delete { profile, person_id }) => {
                         let config = load_profile(&profile)?;
+                        if cli.apply {
+                            cmd::confirm::require_tty_confirmation(
+                                cli.yes,
+                                &format!("About to DELETE person id='{person_id}' on profile '{}'. This cannot be undone.", config.profile_name),
+                            )?;
+                        }
                         one_api_live_request(
                             &config,
                             "platform",
@@ -5612,9 +5998,26 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 None => Envelope::ok(
                     "one job-group commands available: list, count, pdf-results, run, publish, detail, cancel, status, inputs, outputs, jobs, publications, profile, profile-results",
                 ),
-                Some(OneJobGroupCommand::List { profile }) => {
+                Some(OneJobGroupCommand::List {
+                    profile,
+                    limit,
+                    page_token,
+                    all,
+                    max_pages,
+                }) => {
                     let config = load_profile(&profile)?;
-                    one_api_live_request(&config, "jobGroup", "list", "GET", "/v4/jobLibrary", false, &[])?
+                    let params = ayx_one_api::OneListParams::new()
+                        .with_limit(limit)
+                        .with_page_token(page_token)
+                        .with_all(all, max_pages);
+                    ayx_one_api::one_api_list_request(
+                        &config,
+                        "jobGroup",
+                        "list",
+                        "/v4/jobLibrary",
+                        &[],
+                        &params,
+                    )?
                 }
                 Some(OneJobGroupCommand::Count { profile }) => {
                     let config = load_profile(&profile)?;
@@ -5798,16 +6201,25 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 None => Envelope::ok(
                     "one output-object commands available: list, count, create, detail, update, delete, inputs, wrangle-to-python",
                 ),
-                Some(OneOutputObjectCommand::List { profile }) => {
+                Some(OneOutputObjectCommand::List {
+                    profile,
+                    limit,
+                    page_token,
+                    all,
+                    max_pages,
+                }) => {
                     let config = load_profile(&profile)?;
-                    one_api_live_request(
+                    let params = ayx_one_api::OneListParams::new()
+                        .with_limit(limit)
+                        .with_page_token(page_token)
+                        .with_all(all, max_pages);
+                    ayx_one_api::one_api_list_request(
                         &config,
                         "outputObject",
                         "list",
-                        "GET",
                         "/v4/outputObjects",
-                        false,
                         &[],
+                        &params,
                     )?
                 }
                 Some(OneOutputObjectCommand::Count { profile }) => {
@@ -5994,16 +6406,25 @@ fn execute(cli: Cli) -> Result<Envelope> {
             },
             Some(OneCommand::WriteSettings { command }) => match command {
                 None => Envelope::ok("one write-setting commands available: list, count, create, detail, update, delete"),
-                Some(OneWriteSettingCommand::List { profile }) => {
+                Some(OneWriteSettingCommand::List {
+                    profile,
+                    limit,
+                    page_token,
+                    all,
+                    max_pages,
+                }) => {
                     let config = load_profile(&profile)?;
-                    one_api_live_request(
+                    let params = ayx_one_api::OneListParams::new()
+                        .with_limit(limit)
+                        .with_page_token(page_token)
+                        .with_all(all, max_pages);
+                    ayx_one_api::one_api_list_request(
                         &config,
                         "writeSetting",
                         "list",
-                        "GET",
                         "/v4/writeSettings",
-                        false,
                         &[],
+                        &params,
                     )?
                 }
                 Some(OneWriteSettingCommand::Count { profile }) => {
@@ -6099,16 +6520,25 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 None => Envelope::ok(
                     "one connections commands available: list, count, create, dry-run, detail, status, update, delete, permissions, connector-metadata",
                 ),
-                Some(OneConnectionsCommand::List { profile }) => {
+                Some(OneConnectionsCommand::List {
+                    profile,
+                    limit,
+                    page_token,
+                    all,
+                    max_pages,
+                }) => {
                     let config = load_profile(&profile)?;
-                    one_api_live_request(
+                    let params = ayx_one_api::OneListParams::new()
+                        .with_limit(limit)
+                        .with_page_token(page_token)
+                        .with_all(all, max_pages);
+                    ayx_one_api::one_api_list_request(
                         &config,
                         "connection",
                         "list",
-                        "GET",
                         "/v4/connections",
-                        false,
                         &[],
+                        &params,
                     )?
                 }
                 Some(OneConnectionsCommand::Count { profile }) => {
@@ -6381,9 +6811,21 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 None => Envelope::ok(
                     "one flows commands available: list, count, detail, create, update, delete, copy, run, validate, parameters, inputs, outputs, import, import-dry-run, export, export-dry-run",
                 ),
-                Some(OneFlowsCommand::List { profile }) => {
+                Some(OneFlowsCommand::List {
+                    profile,
+                    limit,
+                    page_token,
+                    all,
+                    max_pages,
+                }) => {
                     let config = load_profile(&profile)?;
-                    one_api_live_request(&config, "flow", "list", "GET", "/v4/flows", false, &[])?
+                    let params = ayx_one_api::OneListParams::new()
+                        .with_limit(limit)
+                        .with_page_token(page_token)
+                        .with_all(all, max_pages);
+                    ayx_one_api::one_api_list_request(
+                        &config, "flow", "list", "/v4/flows", &[], &params,
+                    )?
                 }
                 Some(OneFlowsCommand::Count { profile }) => {
                     let config = load_profile(&profile)?;
@@ -6434,6 +6876,15 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 Some(OneFlowsCommand::Delete { profile, flow_id }) => {
                     let config = load_profile(&profile)?;
                     let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+                    if cli.apply {
+                        // Only gate on confirmation when actually applying.
+                        // Without --apply the transport short-circuits to a
+                        // dry-run envelope anyway; no need to prompt.
+                        cmd::confirm::require_tty_confirmation(
+                            cli.yes,
+                            &format!("About to DELETE flow id='{flow_id}' on profile '{}'. This cannot be undone.", config.profile_name),
+                        )?;
+                    }
                     one_api_live_request(
                         &config,
                         "flow",
@@ -6602,9 +7053,26 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 None => Envelope::ok(
                     "one plans commands available: list, create, detail, full, run, count, run-parameters, schedules, export, update, delete, share, import, permissions",
                 ),
-                Some(OnePlansCommand::List { profile }) => {
+                Some(OnePlansCommand::List {
+                    profile,
+                    limit,
+                    page_token,
+                    all,
+                    max_pages,
+                }) => {
                     let config = load_profile(&profile)?;
-                    one_api_live_request(&config, "plans", "list", "GET", "/plans/v1/plans", false, &[])?
+                    let params = ayx_one_api::OneListParams::new()
+                        .with_limit(limit)
+                        .with_page_token(page_token)
+                        .with_all(all, max_pages);
+                    ayx_one_api::one_api_list_request(
+                        &config,
+                        "plans",
+                        "list",
+                        "/plans/v1/plans",
+                        &[],
+                        &params,
+                    )?
                 }
                 Some(OnePlansCommand::Create { profile, body }) => {
                     let config = load_profile(&profile)?;
@@ -6720,6 +7188,12 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 Some(OnePlansCommand::Delete { profile, plan_id }) => {
                     let config = load_profile(&profile)?;
                     let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
+                    if cli.apply {
+                        cmd::confirm::require_tty_confirmation(
+                            cli.yes,
+                            &format!("About to DELETE plan id='{plan_id}' on profile '{}'. This cannot be undone.", config.profile_name),
+                        )?;
+                    }
                     one_api_live_request(
                         &config,
                         "plans",
@@ -6780,9 +7254,26 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 None => Envelope::ok(
                     "one scheduling commands available: list, detail, enable, disable, count",
                 ),
-                Some(OneSchedulingCommand::List { profile }) => {
+                Some(OneSchedulingCommand::List {
+                    profile,
+                    limit,
+                    page_token,
+                    all,
+                    max_pages,
+                }) => {
                     let config = load_profile(&profile)?;
-                    one_api_live_request(&config, "scheduling", "list", "GET", "/scheduling/v1/schedules", false, &[])?
+                    let params = ayx_one_api::OneListParams::new()
+                        .with_limit(limit)
+                        .with_page_token(page_token)
+                        .with_all(all, max_pages);
+                    ayx_one_api::one_api_list_request(
+                        &config,
+                        "scheduling",
+                        "list",
+                        "/scheduling/v1/schedules",
+                        &[],
+                        &params,
+                    )?
                 }
                 Some(OneSchedulingCommand::Detail { profile, schedule_id }) => {
                     let config = load_profile(&profile)?;
@@ -7019,6 +7510,139 @@ fn execute(cli: Cli) -> Result<Envelope> {
             target_version.as_deref(),
             skip_confirm,
         )?,
+        Command::Completions { shell } => {
+            use clap::CommandFactory;
+            let mut cmd = Cli::command();
+            let bin = cmd.get_name().to_string();
+            let mut out: Vec<u8> = Vec::new();
+            clap_complete::generate(shell, &mut cmd, &bin, &mut out);
+            let script = String::from_utf8(out)?;
+            // Print to stdout so users can `>` redirect to a completion file;
+            // also return a small envelope for --output json.
+            print!("{}", script);
+            Envelope::ok_with_data(
+                format!("{} completions generated", shell),
+                json!({
+                    "shell": format!("{}", shell),
+                    "bytes": script.len(),
+                    "usage_hint": match shell {
+                        clap_complete::Shell::Bash => "ayx completions bash > ~/.local/share/bash-completion/completions/ayx",
+                        clap_complete::Shell::Zsh => "ayx completions zsh > ${fpath[1]}/_ayx",
+                        clap_complete::Shell::Fish => "ayx completions fish > ~/.config/fish/completions/ayx.fish",
+                        clap_complete::Shell::PowerShell => "ayx completions powershell | Out-String | Invoke-Expression",
+                        clap_complete::Shell::Elvish => "ayx completions elvish > ~/.elvish/lib/ayx.elv",
+                        _ => "Redirect the printed script into your shell's completion location.",
+                    },
+                }),
+            )
+        }
+        Command::Whoami { profile } => {
+            // Identity in one shot. No network — purely what the local
+            // profile + state knows. The operator can append `--output json`
+            // for a structured payload or pipe through `ayx one platform
+            // workspace current` for the live workspace.
+            let path = profile.unwrap_or_else(|| PathBuf::from("config.yaml"));
+            let resolved = ayx_core::profile::resolve_profile_path(&path)
+                .unwrap_or(path.clone());
+            let config = load_profile(&resolved).ok();
+            let state = load_ayx_state().ok();
+            let active_profile = state.as_ref().and_then(|s| s.active_profile.clone());
+            let active_workspace = state.as_ref().and_then(|s| s.active_workspace.clone());
+            let account_email = config
+                .as_ref()
+                .and_then(|c| c.alteryx_one.as_ref())
+                .map(|o| o.account_email.clone());
+            let one_base_url = config
+                .as_ref()
+                .and_then(|c| c.alteryx_one.as_ref())
+                .and_then(|o| o.normalized_base_url());
+            let expected_workspace_id = config
+                .as_ref()
+                .and_then(|c| c.alteryx_one.as_ref())
+                .and_then(|o| o.expected_workspace_id.clone());
+            Envelope::ok_with_data(
+                active_profile
+                    .clone()
+                    .unwrap_or_else(|| "(no active profile)".to_string()),
+                json!({
+                    "active_profile": active_profile,
+                    "active_workspace": active_workspace,
+                    "profile_path": resolved.display().to_string(),
+                    "environment": cli.environment.clone(),
+                    "account_email": account_email,
+                    "one_base_url": one_base_url,
+                    "expected_workspace_id": expected_workspace_id,
+                }),
+            )
+        }
+        Command::Audit { command } => match command {
+            AuditCommand::Status { audit_dir } => {
+                let dir = audit_dir.unwrap_or_else(|| PathBuf::from("audits"));
+                let resolved = ayx_core::audit::resolve_audit_dir(&dir);
+                let (count, bytes) = if resolved.exists() {
+                    fs::read_dir(&resolved)
+                        .map(|entries| {
+                            let mut c = 0u64;
+                            let mut b = 0u64;
+                            for e in entries.flatten() {
+                                if let Ok(meta) = e.metadata() {
+                                    if meta.is_file() {
+                                        c += 1;
+                                        b += meta.len();
+                                    }
+                                }
+                            }
+                            (c, b)
+                        })
+                        .unwrap_or((0, 0))
+                } else {
+                    (0, 0)
+                };
+                Envelope::ok_with_data(
+                    format!(
+                        "audit dir resolved: {} ({} file(s), {} byte(s))",
+                        resolved.display(),
+                        count,
+                        bytes
+                    ),
+                    json!({
+                        "audit_dir": resolved.display().to_string(),
+                        "file_count": count,
+                        "bytes_total": bytes,
+                        "exists": resolved.exists(),
+                    }),
+                )
+            }
+            AuditCommand::Sweep {
+                audit_dir,
+                retain_days,
+                apply,
+            } => {
+                let dir = audit_dir.unwrap_or_else(|| PathBuf::from("audits"));
+                let report = ayx_core::audit::sweep_audit_dir(&dir, retain_days, !apply)?;
+                Envelope::ok_with_data(
+                    format!(
+                        "audit sweep {}: examined {}, {} {} (kept files newer than {} day(s))",
+                        if apply { "executed" } else { "dry-run (use --apply to delete)" },
+                        report.examined,
+                        report.removed,
+                        if apply { "removed" } else { "would be removed" },
+                        retain_days
+                    ),
+                    json!({
+                        "audit_dir": ayx_core::audit::resolve_audit_dir(&dir).display().to_string(),
+                        "retain_days": retain_days,
+                        "apply": apply,
+                        "examined": report.examined,
+                        "removed": report.removed,
+                        "bytes_freed": report.bytes_freed,
+                        "removed_paths": report.removed_paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+                    }),
+                )
+            }
+        },
+        Command::Tactics { command } => cmd::registry::execute_tactics(cli.apply, command)?,
+        Command::Workflows { command } => cmd::registry::execute_workflows(cli.apply, command)?,
     };
     Ok(envelope)
 }
@@ -7320,11 +7944,13 @@ fn profile_migrate_envelope(profile: &Path, name: Option<&str>) -> Result<Envelo
         fs::create_dir_all(parent)?;
     }
     let mut config = Config::load_from_path(profile)?;
-    let secret_refs = onboard::secretize_config(&mut config, &target_name)?;
-    fs::write(
-        &target,
-        serde_yaml::to_string(&ayx_core::profile::canonical_profile_value(&config)?)?,
+    let secretize = onboard::secretize_config(
+        &mut config,
+        &target_name,
+        onboard::InlineSecretPolicy::Allow,
     )?;
+    let body = serde_yaml::to_string(&ayx_core::profile::canonical_profile_value(&config)?)?;
+    onboard::write_restricted(&target, body.as_bytes())?;
     let mut state = load_ayx_state()?;
     state.active_profile = Some(target_name.clone());
     save_ayx_state(&state)?;
@@ -7334,7 +7960,8 @@ fn profile_migrate_envelope(profile: &Path, name: Option<&str>) -> Result<Envelo
             "source": profile.display().to_string(),
             "target": target.display().to_string(),
             "active_profile": target_name,
-            "secret_refs": secret_refs.keys().collect::<Vec<_>>(),
+            "secret_refs": secretize.refs.keys().collect::<Vec<_>>(),
+            "inline_secret_fields": secretize.inline_fields,
             "next_steps": [
                 "Secrets were moved to the OS keyring when available; run `ayx doctor config` to verify refs",
                 "Run `ayx doctor` to validate the migrated profile",
@@ -7350,7 +7977,8 @@ fn doctor_envelope(
     environment: Option<&str>,
 ) -> Result<Envelope> {
     match command {
-        None => doctor_full_envelope(profile, fix, environment),
+        // `None` (bare `ayx doctor`) and `All` (explicit `ayx doctor all`) both run the full suite.
+        None | Some(DoctorCommand::All) => doctor_full_envelope(profile, fix, environment),
         Some(DoctorCommand::Config) => doctor_config_envelope(profile, fix),
         Some(DoctorCommand::Auth) => doctor_auth_envelope(profile, environment),
         Some(DoctorCommand::Network) => doctor_network_envelope(profile, environment),
@@ -7724,34 +8352,38 @@ fn perform_self_update(
 }
 
 fn main() -> Result<()> {
-    if wants_help() {
-        print_help();
-        return Ok(());
-    }
+    // Clap owns --help/-h rendering. Previously a hand-rolled print_help()
+    // intercepted bare --help; that drifted from the actual command tree.
     let cli = Cli::parse();
-    let output_json = cli.output == "json";
+    let output = cli.output.clone();
 
     match execute(cli) {
         Ok(envelope) => {
-            if output_json {
-                println!("{}", serde_json::to_string_pretty(&envelope)?);
-            } else {
-                println!("{}", envelope.message);
-            }
+            print!("{}", format_envelope(&envelope, &output)?);
+            // Most renderers don't add a trailing newline; add one for shells.
+            println!();
             Ok(())
         }
         Err(err) => {
-            let err_env = Envelope::err_with_data(
-                "command failed",
-                json!({
-                    "error": err.to_string(),
-                    "transport": transport_error_summary(err.as_ref()),
-                }),
+            let code = classify_anyhow_error(&err);
+            let hint = hint_for_error_code(code);
+            let mut data = json!({
+                "error": err.to_string(),
+                "transport": transport_error_summary(err.as_ref()),
+                "error_code": code.as_str(),
+            });
+            if let Some(h) = hint {
+                data["hint"] = Value::String(h.to_string());
+            }
+            let err_env = Envelope::err_coded(code, "command failed", data);
+            // Errors always go to stderr; the format mirrors the success
+            // renderer so JSON consumers see the same envelope shape.
+            eprint!(
+                "{}",
+                format_envelope(&err_env, &output).unwrap_or_else(|_| err_env.message.clone())
             );
-            if output_json {
-                println!("{}", serde_json::to_string_pretty(&err_env)?);
-            } else {
-                eprintln!("{}", err_env.message);
+            eprintln!();
+            if !matches!(output.as_str(), "json" | "yaml") {
                 eprintln!("{}", err);
             }
             Err(err)
@@ -7759,18 +8391,121 @@ fn main() -> Result<()> {
     }
 }
 
-fn print_help() {
-    println!(
-        "AYX Rust CLI\n\nUSAGE:\n    ayx [OPTIONS] <COMMAND>\n\nOPTIONS:\n    --help           Print this help message\n    --output         Output format: text or json\n    --environment    Active environment name when loading an environments file\n\nCOMMANDS:\n    one            Alteryx One platform branch and API surface\n    server         Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls\n    mongo          Mongo inventory, backup, restore, query, and doctor helpers\n    sqlserver      SQL Server status, prechecks, connection helpers, and migration planning\n    workflow       Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, .yxdb, and cloud conversion\n    tools          Cross-environment tools for environments.yaml source/target workflows\n    onboard        Interactive first-run setup for central profiles or environments files\n    tui            Interactive TUI for profile setup, One credentials, and connectivity checks\n    profile        Central profile registry and active profile management\n    doctor         Configuration, auth, network, and product health diagnostics\n    license        Licensing portal branch and API surface\n    update         Self-update from GitHub releases\n    catalog        Machine-readable command registry\n"
-    );
+/// Render an envelope according to the requested output format. Returns a
+/// `Validation` error envelope-as-string for unknown formats so the
+/// failure surfaces uniformly via the outer error path.
+/// Canonical profile loader used by both the closure inside `execute()` and
+/// future code under `cmd/` modules. Single-source-of-truth for how a
+/// `--profile <path>` resolves against `cli.environment`.
+pub(crate) fn load_profile_with_env(path: &Path, environment: Option<&str>) -> Result<Config> {
+    Ok(Config::load_from_path_with_environment(path, environment)?)
 }
 
-fn wants_help() -> bool {
-    let mut args = std::env::args().skip(1);
-    matches!(
-        (args.next(), args.next()),
-        (Some(flag), None) if flag == "--help" || flag == "-h"
-    )
+fn format_envelope(envelope: &Envelope, output: &str) -> Result<String> {
+    match output {
+        "json" => Ok(serde_json::to_string_pretty(envelope)?),
+        "yaml" => Ok(serde_yaml::to_string(envelope)
+            .map_err(|e| anyhow!("failed to serialize envelope to yaml: {e}"))?),
+        "table" => {
+            // Table mode is text-mode rendering but only for list-shaped data.
+            // For non-list data we still render text (graceful) rather than
+            // erroring — the operator may have piped through `ayx ... --output
+            // table` in a script and we don't want to break their pipeline.
+            Ok(render::render_text(envelope))
+        }
+        // Default and explicit text.
+        _ => Ok(render::render_text(envelope)),
+    }
+}
+
+/// Map an `ErrorCode` to a one-line operator hint. `None` means no hint
+/// is added; the error message stands on its own.
+fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static str> {
+    use ayx_core::envelope::ErrorCode::*;
+    match code {
+        ConfigMissing => Some("Run 'ayx onboard' to set up a profile, or 'ayx doctor config' to inspect the current one."),
+        AuthFailed => Some("Run 'ayx doctor auth' to inspect auth posture. Re-run 'ayx onboard' if tokens are stale."),
+        PermissionDenied => Some("Check that the active profile's token has the required role/scope for this resource."),
+        NotFound => Some("Verify the id is correct. Use 'ayx <surface> list' to enumerate available resources."),
+        Validation => Some("Inspect the failed flag or input; '--help' on the subcommand documents accepted values."),
+        Conflict => Some("Resource is in a conflicting state. Inspect the current state with the detail command, then retry."),
+        RateLimited => Some("Retry after the suggested delay; consider --max-pages to bound auto-pagination."),
+        Network => Some("Run 'ayx doctor network' to diagnose connectivity. Check VPN/proxy if applicable."),
+        Upstream => Some("Upstream returned a 5xx. Retry; if it persists, escalate to the Alteryx One status page."),
+        WorkspaceMismatch => Some("Re-authenticate against the expected workspace, or unset alteryx_one.expected_workspace_id."),
+        Internal => None,
+    }
+}
+
+/// Best-effort classification of an anyhow error chain into an `ErrorCode`.
+///
+/// Heuristic: substring-match against the rendered error chain. We prefer
+/// being slightly imprecise here over panicking on classification; the
+/// rendered `message` field still carries the full text for humans, and
+/// future code paths should build typed errors using `ErrorCode::*` directly
+/// rather than relying on this fallback.
+fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
+    let chain = err
+        .chain()
+        .map(|c| c.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_ascii_lowercase();
+    if chain.contains("workspace mismatch") {
+        return ErrorCode::WorkspaceMismatch;
+    }
+    if chain.contains("config missing")
+        || chain.contains("missing field")
+        || chain.contains("profile")
+            && (chain.contains("not found") || chain.contains("does not exist"))
+    {
+        return ErrorCode::ConfigMissing;
+    }
+    if chain.contains("unauthorized")
+        || chain.contains("401")
+        || chain.contains("invalid_grant")
+        || chain.contains("token")
+            && (chain.contains("expired") || chain.contains("missing") || chain.contains("invalid"))
+    {
+        return ErrorCode::AuthFailed;
+    }
+    if chain.contains("forbidden") || chain.contains("403") || chain.contains("permission denied") {
+        return ErrorCode::PermissionDenied;
+    }
+    if chain.contains("not found") || chain.contains("404") {
+        return ErrorCode::NotFound;
+    }
+    if chain.contains("conflict") || chain.contains("409") {
+        return ErrorCode::Conflict;
+    }
+    if chain.contains("rate limit") || chain.contains("429") {
+        return ErrorCode::RateLimited;
+    }
+    if chain.contains("timed out")
+        || chain.contains("timeout")
+        || chain.contains("connection refused")
+        || chain.contains("dns")
+        || chain.contains("tls")
+        || chain.contains("connect error")
+        || chain.contains("network")
+    {
+        return ErrorCode::Network;
+    }
+    if chain.contains("validation")
+        || chain.contains("invalid value")
+        || chain.contains("invalid format")
+        || chain.contains("cannot be empty")
+    {
+        return ErrorCode::Validation;
+    }
+    if chain.contains("500")
+        || chain.contains("502")
+        || chain.contains("503")
+        || chain.contains("504")
+    {
+        return ErrorCode::Upstream;
+    }
+    ErrorCode::Internal
 }
 
 fn catalog_list_envelope(tag: Option<&str>, format: &str) -> Result<Envelope> {

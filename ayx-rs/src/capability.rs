@@ -54,71 +54,6 @@ pub struct CapabilityDescriptor {
     pub notes: &'static [&'static str],
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct DesignerMessageEnvelope {
-    pub version: String,
-    pub message_type: String,
-    pub correlation_id: Option<String>,
-    pub capability_id: Option<String>,
-    pub payload: Value,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Default)]
-pub struct DesignerIpcAdapter {
-    pending: HashMap<String, DesignerMessageEnvelope>,
-    buffered_events: Vec<DesignerMessageEnvelope>,
-}
-
-#[allow(dead_code)]
-impl DesignerIpcAdapter {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn outbound(
-        &mut self,
-        capability_id: &str,
-        correlation_id: &str,
-        payload: Value,
-    ) -> DesignerMessageEnvelope {
-        let message = DesignerMessageEnvelope {
-            version: "eel.nexus.v1".to_string(),
-            message_type: "request".to_string(),
-            correlation_id: Some(correlation_id.to_string()),
-            capability_id: Some(capability_id.to_string()),
-            payload,
-        };
-        self.pending
-            .insert(correlation_id.to_string(), message.clone());
-        message
-    }
-
-    pub fn receive(&mut self, message: DesignerMessageEnvelope) {
-        match message.correlation_id.as_deref() {
-            Some(correlation_id) if self.pending.contains_key(correlation_id) => {
-                self.pending.insert(correlation_id.to_string(), message);
-            }
-            _ => self.buffered_events.push(message),
-        }
-    }
-
-    pub fn take_response(&mut self, correlation_id: &str) -> Option<DesignerMessageEnvelope> {
-        self.pending.remove(correlation_id).and_then(|message| {
-            if message.message_type == "response" {
-                Some(message)
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn buffered_events(&self) -> &[DesignerMessageEnvelope] {
-        &self.buffered_events
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct CloudCapabilityAdapter {
     supported: HashMap<String, bool>,
@@ -444,6 +379,11 @@ fn cloud_capabilities() -> Vec<CapabilityRegistration> {
             executor: Box::new(FnCapabilityExecutor(execute_cloud_capability_stub)),
         },
     ]
+}
+
+/// Does a capability with this id exist in the registry?
+pub fn has_capability(id: &str) -> bool {
+    registry().into_iter().any(|reg| reg.descriptor.id == id)
 }
 
 fn registry() -> Vec<CapabilityRegistration> {
@@ -860,31 +800,10 @@ mod tests {
         r#"<AlteryxDocument yxmdVer="2025.1"><Nodes><Node ToolID="1"><GuiSettings Plugin="AlteryxBasePluginsGui.TextInput.TextInput"/></Node><Node ToolID="2"><GuiSettings Plugin="AlteryxBasePluginsGui.BrowseV2.BrowseV2"/></Node></Nodes><Connections><Connection><Origin ToolID="1" Connection="Output"/><Destination ToolID="2" Connection="Input"/></Connection></Connections></AlteryxDocument>"#.to_string()
     }
 
-    #[test]
-    fn designer_ipc_adapter_correlates_responses_and_buffers_events() {
-        let mut adapter = DesignerIpcAdapter::new();
-        let outbound = adapter.outbound("designer.workflow.context", "corr-1", json!({"ok": true}));
-        assert_eq!(outbound.correlation_id.as_deref(), Some("corr-1"));
-
-        adapter.receive(DesignerMessageEnvelope {
-            version: "nexus.v1".to_string(),
-            message_type: "event".to_string(),
-            correlation_id: None,
-            capability_id: Some("designer.workflow.context".to_string()),
-            payload: json!({"event": "selectionChanged"}),
-        });
-        assert_eq!(adapter.buffered_events().len(), 1);
-
-        adapter.receive(DesignerMessageEnvelope {
-            version: "nexus.v1".to_string(),
-            message_type: "response".to_string(),
-            correlation_id: Some("corr-1".to_string()),
-            capability_id: Some("designer.workflow.context".to_string()),
-            payload: json!({"ok": true}),
-        });
-        let response = adapter.take_response("corr-1").expect("response");
-        assert_eq!(response.message_type, "response");
-    }
+    // designer_ipc_adapter_correlates_responses_and_buffers_events test
+    // was removed alongside its DesignerIpcAdapter / DesignerMessageEnvelope
+    // types in A5 (dead-code cleanup). The adapter was unused production
+    // scaffolding; revive it from git history if Designer IPC ships.
 
     #[test]
     fn cloud_discovery_maps_supported_capabilities() {

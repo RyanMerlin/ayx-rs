@@ -1,0 +1,21 @@
+id: governance.go-live
+title: Governance go-live for a new Alteryx One workspace
+summary: |
+  End-to-end recipe for opening a new managed workspace to its tenants:
+  back up state, validate auth posture, migrate baseline content from the
+  dev template workspace, and produce an audit report.
+safety: destructive
+tags:
+  - governance
+  - go-live
+  - workspace
+tactics:
+  - mongo.backup-restore
+  - server.auth.saml-diagnose
+  - one.workspace-migrate
+  - mongo.doctor
+success_criteria: |
+  - Backup audit artifact exists for the operation.
+  - SAML diagnose envelopes are all ok=true.
+  - Target workspace flow + plan counts match the migration plan.
+  - Mongo doctor reports no orphan / queue-stuck conditions.

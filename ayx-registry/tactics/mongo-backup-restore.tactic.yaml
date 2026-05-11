@@ -1,0 +1,39 @@
+id: mongo.backup-restore
+title: Back up and restore Alteryx Server Mongo
+summary: |
+  Capture a coherent snapshot of the AlteryxGallery and AlteryxService
+  databases before any risky operation, then restore on demand. Works
+  for both embedded and managed Mongo profiles.
+safety: mutating
+trigger:
+  task_keywords:
+    - back up mongo
+    - mongo backup
+    - server backup
+    - snapshot gallery
+    - restore mongo
+  tags:
+    - mongo
+    - backup
+    - server
+steps:
+  - kind: command
+    cmd: "ayx mongo status --profile <profile>"
+    why: "Confirm we know which Mongo mode (embedded/managed) we are operating on before mutating anything."
+  - kind: command
+    cmd: "ayx mongo backup --profile <profile> --output-dir backups/<ts> --dry-run"
+    why: "Explicit dry-run. Inspect the plan envelope before re-running with --apply."
+  - kind: command
+    cmd: "ayx mongo backup --profile <profile> --output-dir backups/<ts> --apply"
+    why: "Take the actual snapshot. Audit artifact is written to the audit dir."
+  - kind: note
+    text: "Restore is the inverse: `ayx mongo restore --profile <profile> --input-path backups/<ts> --apply`. Restore is destructive — always test on a non-production profile first."
+validations:
+  - describe: "Backup directory contains both AlteryxGallery and AlteryxService dumps."
+    check_cmd: "ls -la backups/<ts>"
+  - describe: "Audit artifact recorded the operation with a non-empty payload."
+    check_cmd: "ls -la $AYX_CONFIG_HOME/audits/ | head -3"
+rollback: |
+  Backups are non-destructive on creation. To recover from a *bad* restore,
+  re-run `ayx mongo restore` against the previous good snapshot in the
+  backups/ tree.

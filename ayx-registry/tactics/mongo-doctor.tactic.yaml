@@ -1,0 +1,29 @@
+id: mongo.doctor
+title: Diagnose Alteryx Mongo health
+summary: |
+  Run the read-only Mongo doctor query suite to surface queue, results,
+  orphan, and app-binding issues without touching state. Safe to run any
+  time, including during incidents.
+safety: read_only
+trigger:
+  task_keywords:
+    - mongo doctor
+    - diagnose mongo
+    - queue stuck
+    - orphan
+    - mongo health
+  tags:
+    - mongo
+    - diagnose
+    - support
+steps:
+  - kind: command
+    cmd: "ayx mongo status --profile <profile>"
+    why: "Confirm connectivity and embedded vs. managed posture."
+  - kind: command
+    cmd: "ayx mongo doctor --profile <profile> --output json"
+    why: "Run the registry of read-only diagnostic queries and emit a structured envelope."
+  - kind: note
+    text: "If `results` shows a non-empty failures array, treat each entry as an incident lead rather than truth — re-run the underlying query in mongosh for the full payload."
+validations:
+  - describe: "Doctor envelope shows ok=true for every named query, or carries an explicit failures list."

@@ -1,5 +1,5 @@
 [package]
-name = "ayx-one-api"
+name = "ayx-registry"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,12 +9,8 @@ authors.workspace = true
 anyhow.workspace = true
 ayx-core = { path = "../ayx-core" }
 chrono.workspace = true
-reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-url.workspace = true
-
-[dev-dependencies]
-httpmock = "0.7"
-serial_test = "3"
 serde_yaml.workspace = true
+thiserror.workspace = true
+walkdir.workspace = true

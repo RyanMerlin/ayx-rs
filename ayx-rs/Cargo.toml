@@ -9,6 +9,7 @@ authors.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
+clap_complete = "4"
 reqwest.workspace = true
 roxmltree.workspace = true
 serde.workspace = true
@@ -22,10 +23,12 @@ ayx-workflow = { path = "../ayx-workflow" }
 ayx-one = { path = "../ayx-one" }
 ayx_one_api = { package = "ayx-one-api", path = "../ayx-one-api" }
 ayx-server = { path = "../ayx-server" }
+ayx-registry = { path = "../ayx-registry" }
 self_update = "0.43.1"
 
 [dev-dependencies]
 tempfile.workspace = true
+regex = "1"
 
 [[bin]]
 name = "ayx"

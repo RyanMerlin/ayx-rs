@@ -1,0 +1,38 @@
+id: mongo.queue.stuck
+title: Diagnose a stuck Alteryx Server job queue
+summary: |
+  Step-by-step read-only investigation when AS_Queue is not draining.
+  Inventories queue depth, stuck-job patterns, and cross-references
+  against AlteryxService for owner lookups. Does not mutate state.
+safety: read_only
+trigger:
+  task_keywords:
+    - queue stuck
+    - queue not draining
+    - jobs not running
+    - AS_Queue
+    - workers idle
+  tags:
+    - mongo
+    - queue
+    - diagnose
+    - support
+    - incident
+steps:
+  - kind: command
+    cmd: "ayx mongo query --profile <profile> --database AlteryxService --collection AS_Queue --filter '{}' --output json"
+    why: "Total queue depth + per-state counts. Confirms the queue is non-empty."
+  - kind: command
+    cmd: "ayx mongo query --profile <profile> --database AlteryxService --collection AS_Queue --filter '{\"State\":\"Running\"}' --output json"
+    why: "Surface jobs that have been Running too long — likely the actual culprits."
+  - kind: command
+    cmd: "ayx mongo doctor --profile <profile> --output json"
+    why: "Cross-references the queue against worker registration, license posture, and orphan detection in one shot."
+  - kind: note
+    text: |
+      Mutating remediation is gated behind `ayx mongo mutate` (preview-only
+      today). Do not bulk-update AS_Queue without an explicit change record
+      and a backup taken via `mongo.backup-restore`.
+validations:
+  - describe: "Doctor results array has zero entries with ok=false."
+  - describe: "Running-jobs query length matches what the dashboards show; mismatches indicate cache lag, not a real bug."

@@ -1,0 +1,35 @@
+id: server.auth.saml-diagnose
+title: Diagnose Alteryx Server SAML authentication
+summary: |
+  Read-only SAML posture check. Validates metadata, certificate chains,
+  callback URLs, and (when available) simulates an assertion to spot
+  problems before opening a support ticket.
+safety: read_only
+trigger:
+  task_keywords:
+    - saml
+    - sso broken
+    - login fails
+    - idp
+    - server auth
+  tags:
+    - server
+    - auth
+    - saml
+    - diagnose
+steps:
+  - kind: command
+    cmd: "ayx server auth status --profile <profile> --output json"
+    why: "Snapshot of the configured auth mode + posture."
+  - kind: command
+    cmd: "ayx server auth diagnose saml --metadata-url <idp-metadata-url> --output json"
+    why: "Fetch and validate IdP metadata against Server's expectations."
+  - kind: command
+    cmd: "ayx server auth diagnose certificate --profile <profile> --output json"
+    why: "Validate the cert chain and expiry of the SAML signing cert."
+  - kind: command
+    cmd: "ayx server auth simulate saml --metadata-file ./idp-metadata.xml --output json"
+    why: "When the IdP exposes a static metadata file, simulate an assertion locally to spot binding/encoding mismatches."
+validations:
+  - describe: "Every diagnose envelope returns ok=true and no error_code."
+  - describe: "Certificate envelope shows expiry > 60 days out (rotate proactively)."

@@ -81,6 +81,11 @@ $downloadUrl = if ($Version -eq 'latest') {
 } else {
   "https://github.com/$repoOwner/$repoName/releases/download/$Version/$artifactName"
 }
+$sumsUrl = if ($Version -eq 'latest') {
+  "https://github.com/$repoOwner/$repoName/releases/latest/download/SHA256SUMS"
+} else {
+  "https://github.com/$repoOwner/$repoName/releases/download/$Version/SHA256SUMS"
+}
 
 $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("ayx-install-" + [guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
@@ -91,6 +96,29 @@ try {
     Invoke-WebRequest -Uri $downloadUrl -OutFile $archivePath
   } catch {
     throw "failed to download $downloadUrl. $($_.Exception.Message)"
+  }
+
+  # Verify integrity against SHA256SUMS. Operators may bypass with
+  # $env:AYX_SKIP_CHECKSUM='1' only for explicit reasons.
+  if ($env:AYX_SKIP_CHECKSUM -ne '1') {
+    $sumsPath = Join-Path $tmpDir 'SHA256SUMS'
+    try {
+      Invoke-WebRequest -Uri $sumsUrl -OutFile $sumsPath
+    } catch {
+      Write-Error "Could not fetch SHA256SUMS from $sumsUrl."
+      Write-Error "Set `$env:AYX_SKIP_CHECKSUM='1' to install anyway (NOT recommended)."
+      throw
+    }
+    $expectedLine = Get-Content $sumsPath | Where-Object { $_ -match "\s$([regex]::Escape($artifactName))$" } | Select-Object -First 1
+    if (-not $expectedLine) {
+      throw "SHA256SUMS does not contain an entry for $artifactName"
+    }
+    $expected = ($expectedLine -split '\s+')[0].ToLowerInvariant()
+    $actual = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($expected -ne $actual) {
+      throw "checksum mismatch: expected $expected got $actual. Refusing to install a corrupted or tampered archive."
+    }
+    Write-Host "Checksum verified: $actual"
   }
 
   New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
@@ -123,6 +151,23 @@ try {
   } else {
     Write-Host "added $InstallDir to your user PATH"
     Write-Host "open a new shell to use ayx immediately"
+  }
+
+  # Optional: install PowerShell completions. Best-effort.
+  # Skip entirely when $env:AYX_SKIP_COMPLETIONS = '1'.
+  if ($env:AYX_SKIP_COMPLETIONS -ne '1') {
+    try {
+      $profileDir = Split-Path -Parent $PROFILE
+      if (-not (Test-Path $profileDir)) {
+        New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+      }
+      $completionPath = Join-Path $profileDir 'ayx-completions.ps1'
+      & (Join-Path $InstallDir 'ayx.exe') completions powershell | Set-Content -Path $completionPath -Encoding UTF8
+      Write-Host "installed PowerShell completions to $completionPath"
+      Write-Host "add '. $completionPath' to your `$PROFILE to enable them on shell start"
+    } catch {
+      Write-Host "skipped PowerShell completions: $($_.Exception.Message)"
+    }
   }
 }
 finally {

@@ -219,6 +219,15 @@ pub struct AlteryxOneProfile {
     pub refresh_token: Option<String>,
     #[serde(default)]
     pub refresh_token_ref: Option<String>,
+    /// Expected workspace id for mutation safety preflight.
+    ///
+    /// When set, every mutating One API request (after `--apply`) makes a
+    /// `GET /v4/workspaces/current` call and fails closed if the returned
+    /// workspace id does not match this value. Set per-environment to
+    /// prevent accidentally mutating the wrong workspace when tokens are
+    /// shared or stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_workspace_id: Option<String>,
 }
 
 impl AlteryxOneProfile {
@@ -465,8 +474,7 @@ impl Config {
     }
 
     fn resolve_secret_refs(mut self) -> Result<Self, ProfileError> {
-        if self.alteryx_one.is_some() {
-            let one = self.alteryx_one.as_mut().unwrap();
+        if let Some(one) = self.alteryx_one.as_mut() {
             if one.access_token.is_none() {
                 if let Some(reference) = one.access_token_ref.as_deref() {
                     one.access_token = resolve_secret_ref(reference)?;
@@ -499,12 +507,13 @@ impl Config {
         }
 
         if let Some(sqlserver) = self.sqlserver.as_mut() {
-            for conn in [sqlserver.controller.as_mut(), sqlserver.server_ui.as_mut()] {
-                if let Some(conn) = conn {
-                    if conn.password.is_none() {
-                        if let Some(reference) = conn.password_ref.as_deref() {
-                            conn.password = resolve_secret_ref(reference)?;
-                        }
+            for conn in [sqlserver.controller.as_mut(), sqlserver.server_ui.as_mut()]
+                .into_iter()
+                .flatten()
+            {
+                if conn.password.is_none() {
+                    if let Some(reference) = conn.password_ref.as_deref() {
+                        conn.password = resolve_secret_ref(reference)?;
                     }
                 }
             }
@@ -892,6 +901,7 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
             access_token_ref: None,
             refresh_token: None,
             refresh_token_ref: None,
+            expected_workspace_id: None,
         });
         if let Some(value) = account_email {
             one.account_email = value;
@@ -1504,7 +1514,7 @@ fn resolve_path_internal(path: &Path, allow_workspace: bool) -> Result<PathBuf, 
         }
         let state = load_ayx_state()?;
         if let Some(name) = state.active_workspace {
-            return Ok(workspace_storage_path(&name)?);
+            return workspace_storage_path(&name);
         }
         if path.exists() {
             return Ok(path.to_path_buf());
@@ -1518,7 +1528,7 @@ fn resolve_path_internal(path: &Path, allow_workspace: bool) -> Result<PathBuf, 
         }
         let state = load_ayx_state()?;
         if let Some(name) = state.active_profile {
-            return Ok(profile_storage_path(&name)?);
+            return profile_storage_path(&name);
         }
         if path.exists() {
             return Ok(path.to_path_buf());
@@ -1652,6 +1662,7 @@ mod tests {
                 access_token_ref: None,
                 refresh_token: None,
                 refresh_token_ref: None,
+                expected_workspace_id: None,
             }),
             observability: None,
             server_api: Some(ServerApiProfile {

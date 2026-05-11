@@ -1,0 +1,38 @@
+id: one.scheduling.pause-all
+title: Pause every Alteryx One schedule for a change window
+summary: |
+  Inventory active schedules, snapshot them to an audit file, then pause
+  each one before a maintenance window. Pair with `one.scheduling.resume`
+  to restore at the end of the window.
+safety: mutating
+trigger:
+  task_keywords:
+    - pause schedules
+    - change window
+    - maintenance window
+    - freeze scheduling
+  tags:
+    - one
+    - scheduling
+    - change-management
+steps:
+  - kind: command
+    cmd: "ayx one scheduling list --all --output json"
+    why: "Snapshot of every schedule before we touch state. Save the envelope as the rollback ledger."
+  - kind: note
+    text: "Save the JSON above to ./schedules-pre-pause.json before continuing. Do this even if --apply is set — the executor's per-step audit artifact is a backup, not a substitute."
+  - kind: note
+    text: |
+      Per-schedule pause uses `ayx one scheduling ...` — at the time of
+      writing the binary exposes the schedule list endpoint via
+      `one scheduling list` but the targeted pause action lives behind
+      `one scheduling` subcommands (consult `ayx one scheduling --help`
+      for the exact verb in your build). Each call must include `--apply`;
+      the gate fires per call.
+validations:
+  - describe: "Every schedule referenced in the snapshot reports paused=true (or equivalent) in a follow-up list."
+    check_cmd: "ayx one scheduling list --all --output json"
+rollback: |
+  Use the snapshot file ./schedules-pre-pause.json to identify which
+  schedules were active. Run `one.scheduling.resume` against those ids
+  to restore service.

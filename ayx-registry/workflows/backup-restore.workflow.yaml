@@ -1,0 +1,16 @@
+id: ops.backup-restore
+title: Pre-change backup + post-change verification
+summary: |
+  Standard guardrail before any risky operation: snapshot, do the thing,
+  verify. Pair this with any destructive tactic.
+safety: mutating
+tags:
+  - mongo
+  - safety
+  - guardrail
+tactics:
+  - mongo.backup-restore
+  - mongo.doctor
+success_criteria: |
+  - Backup exists and is non-empty.
+  - Mongo doctor reports identical posture before and after the change.

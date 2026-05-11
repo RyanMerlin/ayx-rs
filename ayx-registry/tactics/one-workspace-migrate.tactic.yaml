@@ -1,0 +1,53 @@
+id: one.workspace-migrate
+title: Migrate Alteryx One assets between workspaces
+summary: |
+  Move flows, plans, connections, and write-settings from a source
+  workspace to a target workspace. Uses the central environments file to
+  resolve source/target, runs a dry-run plan first, requires --apply to
+  execute, and asserts workspace identity preflight before each mutating
+  call.
+safety: destructive
+trigger:
+  task_keywords:
+    - migrate workspace
+    - workspace migration
+    - move flows between workspaces
+    - promote to prod
+  tags:
+    - one
+    - workspace
+    - migration
+    - governance
+steps:
+  - kind: command
+    cmd: "ayx --environment <source> one platform workspace current --output json"
+    why: "Confirm the source workspace id matches expectations."
+  - kind: command
+    cmd: "ayx --environment <target> one platform workspace current --output json"
+    why: "Confirm the target workspace id matches expectations. Both should be pinned in alteryx_one.expected_workspace_id."
+  - kind: command
+    cmd: "ayx --environment <source> one flows list --all --output json"
+    why: "Enumerate every flow that will be considered for migration."
+  - kind: command
+    cmd: "ayx --environment <source> one connections list --all --output json"
+    why: "Enumerate every connection in the source — these usually need to be re-created (not exported) in the target."
+  - kind: note
+    text: |
+      Whole-workspace migration today is a per-resource loop: invoke `one.flow.promote`
+      once per flow id from the list above. A dedicated `ayx tools workspace migrate`
+      orchestrator is on the roadmap (see docs/TODO.md §3) — once it ships, the loop
+      collapses to a single `tools workspace migrate --source <source> --target <target>`
+      invocation with the same safety/audit guarantees.
+  - kind: tactic
+    id: one.flow.promote
+    why: "Promote each flow individually so every step is gated and audited. Use this tactic in a shell loop seeded from the flow list above."
+  - kind: note
+    text: "Migration emits per-object audit artifacts under $AYX_CONFIG_HOME/audits/. Keep them — they are the rollback ledger."
+validations:
+  - describe: "Target workspace `one flows list --all` count matches the source plus pre-existing baseline."
+    check_cmd: "ayx --environment <target> one flows count --output json"
+  - describe: "No mutating envelope reports error_code != null."
+rollback: |
+  Replay the migration plan in reverse against the target workspace, or
+  restore from the per-object audit artifacts. Always coordinate with
+  whoever owns the target workspace before rolling back live traffic.

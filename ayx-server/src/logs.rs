@@ -425,30 +425,25 @@ fn read_log_rows(path: &Path) -> Result<(Vec<String>, Vec<Vec<String>>)> {
 
 fn decode_log_bytes(bytes: &[u8]) -> String {
     if bytes.starts_with(&[0xFF, 0xFE]) {
-        let mut out = String::new();
-        let mut it = bytes[2..].chunks_exact(2);
-        for chunk in &mut it {
-            let code = u16::from_le_bytes([chunk[0], chunk[1]]);
-            if let Some(ch) = char::from_u32(code as u32) {
-                out.push(ch);
-            }
-        }
-        return out;
+        return decode_utf16_le(&bytes[2..]);
     }
 
     if bytes.contains(&0) {
-        let mut out = String::new();
-        let mut it = bytes.chunks_exact(2);
-        for chunk in &mut it {
-            let code = u16::from_le_bytes([chunk[0], chunk[1]]);
-            if let Some(ch) = char::from_u32(code as u32) {
-                out.push(ch);
-            }
-        }
-        return out;
+        return decode_utf16_le(bytes);
     }
 
     String::from_utf8_lossy(bytes).to_string()
+}
+
+fn decode_utf16_le(bytes: &[u8]) -> String {
+    let usable = bytes.len() & !1;
+    let units: Vec<u16> = bytes[..usable]
+        .chunks(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    char::decode_utf16(units)
+        .map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER))
+        .collect()
 }
 
 fn normalize_field(value: &str) -> String {

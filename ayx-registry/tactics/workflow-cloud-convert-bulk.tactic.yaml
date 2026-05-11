@@ -1,0 +1,39 @@
+id: workflow.cloud-convert.bulk
+title: Bulk-convert Desktop workflows to Alteryx Cloud format
+summary: |
+  Walk a directory of .yxmd workflows, convert each to its Cloud
+  representation, and emit a per-workflow conversion report. Useful
+  before a Server → One migration so unsupported tools surface early.
+safety: read_only
+trigger:
+  task_keywords:
+    - convert workflows
+    - cloud convert
+    - desktop to cloud
+    - yxmd to cloud
+    - migration prep
+  tags:
+    - workflow
+    - migration
+    - cloud
+steps:
+  - kind: command
+    cmd: "ayx workflow scan --root <workflow_dir> --output json"
+    why: "Inventory every .yxmd in the tree. Surfaces macros + dependencies before conversion."
+  - kind: command
+    cmd: "ayx workflow inspect --path <workflow_path> --output json"
+    why: "Inspect one workflow's structure + tool inventory. The Cloud-convert action `workflow convert-cloud` is registered as a subcommand (see `ayx workflow --help`); aim it at the same path to produce the converted payload."
+  - kind: note
+    text: |
+      `workflow convert-cloud --input <workflow_path> --output ./cloud/<flow_name>.json`
+      is the workhorse here. It's not yet in the machine-readable catalog
+      (validator will surface that gap), but it is wired in the binary —
+      run it in a shell loop seeded from the scan output above.
+  - kind: note
+    text: |
+      Aggregate unsupported_tools across every convert-cloud envelope to get
+      the *real* migration blocker list. A single workflow with a deprecated
+      Predictive tool can block a whole portfolio promotion.
+validations:
+  - describe: "Every conversion report's converted_tool_count > 0."
+  - describe: "Aggregate unsupported_tools list has a triage owner before scheduling the cutover."

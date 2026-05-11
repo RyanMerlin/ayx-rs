@@ -89,21 +89,56 @@ require_cmd() {
 
 require_cmd curl
 require_cmd tar
+require_cmd sha256sum 2>/dev/null || require_cmd shasum
 
 if [[ "$VERSION" == "latest" ]]; then
   DOWNLOAD_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/${BINARY_NAME}-${PLATFORM}.tar.gz"
+  SUMS_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/SHA256SUMS"
 else
   DOWNLOAD_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/${BINARY_NAME}-${PLATFORM}.tar.gz"
+  SUMS_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/SHA256SUMS"
 fi
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 ARCHIVE="$TMPDIR/${BINARY_NAME}-${PLATFORM}.tar.gz"
+SUMS="$TMPDIR/SHA256SUMS"
 
 echo "Downloading ${DOWNLOAD_URL}"
 if ! curl -fsSL "$DOWNLOAD_URL" -o "$ARCHIVE"; then
   echo "failed to download ${DOWNLOAD_URL}" >&2
   exit 1
+fi
+
+# Verify integrity against SHA256SUMS published alongside the release.
+# Operators can opt out with AYX_SKIP_CHECKSUM=1 only for explicit reasons
+# (air-gapped mirror, etc.); the default is to verify.
+if [[ "${AYX_SKIP_CHECKSUM:-0}" != "1" ]]; then
+  echo "Fetching SHA256SUMS for verification"
+  if curl -fsSL "$SUMS_URL" -o "$SUMS"; then
+    archive_basename="$(basename "$ARCHIVE")"
+    expected="$(awk -v f="$archive_basename" '$2 == f { print $1 }' "$SUMS" | head -n1)"
+    if [[ -z "$expected" ]]; then
+      echo "SHA256SUMS does not contain an entry for ${archive_basename}; aborting." >&2
+      echo "Set AYX_SKIP_CHECKSUM=1 to bypass (not recommended)." >&2
+      exit 1
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+      actual="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
+    else
+      actual="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
+    fi
+    if [[ "$expected" != "$actual" ]]; then
+      echo "checksum mismatch: expected $expected got $actual" >&2
+      echo "Refusing to install a corrupted or tampered archive." >&2
+      exit 1
+    fi
+    echo "Checksum verified: $actual"
+  else
+    echo "WARNING: could not fetch SHA256SUMS from ${SUMS_URL}." >&2
+    echo "Set AYX_SKIP_CHECKSUM=1 to install anyway (NOT recommended)." >&2
+    exit 1
+  fi
 fi
 
 mkdir -p "$INSTALL_DIR"
@@ -144,4 +179,45 @@ else
       echo "added PATH export to ${PROFILE_FILE} for future shells"
     fi
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# Optional: install shell completions. Best-effort — failure is non-fatal.
+# Skip entirely when AYX_SKIP_COMPLETIONS=1 (CI / locked-down hosts).
+# ---------------------------------------------------------------------------
+if [[ "${AYX_SKIP_COMPLETIONS:-0}" != "1" ]]; then
+  shell_name="$(basename "${SHELL:-bash}")"
+  case "$shell_name" in
+    bash)
+      candidates=("${HOME}/.local/share/bash-completion/completions" "/usr/local/etc/bash_completion.d" "/etc/bash_completion.d")
+      for d in "${candidates[@]}"; do
+        if [[ -d "$d" && -w "$d" ]]; then
+          if "${INSTALL_DIR}/${BINARY_NAME}" completions bash > "${d}/${BINARY_NAME}" 2>/dev/null; then
+            echo "installed bash completions to ${d}/${BINARY_NAME}"
+            break
+          fi
+        fi
+      done
+      ;;
+    zsh)
+      # zsh: drop into $fpath; ~/.zfunc is a common writable choice.
+      d="${HOME}/.zfunc"
+      mkdir -p "$d" 2>/dev/null || true
+      if "${INSTALL_DIR}/${BINARY_NAME}" completions zsh > "${d}/_${BINARY_NAME}" 2>/dev/null; then
+        echo "installed zsh completions to ${d}/_${BINARY_NAME}"
+        echo "ensure 'fpath=(${d} \$fpath)' and 'autoload -Uz compinit && compinit' are in your .zshrc"
+      fi
+      ;;
+    fish)
+      d="${HOME}/.config/fish/completions"
+      mkdir -p "$d" 2>/dev/null || true
+      if "${INSTALL_DIR}/${BINARY_NAME}" completions fish > "${d}/${BINARY_NAME}.fish" 2>/dev/null; then
+        echo "installed fish completions to ${d}/${BINARY_NAME}.fish"
+      fi
+      ;;
+    *)
+      echo "shell '${shell_name}' completions not auto-installed."
+      echo "Run: ${BINARY_NAME} completions <shell> > <your completions dir>"
+      ;;
+  esac
 fi

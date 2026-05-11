@@ -438,6 +438,7 @@ fn execute_backup(config: &Config, output_dir: &Path) -> Result<serde_json::Valu
                 fs::create_dir_all(&db_out)?;
 
                 let mut args: Vec<String> = Vec::new();
+                let mut _password_file: Option<MongoPasswordFile> = None;
                 if let Some(url) = managed.url.as_ref() {
                     args.push("--uri".to_string());
                     args.push(url.to_string());
@@ -453,8 +454,10 @@ fn execute_backup(config: &Config, output_dir: &Path) -> Result<serde_json::Valu
                         args.push(username.to_string());
                     }
                     if let Some(password) = managed.password.as_ref() {
-                        args.push("--password".to_string());
-                        args.push(password.to_string());
+                        let pwfile = write_password_config(password)?;
+                        args.push("--config".to_string());
+                        args.push(pwfile.path.display().to_string());
+                        _password_file = Some(pwfile);
                     }
                     if let Some(auth_db) = managed.auth_database.as_ref() {
                         args.push("--authenticationDatabase".to_string());
@@ -489,6 +492,7 @@ fn execute_backup(config: &Config, output_dir: &Path) -> Result<serde_json::Valu
                     &arg_refs,
                     None,
                 )?);
+                drop(_password_file);
             }
 
             Ok(json!({ "mode": "managed", "runs": runs }))
@@ -563,8 +567,12 @@ fn build_mongosh_eval(config: &Config, spec: &MongoQuerySpec) -> Result<String> 
     Ok(format!("{cmd} {quoted}"))
 }
 
-fn attach_connection_args(config: &Config, args: &mut Vec<String>) -> Result<()> {
+fn attach_connection_args(
+    config: &Config,
+    args: &mut Vec<String>,
+) -> Result<Option<MongoPasswordFile>> {
     let managed = config.mongo.managed.as_ref();
+    let mut password_file: Option<MongoPasswordFile> = None;
     if let Some(url) = managed.and_then(|m| m.url.as_ref()) {
         args.push("--uri".to_string());
         args.push(url.to_string());
@@ -580,8 +588,10 @@ fn attach_connection_args(config: &Config, args: &mut Vec<String>) -> Result<()>
             args.push(username.to_string());
         }
         if let Some(password) = m.password.as_ref() {
-            args.push("--password".to_string());
-            args.push(password.to_string());
+            let pwfile = write_password_config(password)?;
+            args.push("--config".to_string());
+            args.push(pwfile.path.display().to_string());
+            password_file = Some(pwfile);
         }
         if let Some(auth_db) = m.auth_database.as_ref() {
             args.push("--authenticationDatabase".to_string());
@@ -602,7 +612,7 @@ fn attach_connection_args(config: &Config, args: &mut Vec<String>) -> Result<()>
             }
         }
     }
-    Ok(())
+    Ok(password_file)
 }
 
 fn execute_query_plan(plan: &MongoQueryPlan) -> Result<serde_json::Value> {
@@ -764,6 +774,7 @@ fn execute_restore(config: &Config, input_path: &Path) -> Result<serde_json::Val
                 .managed
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("mongo.managed config missing"))?;
+            let mut _restore_password_file: Option<MongoPasswordFile> = None;
 
             let mut args: Vec<String> = Vec::new();
             if let Some(url) = managed.url.as_ref() {
@@ -781,8 +792,10 @@ fn execute_restore(config: &Config, input_path: &Path) -> Result<serde_json::Val
                     args.push(username.to_string());
                 }
                 if let Some(password) = managed.password.as_ref() {
-                    args.push("--password".to_string());
-                    args.push(password.to_string());
+                    let pwfile = write_password_config(password)?;
+                    args.push("--config".to_string());
+                    args.push(pwfile.path.display().to_string());
+                    _restore_password_file = Some(pwfile);
                 }
                 if let Some(auth_db) = managed.auth_database.as_ref() {
                     args.push("--authenticationDatabase".to_string());
@@ -839,6 +852,50 @@ fn ensure_tool_available(tool: &str) -> Result<()> {
     } else {
         anyhow::bail!("required tool '{}' not found on PATH", tool)
     }
+}
+
+/// Holds a temporary `--config` file for `mongodump`/`mongorestore`/`mongosh`
+/// so the password is not visible in argv (`ps`, `/proc/<pid>/cmdline`).
+///
+/// The file is created with `0o600` permissions on Unix and is deleted when
+/// the returned `TempDir` is dropped. Callers must keep the `TempDir` alive
+/// until after `run_command_capture` returns.
+struct MongoPasswordFile {
+    _dir: tempfile::TempDir,
+    path: PathBuf,
+}
+
+fn write_password_config(password: &str) -> Result<MongoPasswordFile> {
+    let dir = tempfile::Builder::new()
+        .prefix("ayx-mongo-")
+        .tempdir()
+        .context("failed to create temp dir for mongo password file")?;
+    let path = dir.path().join("config.yaml");
+    // mongodump/mongorestore (mongo-tools) accept a YAML --config file with
+    // `password: "..."`. mongosh accepts the same shape via `--config`.
+    let body = serde_yaml::to_string(&json!({ "password": password }))?;
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .with_context(|| {
+                format!("failed to open mongo password config '{}'", path.display())
+            })?;
+        f.write_all(body.as_bytes())?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(&path, body.as_bytes()).with_context(|| {
+            format!("failed to write mongo password config '{}'", path.display())
+        })?;
+    }
+    Ok(MongoPasswordFile { _dir: dir, path })
 }
 
 fn run_command_capture(

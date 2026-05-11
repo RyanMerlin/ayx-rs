@@ -14,7 +14,7 @@ use ayx_core::profile::{
     MongoDatabases, MongoEmbedded, MongoManaged, MongoMode, MongoProfile, ServerProfile,
     SqlServerConnectionProfile, SqlServerProfile, TlsConfig, WorkspaceConfig,
 };
-use ayx_core::secrets::{keyring_account, store_keyring_secret};
+use ayx_core::secrets::{keyring_account, store_secret_with_fallback};
 use ayx_server::util::runtime_settings_summary;
 
 pub fn run_onboarding(
@@ -262,7 +262,16 @@ pub fn run_onboarding(
     }
 
     let validation = summarize_onboarding_validation(&config);
-    let stored_refs = write_config(&resolved_path, &config, &secret_refs)?;
+    let secretize = write_config_with_policy(&resolved_path, &config, InlineSecretPolicy::Allow)?;
+    let _ = secret_refs; // Preserved for API stability; refs come from secretize.
+
+    let mut warnings = collect_onboarding_warnings(&config);
+    if !secretize.inline_fields.is_empty() {
+        warnings.push(format!(
+            "Stored {} secret(s) inline in YAML because the OS keyring was unavailable. Configure a keyring backend (Secret Service / Keychain / DPAPI) and run `ayx onboard` again to migrate.",
+            secretize.inline_fields.len()
+        ));
+    }
 
     Ok(json!({
         "profile": resolved_path.display().to_string(),
@@ -270,8 +279,9 @@ pub fn run_onboarding(
         "mode": "interactive",
         "summary": summarize_config(&config),
         "validation": validation,
-        "secret_refs": stored_refs.keys().collect::<Vec<_>>(),
-        "warnings": collect_onboarding_warnings(&config),
+        "secret_refs": secretize.refs.keys().collect::<Vec<_>>(),
+        "inline_secret_fields": secretize.inline_fields,
+        "warnings": warnings,
     }))
 }
 
@@ -348,33 +358,91 @@ fn secret_scope(scope: &str, field: &str) -> String {
     keyring_account(scope, field)
 }
 
+/// Inline-secret fallback policy for `secretize_config`.
+///
+/// `Forbid` (default) returns an error if the keyring is unavailable.
+/// `Allow` falls back to inline (plaintext in YAML) and records the field name
+/// in `SecretizeOutput::inline_fields` so the caller can warn the user.
+/// The `AYX_ALLOW_INLINE_SECRETS=1` env var also enables fallback for
+/// automation/headless scenarios.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Forbid is reserved for non-interactive enterprise mode (future flag).
+pub(crate) enum InlineSecretPolicy {
+    Forbid,
+    Allow,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct SecretizeOutput {
+    pub refs: BTreeMap<String, String>,
+    pub inline_fields: Vec<String>,
+}
+
+fn store(
+    account: &str,
+    value: &str,
+    field: &str,
+    policy: InlineSecretPolicy,
+    out: &mut SecretizeOutput,
+) -> Result<String> {
+    let allow = matches!(policy, InlineSecretPolicy::Allow);
+    let (reference, was_inline) = store_secret_with_fallback(account, value, allow)
+        .map_err(|err| anyhow::anyhow!("{field}: {err}"))?;
+    if was_inline {
+        out.inline_fields.push(field.to_string());
+    }
+    Ok(reference)
+}
+
 pub(crate) fn secretize_config(
     config: &mut Config,
     scope: &str,
-) -> Result<BTreeMap<String, String>> {
-    let mut refs = BTreeMap::new();
+    policy: InlineSecretPolicy,
+) -> Result<SecretizeOutput> {
+    let mut out = SecretizeOutput::default();
 
     if let Some(one) = config.alteryx_one.as_mut() {
         if let Some(value) = one.access_token.take() {
             let account = secret_scope(scope, "alteryx_one.access_token");
-            let reference = store_keyring_secret(&account, &value)?;
+            let reference = store(
+                &account,
+                &value,
+                "alteryx_one.access_token",
+                policy,
+                &mut out,
+            )?;
             one.access_token_ref = Some(reference.clone());
-            refs.insert("alteryx_one.access_token".to_string(), reference);
+            out.refs
+                .insert("alteryx_one.access_token".to_string(), reference);
         }
         if let Some(value) = one.refresh_token.take() {
             let account = secret_scope(scope, "alteryx_one.refresh_token");
-            let reference = store_keyring_secret(&account, &value)?;
+            let reference = store(
+                &account,
+                &value,
+                "alteryx_one.refresh_token",
+                policy,
+                &mut out,
+            )?;
             one.refresh_token_ref = Some(reference.clone());
-            refs.insert("alteryx_one.refresh_token".to_string(), reference);
+            out.refs
+                .insert("alteryx_one.refresh_token".to_string(), reference);
         }
     }
 
     if let Some(api) = config.api.as_mut() {
         if let Some(value) = api.auth.client_secret.take() {
             let account = secret_scope(scope, "server.api.client_secret");
-            let reference = store_keyring_secret(&account, &value)?;
+            let reference = store(
+                &account,
+                &value,
+                "server.api.client_secret",
+                policy,
+                &mut out,
+            )?;
             api.auth.client_secret_ref = Some(reference.clone());
-            refs.insert("server.api.client_secret".to_string(), reference);
+            out.refs
+                .insert("server.api.client_secret".to_string(), reference);
         }
     }
 
@@ -382,18 +450,31 @@ pub(crate) fn secretize_config(
         if !server.curator_api_secret.trim().is_empty() {
             let value = std::mem::take(&mut server.curator_api_secret);
             let account = secret_scope(scope, "server.curator_api_secret");
-            let reference = store_keyring_secret(&account, &value)?;
+            let reference = store(
+                &account,
+                &value,
+                "server.curator_api_secret",
+                policy,
+                &mut out,
+            )?;
             server.curator_api_secret_ref = Some(reference.clone());
-            refs.insert("server.curator_api_secret".to_string(), reference);
+            out.refs
+                .insert("server.curator_api_secret".to_string(), reference);
         }
     }
 
     if let Some(mongo) = config.mongo.managed.as_mut() {
         if let Some(value) = mongo.password.take() {
             let account = secret_scope(scope, "server.storage.mongo.managed.password");
-            let reference = store_keyring_secret(&account, &value)?;
+            let reference = store(
+                &account,
+                &value,
+                "server.storage.mongo.managed.password",
+                policy,
+                &mut out,
+            )?;
             mongo.password_ref = Some(reference.clone());
-            refs.insert(
+            out.refs.insert(
                 "server.storage.mongo.managed.password".to_string(),
                 reference,
             );
@@ -414,15 +495,15 @@ pub(crate) fn secretize_config(
             if let Some(conn) = conn {
                 if let Some(value) = conn.password.take() {
                     let account = secret_scope(scope, label);
-                    let reference = store_keyring_secret(&account, &value)?;
+                    let reference = store(&account, &value, label, policy, &mut out)?;
                     conn.password_ref = Some(reference.clone());
-                    refs.insert(label.to_string(), reference);
+                    out.refs.insert(label.to_string(), reference);
                 }
             }
         }
     }
 
-    Ok(refs)
+    Ok(out)
 }
 
 pub(crate) fn default_config() -> Config {
@@ -541,6 +622,7 @@ fn update_or_create_one(
         access_token_ref: None,
         refresh_token: None,
         refresh_token_ref: None,
+        expected_workspace_id: None,
     });
     one.account_email = account_email;
     one
@@ -662,16 +744,50 @@ pub(crate) fn write_config(
     config: &Config,
     _secret_refs: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, String>> {
+    Ok(write_config_with_policy(path, config, InlineSecretPolicy::Allow)?.refs)
+}
+
+/// Write a profile file under `path`. Returns refs + inline-fallback warnings.
+///
+/// The file is created with restrictive permissions (0o600 on Unix) so secrets
+/// that fell back to inline storage are not group/world-readable.
+pub(crate) fn write_config_with_policy(
+    path: &Path,
+    config: &Config,
+    policy: InlineSecretPolicy,
+) -> Result<SecretizeOutput> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let mut export = config.clone();
-    let refs = secretize_config(&mut export, &config.profile_name)?;
-    fs::write(
-        path,
-        serde_yaml::to_string(&canonical_profile_value(&export)?)?,
-    )?;
-    Ok(refs)
+    let out = secretize_config(&mut export, &config.profile_name, policy)?;
+    let body = serde_yaml::to_string(&canonical_profile_value(&export)?)?;
+    write_restricted(path, body.as_bytes())?;
+    Ok(out)
+}
+
+/// Write a file with 0o600 permissions on Unix. On other platforms falls back
+/// to plain write. Existing files have their permissions tightened after write.
+pub(crate) fn write_restricted(path: &Path, contents: &[u8]) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        std::io::Write::write_all(&mut f, contents)?;
+        // Re-apply permissions in case the file already existed with looser bits.
+        fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, contents)?;
+        Ok(())
+    }
 }
 
 pub(crate) fn summarize_config(config: &Config) -> Value {

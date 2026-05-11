@@ -1502,10 +1502,55 @@ fn api_profile(config: &Config) -> Result<&ApiProfile> {
 
 fn build_client(api: &ApiProfile) -> Result<Client> {
     let timeout = Duration::from_millis(api.timeout_ms.unwrap_or(30_000));
-    Client::builder()
-        .timeout(timeout)
-        .build()
-        .context("failed to build API HTTP client")
+    let mut builder = Client::builder().timeout(timeout);
+    // The new global --no-verify-tls flag (set via `set_no_verify_tls`) is
+    // a thread-local override that takes effect only when explicitly opted
+    // in. Server profile doesn't carry a per-profile verify_tls field
+    // today; the global flag is the only knob.
+    if no_verify_tls() {
+        builder = builder.danger_accept_invalid_certs(true);
+        eprintln!(
+            "[warn] TLS certificate verification disabled for Server API transport (--no-verify-tls). Never use this in production."
+        );
+    }
+    let _ = api; // verify_tls is not a per-profile field on Server API today.
+    builder.build().context("failed to build API HTTP client")
+}
+
+thread_local! {
+    static SERVER_APPLY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static SERVER_NO_VERIFY_TLS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static SERVER_DEBUG_TRACE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Set the Server API apply gate for the current thread.
+///
+/// When `false` (default), mutating Server API requests short-circuit to a
+/// structured dry-run envelope. Mirrors the One API safety contract.
+pub fn set_server_apply(apply: bool) {
+    SERVER_APPLY.with(|c| c.set(apply));
+}
+
+pub fn server_apply() -> bool {
+    SERVER_APPLY.with(|c| c.get())
+}
+
+/// Disable TLS certificate verification on Server API client builds for
+/// this thread. Lab/dev only.
+pub fn set_no_verify_tls(disabled: bool) {
+    SERVER_NO_VERIFY_TLS.with(|c| c.set(disabled));
+}
+
+pub fn no_verify_tls() -> bool {
+    SERVER_NO_VERIFY_TLS.with(|c| c.get())
+}
+
+pub fn set_debug_trace(on: bool) {
+    SERVER_DEBUG_TRACE.with(|c| c.set(on));
+}
+
+pub fn debug_trace() -> bool {
+    SERVER_DEBUG_TRACE.with(|c| c.get())
 }
 
 fn cache_key(api: &ApiProfile) -> String {
@@ -1610,11 +1655,16 @@ fn request_json(
     bearer_token: &str,
     body: Option<Value>,
 ) -> Result<Value> {
+    let mutating = is_mutating_method(method);
     for attempt in 1..=MAX_RETRIES {
-        let req = match method {
+        // DELETE / PATCH were missing — added so the safety lift can route
+        // every Server-API mutation through this single chokepoint.
+        let req = match method.to_ascii_uppercase().as_str() {
             "GET" => client.get(url),
             "PUT" => client.put(url),
             "POST" => client.post(url),
+            "DELETE" => client.delete(url),
+            "PATCH" => client.patch(url),
             _ => bail!("unsupported method '{}'", method),
         }
         .bearer_auth(bearer_token)
@@ -1634,19 +1684,38 @@ fn request_json(
         let body_json = serde_json::from_str::<Value>(&body_text)
             .unwrap_or_else(|_| json!({ "raw": body_text }));
 
-        if (status == 429 || status >= 500) && attempt < MAX_RETRIES {
-            thread::sleep(Duration::from_millis((attempt as u64) * 300));
+        // Mutating requests must not be silently retried (the server may
+        // have processed the first attempt). Only retry GETs.
+        let retryable = (status == 429 || status >= 500) && !mutating;
+        if retryable && attempt < MAX_RETRIES {
+            // Jittered backoff: deterministic 300 ms × attempt with ±20%
+            // jitter from clock nanos to avoid thundering-herd retries.
+            let base = (attempt as u64) * 300;
+            let span = base / 5;
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos() as u64)
+                .unwrap_or(0);
+            let offset = if span > 0 { nanos % (span * 2 + 1) } else { 0 };
+            let sleep_ms = base.saturating_add(offset).saturating_sub(span);
+            thread::sleep(Duration::from_millis(sleep_ms));
             continue;
         }
 
         if status >= 400 {
+            // Use ayx-core's HTTP-status → ErrorCode mapping so anyhow chain
+            // classification at the outer dispatcher picks it up cleanly.
+            let code = ayx_core::envelope::ErrorCode::from_http_status(status)
+                .map(|c| c.as_str())
+                .unwrap_or("internal");
             bail!(
-                "api request failed [{}] status={} code={} url={} body={}",
+                "api request failed [{}] status={} code={} error_code={} url={} body={}",
                 method,
                 status,
                 status_error_code(status),
-                url,
-                body_json
+                code,
+                ayx_core::observability::redact_url(url),
+                ayx_core::observability::redact_json(&body_json)
             );
         }
 
@@ -1778,10 +1847,65 @@ fn api_request(
     body: Option<Value>,
 ) -> Result<Value> {
     let api = api_profile(config)?;
+    let url_preview = format!("{}{}", normalized_base_url(api), relative_path);
+
+    // Safety gate. Mutating methods short-circuit to a structured dry-run
+    // body when --apply is not set. Mirrors the One transport's behavior so
+    // the safety story is identical regardless of which surface is in use.
+    let mutating = is_mutating_method(method);
+    if mutating && !server_apply() {
+        if debug_trace() {
+            eprintln!(
+                "[debug] server✗ {} {} dry-run (no --apply)",
+                method,
+                ayx_core::observability::redact_url(&url_preview)
+            );
+        }
+        return Ok(json!({
+            "ok": true,
+            "dry_run": true,
+            "apply": false,
+            "mutating": true,
+            "method": method,
+            "url": url_preview,
+            "would_send": body.unwrap_or(Value::Null),
+            "message": format!(
+                "Server API {} {} would be sent. Re-run with --apply to execute.",
+                method, relative_path
+            ),
+        }));
+    }
+
     let client = build_client(api)?;
     let token = resolve_bearer_token(api, &client)?;
     let url = format!("{}{}", normalized_base_url(api), relative_path);
-    request_json(&client, method, &url, &token, body)
+    if debug_trace() {
+        eprintln!(
+            "[debug] server→ {} {} (mutating={}, body={})",
+            method,
+            ayx_core::observability::redact_url(&url),
+            mutating,
+            body.is_some()
+        );
+    }
+    let result = request_json(&client, method, &url, &token, body);
+    if debug_trace() {
+        match &result {
+            Ok(v) => {
+                let status = v.get("status").and_then(|s| s.as_u64()).unwrap_or(0);
+                eprintln!("[debug] server← {} status={}", method, status);
+            }
+            Err(e) => eprintln!("[debug] server← {} error: {}", method, e),
+        }
+    }
+    result
+}
+
+fn is_mutating_method(method: &str) -> bool {
+    matches!(
+        method.to_ascii_uppercase().as_str(),
+        "POST" | "PUT" | "PATCH" | "DELETE"
+    )
 }
 
 #[cfg(test)]

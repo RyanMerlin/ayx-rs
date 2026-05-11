@@ -1,0 +1,38 @@
+id: server.logs.triage
+title: Triage an Alteryx Server incident from the logs
+summary: |
+  Read-only log triage. Tails the Server logs, filters for recent errors,
+  and surfaces the diagnostic envelope keyed by error pattern. Use this
+  as the first move on any incident page.
+safety: read_only
+trigger:
+  task_keywords:
+    - server error
+    - server log
+    - incident
+    - triage
+    - failed to register
+    - startup error
+  tags:
+    - server
+    - logs
+    - diagnose
+    - incident
+steps:
+  - kind: command
+    cmd: "ayx server-logs discover --profile <profile> --output json"
+    why: "Inventory every Server log file the profile knows about — gives us the file paths to drill into."
+  - kind: command
+    cmd: "ayx server-logs context --path <log_path> --query <error_pattern> --before 25 --after 25"
+    why: "Extract ±25 lines around every occurrence of an error pattern in one log file. The substring search avoids the 'tail and grep by eye' anti-pattern."
+  - kind: command
+    cmd: "ayx server diagnose startup --profile <profile> --error \"<error_pattern>\" --output json"
+    why: "Map a specific error string to the canonical diagnostic + remediation playbook (if one exists)."
+  - kind: note
+    text: |
+      If the diagnose envelope returns error_code=not_found, the error
+      pattern isn't yet in the knowledge base. Capture it in a ticket
+      with the surrounding context lines so future-you (or the next
+      on-call) has a hit.
+validations:
+  - describe: "Every error_pattern in the grep output has either a doctor hit or a captured ticket reference."

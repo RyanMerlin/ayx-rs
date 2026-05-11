@@ -8,17 +8,9 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct CloudConversionOptions {
     pub fail_on_unsupported: bool,
-}
-
-impl Default for CloudConversionOptions {
-    fn default() -> Self {
-        Self {
-            fail_on_unsupported: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -356,15 +348,17 @@ fn generic_convert(node: Node<'_, '_>) -> Value {
             .or_default()
             .push(generic_convert(child));
     }
-    for (tag, values) in grouped {
-        out.insert(
-            tag,
-            if values.len() == 1 {
-                values.into_iter().next().unwrap()
-            } else {
-                Value::Array(values)
-            },
-        );
+    for (tag, mut values) in grouped {
+        // `values.len() == 1` is checked above, but pop() is panic-free
+        // regardless and makes the invariant obvious without `unwrap()`.
+        let entry = if values.len() == 1 {
+            values
+                .pop()
+                .unwrap_or(Value::Object(serde_json::Map::new()))
+        } else {
+            Value::Array(values)
+        };
+        out.insert(tag, entry);
     }
     if !text.is_empty() {
         out.insert("#text".to_string(), Value::String(text.to_string()));
@@ -1479,7 +1473,11 @@ fn patch_connections(content: &mut Value, nodes: &HashMap<String, NodeSpec>) {
         Value::Object(_) => {
             let old = connections.take();
             *connections = Value::Array(vec![old]);
-            connections.as_array_mut().unwrap()
+            // We just assigned `Value::Array(...)`; `as_array_mut` cannot
+            // fail. Use `expect` to make the invariant explicit.
+            connections
+                .as_array_mut()
+                .expect("just wrapped in Value::Array")
         }
         _ => return,
     };
@@ -2495,7 +2493,10 @@ fn canonical_json(value: &Value) -> String {
                 keys.into_iter()
                     .map(|key| format!(
                         "{}:{}",
-                        serde_json::to_string(key).unwrap(),
+                        // `key` is a `String`; `to_string` on a string is
+                        // infallible. The fallback is defensive only.
+                        serde_json::to_string(key)
+                            .unwrap_or_else(|_| format!("\"{}\"", key.replace('"', "\\\""))),
                         canonical_json(&map[key])
                     ))
                     .collect::<Vec<_>>()

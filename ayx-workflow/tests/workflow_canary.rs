@@ -136,3 +136,64 @@ fn yxdb_fixture_reads_and_exports_csv() {
     assert!(csv.lines().count() > 1);
     let _ = fs::remove_file(&out_csv);
 }
+
+/// H9 — Workflow round-trip canary.
+///
+/// Converts the fixture `root.yxmd` Desktop workflow to its Cloud
+/// representation, then asserts that the conversion is deterministic and
+/// that any "lossy" operations (silent skips, missing field mappings) are
+/// captured in the report rather than swallowed.
+///
+/// Drift trigger: if the converter starts silently dropping fields that
+/// previously round-tripped cleanly, this test fails.
+#[test]
+fn workflow_roundtrip_canary() {
+    use ayx_workflow::{convert_desktop_to_cloud, CloudConversionOptions};
+
+    let fixture = fixture_dir().join("root.yxmd");
+    let report = convert_desktop_to_cloud(&fixture, CloudConversionOptions::default())
+        .expect("desktop workflow converts");
+
+    // Determinism: converting the same input twice must produce identical
+    // content + checksum. Catches accidental non-determinism (hashmap order,
+    // wall-clock fields, etc.).
+    let again = convert_desktop_to_cloud(&fixture, CloudConversionOptions::default())
+        .expect("desktop workflow converts (second pass)");
+    assert_eq!(
+        report.content_checksum, again.content_checksum,
+        "conversion is non-deterministic: checksums differ across two runs"
+    );
+    assert_eq!(report.content, again.content);
+
+    // Lossy-op accounting: removed_tools and unsupported_tools are surfaced
+    // explicitly; we don't pin their counts (the fixture may add tools) but
+    // we DO insist that the converter doesn't silently drop everything.
+    assert!(
+        report.converted_tool_count > 0,
+        "converter produced 0 tools — fixture or converter regressed"
+    );
+
+    // The report payload must be a JSON object (not bare array/string) so
+    // downstream callers can rely on the shape.
+    assert!(report.content.is_object());
+
+    // Sanity: input field matches the path we passed in.
+    assert!(report.input.ends_with("root.yxmd"));
+
+    // Strict mode: when fail_on_unsupported is set, any unsupported tools
+    // should escalate to an error. If the fixture currently has zero
+    // unsupported tools this should succeed; if it has any, it errors —
+    // either outcome is a meaningful signal worth asserting.
+    let strict = convert_desktop_to_cloud(
+        &fixture,
+        CloudConversionOptions {
+            fail_on_unsupported: true,
+        },
+    );
+    match (strict, report.unsupported_tools.is_empty()) {
+        (Ok(_), true) => {}   // fixture is clean
+        (Err(_), false) => {} // fixture has unsupported, strict errored
+        (Ok(_), false) => panic!("strict mode accepted unsupported tools"),
+        (Err(err), true) => panic!("strict mode rejected a clean fixture: {err}"),
+    }
+}

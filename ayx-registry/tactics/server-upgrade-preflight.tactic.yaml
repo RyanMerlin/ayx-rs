@@ -1,0 +1,51 @@
+id: server.upgrade.preflight
+title: Pre-upgrade preflight for Alteryx Server
+summary: |
+  Read-only safety sweep before kicking off a Server upgrade: validate
+  config, capture a Mongo snapshot, dump current auth posture, and verify
+  there are no in-flight jobs. Outputs a single bundle of evidence for
+  the change record.
+safety: mutating
+trigger:
+  task_keywords:
+    - upgrade server
+    - server upgrade
+    - preflight
+    - pre-upgrade
+  tags:
+    - server
+    - upgrade
+    - change-management
+    - safety
+steps:
+  - kind: command
+    cmd: "ayx doctor config --profile <profile> --output json"
+    why: "Validate config + secret refs resolve cleanly. Upgrade fails fast if anything is malformed."
+  - kind: command
+    cmd: "ayx server auth status --profile <profile> --output json"
+    why: "Snapshot auth posture so post-upgrade comparison is possible."
+  - kind: tactic
+    id: mongo.backup-restore
+    why: "Take the snapshot. Mandatory before any upgrade."
+  - kind: command
+    cmd: "ayx server api status --profile <profile> --output json"
+    why: "Capture API reachability + auth posture so post-upgrade comparison is possible."
+  - kind: command
+    cmd: "ayx server upgrade plan --profile <profile> --output json"
+    why: "Compute the upgrade plan envelope (rules, version graph, expected migrations). Read-only."
+  - kind: note
+    text: |
+      Active-job draining is checked via the Mongo `mongo.queue.stuck` tactic
+      below — the AS_Queue queue depth and per-state counts are what actually
+      matter, not a single status RPC.
+  - kind: tactic
+    id: mongo.queue.stuck
+    why: "Confirm the AS_Queue is empty or only holds Queued (not Running) jobs before kicking off the upgrade."
+validations:
+  - describe: "Mongo backup artifact exists and is non-empty."
+  - describe: "Server queue is empty (count = 0)."
+  - describe: "Doctor config envelope has no findings."
+rollback: |
+  Preflight itself is mutating only via the Mongo snapshot, which is
+  additive. If the upgrade itself goes wrong, restore from the snapshot
+  captured here via `mongo.backup-restore` (restore branch).

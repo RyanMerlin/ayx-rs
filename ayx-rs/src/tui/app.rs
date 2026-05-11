@@ -1,3 +1,13 @@
+// TUI module pre-dates the structural refactor planned in audit Stage 3.
+// These allows scope known stylistic lints to this file only; the next
+// pass should split state/update/effects and remove them.
+#![allow(
+    clippy::derivable_impls,
+    clippy::vec_init_then_push,
+    clippy::type_complexity,
+    clippy::needless_lifetimes
+)]
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -7,14 +17,21 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 use serde_json::Value;
 
-use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
+use super::forms::{
+    api_profile_to_server_api_ref, default_mongo_embedded, default_mongo_managed,
+    default_server_profile, default_sqlserver_profile, field_value, mongo_values,
+    normalize_server_url, observability_fields, parse_bool_field, parse_optional_text_field,
+    parse_u16_field, parse_u32_field, parse_u64_field, server_profile_to_server_api_ref,
+    sqlserver_fields, update_sql_connection,
+};
+use super::render_helpers::{extract_one_browser_items, pretty_yaml_lines, render_envelope_panel};
+
 use ayx_core::profile::{
     default_profile_storage_path, list_central_profiles, list_central_workspaces, load_ayx_state,
     load_workspace_config, normalize_alteryx_base_url, normalize_alteryx_one_base_url,
     profile_resolution_detail, profile_storage_path, save_ayx_state, workspace_storage_path,
-    AlteryxOneProfile, ApiAuth, ApiAuthMode, ApiLoggingProfile, ApiProfile, Config, MongoEmbedded,
-    MongoManaged, MongoMode, MongoProfile, ObservabilityProfile, ServerApiProfile, ServerProfile,
-    SqlServerConnectionProfile, SqlServerProfile, TlsConfig, WorkspaceConfig,
+    AlteryxOneProfile, ApiAuth, ApiAuthMode, ApiLoggingProfile, ApiProfile, Config, MongoMode,
+    ObservabilityProfile, WorkspaceConfig,
 };
 
 use crate::onboard::{
@@ -61,15 +78,25 @@ impl Screen {
         Self::all()[index.min(Self::all().len() - 1)]
     }
 
+    /// Index in the sidebar list. `Inspect` is a modal overlay and has no
+    /// stable sidebar position — callers must not call this on Inspect; use
+    /// `sidebar_index` instead, which returns `None` for Inspect so the
+    /// current sidebar selection is left alone.
     pub fn index(self) -> usize {
+        self.sidebar_index().unwrap_or(0)
+    }
+
+    pub fn sidebar_index(self) -> Option<usize> {
         match self {
-            Screen::Profiles => 0,
-            Screen::Credentials => 1,
-            Screen::Config => 2,
-            Screen::Connectivity => 3,
-            Screen::One => 4,
-            Screen::Help => 5,
-            Screen::Inspect => 0,
+            Screen::Profiles => Some(0),
+            Screen::Credentials => Some(1),
+            Screen::Config => Some(2),
+            Screen::Connectivity => Some(3),
+            Screen::One => Some(4),
+            Screen::Help => Some(5),
+            // Inspect is a modal overlay rendered on top of whatever screen
+            // was active. It must not move the sidebar cursor.
+            Screen::Inspect => None,
         }
     }
 }
@@ -244,7 +271,12 @@ impl ConfigForm {
             .server_api
             .clone()
             .or_else(|| config.api.as_ref().and_then(api_profile_to_server_api_ref))
-            .or_else(|| config.server.as_ref().and_then(server_profile_to_server_api_ref));
+            .or_else(|| {
+                config
+                    .server
+                    .as_ref()
+                    .and_then(server_profile_to_server_api_ref)
+            });
         let server_api_fields = vec![
             ConfigFieldState {
                 label: "Base URL",
@@ -279,10 +311,25 @@ impl ConfigForm {
         ];
 
         let mongo = &config.mongo;
-        let (embedded_runtime, embedded_service, embedded_restore, managed_url, managed_host,
-            managed_port, managed_auth_db, managed_username, managed_password, managed_tls_enabled,
-            managed_tls_ca, managed_tls_cert, managed_tls_key, managed_tls_invalid_hostnames,
-            managed_timeout, managed_retry, managed_pool) = mongo_values(mongo);
+        let (
+            embedded_runtime,
+            embedded_service,
+            embedded_restore,
+            managed_url,
+            managed_host,
+            managed_port,
+            managed_auth_db,
+            managed_username,
+            managed_password,
+            managed_tls_enabled,
+            managed_tls_ca,
+            managed_tls_cert,
+            managed_tls_key,
+            managed_tls_invalid_hostnames,
+            managed_timeout,
+            managed_retry,
+            managed_pool,
+        ) = mongo_values(mongo);
         let mongo_fields = vec![
             ConfigFieldState {
                 label: "Mode",
@@ -789,7 +836,10 @@ pub struct App {
     pub target_path: PathBuf,
     pub target_environment: Option<String>,
     pub resolution_source: String,
-    pub inspect_return: Option<Screen>,
+    /// (screen, focus) captured when entering Inspect so closing the modal
+    /// restores both. Carrying focus prevents `Focus::Content` from leaking
+    /// onto a destination screen that doesn't have a meaningful content pane.
+    pub inspect_return: Option<(Screen, Focus)>,
     pub current_config: Config,
     pub config_form: ConfigForm,
     pub credentials: CredentialsForm,
@@ -797,6 +847,12 @@ pub struct App {
     pub one_browser: OneBrowserState,
     pub status_message: String,
     pub toast: Option<ToastState>,
+    // Background worker for off-UI-thread network/disk work. Held in an
+    // Option so headless smoke tests (if any) can construct an App without
+    // spawning a real thread.
+    pub(super) worker: Option<super::worker::BackgroundWorker>,
+    pub(super) latest_connectivity_request: Option<super::worker::RequestId>,
+    pub(super) latest_one_browser_request: Option<super::worker::RequestId>,
 }
 
 impl App {
@@ -847,6 +903,9 @@ impl App {
             one_browser: OneBrowserState::default(),
             status_message: "Ready".to_string(),
             toast: None,
+            worker: Some(super::worker::BackgroundWorker::spawn()),
+            latest_connectivity_request: None,
+            latest_one_browser_request: None,
         };
         app.sync_selected_entries();
         app.refresh_connectivity();
@@ -861,6 +920,56 @@ impl App {
             .is_some_and(|toast| Instant::now() >= toast.expires_at)
         {
             self.toast = None;
+        }
+        self.drain_worker_results();
+    }
+
+    /// Pull every available result off the worker channel and apply it.
+    /// Results stamped with stale request ids (older than the latest issued
+    /// for that lane) are dropped — the user moved on.
+    fn drain_worker_results(&mut self) {
+        // Collect available results into a local vec first, then process —
+        // this releases the immutable borrow on `self.worker` before we
+        // mutate `self` to apply each result.
+        let mut batch: Vec<super::worker::TaskResult> = Vec::new();
+        let mut disconnected = false;
+        if let Some(worker) = self.worker.as_ref() {
+            loop {
+                match worker.try_recv() {
+                    Ok(result) => batch.push(result),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if disconnected {
+            self.worker = None;
+        }
+        for result in batch {
+            match result {
+                super::worker::TaskResult::Connectivity { id, panels } => {
+                    if self.latest_connectivity_request == Some(id) {
+                        self.connectivity.panels = panels;
+                        self.connectivity.last_run =
+                            Some(format!("{:?}", std::time::SystemTime::now()));
+                        self.status_message = "Connectivity checks refreshed".to_string();
+                    }
+                }
+                super::worker::TaskResult::OneBrowser {
+                    id,
+                    resource,
+                    resource_id: _,
+                    result,
+                } => {
+                    if self.latest_one_browser_request == Some(id) {
+                        let typed = result.map_err(|e| anyhow!(e));
+                        self.set_one_browser_panel(resource, typed);
+                    }
+                }
+            }
         }
     }
 
@@ -1249,7 +1358,9 @@ impl App {
 
     fn select_screen(&mut self, screen: Screen) {
         if screen == Screen::Inspect && self.screen != Screen::Inspect {
-            self.inspect_return = Some(self.screen);
+            // Capture both the underlying screen and the focus so close_inspect
+            // restores the full state.
+            self.inspect_return = Some((self.screen, self.focus));
             self.screen = Screen::Inspect;
             self.focus = Focus::Content;
             return;
@@ -1257,16 +1368,23 @@ impl App {
             self.inspect_return = None;
         }
         self.screen = screen;
-        if screen != Screen::Inspect {
-            self.sidebar.select(Some(screen.index()));
+        // Inspect is modal — leave the sidebar selection alone for it.
+        if let Some(idx) = screen.sidebar_index() {
+            self.sidebar.select(Some(idx));
         }
     }
 
     fn close_inspect(&mut self) {
         if self.screen == Screen::Inspect {
-            let next = self.inspect_return.take().unwrap_or(Screen::Profiles);
+            let (next, focus) = self
+                .inspect_return
+                .take()
+                .unwrap_or((Screen::Profiles, Focus::Sidebar));
             self.screen = next;
-            self.sidebar.select(Some(next.index()));
+            self.focus = focus;
+            if let Some(idx) = next.sidebar_index() {
+                self.sidebar.select(Some(idx));
+            }
         }
     }
 
@@ -1444,12 +1562,10 @@ impl App {
             .trim()
             .to_string();
 
-        let server_base_url = field_value(
-            &self.config_form.overview_fields,
-            "Alteryx Server Base URL",
-        )
-        .trim()
-        .to_string();
+        let server_base_url =
+            field_value(&self.config_form.overview_fields, "Alteryx Server Base URL")
+                .trim()
+                .to_string();
         let verify_tls = parse_bool_field(
             field_value(&self.config_form.overview_fields, "Verify TLS"),
             true,
@@ -1472,12 +1588,10 @@ impl App {
         let server_api_client_id = field_value(&self.config_form.server_api_fields, "Client ID")
             .trim()
             .to_string();
-        let server_api_client_secret = field_value(
-            &self.config_form.server_api_fields,
-            "Client Secret",
-        )
-        .trim()
-        .to_string();
+        let server_api_client_secret =
+            field_value(&self.config_form.server_api_fields, "Client Secret")
+                .trim()
+                .to_string();
         if !server_api_base.is_empty()
             || !server_api_client_id.is_empty()
             || !server_api_client_secret.is_empty()
@@ -1525,20 +1639,28 @@ impl App {
             "embedded" => {
                 config.mongo.mode = MongoMode::Embedded;
                 let mut embedded = config.mongo.embedded.unwrap_or_else(default_mongo_embedded);
-                embedded.runtime_settings_path =
-                    parse_optional_text_field(&self.config_form.mongo_fields, "Embedded RuntimeSettings");
-                embedded.alteryx_service_path =
-                    parse_optional_text_field(&self.config_form.mongo_fields, "Embedded Service Path");
-                embedded.restore_target_path =
-                    parse_optional_text_field(&self.config_form.mongo_fields, "Embedded Restore Path");
+                embedded.runtime_settings_path = parse_optional_text_field(
+                    &self.config_form.mongo_fields,
+                    "Embedded RuntimeSettings",
+                );
+                embedded.alteryx_service_path = parse_optional_text_field(
+                    &self.config_form.mongo_fields,
+                    "Embedded Service Path",
+                );
+                embedded.restore_target_path = parse_optional_text_field(
+                    &self.config_form.mongo_fields,
+                    "Embedded Restore Path",
+                );
                 config.mongo.embedded = Some(embedded);
                 config.mongo.managed = None;
             }
             "managed" => {
                 config.mongo.mode = MongoMode::Managed;
                 let mut managed = config.mongo.managed.unwrap_or_else(default_mongo_managed);
-                let managed_url = parse_optional_text_field(&self.config_form.mongo_fields, "Managed URL");
-                let managed_host = parse_optional_text_field(&self.config_form.mongo_fields, "Managed Host");
+                let managed_url =
+                    parse_optional_text_field(&self.config_form.mongo_fields, "Managed URL");
+                let managed_host =
+                    parse_optional_text_field(&self.config_form.mongo_fields, "Managed Host");
                 if managed_url.is_some() {
                     managed.url = managed_url;
                     managed.host = None;
@@ -1546,7 +1668,8 @@ impl App {
                     managed.url = None;
                     managed.host = managed_host;
                 }
-                managed.port = parse_u16_field(&self.config_form.mongo_fields, "Managed Port", managed.port)?;
+                managed.port =
+                    parse_u16_field(&self.config_form.mongo_fields, "Managed Port", managed.port)?;
                 managed.auth_database =
                     parse_optional_text_field(&self.config_form.mongo_fields, "Auth DB");
                 managed.username =
@@ -1565,10 +1688,7 @@ impl App {
                     managed.tls.key_path =
                         parse_optional_text_field(&self.config_form.mongo_fields, "TLS Key Path");
                     managed.tls.allow_invalid_hostnames = Some(parse_bool_field(
-                        field_value(
-                            &self.config_form.mongo_fields,
-                            "Allow Invalid Hostnames",
-                        ),
+                        field_value(&self.config_form.mongo_fields, "Allow Invalid Hostnames"),
                         false,
                     )?);
                 } else {
@@ -1577,8 +1697,7 @@ impl App {
                     managed.tls.key_path = None;
                     managed.tls.allow_invalid_hostnames = None;
                 }
-                managed.timeout_ms =
-                    parse_u64_field(&self.config_form.mongo_fields, "Timeout ms")?;
+                managed.timeout_ms = parse_u64_field(&self.config_form.mongo_fields, "Timeout ms")?;
                 managed.retry_count =
                     parse_u32_field(&self.config_form.mongo_fields, "Retry Count")?;
                 managed.max_pool_size =
@@ -1594,60 +1713,48 @@ impl App {
             }
         }
 
-        let sqlserver_has_input = self
-            .config_form
-            .sqlserver_fields
-            .iter()
-            .any(|field| {
-                matches!(
-                    field.label,
-                    "Controller Host"
-                        | "Controller Port"
-                        | "Controller Database"
-                        | "Controller Username"
-                        | "Controller Password"
-                        | "Controller Conn Str"
-                        | "Server UI Host"
-                        | "Server UI Port"
-                        | "Server UI Database"
-                        | "Server UI Username"
-                        | "Server UI Password"
-                        | "Server UI Conn Str"
-                        | "Legacy Conn Str"
-                ) && !field.value.trim().is_empty()
-            })
-            || parse_bool_field(
-                field_value(&self.config_form.sqlserver_fields, "Controller Integrated"),
-                false,
-            )?
-            || parse_bool_field(
-                field_value(&self.config_form.sqlserver_fields, "Controller Encrypt"),
-                false,
-            )?
-            || parse_bool_field(
-                field_value(&self.config_form.sqlserver_fields, "Controller Trust Cert"),
-                false,
-            )?
-            || parse_bool_field(
-                field_value(&self.config_form.sqlserver_fields, "Controller MultiSubnet"),
-                false,
-            )?
-            || parse_bool_field(
-                field_value(&self.config_form.sqlserver_fields, "Server UI Integrated"),
-                false,
-            )?
-            || parse_bool_field(
-                field_value(&self.config_form.sqlserver_fields, "Server UI Encrypt"),
-                false,
-            )?
-            || parse_bool_field(
-                field_value(&self.config_form.sqlserver_fields, "Server UI Trust Cert"),
-                false,
-            )?
-            || parse_bool_field(
-                field_value(&self.config_form.sqlserver_fields, "Server UI MultiSubnet"),
-                false,
-            )?;
+        let sqlserver_has_input = self.config_form.sqlserver_fields.iter().any(|field| {
+            matches!(
+                field.label,
+                "Controller Host"
+                    | "Controller Port"
+                    | "Controller Database"
+                    | "Controller Username"
+                    | "Controller Password"
+                    | "Controller Conn Str"
+                    | "Server UI Host"
+                    | "Server UI Port"
+                    | "Server UI Database"
+                    | "Server UI Username"
+                    | "Server UI Password"
+                    | "Server UI Conn Str"
+                    | "Legacy Conn Str"
+            ) && !field.value.trim().is_empty()
+        }) || parse_bool_field(
+            field_value(&self.config_form.sqlserver_fields, "Controller Integrated"),
+            false,
+        )? || parse_bool_field(
+            field_value(&self.config_form.sqlserver_fields, "Controller Encrypt"),
+            false,
+        )? || parse_bool_field(
+            field_value(&self.config_form.sqlserver_fields, "Controller Trust Cert"),
+            false,
+        )? || parse_bool_field(
+            field_value(&self.config_form.sqlserver_fields, "Controller MultiSubnet"),
+            false,
+        )? || parse_bool_field(
+            field_value(&self.config_form.sqlserver_fields, "Server UI Integrated"),
+            false,
+        )? || parse_bool_field(
+            field_value(&self.config_form.sqlserver_fields, "Server UI Encrypt"),
+            false,
+        )? || parse_bool_field(
+            field_value(&self.config_form.sqlserver_fields, "Server UI Trust Cert"),
+            false,
+        )? || parse_bool_field(
+            field_value(&self.config_form.sqlserver_fields, "Server UI MultiSubnet"),
+            false,
+        )?;
         if config.sqlserver.is_some() || sqlserver_has_input {
             let mut sqlserver = config.sqlserver.unwrap_or_else(default_sqlserver_profile);
             sqlserver.controller = Some(update_sql_connection(
@@ -1662,10 +1769,8 @@ impl App {
                 "AYX_SQL_SERVER_UI_PASSWORD",
                 &self.config_form.sqlserver_fields,
             )?);
-            sqlserver.legacy_connection_string = parse_optional_text_field(
-                &self.config_form.sqlserver_fields,
-                "Legacy Conn Str",
-            );
+            sqlserver.legacy_connection_string =
+                parse_optional_text_field(&self.config_form.sqlserver_fields, "Legacy Conn Str");
             config.sqlserver = Some(sqlserver);
         } else {
             config.sqlserver = None;
@@ -1673,7 +1778,10 @@ impl App {
 
         let observability_has_input = config.observability.is_some()
             || parse_bool_field(
-                field_value(&self.config_form.observability_fields, "API Logging Enabled"),
+                field_value(
+                    &self.config_form.observability_fields,
+                    "API Logging Enabled",
+                ),
                 false,
             )?
             || !field_value(&self.config_form.observability_fields, "API Logging Path")
@@ -1693,7 +1801,10 @@ impl App {
             )?;
         if observability_has_input {
             let api_logging_enabled = parse_bool_field(
-                field_value(&self.config_form.observability_fields, "API Logging Enabled"),
+                field_value(
+                    &self.config_form.observability_fields,
+                    "API Logging Enabled",
+                ),
                 false,
             )?;
             let mut observability = config
@@ -1762,6 +1873,7 @@ impl App {
             access_token_ref: None,
             refresh_token: None,
             refresh_token_ref: None,
+            expected_workspace_id: None,
         });
 
         one.account_email = self.credentials.fields[0].value.clone();
@@ -1937,8 +2049,29 @@ impl App {
     }
 
     pub fn refresh_connectivity(&mut self) {
-        let mut panels = Vec::new();
+        // If a worker is available, dispatch off-thread. Otherwise fall back
+        // to the blocking path so headless tests / unusual environments
+        // still work.
+        let Some(worker) = self.worker.as_ref() else {
+            self.refresh_connectivity_blocking();
+            return;
+        };
+        let id = super::worker::BackgroundWorker::new_request_id();
+        self.latest_connectivity_request = Some(id);
+        self.status_message = "Connectivity checks in progress…".to_string();
+        if let Err(err) = worker.submit(super::worker::BackgroundTask::Connectivity {
+            id,
+            target_path: self.target_path.clone(),
+            target_environment: self.target_environment.clone(),
+            config: self.current_config.clone(),
+        }) {
+            self.push_toast(err.to_string(), true);
+            self.refresh_connectivity_blocking();
+        }
+    }
 
+    fn refresh_connectivity_blocking(&mut self) {
+        let mut panels = Vec::new();
         panels.push(render_envelope_panel(
             "Doctor Config",
             crate::doctor_config_envelope(&self.target_path, false).map(|env| env.data),
@@ -1956,7 +2089,6 @@ impl App {
             "One Auth Diagnose",
             crate::one_platform_auth_diagnose_envelope(&self.current_config).map(|env| env.data),
         ));
-
         self.connectivity.panels = panels;
         self.connectivity.last_run = Some(format!("{:?}", std::time::SystemTime::now()));
         self.status_message = "Connectivity checks refreshed".to_string();
@@ -1964,8 +2096,24 @@ impl App {
 
     pub fn refresh_one_browser(&mut self) {
         let resource = OneBrowserResource::all()[self.one_browser.cursor];
-        let result = self.request_for_one_browser(resource, None);
-        self.set_one_browser_panel(resource, result);
+        let Some(worker) = self.worker.as_ref() else {
+            let result = self.request_for_one_browser(resource, None);
+            self.set_one_browser_panel(resource, result);
+            return;
+        };
+        let id = super::worker::BackgroundWorker::new_request_id();
+        self.latest_one_browser_request = Some(id);
+        self.status_message = format!("Loading {}…", resource.label());
+        if let Err(err) = worker.submit(super::worker::BackgroundTask::OneBrowser {
+            id,
+            config: self.current_config.clone(),
+            resource,
+            resource_id: None,
+        }) {
+            self.push_toast(err.to_string(), true);
+            let result = self.request_for_one_browser(resource, None);
+            self.set_one_browser_panel(resource, result);
+        }
     }
 
     fn refresh_one_browser_detail(
@@ -1981,99 +2129,7 @@ impl App {
         resource: OneBrowserResource,
         id: Option<&str>,
     ) -> Result<Value> {
-        let envelope = match resource {
-            OneBrowserResource::AuthStatus => {
-                crate::one_platform_auth_status_envelope(&self.current_config)?
-            }
-            OneBrowserResource::AuthDiagnose => {
-                crate::one_platform_auth_diagnose_envelope(&self.current_config)?
-            }
-            OneBrowserResource::SurfaceInventory => {
-                crate::one_surface_inventory_envelope(&self.current_config)?
-            }
-            OneBrowserResource::WorkspaceCurrent => crate::one_api_live_request(
-                &self.current_config,
-                "platform",
-                "tui-workspace-current",
-                "GET",
-                "/v4/workspaces/current",
-                false,
-                &[],
-            )?,
-            OneBrowserResource::WorkspaceCurrentConfiguration => crate::one_api_live_request(
-                &self.current_config,
-                "platform",
-                "tui-workspace-current-configuration",
-                "GET",
-                "/v4/workspaces/current/configuration",
-                false,
-                &[],
-            )?,
-            OneBrowserResource::WorkspaceCurrentConfigurationSchema => crate::one_api_live_request(
-                &self.current_config,
-                "platform",
-                "tui-workspace-current-configuration-schema",
-                "GET",
-                "/v4/workspaces/current/configuration-schema",
-                false,
-                &[],
-            )?,
-            OneBrowserResource::WorkspaceList => crate::one_api_live_request(
-                &self.current_config,
-                "platform",
-                "tui-workspace-list",
-                "GET",
-                "/v4/workspaces",
-                false,
-                &[],
-            )?,
-            OneBrowserResource::WorkspaceDetail => crate::one_api_live_request(
-                &self.current_config,
-                "platform",
-                "tui-workspace-detail",
-                "GET",
-                "/v4/workspaces/{id}",
-                false,
-                &[("id", id.ok_or_else(|| anyhow!("workspace id required"))?)],
-            )?,
-            OneBrowserResource::FlowList => crate::one_api_live_request(
-                &self.current_config,
-                "flow",
-                "tui-flow-list",
-                "GET",
-                "/v4/flows",
-                false,
-                &[],
-            )?,
-            OneBrowserResource::FlowDetail => crate::one_api_live_request(
-                &self.current_config,
-                "flow",
-                "tui-flow-detail",
-                "GET",
-                "/v4/flows/{id}",
-                false,
-                &[("id", id.ok_or_else(|| anyhow!("flow id required"))?)],
-            )?,
-            OneBrowserResource::ConnectionList => crate::one_api_live_request(
-                &self.current_config,
-                "connection",
-                "tui-connection-list",
-                "GET",
-                "/v4/connections",
-                false,
-                &[],
-            )?,
-            OneBrowserResource::ConnectionDetail => crate::one_api_live_request(
-                &self.current_config,
-                "connection",
-                "tui-connection-detail",
-                "GET",
-                "/v4/connections/{id}",
-                false,
-                &[("id", id.ok_or_else(|| anyhow!("connection id required"))?)],
-            )?,
-        };
-        Ok(envelope.data)
+        super::one_browser::request_for_one_browser_blocking(&self.current_config, resource, id)
     }
 
     fn set_one_browser_panel(&mut self, resource: OneBrowserResource, result: Result<Value>) {
@@ -2109,565 +2165,6 @@ impl App {
     }
 }
 
-fn api_profile_to_server_api_ref(api: &ApiProfile) -> Option<ServerApiProfile> {
-    let client_id = api.auth.client_id.as_ref()?.clone();
-    let client_secret = api.auth.client_secret.as_ref()?.clone();
-    Some(ServerApiProfile {
-        base_url: api.base_url.clone(),
-        client_id,
-        client_secret,
-    })
-}
-
-fn server_profile_to_server_api_ref(server: &ServerProfile) -> Option<ServerApiProfile> {
-    Some(ServerApiProfile {
-        base_url: server.webapi_url.clone(),
-        client_id: server.curator_api_key.clone(),
-        client_secret: server.curator_api_secret.clone(),
-    })
-}
-
-fn mongo_values(
-    mongo: &MongoProfile,
-) -> (
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-    String,
-) {
-    let embedded = mongo.embedded.as_ref();
-    let managed = mongo.managed.as_ref();
-    (
-        embedded
-            .and_then(|value| value.runtime_settings_path.clone())
-            .unwrap_or_default(),
-        embedded
-            .and_then(|value| value.alteryx_service_path.clone())
-            .unwrap_or_default(),
-        embedded
-            .and_then(|value| value.restore_target_path.clone())
-            .unwrap_or_default(),
-        managed
-            .and_then(|value| value.url.clone())
-            .unwrap_or_default(),
-        managed
-            .and_then(|value| value.host.clone())
-            .unwrap_or_default(),
-        managed
-            .map(|value| value.port.to_string())
-            .unwrap_or_default(),
-        managed
-            .and_then(|value| value.auth_database.clone())
-            .unwrap_or_default(),
-        managed
-            .and_then(|value| value.username.clone())
-            .unwrap_or_default(),
-        managed
-            .and_then(|value| value.password.clone())
-            .unwrap_or_default(),
-        managed
-            .map(|value| value.tls.enabled.to_string())
-            .unwrap_or_else(|| "false".to_string()),
-        managed
-            .and_then(|value| value.tls.ca_path.clone())
-            .unwrap_or_default(),
-        managed
-            .and_then(|value| value.tls.cert_path.clone())
-            .unwrap_or_default(),
-        managed
-            .and_then(|value| value.tls.key_path.clone())
-            .unwrap_or_default(),
-        managed
-            .and_then(|value| value.tls.allow_invalid_hostnames)
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "false".to_string()),
-        managed
-            .and_then(|value| value.timeout_ms)
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        managed
-            .and_then(|value| value.retry_count)
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        managed
-        .and_then(|value| value.max_pool_size)
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-    )
-}
-
-fn sqlserver_fields(config: &Config) -> Vec<ConfigFieldState> {
-    let sql = config.sqlserver.as_ref();
-    let controller = sql.and_then(|value| value.controller.as_ref());
-    let server_ui = sql.and_then(|value| value.server_ui.as_ref());
-
-    vec![
-        ConfigFieldState {
-            label: "Controller Host",
-            value: controller
-                .and_then(|value| value.host.clone())
-                .unwrap_or_default(),
-            placeholder: "localhost",
-            kind: ConfigFieldKind::Text,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Controller Port",
-            value: controller
-                .and_then(|value| value.port.map(|port| port.to_string()))
-                .unwrap_or_default(),
-            placeholder: "1433",
-            kind: ConfigFieldKind::Text,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Controller Database",
-            value: controller
-                .and_then(|value| value.database.clone())
-                .unwrap_or_default(),
-            placeholder: "AlteryxService",
-            kind: ConfigFieldKind::Text,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Controller Username",
-            value: controller
-                .and_then(|value| value.username.clone())
-                .unwrap_or_default(),
-            placeholder: "sa",
-            kind: ConfigFieldKind::Text,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Controller Password",
-            value: controller
-                .and_then(|value| value.password.clone())
-                .unwrap_or_default(),
-            placeholder: "stored in keyring on save",
-            kind: ConfigFieldKind::Text,
-            secret: true,
-        },
-        ConfigFieldState {
-            label: "Controller Integrated",
-            value: controller
-                .and_then(|value| value.integrated_security)
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "false".to_string()),
-            placeholder: "true|false",
-            kind: ConfigFieldKind::Bool,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Controller Encrypt",
-            value: controller
-                .and_then(|value| value.encrypt)
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "false".to_string()),
-            placeholder: "true|false",
-            kind: ConfigFieldKind::Bool,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Controller Trust Cert",
-            value: controller
-                .and_then(|value| value.trust_server_certificate)
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "false".to_string()),
-            placeholder: "true|false",
-            kind: ConfigFieldKind::Bool,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Controller MultiSubnet",
-            value: controller
-                .and_then(|value| value.multi_subnet_failover)
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "false".to_string()),
-            placeholder: "true|false",
-            kind: ConfigFieldKind::Bool,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Controller Conn Str",
-            value: controller
-                .and_then(|value| value.connection_string.clone())
-                .unwrap_or_default(),
-            placeholder: "connection string",
-            kind: ConfigFieldKind::Text,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Server UI Host",
-            value: server_ui
-                .and_then(|value| value.host.clone())
-                .unwrap_or_default(),
-            placeholder: "localhost",
-            kind: ConfigFieldKind::Text,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Server UI Port",
-            value: server_ui
-                .and_then(|value| value.port.map(|port| port.to_string()))
-                .unwrap_or_default(),
-            placeholder: "1433",
-            kind: ConfigFieldKind::Text,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Server UI Database",
-            value: server_ui
-                .and_then(|value| value.database.clone())
-                .unwrap_or_default(),
-            placeholder: "AlteryxServerUI",
-            kind: ConfigFieldKind::Text,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Server UI Username",
-            value: server_ui
-                .and_then(|value| value.username.clone())
-                .unwrap_or_default(),
-            placeholder: "sa",
-            kind: ConfigFieldKind::Text,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Server UI Password",
-            value: server_ui
-                .and_then(|value| value.password.clone())
-                .unwrap_or_default(),
-            placeholder: "stored in keyring on save",
-            kind: ConfigFieldKind::Text,
-            secret: true,
-        },
-        ConfigFieldState {
-            label: "Server UI Integrated",
-            value: server_ui
-                .and_then(|value| value.integrated_security)
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "false".to_string()),
-            placeholder: "true|false",
-            kind: ConfigFieldKind::Bool,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Server UI Encrypt",
-            value: server_ui
-                .and_then(|value| value.encrypt)
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "false".to_string()),
-            placeholder: "true|false",
-            kind: ConfigFieldKind::Bool,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Server UI Trust Cert",
-            value: server_ui
-                .and_then(|value| value.trust_server_certificate)
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "false".to_string()),
-            placeholder: "true|false",
-            kind: ConfigFieldKind::Bool,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Server UI MultiSubnet",
-            value: server_ui
-                .and_then(|value| value.multi_subnet_failover)
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "false".to_string()),
-            placeholder: "true|false",
-            kind: ConfigFieldKind::Bool,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Server UI Conn Str",
-            value: server_ui
-                .and_then(|value| value.connection_string.clone())
-                .unwrap_or_default(),
-            placeholder: "connection string",
-            kind: ConfigFieldKind::Text,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Legacy Conn Str",
-            value: sql
-                .and_then(|value| value.legacy_connection_string.clone())
-                .unwrap_or_default(),
-            placeholder: "legacy connection string",
-            kind: ConfigFieldKind::Text,
-            secret: false,
-        },
-    ]
-}
-
-fn observability_fields(config: &Config) -> Vec<ConfigFieldState> {
-    let api_logging = config
-        .observability
-        .as_ref()
-        .and_then(|value| value.api_logging.as_ref());
-    vec![
-        ConfigFieldState {
-            label: "API Logging Enabled",
-            value: api_logging
-                .map(|value| value.enabled.to_string())
-                .unwrap_or_else(|| "false".to_string()),
-            placeholder: "true|false",
-            kind: ConfigFieldKind::Bool,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "API Logging Path",
-            value: api_logging
-                .and_then(|value| value.path.clone())
-                .unwrap_or_default(),
-            placeholder: "/path/to/logs",
-            kind: ConfigFieldKind::Text,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Redact Bodies",
-            value: api_logging
-                .and_then(|value| value.redact_bodies)
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "false".to_string()),
-            placeholder: "true|false",
-            kind: ConfigFieldKind::Bool,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Log Requests",
-            value: api_logging
-                .and_then(|value| value.log_requests)
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "false".to_string()),
-            placeholder: "true|false",
-            kind: ConfigFieldKind::Bool,
-            secret: false,
-        },
-        ConfigFieldState {
-            label: "Log Responses",
-            value: api_logging
-                .and_then(|value| value.log_responses)
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "false".to_string()),
-            placeholder: "true|false",
-            kind: ConfigFieldKind::Bool,
-            secret: false,
-        },
-    ]
-}
-
-fn normalize_server_url(url: &str) -> String {
-    let trimmed = url.trim();
-    if trimmed.ends_with('/') {
-        trimmed.to_string()
-    } else {
-        format!("{trimmed}/")
-    }
-}
-
-fn field_value<'a>(fields: &'a [ConfigFieldState], label: &str) -> &'a str {
-    fields
-        .iter()
-        .find(|field| field.label == label)
-        .map(|field| field.value.as_str())
-        .unwrap_or("")
-}
-
-fn parse_u16_field(fields: &[ConfigFieldState], label: &str, default: u16) -> Result<u16> {
-    let value = field_value(fields, label).trim();
-    if value.is_empty() {
-        return Ok(default);
-    }
-    value
-        .parse::<u16>()
-        .map_err(|_| anyhow!("expected a whole number for {label}"))
-}
-
-fn parse_u32_field(fields: &[ConfigFieldState], label: &str) -> Result<Option<u32>> {
-    let value = field_value(fields, label).trim();
-    if value.is_empty() {
-        return Ok(None);
-    }
-    value
-        .parse::<u32>()
-        .map(Some)
-        .map_err(|_| anyhow!("expected a whole number for {label}"))
-}
-
-fn parse_u64_field(fields: &[ConfigFieldState], label: &str) -> Result<Option<u64>> {
-    let value = field_value(fields, label).trim();
-    if value.is_empty() {
-        return Ok(None);
-    }
-    value
-        .parse::<u64>()
-        .map(Some)
-        .map_err(|_| anyhow!("expected a whole number for {label}"))
-}
-
-fn parse_optional_text_field(fields: &[ConfigFieldState], label: &str) -> Option<String> {
-    let value = field_value(fields, label).trim();
-    if value.is_empty() {
-        None
-    } else {
-        Some(value.to_string())
-    }
-}
-
-fn parse_bool_field(value: &str, default: bool) -> Result<bool> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Ok(default);
-    }
-    match trimmed.to_ascii_lowercase().as_str() {
-        "true" | "yes" | "y" | "1" | "on" => Ok(true),
-        "false" | "no" | "n" | "0" | "off" => Ok(false),
-        _ => Err(anyhow!("expected true/false value")),
-    }
-}
-
-fn default_mongo_embedded() -> MongoEmbedded {
-    MongoEmbedded {
-        runtime_settings_path: Some(DEFAULT_RUNTIME_SETTINGS_PATH.to_string()),
-        alteryx_service_path: None,
-        restore_target_path: None,
-    }
-}
-
-fn default_mongo_managed() -> MongoManaged {
-    MongoManaged {
-        url: None,
-        host: None,
-        port: 27017,
-        auth_database: None,
-        username: None,
-        password: None,
-        password_ref: None,
-        tls: TlsConfig {
-            enabled: false,
-            ca_path: None,
-            cert_path: None,
-            key_path: None,
-            allow_invalid_hostnames: None,
-        },
-        timeout_ms: None,
-        retry_count: None,
-        max_pool_size: None,
-    }
-}
-
-fn default_sqlserver_profile() -> SqlServerProfile {
-    SqlServerProfile {
-        controller: Some(SqlServerConnectionProfile {
-            connection_string: None,
-            host: Some("localhost".to_string()),
-            port: Some(1433),
-            database: Some("AlteryxService".to_string()),
-            username: Some("sa".to_string()),
-            password: None,
-            password_ref: None,
-            password_env: Some("AYX_SQL_CONTROLLER_PASSWORD".to_string()),
-            integrated_security: Some(true),
-            encrypt: Some(true),
-            trust_server_certificate: Some(false),
-            multi_subnet_failover: Some(false),
-        }),
-        server_ui: Some(SqlServerConnectionProfile {
-            connection_string: None,
-            host: Some("localhost".to_string()),
-            port: Some(1433),
-            database: Some("AlteryxServerUI".to_string()),
-            username: Some("sa".to_string()),
-            password: None,
-            password_ref: None,
-            password_env: Some("AYX_SQL_SERVER_UI_PASSWORD".to_string()),
-            integrated_security: Some(false),
-            encrypt: Some(true),
-            trust_server_certificate: Some(false),
-            multi_subnet_failover: Some(false),
-        }),
-        legacy_connection_string: None,
-    }
-}
-
-fn update_sql_connection(
-    existing: Option<SqlServerConnectionProfile>,
-    label: &str,
-    password_env: &str,
-    fields: &[ConfigFieldState],
-) -> Result<SqlServerConnectionProfile> {
-    let mut conn = existing.unwrap_or_else(|| SqlServerConnectionProfile {
-        connection_string: None,
-        host: None,
-        port: None,
-        database: None,
-        username: None,
-        password: None,
-        password_ref: None,
-        password_env: Some(password_env.to_string()),
-        integrated_security: Some(false),
-        encrypt: Some(true),
-        trust_server_certificate: Some(false),
-        multi_subnet_failover: Some(false),
-    });
-    conn.host = parse_optional_text_field(fields, &format!("{label} Host"));
-    conn.port = Some(parse_u16_field(
-        fields,
-        &format!("{label} Port"),
-        conn.port.unwrap_or(1433),
-    )?);
-    conn.database = parse_optional_text_field(fields, &format!("{label} Database"));
-    conn.username = parse_optional_text_field(fields, &format!("{label} Username"));
-    conn.password = parse_optional_text_field(fields, &format!("{label} Password"));
-    conn.integrated_security = Some(parse_bool_field(
-        field_value(fields, &format!("{label} Integrated")),
-        conn.integrated_security.unwrap_or(false),
-    )?);
-    conn.encrypt = Some(parse_bool_field(
-        field_value(fields, &format!("{label} Encrypt")),
-        conn.encrypt.unwrap_or(true),
-    )?);
-    conn.trust_server_certificate = Some(parse_bool_field(
-        field_value(fields, &format!("{label} Trust Cert")),
-        conn.trust_server_certificate.unwrap_or(false),
-    )?);
-    conn.multi_subnet_failover = Some(parse_bool_field(
-        field_value(fields, &format!("{label} MultiSubnet")),
-        conn.multi_subnet_failover.unwrap_or(false),
-    )?);
-    conn.connection_string = parse_optional_text_field(fields, &format!("{label} Conn Str"));
-    if conn.password_env.is_none() {
-        conn.password_env = Some(password_env.to_string());
-    }
-    Ok(conn)
-}
-
-fn default_server_profile() -> ServerProfile {
-    ServerProfile {
-        webapi_url: "http://localhost/".to_string(),
-        curator_api_key: String::new(),
-        curator_api_secret: String::new(),
-        curator_api_secret_ref: None,
-        verify_tls: Some(true),
-    }
-}
-
 fn move_list_state(state: &mut ListState, len: usize, delta: isize) {
     if len == 0 {
         state.select(None);
@@ -2685,164 +2182,6 @@ fn option_string(value: &str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
-}
-
-fn render_envelope_panel(title: &str, value: Result<Value>) -> PanelState {
-    match value {
-        Ok(value) => PanelState {
-            title: title.to_string(),
-            lines: pretty_yaml_lines(&value),
-            is_error: false,
-            raw: Some(value),
-        },
-        Err(err) => PanelState {
-            title: title.to_string(),
-            lines: vec![err.to_string()],
-            is_error: true,
-            raw: None,
-        },
-    }
-}
-
-fn pretty_yaml_lines(value: &Value) -> Vec<String> {
-    serde_yaml::to_string(value)
-        .unwrap_or_else(|_| value.to_string())
-        .lines()
-        .map(|line| line.to_string())
-        .collect()
-}
-
-fn extract_one_browser_items(resource: OneBrowserResource, value: &Value) -> Vec<OneBrowserItem> {
-    let array = preferred_item_array(resource, value)
-        .or_else(|| find_first_object_array(value))
-        .or_else(|| value.as_array().map(|v| v.as_slice()));
-
-    let Some(array) = array else {
-        return Vec::new();
-    };
-
-    array
-        .iter()
-        .map(|item| {
-            let id = item.as_object().and_then(|object| {
-                string_field(
-                    object,
-                    &[
-                        "id",
-                        "workspace_id",
-                        "workspaceId",
-                        "flow_id",
-                        "flowId",
-                        "connection_id",
-                        "connectionId",
-                        "person_id",
-                        "personId",
-                        "subjectId",
-                        "roleId",
-                        "planId",
-                    ],
-                )
-            });
-            let id = id.map(str::to_owned);
-            let label = item
-                .as_object()
-                .and_then(|object| {
-                    string_field(
-                        object,
-                        &[
-                            "name",
-                            "title",
-                            "label",
-                            "display_name",
-                            "displayName",
-                            "workspace_name",
-                            "workspaceName",
-                            "flow_name",
-                            "flowName",
-                            "connection_name",
-                            "connectionName",
-                            "email",
-                            "status",
-                        ],
-                    )
-                })
-                .map(str::to_owned)
-                .unwrap_or_else(|| id.clone().unwrap_or_else(|| item.to_string()));
-            let summary = item
-                .as_object()
-                .and_then(|object| {
-                    string_field(
-                        object,
-                        &[
-                            "description",
-                            "status",
-                            "type",
-                            "path",
-                            "command",
-                            "method",
-                            "role",
-                        ],
-                    )
-                })
-                .map(str::to_owned)
-                .unwrap_or_default();
-            OneBrowserItem { id, label, summary }
-        })
-        .collect()
-}
-
-fn preferred_item_array<'a>(resource: OneBrowserResource, value: &'a Value) -> Option<&'a [Value]> {
-    let object = value.as_object()?;
-    let keys = match resource {
-        OneBrowserResource::SurfaceInventory => [
-            "surfaces",
-            "partial_surfaces",
-            "documented_only_surfaces",
-            "deferred_surfaces",
-        ]
-        .as_slice(),
-        OneBrowserResource::WorkspaceCurrentConfiguration
-        | OneBrowserResource::WorkspaceCurrentConfigurationSchema => &["environments"],
-        OneBrowserResource::WorkspaceList
-        | OneBrowserResource::WorkspaceDetail
-        | OneBrowserResource::ConnectionList
-        | OneBrowserResource::ConnectionDetail
-        | OneBrowserResource::FlowList
-        | OneBrowserResource::FlowDetail => &["items", "data", "results", "rows"],
-        _ => &["items", "data", "results", "rows", "surfaces", "endpoints"],
-    };
-
-    for key in keys {
-        if let Some(array) = object.get(*key).and_then(|value| value.as_array()) {
-            return Some(array.as_slice());
-        }
-    }
-    None
-}
-
-fn find_first_object_array(value: &Value) -> Option<&[Value]> {
-    let object = value.as_object()?;
-    for key in [
-        "items",
-        "data",
-        "results",
-        "rows",
-        "surfaces",
-        "endpoints",
-        "workspaces",
-        "flows",
-        "connections",
-        "people",
-    ] {
-        if let Some(array) = object.get(key).and_then(|value| value.as_array()) {
-            return Some(array.as_slice());
-        }
-    }
-    None
-}
-
-fn string_field<'a>(object: &'a serde_json::Map<String, Value>, keys: &[&str]) -> Option<&'a str> {
-    keys.iter().find_map(|key| object.get(*key)?.as_str())
 }
 
 impl OneBrowserResource {
