@@ -33,11 +33,7 @@ use ayx_server::mongo::{
     backup_envelope, doctor_envelope as mongo_doctor_envelope, inventory_envelope,
     query_envelope as mongo_query_envelope, restore_envelope, status_envelope,
 };
-use ayx_server::sqlserver::{
-    connection_string_envelope, inventory_envelope as sqlserver_inventory_envelope,
-    migration_prepare_envelope, precheck_envelope as sqlserver_precheck_envelope,
-    status_envelope as sqlserver_status_envelope, validate_connection_strings_envelope,
-};
+// sqlserver helpers moved to cmd/sqlserver.rs in the cmd/ split.
 use ayx_server::upgrade::{
     compute_path, run_apply, run_backup, run_bundle, run_plan, run_postcheck, run_precheck,
 };
@@ -521,7 +517,7 @@ enum ServerCommand {
 }
 
 #[derive(Subcommand, Debug)]
-enum SqlserverCommand {
+pub(crate) enum SqlserverCommand {
     Status {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
@@ -842,7 +838,7 @@ enum UiJobsCommand {
 }
 
 #[derive(Subcommand, Debug)]
-enum ToolsCommand {
+pub(crate) enum ToolsCommand {
     Workspace {
         #[command(subcommand)]
         command: Option<ToolsWorkspaceCommand>,
@@ -850,7 +846,7 @@ enum ToolsCommand {
 }
 
 #[derive(Subcommand, Debug)]
-enum ToolsWorkspaceCommand {
+pub(crate) enum ToolsWorkspaceCommand {
     Init {
         #[arg(long, default_value = "environments.yaml")]
         output: PathBuf,
@@ -3989,7 +3985,7 @@ fn load_payload(path: &Path) -> Result<Value> {
     Ok(value)
 }
 
-fn tools_workspace_init_envelope(
+pub(crate) fn tools_workspace_init_envelope(
     output: &Path,
     active_environment: &str,
     source_environment: &str,
@@ -4015,7 +4011,7 @@ fn tools_workspace_init_envelope(
     ))
 }
 
-fn tools_workspace_resolve_envelope(
+pub(crate) fn tools_workspace_resolve_envelope(
     workspace: &Path,
     source: &str,
     target: &str,
@@ -4038,7 +4034,7 @@ fn tools_workspace_resolve_envelope(
     ))
 }
 
-fn tools_workspace_compare_envelope(
+pub(crate) fn tools_workspace_compare_envelope(
     workspace: &Path,
     source: &str,
     target: &str,
@@ -4059,7 +4055,7 @@ fn tools_workspace_compare_envelope(
     ))
 }
 
-fn tools_workspace_migrate_envelope(
+pub(crate) fn tools_workspace_migrate_envelope(
     workspace: &Path,
     source: &str,
     target: &str,
@@ -4999,88 +4995,9 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 )
             }
         },
-        Command::Sqlserver { command } => match command {
-            None => Envelope::ok(
-                "sqlserver commands available: status, inventory, precheck, connection-string, migrate",
-            ),
-            Some(SqlserverCommand::Status { profile }) => {
-                let config = load_profile(&profile)?;
-                Envelope::ok_with_data(
-                    "sqlserver status summarized",
-                    sqlserver_status_envelope(&config)?,
-                )
-            }
-            Some(SqlserverCommand::Inventory { profile }) => {
-                let config = load_profile(&profile)?;
-                Envelope::ok_with_data(
-                    "sqlserver inventory summarized",
-                    sqlserver_inventory_envelope(&config)?,
-                )
-            }
-            Some(SqlserverCommand::Precheck { profile, collation }) => {
-                let config = load_profile(&profile)?;
-                Envelope::ok_with_data(
-                    "sqlserver precheck summarized",
-                    sqlserver_precheck_envelope(&config, collation.as_deref())?,
-                )
-            }
-            Some(SqlserverCommand::ValidateStrings { profile }) => {
-                let config = load_profile(&profile)?;
-                Envelope::ok_with_data(
-                    "sqlserver connection strings validated",
-                    validate_connection_strings_envelope(&config)?,
-                )
-            }
-            Some(SqlserverCommand::ConnectionString {
-                profile,
-                scope,
-                auth,
-                server,
-                database,
-                port,
-                encrypt,
-                trust_server_certificate,
-                multi_subnet_failover,
-            }) => {
-                let config = load_profile(&profile)?;
-                Envelope::ok_with_data(
-                    "sqlserver connection string generated",
-                    connection_string_envelope(
-                        &config,
-                        &scope,
-                        &auth,
-                        server.as_deref(),
-                        database.as_deref(),
-                        port,
-                        encrypt,
-                        trust_server_certificate,
-                        multi_subnet_failover,
-                    )?,
-                )
-            }
-            Some(SqlserverCommand::Migrate {
-                profile,
-                target_version,
-                dry_run,
-            }) => {
-                let config = load_profile(&profile)?;
-                Envelope::ok_with_data(
-                    "sqlserver migration plan generated",
-                    migration_prepare_envelope(&config, target_version.as_deref(), dry_run)?,
-                )
-            }
-            Some(SqlserverCommand::Prepare {
-                profile,
-                target_version,
-                dry_run,
-            }) => {
-                let config = load_profile(&profile)?;
-                Envelope::ok_with_data(
-                    "sqlserver migration preparation generated",
-                    migration_prepare_envelope(&config, target_version.as_deref(), dry_run)?,
-                )
-            }
-        },
+        Command::Sqlserver { command } => {
+            cmd::sqlserver::execute(cli.environment.as_deref(), command)?
+        }
         Command::Workflow { command } => match command {
             None => Envelope::ok(
                 "workflow commands available: inspect, unpack, validate, replace, repackage, recurse, scan, convert-cloud, publish, migrate, yxdb",
@@ -5331,43 +5248,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 )
             }
         },
-        Command::Tools { command } => match command {
-            None => Envelope::ok("tools workspace commands available: init, resolve, compare, migrate-workflows, check-dcm-connections"),
-            Some(ToolsCommand::Workspace { command }) => match command {
-                None => Envelope::ok("tools workspace commands available: init, resolve, compare, migrate-workflows, check-dcm-connections"),
-                Some(ToolsWorkspaceCommand::Init {
-                    output,
-                    active_environment,
-                    source_environment,
-                    target_environment,
-                }) => tools_workspace_init_envelope(
-                    &output,
-                    &active_environment,
-                    &source_environment,
-                    &target_environment,
-                )?,
-                Some(ToolsWorkspaceCommand::Resolve {
-                    workspace,
-                    source,
-                    target,
-                }) => tools_workspace_resolve_envelope(&workspace, &source, &target)?,
-                Some(ToolsWorkspaceCommand::Compare {
-                    workspace,
-                    source,
-                    target,
-                }) => tools_workspace_compare_envelope(&workspace, &source, &target)?,
-                Some(ToolsWorkspaceCommand::MigrateWorkflows {
-                    workspace,
-                    source,
-                    target,
-                }) => tools_workspace_migrate_envelope(&workspace, &source, &target, "workflows")?,
-                Some(ToolsWorkspaceCommand::CheckDcmConnections {
-                    workspace,
-                    source,
-                    target,
-                }) => tools_workspace_migrate_envelope(&workspace, &source, &target, "dcm-connections")?,
-            },
-        },
+        Command::Tools { command } => cmd::tools::execute(command)?,
         Command::Onboard {
             profile,
             environments,

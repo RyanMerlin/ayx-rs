@@ -5,7 +5,8 @@
     clippy::derivable_impls,
     clippy::vec_init_then_push,
     clippy::type_complexity,
-    clippy::needless_lifetimes
+    clippy::needless_lifetimes,
+    clippy::collapsible_match
 )]
 
 use std::collections::BTreeMap;

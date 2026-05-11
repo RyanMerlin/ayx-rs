@@ -12,3 +12,5 @@
 
 pub mod confirm;
 pub mod registry;
+pub mod sqlserver;
+pub mod tools;
