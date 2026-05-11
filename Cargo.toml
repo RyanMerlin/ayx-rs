@@ -22,7 +22,7 @@ authors = ["AYX Team", "Ryan Merlin"]
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls-tls", "multipart"] }
 roxmltree = "0.21"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
