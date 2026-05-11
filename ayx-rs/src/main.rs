@@ -206,6 +206,13 @@ enum Command {
         #[command(subcommand)]
         command: WorkflowsCommand,
     },
+    #[command(
+        about = "Operational telemetry: running jobs, run history, top workflows/plans, errors, weekly run-counts"
+    )]
+    Telemetry {
+        #[command(subcommand)]
+        command: cmd::telemetry::TelemetryCommand,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -4355,6 +4362,9 @@ fn execute(cli: Cli) -> Result<Envelope> {
         },
         Command::Tactics { command } => cmd::registry::execute_tactics(cli.apply, command)?,
         Command::Workflows { command } => cmd::registry::execute_workflows(cli.apply, command)?,
+        Command::Telemetry { command } => {
+            cmd::telemetry::execute(cli.environment.as_deref(), command)?
+        }
     };
     Ok(envelope)
 }

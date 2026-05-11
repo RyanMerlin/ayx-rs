@@ -16,5 +16,6 @@ pub mod one;
 pub mod registry;
 pub mod server;
 pub mod sqlserver;
+pub mod telemetry;
 pub mod tools;
 pub mod workflow;

@@ -251,6 +251,176 @@ impl FromItems for PersonListPage {
     }
 }
 
+// ─── Job groups ────────────────────────────────────────────────────────────
+
+/// One row from `/v4/jobLibrary` or `/v4/jobGroups`. The two list endpoints
+/// return overlapping but not identical shapes; this struct unions both via
+/// optional fields. Telemetry aggregates over `status`, `started_at`,
+/// `finished_at`, and `flow_id` — anything else is parked in `extra`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct JobGroupSummary {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default, alias = "flowId", alias = "flow_id")]
+    pub flow_id: Option<String>,
+    #[serde(default, alias = "flowName", alias = "flow_name")]
+    pub flow_name: Option<String>,
+    #[serde(default, alias = "planId", alias = "plan_id")]
+    pub plan_id: Option<String>,
+    /// Queued / Running / Succeeded / Failed / Cancelled (per One UI strings).
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default, alias = "createdAt", alias = "created_at")]
+    pub created_at: Option<String>,
+    #[serde(default, alias = "startedAt", alias = "started_at")]
+    pub started_at: Option<String>,
+    #[serde(default, alias = "finishedAt", alias = "finished_at")]
+    pub finished_at: Option<String>,
+    /// Some surfaces return a duration in milliseconds directly.
+    #[serde(default, alias = "durationMs", alias = "duration_ms")]
+    pub duration_ms: Option<u64>,
+    #[serde(default, alias = "ownerId", alias = "owner_id")]
+    pub owner_id: Option<String>,
+    #[serde(default, alias = "ownerEmail", alias = "owner_email")]
+    pub owner_email: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct JobGroupListPage {
+    #[serde(default)]
+    pub items: Vec<JobGroupSummary>,
+    #[serde(default, alias = "nextPageToken", alias = "next_page_token")]
+    pub next_page_token: Option<String>,
+    #[serde(default)]
+    pub total: Option<u64>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
+}
+
+impl JobGroupListPage {
+    pub fn from_value(v: &Value) -> Result<Self, serde_json::Error> {
+        from_value_or_array(v)
+    }
+}
+
+impl FromItems for JobGroupListPage {
+    type Item = JobGroupSummary;
+    fn from_items(items: Vec<JobGroupSummary>) -> Self {
+        Self {
+            items,
+            next_page_token: None,
+            total: None,
+            extra: Default::default(),
+        }
+    }
+}
+
+// ─── Schedules ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ScheduleSummary {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default, alias = "planId", alias = "plan_id")]
+    pub plan_id: Option<String>,
+    #[serde(default, alias = "flowId", alias = "flow_id")]
+    pub flow_id: Option<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub cron: Option<String>,
+    #[serde(default)]
+    pub recurrence: Option<String>,
+    #[serde(default, alias = "nextRunAt", alias = "next_run_at")]
+    pub next_run_at: Option<String>,
+    #[serde(default, alias = "lastRunAt", alias = "last_run_at")]
+    pub last_run_at: Option<String>,
+    #[serde(default, alias = "ownerId", alias = "owner_id")]
+    pub owner_id: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ScheduleListPage {
+    #[serde(default)]
+    pub items: Vec<ScheduleSummary>,
+    #[serde(default, alias = "nextPageToken", alias = "next_page_token")]
+    pub next_page_token: Option<String>,
+    #[serde(default)]
+    pub total: Option<u64>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
+}
+
+impl ScheduleListPage {
+    pub fn from_value(v: &Value) -> Result<Self, serde_json::Error> {
+        from_value_or_array(v)
+    }
+}
+
+impl FromItems for ScheduleListPage {
+    type Item = ScheduleSummary;
+    fn from_items(items: Vec<ScheduleSummary>) -> Self {
+        Self {
+            items,
+            next_page_token: None,
+            total: None,
+            extra: Default::default(),
+        }
+    }
+}
+
+// ─── Roles ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RoleSummary {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default, alias = "workspaceId", alias = "workspace_id")]
+    pub workspace_id: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RoleListPage {
+    #[serde(default)]
+    pub items: Vec<RoleSummary>,
+    #[serde(default, alias = "nextPageToken", alias = "next_page_token")]
+    pub next_page_token: Option<String>,
+    #[serde(default)]
+    pub total: Option<u64>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
+}
+
+impl RoleListPage {
+    pub fn from_value(v: &Value) -> Result<Self, serde_json::Error> {
+        from_value_or_array(v)
+    }
+}
+
+impl FromItems for RoleListPage {
+    type Item = RoleSummary;
+    fn from_items(items: Vec<RoleSummary>) -> Self {
+        Self {
+            items,
+            next_page_token: None,
+            total: None,
+            extra: Default::default(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,5 +513,69 @@ mod tests {
         let p = PersonListPage::from_value(&payload).expect("parses");
         assert_eq!(p.items[0].is_admin, Some(true));
         assert_eq!(p.items[0].is_suspended, Some(false));
+    }
+
+    #[test]
+    fn job_group_list_parses_status_and_aliases() {
+        let payload = json!({
+            "items": [
+                {
+                    "id": "jg1",
+                    "flowId": "f1",
+                    "flowName": "Daily ETL",
+                    "status": "Succeeded",
+                    "startedAt": "2026-05-10T12:00:00Z",
+                    "finishedAt": "2026-05-10T12:05:30Z",
+                    "ownerEmail": "ops@example.com"
+                },
+                {
+                    "id": "jg2",
+                    "flow_id": "f2",
+                    "status": "Failed",
+                    "error": "timeout",
+                    "duration_ms": 90000
+                }
+            ],
+            "nextPageToken": "p2"
+        });
+        let p = JobGroupListPage::from_value(&payload).expect("parses");
+        assert_eq!(p.items.len(), 2);
+        assert_eq!(p.items[0].flow_id.as_deref(), Some("f1"));
+        assert_eq!(p.items[0].status.as_deref(), Some("Succeeded"));
+        assert_eq!(p.items[1].flow_id.as_deref(), Some("f2"));
+        assert_eq!(p.items[1].error.as_deref(), Some("timeout"));
+        assert_eq!(p.items[1].duration_ms, Some(90000));
+        assert_eq!(p.next_page_token.as_deref(), Some("p2"));
+    }
+
+    #[test]
+    fn job_group_list_parses_bare_array() {
+        let payload = json!([{"id": "jg1", "status": "Running"}]);
+        let p = JobGroupListPage::from_value(&payload).expect("parses");
+        assert_eq!(p.items.len(), 1);
+        assert_eq!(p.items[0].status.as_deref(), Some("Running"));
+    }
+
+    #[test]
+    fn schedule_list_parses_cron_and_recurrence() {
+        let payload = json!({
+            "items": [
+                {"id": "s1", "planId": "pl1", "enabled": true, "cron": "0 6 * * *",
+                 "nextRunAt": "2026-05-12T06:00:00Z"}
+            ]
+        });
+        let p = ScheduleListPage::from_value(&payload).expect("parses");
+        assert_eq!(p.items[0].plan_id.as_deref(), Some("pl1"));
+        assert_eq!(p.items[0].cron.as_deref(), Some("0 6 * * *"));
+        assert_eq!(p.items[0].enabled, Some(true));
+    }
+
+    #[test]
+    fn role_list_parses_basic_fields() {
+        let payload = json!({
+            "items": [{"id": "r1", "name": "Editor", "description": "edit flows"}]
+        });
+        let p = RoleListPage::from_value(&payload).expect("parses");
+        assert_eq!(p.items[0].name.as_deref(), Some("Editor"));
     }
 }

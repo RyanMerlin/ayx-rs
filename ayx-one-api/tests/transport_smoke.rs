@@ -257,3 +257,198 @@ fn body_post_dry_run_envelope_includes_would_send() {
     assert_eq!(envelope.data["dry_run"], json!(true));
     assert_eq!(envelope.data["would_send"]["name"], json!("test-flow"));
 }
+
+// ─── Telemetry list-request paths ──────────────────────────────────────────
+//
+// Phase 1 of `ayx telemetry` pages `/v4/jobLibrary` via `one_api_list_request`
+// and normalizes the response into `JobGroupListPage`. These tests cover
+// pagination, max-pages capping, the bare-array response shape some surfaces
+// emit, and typed parsing of the result.
+
+use ayx_one_api::types::JobGroupListPage;
+use ayx_one_api::{one_api_list_request, OneListParams};
+use serde_json::Value;
+
+fn extract_list_items(env_data: &Value) -> &Vec<Value> {
+    env_data
+        .get("items")
+        .and_then(|v| v.as_array())
+        .expect("envelope.data.items is an array")
+}
+
+#[test]
+#[serial]
+fn telemetry_job_library_auto_paginates_until_no_next_token() {
+    let server = MockServer::start();
+    // Register the page-2 matcher (with pageToken=tok2) FIRST so httpmock
+    // routes the second request to it; otherwise the page-1 matcher (which
+    // only requires limit=200) would swallow every iteration.
+    let _p2 = server.mock(|when, then| {
+        when.method(GET)
+            .path("/v4/jobLibrary")
+            .query_param("pageToken", "tok2");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "items": [
+                    {"id": "jg3", "flowId": "f2", "status": "Running"},
+                ],
+            }));
+    });
+    let _p1 = server.mock(|when, then| {
+        when.method(GET)
+            .path("/v4/jobLibrary")
+            .query_param("limit", "200");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "items": [
+                    {"id": "jg1", "flowId": "f1", "status": "Succeeded"},
+                    {"id": "jg2", "flowId": "f1", "status": "Failed"},
+                ],
+                "nextPageToken": "tok2",
+            }));
+    });
+    set_one_apply(false);
+    let config = make_config(&server.base_url(), None);
+    let params = OneListParams::new()
+        .with_limit(Some(200))
+        .with_all(true, Some(10));
+    let env = one_api_list_request(
+        &config,
+        "platform",
+        "job-library-list",
+        "/v4/jobLibrary",
+        &[],
+        &params,
+    )
+    .expect("list request");
+    let items = extract_list_items(&env.data);
+    assert_eq!(items.len(), 3);
+    assert_eq!(env.data["pages_fetched"], json!(2));
+}
+
+#[test]
+#[serial]
+fn telemetry_job_library_respects_max_pages() {
+    let server = MockServer::start();
+    let _p1 = server.mock(|when, then| {
+        when.method(GET).path("/v4/jobLibrary");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "items": [{"id": "jg1", "flowId": "f1", "status": "Running"}],
+                "nextPageToken": "tok2",
+            }));
+    });
+    set_one_apply(false);
+    let config = make_config(&server.base_url(), None);
+    let params = OneListParams::new().with_all(true, Some(1));
+    let env = one_api_list_request(
+        &config,
+        "platform",
+        "job-library-list",
+        "/v4/jobLibrary",
+        &[],
+        &params,
+    )
+    .expect("list request");
+    assert_eq!(env.data["pages_fetched"], json!(1));
+    assert_eq!(env.data["next_page_token"], json!("tok2"));
+}
+
+#[test]
+#[serial]
+fn telemetry_job_library_typed_parse_extracts_status_and_flow_id() {
+    let server = MockServer::start();
+    let _m = server.mock(|when, then| {
+        when.method(GET).path("/v4/jobLibrary");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({
+                "items": [
+                    {"id": "jg1", "flowId": "f1", "flowName": "ETL",
+                     "status": "Succeeded", "startedAt": "2026-05-10T12:00:00Z",
+                     "finishedAt": "2026-05-10T12:05:00Z"},
+                    {"id": "jg2", "flow_id": "f2", "status": "Failed",
+                     "error": "boom", "duration_ms": 1234}
+                ]
+            }));
+    });
+    set_one_apply(false);
+    let config = make_config(&server.base_url(), None);
+    let env = one_api_list_request(
+        &config,
+        "platform",
+        "job-library-list",
+        "/v4/jobLibrary",
+        &[],
+        &OneListParams::new(),
+    )
+    .expect("list request");
+    let items = env.data["items"].clone();
+    let normalized = json!({"items": items});
+    let page = JobGroupListPage::from_value(&normalized).expect("typed parse");
+    assert_eq!(page.items.len(), 2);
+    assert_eq!(page.items[0].flow_id.as_deref(), Some("f1"));
+    assert_eq!(page.items[0].status.as_deref(), Some("Succeeded"));
+    assert_eq!(page.items[1].flow_id.as_deref(), Some("f2"));
+    assert_eq!(page.items[1].error.as_deref(), Some("boom"));
+    assert_eq!(page.items[1].duration_ms, Some(1234));
+}
+
+#[test]
+#[serial]
+fn telemetry_job_library_handles_bare_array_response() {
+    let server = MockServer::start();
+    let _m = server.mock(|when, then| {
+        when.method(GET).path("/v4/jobLibrary");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!([
+                {"id": "jg1", "flowId": "f1", "status": "Running"}
+            ]));
+    });
+    set_one_apply(false);
+    let config = make_config(&server.base_url(), None);
+    let env = one_api_list_request(
+        &config,
+        "platform",
+        "job-library-list",
+        "/v4/jobLibrary",
+        &[],
+        &OneListParams::new(),
+    )
+    .expect("list request");
+    let items = extract_list_items(&env.data);
+    assert_eq!(items.len(), 1);
+    let normalized = json!({"items": items});
+    let page = JobGroupListPage::from_value(&normalized).expect("typed parse");
+    assert_eq!(page.items[0].status.as_deref(), Some("Running"));
+}
+
+#[test]
+#[serial]
+fn telemetry_job_library_empty_response_parses_clean() {
+    let server = MockServer::start();
+    let _m = server.mock(|when, then| {
+        when.method(GET).path("/v4/jobLibrary");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(json!({"items": []}));
+    });
+    set_one_apply(false);
+    let config = make_config(&server.base_url(), None);
+    let env = one_api_list_request(
+        &config,
+        "platform",
+        "job-library-list",
+        "/v4/jobLibrary",
+        &[],
+        &OneListParams::new(),
+    )
+    .expect("list request");
+    assert_eq!(extract_list_items(&env.data).len(), 0);
+    let page = JobGroupListPage::from_value(&json!({"items": []})).expect("typed parse");
+    assert!(page.items.is_empty());
+}
