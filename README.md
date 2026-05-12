@@ -154,6 +154,13 @@ Install scripts:
 - `scripts/install.ps1`
 - `scripts/install.sh`
 
+The installers prefer dedicated bin directories such as `~/.local/bin` so
+they do not get shadowed by tool-managed PATH entries like `mise` installs.
+
+`ayx update` only updates the release binary that is currently on PATH. If you
+are running a source build (`cargo run`) or a tool-managed shim, update that
+copy first or switch PATH to the release install before invoking `ayx update`.
+
 ## Vision
 
 The long-term goal is not just a CLI. It is a secure, portable operator for the Alteryx ecosystem that can also serve as a tool and skill substrate for agents and non-technical operators.

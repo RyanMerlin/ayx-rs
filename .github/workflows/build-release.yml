@@ -33,6 +33,14 @@ jobs:
       - name: Build release
         run: cargo build --release --target x86_64-pc-windows-msvc
         shell: pwsh
+      - name: Verify release binary
+        shell: pwsh
+        run: |
+          $binary = Join-Path "${{ github.workspace }}" "target/x86_64-pc-windows-msvc/release/ayx.exe"
+          if (-not (Test-Path $binary)) {
+            throw "release binary not found at $binary"
+          }
+          Get-Item $binary | Format-List FullName,Length,LastWriteTime
       - name: Package Windows release
         shell: pwsh
         run: |
@@ -73,6 +81,14 @@ jobs:
       - name: Build release
         run: cargo build --release --target x86_64-unknown-linux-gnu
         shell: bash
+      - name: Verify release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="${GITHUB_WORKSPACE}/target/x86_64-unknown-linux-gnu/release/ayx"
+          test -x "$binary"
+          ls -l "$binary"
+          file "$binary"
       - name: Package Linux release
         shell: bash
         run: |
@@ -117,6 +133,14 @@ jobs:
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
         shell: bash
+      - name: Verify release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="${GITHUB_WORKSPACE}/target/${{ matrix.target }}/release/ayx"
+          test -x "$binary"
+          ls -l "$binary"
+          file "$binary"
       - name: Package macOS release
         shell: bash
         run: |

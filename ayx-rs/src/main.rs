@@ -213,6 +213,10 @@ enum Command {
         #[command(subcommand)]
         command: cmd::telemetry::TelemetryCommand,
     },
+    #[command(
+        about = "Serve a local read-only operational web dashboard (overview, jobs, workflows)"
+    )]
+    Dashboard(cmd::dashboard::DashboardCommand),
 }
 
 #[derive(Subcommand, Debug)]
@@ -4365,6 +4369,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
         Command::Telemetry { command } => {
             cmd::telemetry::execute(cli.environment.as_deref(), command)?
         }
+        Command::Dashboard(dash) => cmd::dashboard::execute(cli.environment.as_deref(), dash)?,
     };
     Ok(envelope)
 }
@@ -5042,6 +5047,8 @@ fn perform_self_update(
     target_version: Option<&str>,
     skip_confirm: bool,
 ) -> Result<Envelope> {
+    warn_if_update_context_looks_suspicious(bin_name);
+
     let target = self_update::get_target();
     let mut builder = GitHubUpdate::configure();
     builder
@@ -5071,6 +5078,36 @@ fn perform_self_update(
     };
 
     Ok(Envelope::ok_with_data("self-update complete", detail))
+}
+
+fn warn_if_update_context_looks_suspicious(bin_name: &str) {
+    let current_exe = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(err) => {
+            eprintln!(
+                "warning: unable to determine the active {bin_name} binary for self-update: {err}"
+            );
+            return;
+        }
+    };
+
+    let exe = current_exe.to_string_lossy();
+    let exe_lower = exe.to_lowercase();
+    let suspicious = exe_lower.contains("/target/debug/")
+        || exe_lower.contains("/target/release/")
+        || exe_lower.contains(".cargo/bin/")
+        || exe_lower.contains(".local/share/mise/")
+        || exe_lower.contains("/node/")
+        || exe_lower.contains("/nvm/");
+
+    if suspicious {
+        eprintln!(
+            "warning: self-update is running from {exe}. If a different {bin_name} appears first on PATH, this update will not affect future invocations."
+        );
+        eprintln!(
+            "warning: prefer a release install such as ~/.local/bin/{bin_name} and confirm with `type -a {bin_name}`."
+        );
+    }
 }
 
 fn main() -> Result<()> {

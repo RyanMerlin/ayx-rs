@@ -52,25 +52,26 @@ is_on_path() {
 }
 
 pick_install_dir() {
-  local candidate
-  local path_entries
   if [[ -n "${AYX_INSTALL_DIR:-}" ]]; then
     echo "$INSTALL_DIR"
     return
   fi
 
-  IFS=':' read -r -a path_entries <<< "${PATH:-}"
-  for candidate in "${path_entries[@]}"; do
-    if [[ -n "$candidate" && -d "$candidate" && -w "$candidate" ]]; then
-      echo "$candidate"
-      return
-    fi
-  done
+  local candidate
+  local parent
 
-  for candidate in /usr/local/bin /usr/bin "${HOME}/.local/bin" "${HOME}/bin"; do
+  for candidate in "${HOME}/.local/bin" "${HOME}/bin" /usr/local/bin /usr/bin; do
+    parent="$(dirname "$candidate")"
     if [[ -d "$candidate" && -w "$candidate" ]]; then
       echo "$candidate"
       return
+    fi
+    if [[ -d "$parent" && -w "$parent" ]]; then
+      mkdir -p "$candidate" 2>/dev/null || true
+      if [[ -d "$candidate" && -w "$candidate" ]]; then
+        echo "$candidate"
+        return
+      fi
     fi
   done
 
