@@ -12,7 +12,7 @@ use serde_yaml::Value as YamlValue;
 use snap::raw::Decoder as SnapDecoder;
 use walkdir::WalkDir;
 use zip::read::ZipArchive;
-use zip::write::FileOptions;
+use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
 pub mod cloud_convert;
@@ -1331,7 +1331,7 @@ pub fn repackage_dir(input_dir: &Path, output_path: &Path) -> Result<Value> {
     let file = fs::File::create(output_path)
         .with_context(|| format!("failed to create '{}'", output_path.display()))?;
     let mut zip = ZipWriter::new(file);
-    let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let mut entry_count = 0usize;
 
     for entry in WalkDir::new(input_dir) {

@@ -2509,7 +2509,11 @@ fn canonical_json(value: &Value) -> String {
 fn checksum(value: &Value) -> String {
     let mut hasher = Sha256::new();
     hasher.update(canonical_json(value).as_bytes());
-    format!("{:x}", hasher.finalize())
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{:02x}", byte))
+        .collect()
 }
 
 pub fn convert_desktop_to_cloud(

@@ -14,7 +14,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use roxmltree::Document;
 use serde_json::{json, Value};
 use walkdir::WalkDir;
-use zip::write::FileOptions;
+use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
 use crate::upgrade::{io, manifest, rules};
@@ -665,7 +665,7 @@ pub fn run_bundle(input_dir: &Path, out_zip: &Path) -> Result<Value> {
     }
     let file = fs::File::create(out_zip)?;
     let mut zip = ZipWriter::new(file);
-    let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     for entry in WalkDir::new(&source) {
         let entry = entry?;
         let path = entry.path();

@@ -12,7 +12,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 walkdir.workspace = true
-zip = "0.6"
+zip = { workspace = true }
 lzf = "1"
 snap = "1"
 tempfile = "3"
