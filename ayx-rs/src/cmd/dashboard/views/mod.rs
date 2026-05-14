@@ -4,6 +4,7 @@
 //! the views are decoupled from the per-surface struct definitions. If a
 //! field is missing the renderer prints "—" rather than failing.
 
+use ayx_core::profile::RuntimeProfileResolution;
 use maud::{html, Markup, DOCTYPE};
 use serde_json::Value;
 
@@ -14,12 +15,17 @@ pub mod workflows;
 
 /// Page shell shared by every full-page route. Partial routes return a
 /// bare `Markup` fragment instead so htmx can swap into the page in place.
+#[allow(clippy::too_many_arguments)]
 pub fn layout(
     title: &str,
+    route: &str,
     body: Markup,
     source: &str,
     poll: u64,
     environment: Option<&str>,
+    selected_profile: Option<&str>,
+    profile_resolution: Option<&RuntimeProfileResolution>,
+    profiles: &[String],
 ) -> Markup {
     html! {
         (DOCTYPE)
@@ -46,7 +52,7 @@ pub fn layout(
             body {
                 header.topbar {
                     div.brand {
-                        a.wordmark href="/" {
+                        a.wordmark href=(profile_href("/", selected_profile)) {
                             span.brand-blue { "Alteryx" }
                             span.brand-white { " One" }
                         }
@@ -56,22 +62,42 @@ pub fn layout(
                         }
                     }
                     nav.tabs {
-                        a class=(if title == "overview" { "active" } else { "" }) href="/" { "Overview" }
-                        a class=(if title == "jobs" { "active" } else { "" }) href="/jobs" { "Jobs" }
-                        a class=(if title == "failures" { "active" } else { "" }) href="/failures" { "Failures" }
-                        a class=(if title == "workflows" || title == "workflow" { "active" } else { "" }) href="/workflows" { "Workflows" }
+                        a class=(if title == "overview" { "active" } else { "" }) href=(profile_href("/", selected_profile)) { "Overview" }
+                        a class=(if title == "jobs" { "active" } else { "" }) href=(profile_href("/jobs", selected_profile)) { "Jobs" }
+                        a class=(if title == "failures" { "active" } else { "" }) href=(profile_href("/failures", selected_profile)) { "Failures" }
+                        a class=(if title == "workflows" || title == "workflow" { "active" } else { "" }) href=(profile_href("/workflows", selected_profile)) { "Workflows" }
                     }
                     div.controls {
                         span.pill { "source: " strong { (source) } }
+                        @if let Some(profile) = selected_profile {
+                            span.pill { "profile: " strong { (profile) } }
+                        }
+                        @if let Some(resolution) = profile_resolution {
+                            span.pill { "selection: " strong { (resolution.selection_source.as_str()) } }
+                            span.pill { "active: " strong { (resolution.active_profile.as_deref().unwrap_or("—")) } }
+                        }
                         @if let Some(env) = environment {
                             span.pill { "env: " strong { (env) } }
                         }
                         span.muted { "poll: " (poll) "s" }
                     }
+                    @if !profiles.is_empty() {
+                        nav.profile-switcher {
+                            span.muted { "profile" }
+                            @for profile in profiles {
+                                a
+                                    class=(if selected_profile == Some(profile.as_str()) { "active" } else { "" })
+                                    href=(profile_href(route, Some(profile.as_str())))
+                                {
+                                    (profile)
+                                }
+                            }
+                        }
+                    }
                 }
                 main { (body) }
                 footer.foot {
-                    span.muted { "Alteryx One dashboard — read-only telemetry · " (poll) "s panel polling" }
+                    span.muted { "Alteryx One dashboard — central profile runtime surface · " (poll) "s panel polling" }
                 }
             }
         }
@@ -81,11 +107,36 @@ pub fn layout(
 /// Render an error envelope into a small card so handlers don't have to
 /// branch in every match arm.
 pub fn error_card(message: &str) -> Markup {
+    error_card_with_title("Telemetry error", message, None)
+}
+
+pub fn profile_error_card(message: &str, details: &Value) -> Markup {
+    error_card_with_title("Profile resolution error", message, Some(details))
+}
+
+fn error_card_with_title(title: &str, message: &str, details: Option<&Value>) -> Markup {
     html! {
         div.error-card {
-            div.eyebrow { "Telemetry error" }
+            div.eyebrow { (title) }
             pre { (message) }
+            @if let Some(details) = details {
+                dl.meta-grid {
+                    @for (key, value) in details.as_object().into_iter().flat_map(|map| map.iter()) {
+                        dt { (key) }
+                        dd { (s(value)) }
+                    }
+                }
+            }
         }
+    }
+}
+
+pub fn profile_href(path: &str, selected_profile: Option<&str>) -> String {
+    match selected_profile {
+        Some(profile) if !profile.trim().is_empty() => {
+            format!("{path}?profile={}", esc_attr(profile))
+        }
+        _ => path.to_string(),
     }
 }
 

@@ -1,16 +1,35 @@
 use axum::extract::{Path, State};
 use axum::response::Response;
 
+use crate::cmd::dashboard::resolve_dashboard_profile;
 use crate::cmd::dashboard::server::SharedState;
 use crate::cmd::dashboard::telemetry_bridge::{build_args, run_envelope, PanelQ};
 use crate::cmd::dashboard::views;
 use crate::cmd::telemetry::workflows;
 
-use super::{err_card, html};
+use super::{err_card, html, profile_err_card};
 
 pub async fn page(State(state): State<SharedState>, q: PanelQ) -> Response {
+    let selected_profile = q.0.profile.as_deref().or(state.selected_profile.as_deref());
+    let resolved = match resolve_dashboard_profile(&state, q.0.profile.as_deref()) {
+        Ok(resolution) => resolution,
+        Err(error) => {
+            return html(views::layout(
+                "workflows",
+                "/workflows",
+                views::profile_error_card(&error.message, &error.to_value()),
+                &state.default_source,
+                state.poll_secs,
+                state.environment.as_deref(),
+                selected_profile,
+                state.profile_resolution.as_ref(),
+                &state.available_profiles,
+            ))
+        }
+    };
     html(views::layout(
         "workflows",
+        "/workflows",
         views::workflows::page(
             &state.default_source,
             state.poll_secs,
@@ -19,15 +38,27 @@ pub async fn page(State(state): State<SharedState>, q: PanelQ) -> Response {
             q.0.sort.as_deref().unwrap_or("runs"),
             q.0.owner.as_deref().unwrap_or(""),
             q.0.health.as_deref().unwrap_or("all"),
+            selected_profile,
         ),
         &state.default_source,
         state.poll_secs,
         state.environment.as_deref(),
+        selected_profile,
+        Some(&resolved),
+        &state.available_profiles,
     ))
 }
 
 pub async fn summary_partial(State(state): State<SharedState>, q: PanelQ) -> Response {
-    let args = build_args(&q.0, &state.default_source, &state.profile_path);
+    let resolved = match resolve_dashboard_profile(&state, q.0.profile.as_deref()) {
+        Ok(resolution) => resolution,
+        Err(error) => return profile_err_card(&error),
+    };
+    let args = build_args(
+        &q.0,
+        &state.default_source,
+        Some(&resolved.selected_profile),
+    );
     let env = state.environment.clone();
     match run_envelope(move || workflows::dashboard_summary(env.as_deref(), &args)).await {
         Ok(env_) => html(views::workflows::summary_strip(&env_.data)),
@@ -36,20 +67,38 @@ pub async fn summary_partial(State(state): State<SharedState>, q: PanelQ) -> Res
 }
 
 pub async fn top_partial(State(state): State<SharedState>, q: PanelQ) -> Response {
-    let args = build_args(&q.0, &state.default_source, &state.profile_path);
+    let selected_profile = q.0.profile.as_deref().or(state.selected_profile.as_deref());
+    let resolved = match resolve_dashboard_profile(&state, q.0.profile.as_deref()) {
+        Ok(resolution) => resolution,
+        Err(error) => return profile_err_card(&error),
+    };
+    let args = build_args(
+        &q.0,
+        &state.default_source,
+        Some(&resolved.selected_profile),
+    );
     let env = state.environment.clone();
     let sort = q.0.sort.clone().unwrap_or_else(|| "runs".to_owned());
     match run_envelope(move || workflows::top(env.as_deref(), &args, &sort)).await {
         Ok(mut env_) => {
             filter_workflow_items(&mut env_.data, q.0.owner.as_deref(), q.0.health.as_deref());
-            html(views::workflows::top_table(&env_.data))
+            html(views::workflows::top_table(&env_.data, selected_profile))
         }
         Err(e) => err_card(format!("workflows top: {e}")),
     }
 }
 
 pub async fn performance_partial(State(state): State<SharedState>, q: PanelQ) -> Response {
-    let args = build_args(&q.0, &state.default_source, &state.profile_path);
+    let selected_profile = q.0.profile.as_deref().or(state.selected_profile.as_deref());
+    let resolved = match resolve_dashboard_profile(&state, q.0.profile.as_deref()) {
+        Ok(resolution) => resolution,
+        Err(error) => return profile_err_card(&error),
+    };
+    let args = build_args(
+        &q.0,
+        &state.default_source,
+        Some(&resolved.selected_profile),
+    );
     let env = state.environment.clone();
     match run_envelope(move || workflows::performance(env.as_deref(), &args)).await {
         Ok(mut env_) => {
@@ -61,6 +110,7 @@ pub async fn performance_partial(State(state): State<SharedState>, q: PanelQ) ->
                 q.0.since.as_deref().unwrap_or("7d"),
                 q.0.owner.as_deref().unwrap_or(""),
                 q.0.health.as_deref().unwrap_or("all"),
+                selected_profile,
             ))
         }
         Err(e) => err_card(format!("workflows performance: {e}")),
@@ -68,7 +118,15 @@ pub async fn performance_partial(State(state): State<SharedState>, q: PanelQ) ->
 }
 
 pub async fn errors_partial(State(state): State<SharedState>, q: PanelQ) -> Response {
-    let args = build_args(&q.0, &state.default_source, &state.profile_path);
+    let resolved = match resolve_dashboard_profile(&state, q.0.profile.as_deref()) {
+        Ok(resolution) => resolution,
+        Err(error) => return profile_err_card(&error),
+    };
+    let args = build_args(
+        &q.0,
+        &state.default_source,
+        Some(&resolved.selected_profile),
+    );
     let env = state.environment.clone();
     match run_envelope(move || workflows::errors(env.as_deref(), &args)).await {
         Ok(mut env_) => {
@@ -84,19 +142,45 @@ pub async fn drilldown(
     Path(id): Path<String>,
     q: PanelQ,
 ) -> Response {
-    let args = build_args(&q.0, &state.default_source, &state.profile_path);
+    let selected_profile = q.0.profile.as_deref().or(state.selected_profile.as_deref());
+    let resolved = match resolve_dashboard_profile(&state, q.0.profile.as_deref()) {
+        Ok(resolution) => resolution,
+        Err(error) => {
+            let body = views::profile_error_card(&error.message, &error.to_value());
+            return html(views::layout(
+                "workflow",
+                "/workflows",
+                body,
+                &state.default_source,
+                state.poll_secs,
+                state.environment.as_deref(),
+                selected_profile,
+                state.profile_resolution.as_ref(),
+                &state.available_profiles,
+            ));
+        }
+    };
+    let args = build_args(
+        &q.0,
+        &state.default_source,
+        Some(&resolved.selected_profile),
+    );
     let env = state.environment.clone();
     let result = run_envelope(move || workflows::detail(env.as_deref(), &args, &id)).await;
     let body = match result {
-        Ok(env_) => views::workflows::drilldown(&env_.data),
+        Ok(env_) => views::workflows::drilldown(&env_.data, selected_profile),
         Err(e) => views::error_card(&format!("workflow drilldown: {e}")),
     };
     html(views::layout(
         "workflow",
+        "/workflows",
         body,
         &state.default_source,
         state.poll_secs,
         state.environment.as_deref(),
+        selected_profile,
+        Some(&resolved),
+        &state.available_profiles,
     ))
 }
 

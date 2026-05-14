@@ -155,7 +155,8 @@ fn tui_help_renders() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Interactive TUI"));
-    assert!(stdout.contains("profile setup"));
+    assert!(stdout.contains("central profile"));
+    assert!(!stdout.contains("config.yaml"));
 }
 
 #[test]

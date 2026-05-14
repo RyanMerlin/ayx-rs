@@ -10,7 +10,7 @@
 )]
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
@@ -30,9 +30,9 @@ use super::render_helpers::{extract_one_browser_items, pretty_yaml_lines, render
 use ayx_core::profile::{
     default_profile_storage_path, list_central_profiles, list_central_workspaces, load_ayx_state,
     load_workspace_config, normalize_alteryx_base_url, normalize_alteryx_one_base_url,
-    profile_resolution_detail, profile_storage_path, save_ayx_state, workspace_storage_path,
-    AlteryxOneProfile, ApiAuth, ApiAuthMode, ApiLoggingProfile, ApiProfile, Config, MongoMode,
-    ObservabilityProfile, WorkspaceConfig,
+    profile_resolution_detail, profile_storage_path, resolve_runtime_profile, save_ayx_state,
+    workspace_storage_path, AlteryxOneProfile, ApiAuth, ApiAuthMode, ApiLoggingProfile, ApiProfile,
+    Config, MongoMode, ObservabilityProfile, WorkspaceConfig,
 };
 
 use crate::onboard::{
@@ -864,8 +864,7 @@ impl App {
         let target_path = default_profile_storage_path().map_err(anyhow::Error::from)?;
         let current_config = Config::load_from_path_with_environment_lenient(&target_path, None)
             .unwrap_or_else(|_| default_config());
-        let resolution =
-            profile_resolution_detail(Path::new("config.yaml")).map_err(anyhow::Error::from)?;
+        let runtime_resolution = resolve_runtime_profile(None).ok();
 
         let mut sidebar = ListState::default();
         sidebar.select(Some(Screen::Profiles.index()));
@@ -895,7 +894,10 @@ impl App {
             target_kind: TargetKind::Profile,
             target_path,
             target_environment: None,
-            resolution_source: resolution.source,
+            resolution_source: runtime_resolution
+                .as_ref()
+                .map(|resolution| resolution.selection_source.clone())
+                .unwrap_or_else(|| "runtime-unavailable".to_string()),
             inspect_return: None,
             config_form: ConfigForm::from_config(&current_config),
             credentials: CredentialsForm::from_config(&current_config),
@@ -1548,6 +1550,9 @@ impl App {
         self.target_kind = kind;
         self.target_path = path;
         self.target_environment = environment;
+        self.resolution_source = profile_resolution_detail(&self.target_path)
+            .map(|resolution| resolution.source)
+            .unwrap_or_else(|_| "editor".to_string());
         self.current_config = config;
         self.config_form = ConfigForm::from_config(&self.current_config);
         self.credentials = CredentialsForm::from_config(&self.current_config);
@@ -2075,12 +2080,15 @@ impl App {
         let mut panels = Vec::new();
         panels.push(render_envelope_panel(
             "Doctor Config",
-            crate::doctor_config_envelope(&self.target_path, false).map(|env| env.data),
+            crate::doctor_config_envelope_from_path(&self.target_path, false).map(|env| env.data),
         ));
         panels.push(render_envelope_panel(
             "Doctor Auth",
-            crate::doctor_auth_envelope(&self.target_path, self.target_environment.as_deref())
-                .map(|env| env.data),
+            crate::doctor_auth_envelope_from_path(
+                &self.target_path,
+                self.target_environment.as_deref(),
+            )
+            .map(|env| env.data),
         ));
         panels.push(render_envelope_panel(
             "One Auth Status",

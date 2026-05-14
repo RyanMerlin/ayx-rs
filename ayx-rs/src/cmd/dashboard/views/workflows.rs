@@ -3,8 +3,9 @@
 use maud::{html, Markup};
 use serde_json::Value;
 
-use super::{esc_attr, fmt_f64, s_at, status_class};
+use super::{esc_attr, fmt_f64, profile_href, s_at, status_class};
 
+#[allow(clippy::too_many_arguments)]
 pub fn page(
     source: &str,
     poll: u64,
@@ -13,8 +14,9 @@ pub fn page(
     sort: &str,
     owner: &str,
     health: &str,
+    selected_profile: Option<&str>,
 ) -> Markup {
-    let filters = query_suffix(source, since, sort, owner, health);
+    let filters = query_suffix(source, since, sort, owner, health, selected_profile);
     html! {
         section.hero.workflow-shell data-testid="workflow-rankings" {
             div.hero-grid {
@@ -29,7 +31,7 @@ pub fn page(
                             h3 { "Workflow context" }
                             span.muted { "source: " (source) }
                         }
-                        (controls_form("/workflows", source, since, sort, owner, health))
+                        (controls_form("/workflows", source, since, sort, owner, health, selected_profile))
                         div.list {
                             div.list-item {
                                 div.kpi-line { strong { "Window" } span.small { "7d default" } }
@@ -55,7 +57,7 @@ pub fn page(
             }
             div
                 id="wf-summary"
-                hx-get={ "/workflows/summary?source=" (source) "&since=" (since) }
+                hx-get={ "/workflows/summary?" (filters) }
                 hx-trigger={ "load, every " (poll) "s" }
                 hx-swap="innerHTML"
             { "Loading…" }
@@ -110,7 +112,7 @@ pub fn summary_strip(data: &Value) -> Markup {
     }
 }
 
-pub fn top_table(data: &Value) -> Markup {
+pub fn top_table(data: &Value, selected_profile: Option<&str>) -> Markup {
     let items = data["items"].as_array().cloned().unwrap_or_default();
     if items.is_empty() {
         return html! { p.empty { "No workflow activity in window." } };
@@ -126,7 +128,7 @@ pub fn top_table(data: &Value) -> Markup {
                 @let id = s_at(w, "flow_id");
                 @let runs = w["run_count"].as_u64().unwrap_or(0);
                 @let width = ((runs as f64 / max_runs as f64) * 100.0).round();
-                a.rank-row href={ "/workflows/" (id) } {
+                a.rank-row href=(workflow_detail_href(&id, selected_profile)) {
                     div.rank-main {
                         div.rank-title { (s_at(w, "flow_name")) }
                         div.rank-meta {
@@ -154,6 +156,7 @@ pub fn performance_table(
     since: &str,
     owner: &str,
     health: &str,
+    selected_profile: Option<&str>,
 ) -> Markup {
     let items = data["items"].as_array().cloned().unwrap_or_default();
     if items.is_empty() {
@@ -162,10 +165,10 @@ pub fn performance_table(
     html! {
         table.data {
             thead { tr {
-                th { (sort_link("/workflows", "Workflow", source, since, owner, health, "runs")) }
-                th { (sort_link("/workflows", "Count", source, since, owner, health, "runs")) }
+                th { (sort_link("/workflows", "Workflow", source, since, owner, health, "runs", selected_profile)) }
+                th { (sort_link("/workflows", "Count", source, since, owner, health, "runs", selected_profile)) }
                 th { "p50" }
-                th { (sort_link("/workflows", "p95", source, since, owner, health, "duration")) }
+                th { (sort_link("/workflows", "p95", source, since, owner, health, "duration", selected_profile)) }
                 th { "p99" }
                 th { "Max" }
             }}
@@ -206,7 +209,7 @@ pub fn errors_table(data: &Value) -> Markup {
     }
 }
 
-pub fn drilldown(data: &Value) -> Markup {
+pub fn drilldown(data: &Value, selected_profile: Option<&str>) -> Markup {
     let workflow = &data["workflow"];
     html! {
         section.hero.workflow-detail-shell data-testid="workflow-detail-shell" {
@@ -216,7 +219,7 @@ pub fn drilldown(data: &Value) -> Markup {
                         h2 { (s_at(workflow, "flow_name")) }
                     p.muted.mono { (s_at(workflow, "flow_id")) }
                 }
-                a.muted href="/workflows" { "← all workflows" }
+                a.muted href=(profile_href("/workflows", selected_profile)) { "← all workflows" }
             }
             div.metric-strip {
                 (summary_metric("Runs", &workflow["run_count"], "Runs in the selected window."))
@@ -370,6 +373,15 @@ fn trend_chart(data: &Value) -> Markup {
     }
 }
 
+fn workflow_detail_href(id: &str, selected_profile: Option<&str>) -> String {
+    let mut href = format!("/workflows/{id}");
+    if let Some(profile) = selected_profile.filter(|profile| !profile.trim().is_empty()) {
+        href.push_str("?profile=");
+        href.push_str(&esc_attr(profile));
+    }
+    href
+}
+
 fn summary_metric(label: &str, value: &Value, detail: &str) -> Markup {
     let rendered =
         if value.is_number() && value.as_f64().is_some() && !value.is_u64() && !value.is_i64() {
@@ -393,10 +405,14 @@ fn controls_form(
     sort: &str,
     owner: &str,
     health: &str,
+    selected_profile: Option<&str>,
 ) -> Markup {
     html! {
         form.control-row method="get" action=(action) {
             input type="hidden" name="source" value=(source);
+            @if let Some(profile) = selected_profile {
+                input type="hidden" name="profile" value=(profile);
+            }
             label.control-group {
                 span.small { "Window" }
                 select name="since" {
@@ -436,17 +452,30 @@ fn select_option(value: &str, current: &str) -> Markup {
     }
 }
 
-fn query_suffix(source: &str, since: &str, sort: &str, owner: &str, health: &str) -> String {
-    format!(
+fn query_suffix(
+    source: &str,
+    since: &str,
+    sort: &str,
+    owner: &str,
+    health: &str,
+    selected_profile: Option<&str>,
+) -> String {
+    let mut query = format!(
         "source={}&since={}&sort={}&owner={}&health={}",
         esc_attr(source),
         esc_attr(since),
         esc_attr(sort),
         esc_attr(owner),
         esc_attr(health)
-    )
+    );
+    if let Some(profile) = selected_profile.filter(|profile| !profile.trim().is_empty()) {
+        query.push_str("&profile=");
+        query.push_str(&esc_attr(profile));
+    }
+    query
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sort_link(
     base: &str,
     label: &str,
@@ -455,9 +484,10 @@ fn sort_link(
     owner: &str,
     health: &str,
     next_sort: &str,
+    selected_profile: Option<&str>,
 ) -> Markup {
     html! {
-        a href={ (base) "?source=" (esc_attr(source)) "&since=" (esc_attr(since)) "&sort=" (next_sort) "&owner=" (esc_attr(owner)) "&health=" (esc_attr(health)) } { (label) }
+        a href={ (base) "?source=" (esc_attr(source)) "&since=" (esc_attr(since)) "&sort=" (next_sort) "&owner=" (esc_attr(owner)) "&health=" (esc_attr(health)) @if let Some(profile) = selected_profile.filter(|profile| !profile.trim().is_empty()) { "&profile=" (esc_attr(profile)) } } { (label) }
     }
 }
 
@@ -507,7 +537,7 @@ mod tests {
             }
         });
 
-        let rendered = drilldown(&payload).into_string();
+        let rendered = drilldown(&payload, None).into_string();
         assert!(rendered.contains("workflow-detail-shell"));
         assert!(rendered.contains("Recent runs"));
         assert!(rendered.contains("Recent errors"));

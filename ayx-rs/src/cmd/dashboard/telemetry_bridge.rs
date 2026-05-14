@@ -1,6 +1,6 @@
 //! Bridge between async axum handlers and the blocking telemetry functions.
 
-use std::path::Path;
+use std::borrow::ToOwned;
 
 use anyhow::Result;
 use axum::extract::Query;
@@ -13,6 +13,7 @@ use crate::cmd::telemetry::TelemetryArgs;
 /// the URL and the CLI stay in lock-step.
 #[derive(Debug, Default, Deserialize)]
 pub struct PanelQuery {
+    pub profile: Option<String>,
     pub source: Option<String>,
     pub since: Option<String>,
     pub top: Option<usize>,
@@ -26,9 +27,16 @@ pub struct PanelQuery {
 
 pub type PanelQ = Query<PanelQuery>;
 
-pub fn build_args(q: &PanelQuery, default_source: &str, profile: &Path) -> TelemetryArgs {
+pub fn build_args(
+    q: &PanelQuery,
+    default_source: &str,
+    selected_profile: Option<&str>,
+) -> TelemetryArgs {
     TelemetryArgs {
-        profile: profile.to_path_buf(),
+        profile: q
+            .profile
+            .clone()
+            .or_else(|| selected_profile.map(ToOwned::to_owned)),
         source: q
             .source
             .clone()

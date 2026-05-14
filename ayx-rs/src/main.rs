@@ -14,7 +14,7 @@ use ayx_core::observability::transport_error_summary;
 use ayx_core::profile::{
     ayx_config_home, ayx_profiles_dir, ayx_state_path, ayx_workspaces_dir, list_central_profiles,
     load_ayx_state, profile_resolution_detail, profile_shape_label, profile_storage_path,
-    save_ayx_state, AyxState, Config, ServerProfile,
+    resolve_runtime_profile, save_ayx_state, AyxState, Config, ServerProfile,
 };
 // Most ayx_one + ayx_one_api helpers used by the One dispatch are now imported
 // directly in cmd/one.rs. These re-exports stay so the License surface and the
@@ -134,7 +134,7 @@ enum Command {
         non_interactive: bool,
     },
     #[command(
-        about = "Interactive TUI for profile setup, One credentials, and connectivity checks"
+        about = "Interactive TUI for central profile selection, explicit file editing, One credentials, and connectivity checks"
     )]
     Tui,
     #[command(about = "Central profile registry and active profile management")]
@@ -148,8 +148,8 @@ enum Command {
         command: Option<DoctorCommand>,
         #[arg(long)]
         fix: bool,
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     #[command(about = "Licensing portal branch and API surface")]
     License {
@@ -183,9 +183,9 @@ enum Command {
         about = "Show active profile, account email, workspace, and environment in one shot."
     )]
     Whoami {
-        /// Override profile path. Defaults to the central profile resolver.
+        /// Override the central profile name. Defaults to `AYX_PROFILE` or the active profile.
         #[arg(long)]
-        profile: Option<PathBuf>,
+        profile: Option<String>,
     },
     #[command(
         about = "Audit artifact management — list, sweep, retention. Audit files live under ${AYX_CONFIG_HOME}/audits/ by default."
@@ -377,16 +377,16 @@ enum DoctorCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum MongoCommand {
     Status {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Inventory {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Backup {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long, default_value = "backups")]
         output_dir: PathBuf,
         #[arg(long)]
@@ -395,8 +395,8 @@ pub(crate) enum MongoCommand {
         audit_dir: PathBuf,
     },
     Restore {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         input_path: PathBuf,
         #[arg(long)]
@@ -405,8 +405,8 @@ pub(crate) enum MongoCommand {
         audit_dir: PathBuf,
     },
     Query {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         database: Option<String>,
         #[arg(long)]
@@ -427,8 +427,8 @@ pub(crate) enum MongoCommand {
         template: Option<String>,
     },
     Mutate {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         database: Option<String>,
         #[arg(long)]
@@ -447,8 +447,8 @@ pub(crate) enum MongoCommand {
         accept_mutation_risk: bool,
     },
     Doctor {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
 }
 
@@ -494,8 +494,8 @@ pub(crate) enum ServerCommand {
         backup_dir: PathBuf,
     },
     Backup {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long, default_value = "backups")]
         backup_dir: PathBuf,
         #[arg(long)]
@@ -508,26 +508,26 @@ pub(crate) enum ServerCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum SqlserverCommand {
     Status {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Inventory {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Precheck {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         collation: Option<String>,
     },
     ValidateStrings {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     ConnectionString {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long, default_value = "controller")]
         scope: String,
         #[arg(long, default_value = "sql")]
@@ -546,16 +546,16 @@ pub(crate) enum SqlserverCommand {
         multi_subnet_failover: bool,
     },
     Migrate {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         target_version: Option<String>,
         #[arg(long)]
         dry_run: bool,
     },
     Prepare {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         target_version: Option<String>,
         #[arg(long)]
@@ -630,8 +630,8 @@ pub(crate) enum WorkflowCommand {
         fail_on_unsupported: bool,
     },
     Publish {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         input: PathBuf,
         #[arg(long)]
@@ -891,12 +891,12 @@ pub(crate) enum OneCommand {
         command: Option<OneDoctorCommand>,
     },
     Status {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Inventory {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Plans {
         #[command(subcommand)]
@@ -940,12 +940,12 @@ pub(crate) enum OneCommand {
         command: Option<UiCommand>,
     },
     AutoInsights {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     DesktopExec {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
 }
 
@@ -960,12 +960,12 @@ pub(crate) enum OnePlatformCommand {
         command: OnePlatformAuthCommand,
     },
     Status {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Inventory {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Workspace {
         #[command(subcommand)]
@@ -990,20 +990,20 @@ pub(crate) enum OnePlatformCommand {
 pub(crate) enum OnePlatformTokenCommand {
     List,
     Create {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Detail {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         token_id: String,
     },
     Delete {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         token_id: String,
     },
@@ -1012,8 +1012,8 @@ pub(crate) enum OnePlatformTokenCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OnePlatformPersonCommand {
     List {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         limit: Option<u32>,
         #[arg(long)]
@@ -1026,48 +1026,48 @@ pub(crate) enum OnePlatformPersonCommand {
     Current,
     Count,
     Detail {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         person_id: String,
     },
     Create {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Update {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         person_id: String,
         #[arg(long)]
         body: PathBuf,
     },
     Patch {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         person_id: String,
         #[arg(long)]
         body: PathBuf,
     },
     Delete {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         person_id: String,
     },
     UpdatePassword {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     PasswordResetRequest {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
@@ -1076,8 +1076,8 @@ pub(crate) enum OnePlatformPersonCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneWorkspaceCommand {
     List {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         limit: Option<u32>,
         #[arg(long)]
@@ -1094,14 +1094,14 @@ pub(crate) enum OneWorkspaceCommand {
         workspace_id: String,
     },
     SaveCurrentConfiguration {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     SaveConfigurationV4 {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         workspace_id: String,
         #[arg(long)]
@@ -1117,8 +1117,8 @@ pub(crate) enum OneWorkspaceCommand {
     },
     CurrentConfigurationSchema,
     DeleteCurrentConfiguration {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     DeleteConfiguration {
         #[arg(long)]
@@ -1155,8 +1155,8 @@ pub(crate) enum OneWorkspaceCommand {
         workspace_id: String,
     },
     TransferAssets {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
@@ -1185,36 +1185,36 @@ pub(crate) enum OneRoleCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OnePlatformApiCommand {
     Status {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Diagnose {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     OpenApiSpec {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
 }
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OnePlatformAuthCommand {
     Status {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Diagnose {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
 }
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OnePlansCommand {
     List {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         limit: Option<u32>,
         #[arg(long)]
@@ -1225,80 +1225,80 @@ pub(crate) enum OnePlansCommand {
         max_pages: Option<u32>,
     },
     Create {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Detail {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         plan_id: Option<String>,
     },
     Full {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         plan_id: Option<String>,
     },
     Run {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         plan_id: Option<String>,
     },
     Count {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     RunParameters {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         plan_id: Option<String>,
     },
     Schedules {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         plan_id: Option<String>,
     },
     Export {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         plan_id: Option<String>,
     },
     Update {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         plan_id: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Delete {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         plan_id: Option<String>,
     },
     Share {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         plan_id: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Import {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Permissions {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         plan_id: Option<String>,
         #[arg(long)]
@@ -1309,8 +1309,8 @@ pub(crate) enum OnePlansCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneFlowsCommand {
     List {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         /// Cap results per page (server-side limit). Default is the server's
         /// own page size (typically 100 for /v4/flows).
         #[arg(long)]
@@ -1329,80 +1329,80 @@ pub(crate) enum OneFlowsCommand {
         max_pages: Option<u32>,
     },
     Count {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Create {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Detail {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
     },
     Update {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Delete {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
     },
     Copy {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
         #[arg(long)]
         body: Option<PathBuf>,
     },
     Run {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
         #[arg(long)]
         body: Option<PathBuf>,
     },
     Validate {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
     },
     Parameters {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
         #[arg(long)]
         output_object_type: Option<String>,
     },
     Inputs {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
     },
     Outputs {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
     },
     Import {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         input: PathBuf,
         #[arg(long)]
@@ -1413,8 +1413,8 @@ pub(crate) enum OneFlowsCommand {
         override_js_udfs: bool,
     },
     ImportDryRun {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         input: PathBuf,
         #[arg(long)]
@@ -1425,16 +1425,16 @@ pub(crate) enum OneFlowsCommand {
         override_js_udfs: bool,
     },
     Export {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
         #[arg(long)]
         output: PathBuf,
     },
     ExportDryRun {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
     },
@@ -1443,8 +1443,8 @@ pub(crate) enum OneFlowsCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneConnectionsCommand {
     List {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         limit: Option<u32>,
         #[arg(long)]
@@ -1455,44 +1455,44 @@ pub(crate) enum OneConnectionsCommand {
         max_pages: Option<u32>,
     },
     Count {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Create {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     DryRun {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Detail {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connection_id: Option<String>,
     },
     Status {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connection_id: Option<String>,
     },
     Update {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connection_id: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Delete {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connection_id: Option<String>,
     },
@@ -1509,20 +1509,20 @@ pub(crate) enum OneConnectionsCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneConnectorMetadataCommand {
     Defaults {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connector: String,
     },
     PublishInfo {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connector: String,
     },
     Detail {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connector: String,
     },
@@ -1535,22 +1535,22 @@ pub(crate) enum OneConnectorMetadataCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneConnectorMetadataOverridesCommand {
     Create {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connector: String,
         #[arg(long)]
         body: PathBuf,
     },
     List {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connector: String,
     },
     Delete {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connector: String,
     },
@@ -1559,30 +1559,30 @@ pub(crate) enum OneConnectorMetadataOverridesCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneConnectionPermissionCommand {
     List {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connection_id: Option<String>,
     },
     Create {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connection_id: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Detail {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connection_id: Option<String>,
         #[arg(long)]
         aid: String,
     },
     Delete {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         connection_id: Option<String>,
         #[arg(long)]
@@ -1593,8 +1593,8 @@ pub(crate) enum OneConnectionPermissionCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneJobGroupCommand {
     List {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         limit: Option<u32>,
         #[arg(long)]
@@ -1605,80 +1605,80 @@ pub(crate) enum OneJobGroupCommand {
         max_pages: Option<u32>,
     },
     Count {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Run {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Publish {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         job_group_id: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Detail {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         job_group_id: Option<String>,
     },
     Cancel {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         job_group_id: Option<String>,
     },
     Status {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         job_group_id: Option<String>,
     },
     Inputs {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         job_group_id: Option<String>,
     },
     Outputs {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         job_group_id: Option<String>,
     },
     Jobs {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         job_group_id: Option<String>,
     },
     Publications {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         job_group_id: Option<String>,
     },
     Profile {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         job_group_id: Option<String>,
     },
     ProfileResults {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         job_group_id: Option<String>,
     },
     PdfResults {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         job_group_id: Option<String>,
     },
@@ -1687,8 +1687,8 @@ pub(crate) enum OneJobGroupCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneOutputObjectCommand {
     List {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         limit: Option<u32>,
         #[arg(long)]
@@ -1699,44 +1699,44 @@ pub(crate) enum OneOutputObjectCommand {
         max_pages: Option<u32>,
     },
     Count {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Create {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Detail {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         output_object_id: Option<String>,
     },
     Update {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         output_object_id: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Delete {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         output_object_id: Option<String>,
     },
     Inputs {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         output_object_id: Option<String>,
     },
     WrangleToPython {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         output_object_id: Option<String>,
         #[arg(long)]
@@ -1747,26 +1747,26 @@ pub(crate) enum OneOutputObjectCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneWebhookFlowTaskCommand {
     Create {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Detail {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         webhook_flow_task_id: Option<String>,
     },
     Delete {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         webhook_flow_task_id: Option<String>,
     },
     Test {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
@@ -1775,8 +1775,8 @@ pub(crate) enum OneWebhookFlowTaskCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneWriteSettingCommand {
     List {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         limit: Option<u32>,
         #[arg(long)]
@@ -1787,32 +1787,32 @@ pub(crate) enum OneWriteSettingCommand {
         max_pages: Option<u32>,
     },
     Count {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Create {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Detail {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         write_setting_id: Option<String>,
     },
     Update {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         write_setting_id: Option<String>,
         #[arg(long)]
         body: PathBuf,
     },
     Delete {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         write_setting_id: Option<String>,
     },
@@ -1821,8 +1821,8 @@ pub(crate) enum OneWriteSettingCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneSchedulingCommand {
     List {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         limit: Option<u32>,
         #[arg(long)]
@@ -1833,66 +1833,66 @@ pub(crate) enum OneSchedulingCommand {
         max_pages: Option<u32>,
     },
     Detail {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         schedule_id: Option<String>,
     },
     Enable {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         schedule_id: Option<String>,
     },
     Disable {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         schedule_id: Option<String>,
     },
     Count {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
 }
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneBillingCommand {
     CurrentAccount {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     UsageExport {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
 }
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneDoctorCommand {
     Auth {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Discover {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Platform {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Plans {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Scheduling {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Billing {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
 }
 
@@ -1903,24 +1903,24 @@ enum LicenseCommand {
         command: LicenseApiCommand,
     },
     Status {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Inventory {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
 }
 
 #[derive(Subcommand, Debug)]
 enum LicenseApiCommand {
     Status {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Diagnose {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
 }
 
@@ -2016,7 +2016,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "connection detail and database metadata",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "mongo.mode", "mongo.databases"],
+        prerequisites: &["central runtime profile", "mongo.mode", "mongo.databases"],
         notes: &["Use this first to validate embedded or managed Mongo configuration."],
     },
     CommandSpec {
@@ -2026,7 +2026,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "database inventory plan",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "mongo.databases"],
+        prerequisites: &["central runtime profile", "mongo.databases"],
         notes: &["Use this before backup or restore planning."],
     },
     CommandSpec {
@@ -2036,7 +2036,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "backup plan or execution artifacts",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "mongo.mode"],
+        prerequisites: &["central runtime profile", "mongo.mode"],
         notes: &[
             "Requires --apply for a live backup.",
             "Writes audit artifacts.",
@@ -2049,7 +2049,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "restore execution artifacts",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "restore input path"],
+        prerequisites: &["central runtime profile", "restore input path"],
         notes: &[
             "Requires --apply for a live restore.",
             "Writes audit artifacts.",
@@ -2062,7 +2062,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "cached swagger metadata",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server.webapi_url"],
+        prerequisites: &["central runtime profile", "server.webapi_url"],
         notes: &["Use before server api call."],
     },
     CommandSpec {
@@ -2072,7 +2072,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "server api status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Useful before diagnostics, import, or call."],
     },
     CommandSpec {
@@ -2082,7 +2082,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "diagnostic envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Use before server api import-swagger or server api call."],
     },
     CommandSpec {
@@ -2092,7 +2092,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "call response envelope",
         safety: "mutating-or-read-only",
         mutating: false,
-        prerequisites: &["cached Swagger document", "config.yaml"],
+        prerequisites: &["cached Swagger document", "central runtime profile"],
         notes: &["Operation behavior depends on the selected endpoint."],
     },
     CommandSpec {
@@ -2102,7 +2102,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "license status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Product branch ready; API subcommands are the primary entry point."],
     },
     CommandSpec {
@@ -2112,7 +2112,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "license inventory envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Product branch ready; API subcommands are the primary entry point."],
     },
     CommandSpec {
@@ -2223,7 +2223,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "workflow publish envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "workflow package"],
+        prerequisites: &["central runtime profile", "server_api", "workflow package"],
         notes: &[
             "Uses the Server workflow upload API for the actual publish step.",
             "Accepts a ready .yxzp or a directory that can be repackaged first.",
@@ -2275,7 +2275,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &[
             "Use this before platform, plans, auto-insights, or desktop-exec workflows.",
             "Managed IAM lives in walter/docs/one/api/managed-iam-v1.yaml.",
@@ -2288,7 +2288,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform inventory envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml"],
+        prerequisites: &["central runtime profile"],
         notes: &[
             "Use this as the authoritative One endpoint registry.",
             "Implemented and partial surfaces are listed separately from documented-only gaps.",
@@ -2301,7 +2301,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform user envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/people/current in the One API docs."],
     },
     CommandSpec {
@@ -2311,7 +2311,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/people in the One API docs."],
     },
     CommandSpec {
@@ -2321,7 +2321,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person current envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/people/current in the One API docs."],
     },
     CommandSpec {
@@ -2331,7 +2331,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/people/count in the One API docs."],
     },
     CommandSpec {
@@ -2341,7 +2341,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/people/{id} in the One API docs."],
     },
     CommandSpec {
@@ -2351,7 +2351,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
         notes: &["Maps to POST /v4/people in the One API docs."],
     },
     CommandSpec {
@@ -2361,7 +2361,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person update envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
         notes: &["Maps to PUT /v4/people/{id} in the One API docs."],
     },
     CommandSpec {
@@ -2371,7 +2371,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person patch envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
         notes: &["Maps to PATCH /v4/people/{id} in the One API docs."],
     },
     CommandSpec {
@@ -2381,7 +2381,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to DELETE /v4/people/{id} in the One API docs."],
     },
     CommandSpec {
@@ -2391,7 +2391,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person update-password envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
         notes: &["Maps to PATCH /v4/people/current/updatePassword in the One API docs."],
     },
     CommandSpec {
@@ -2401,7 +2401,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person password reset request envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
         notes: &["Maps to POST /v4/passwordresetrequest in the One API docs."],
     },
     CommandSpec {
@@ -2411,7 +2411,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace current envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/workspaces/current in the One API docs."],
     },
     CommandSpec {
@@ -2421,7 +2421,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace current configuration envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/workspaces/current/configuration in the One API docs."],
     },
     CommandSpec {
@@ -2431,7 +2431,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace configuration-v4 envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/workspaces/{id}/configuration in the One API docs."],
     },
     CommandSpec {
@@ -2441,7 +2441,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace save-current-configuration envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
         notes: &["Maps to PATCH /v4/workspaces/current/configuration in the One API docs."],
     },
     CommandSpec {
@@ -2451,7 +2451,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace save-configuration-v4 envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
         notes: &["Maps to PATCH /v4/workspaces/{id}/configuration in the One API docs."],
     },
     CommandSpec {
@@ -2461,7 +2461,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/workspaces in the One API docs."],
     },
     CommandSpec {
@@ -2471,7 +2471,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace configuration schema envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/workspaces/{id}/configuration-schema in the One API docs."],
     },
     CommandSpec {
@@ -2481,7 +2481,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace current configuration schema envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/workspaces/current/configuration-schema in the One API docs."],
     },
     CommandSpec {
@@ -2491,7 +2491,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace delete-current-configuration envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to POST /v4/workspaces/current/delete-configuration in the One API docs."],
     },
     CommandSpec {
@@ -2501,7 +2501,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace delete-configuration envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to POST /v4/workspaces/{id}/delete-configuration in the One API docs."],
     },
     CommandSpec {
@@ -2511,7 +2511,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace people envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /iam/v1/workspaces/{id}/people in managed-iam-v1.yaml."],
     },
     CommandSpec {
@@ -2521,7 +2521,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace admins envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /iam/v1/workspaces/{workspaceId}/admins in managed-iam-v1.yaml."],
     },
     CommandSpec {
@@ -2531,7 +2531,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform role assignments envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /iam/v1/authorization/roles/{id}/people in managed-iam-v1.yaml."],
     },
     CommandSpec {
@@ -2541,7 +2541,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform auth status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Confirms OAuth client ID, token endpoint, access token presence, refresh token presence, and whether a safe workspace endpoint is reachable."],
     },
     CommandSpec {
@@ -2551,7 +2551,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform token envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/apiAccessTokens in the One API docs."],
     },
     CommandSpec {
@@ -2561,7 +2561,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform token create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "alteryx_one.access_token", "payload json"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
         notes: &["Maps to POST /v4/apiAccessTokens in the One API docs."],
     },
     CommandSpec {
@@ -2571,7 +2571,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform token detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/apiAccessTokens/{tokenId} in the One API docs."],
     },
     CommandSpec {
@@ -2581,7 +2581,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform token delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to DELETE /v4/apiAccessTokens/{tokenId} in the One API docs."],
     },
     CommandSpec {
@@ -2591,7 +2591,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform auth diagnostic envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Uses the managed IAM current workspace endpoint as the safe validation target."],
     },
     CommandSpec {
@@ -2601,7 +2601,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one auth doctor envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Wraps token posture and workspace probe checks."],
     },
     CommandSpec {
@@ -2611,7 +2611,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one discovery doctor envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Surfaces workspace, plan, schedule, and billing discovery data."],
     },
     CommandSpec {
@@ -2621,7 +2621,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform doctor envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Wraps workspace and role discovery checks."],
     },
     CommandSpec {
@@ -2631,7 +2631,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one plans doctor envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Wraps list, count, and plan lookup checks."],
     },
     CommandSpec {
@@ -2641,7 +2641,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one scheduling doctor envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Wraps schedule list and count checks."],
     },
     CommandSpec {
@@ -2651,7 +2651,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one billing doctor envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "alteryx_one.access_token"],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Wraps billing account and usage export checks."],
     },
     CommandSpec {
@@ -2661,7 +2661,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform api status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &[
             "Use this to inspect platform API posture before diagnostics.",
             "Treat this as the One managed IAM posture check.",
@@ -2674,7 +2674,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform api diagnostic envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &[
             "Use before future platform API call-style workflows.",
             "Route workflow guidance through the orchestration layer once the symptom is known.",
@@ -2687,7 +2687,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform api open-api-spec envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/open-api-spec in the One API docs."],
     },
     CommandSpec {
@@ -2697,7 +2697,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one plans status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &[
             "Reserved for plan lifecycle workflows.",
             "Managed Plans lives in walter/docs/one/api/managed-plans-v1.yaml.",
@@ -2710,7 +2710,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one plans list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /plans/v1/plans in managed-plans-v1.yaml."],
     },
     CommandSpec {
@@ -2720,7 +2720,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one plans create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/plans in the One API docs."],
     },
     CommandSpec {
@@ -2730,7 +2730,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one plans run envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to POST /plans/v1/plans/{id}/run in managed-plans-v1.yaml."],
     },
     CommandSpec {
@@ -2740,7 +2740,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one plans full envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/plans/{id}/full in the One API docs."],
     },
     CommandSpec {
@@ -2750,7 +2750,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one plans update envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to PATCH /v4/plans/{id} in the One API docs."],
     },
     CommandSpec {
@@ -2760,7 +2760,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one plans delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to DELETE /v4/plans/{id} in the One API docs."],
     },
     CommandSpec {
@@ -2770,7 +2770,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one plans share envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/plans/{id}/permissions in the One API docs."],
     },
     CommandSpec {
@@ -2780,7 +2780,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/flows in the One API docs."],
     },
     CommandSpec {
@@ -2790,7 +2790,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/flows/count in the One API docs."],
     },
     CommandSpec {
@@ -2800,7 +2800,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/flows/{id} in the One API docs."],
     },
     CommandSpec {
@@ -2810,7 +2810,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/flows in the One API docs."],
     },
     CommandSpec {
@@ -2820,7 +2820,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows update envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to PUT /v4/flows/{id} in the One API docs."],
     },
     CommandSpec {
@@ -2830,7 +2830,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to DELETE /v4/flows/{id} in the One API docs."],
     },
     CommandSpec {
@@ -2840,7 +2840,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows copy envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/flows/{id}/copy in the One API docs."],
     },
     CommandSpec {
@@ -2850,7 +2850,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows run envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/flows/{id}/run in the One API docs."],
     },
     CommandSpec {
@@ -2860,7 +2860,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows validate envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/flows/{id}/validate in the One API docs."],
     },
     CommandSpec {
@@ -2870,7 +2870,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows parameters envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/flows/{id}/recipeParameters in the One API docs."],
     },
     CommandSpec {
@@ -2880,7 +2880,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows inputs envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/flows/{id}/inputs in the One API docs."],
     },
     CommandSpec {
@@ -2890,7 +2890,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows outputs envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/flows/{id}/outputs in the One API docs."],
     },
     CommandSpec {
@@ -2900,7 +2900,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows import envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "flow package"],
+        prerequisites: &["central runtime profile", "server_api", "flow package"],
         notes: &["Maps to POST /v4/flows/package in the One API docs."],
     },
     CommandSpec {
@@ -2910,7 +2910,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows import dry-run envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api", "flow package"],
+        prerequisites: &["central runtime profile", "server_api", "flow package"],
         notes: &["Maps to POST /v4/flows/package/dryRun in the One API docs."],
     },
     CommandSpec {
@@ -2920,7 +2920,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows export envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/flows/{id}/package in the One API docs."],
     },
     CommandSpec {
@@ -2930,7 +2930,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one flows export dry-run envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/flows/{id}/package/dryRun in the One API docs."],
     },
     CommandSpec {
@@ -2940,7 +2940,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/connections in the One API docs."],
     },
     CommandSpec {
@@ -2950,7 +2950,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/connections/count in the One API docs."],
     },
     CommandSpec {
@@ -2960,7 +2960,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/connections in the One API docs."],
     },
     CommandSpec {
@@ -2970,7 +2970,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections dry-run envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/connections/dryRun in the One API docs."],
     },
     CommandSpec {
@@ -2980,7 +2980,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/connections/{id} in the One API docs."],
     },
     CommandSpec {
@@ -2990,7 +2990,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/connections/{id}/status in the One API docs."],
     },
     CommandSpec {
@@ -3000,7 +3000,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections update envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to PATCH /v4/connections/{id} in the One API docs."],
     },
     CommandSpec {
@@ -3010,7 +3010,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to DELETE /v4/connections/{id} in the One API docs."],
     },
     CommandSpec {
@@ -3020,7 +3020,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections permissions envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/connections/{id}/permissions in the One API docs."],
     },
     CommandSpec {
@@ -3030,7 +3030,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections permissions create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/connections/{id}/permissions in the One API docs."],
     },
     CommandSpec {
@@ -3040,7 +3040,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections permissions detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/connections/{id}/permissions/{aid} in the One API docs."],
     },
     CommandSpec {
@@ -3050,7 +3050,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections permissions delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to DELETE /v4/connections/{id}/permissions/{aid} in the One API docs."],
     },
     CommandSpec {
@@ -3060,7 +3060,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections connector-metadata defaults envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/connectorMetadata/{connector}/defaults in the One API docs."],
     },
     CommandSpec {
@@ -3070,7 +3070,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections connector-metadata detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/connectorMetadata/{connector} in the One API docs."],
     },
     CommandSpec {
@@ -3080,7 +3080,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections connector-metadata publish-info envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/connectorMetadata/{connector}/publish/info in the One API docs."],
     },
     CommandSpec {
@@ -3090,7 +3090,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections connector-metadata overrides create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/connectorMetadata/{connector}/overrides in the One API docs."],
     },
     CommandSpec {
@@ -3100,7 +3100,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections connector-metadata overrides list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/connectorMetadata/{connector}/overrides in the One API docs."],
     },
     CommandSpec {
@@ -3110,7 +3110,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one connections connector-metadata overrides delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to DELETE /v4/connectorMetadata/{connector}/overrides in the One API docs."],
     },
     CommandSpec {
@@ -3120,7 +3120,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/jobLibrary in the One API docs."],
     },
     CommandSpec {
@@ -3130,7 +3130,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/jobLibrary/count in the One API docs."],
     },
     CommandSpec {
@@ -3140,7 +3140,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group pdf-results envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/jobGroups/{id}/pdfResults in the One API docs."],
     },
     CommandSpec {
@@ -3150,7 +3150,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group run envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/jobGroups in the One API docs."],
     },
     CommandSpec {
@@ -3160,7 +3160,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group publish envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to PUT /v4/jobGroups/{id}/publish in the One API docs."],
     },
     CommandSpec {
@@ -3170,7 +3170,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/jobGroups/{id} in the One API docs."],
     },
     CommandSpec {
@@ -3180,7 +3180,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group cancel envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to POST /v4/jobGroups/{id}/cancel in the One API docs."],
     },
     CommandSpec {
@@ -3190,7 +3190,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/jobGroups/{id}/status in the One API docs."],
     },
     CommandSpec {
@@ -3200,7 +3200,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group inputs envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/jobGroups/{id}/inputs in the One API docs."],
     },
     CommandSpec {
@@ -3210,7 +3210,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group outputs envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/jobGroups/{id}/outputs in the One API docs."],
     },
     CommandSpec {
@@ -3220,7 +3220,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group jobs envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/jobGroups/{id}/jobs in the One API docs."],
     },
     CommandSpec {
@@ -3230,7 +3230,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group publications envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/jobGroups/{id}/publications in the One API docs."],
     },
     CommandSpec {
@@ -3240,7 +3240,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group profile envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/jobGroups/{id}/profile in the One API docs."],
     },
     CommandSpec {
@@ -3250,7 +3250,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one job-group profile-results envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/jobGroups/{id}/profileResults in the One API docs."],
     },
     CommandSpec {
@@ -3260,7 +3260,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one output-object list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/outputObjects in the One API docs."],
     },
     CommandSpec {
@@ -3270,7 +3270,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one output-object count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/outputObjects/count in the One API docs."],
     },
     CommandSpec {
@@ -3280,7 +3280,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one output-object create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/outputObjects in the One API docs."],
     },
     CommandSpec {
@@ -3290,7 +3290,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one output-object detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/outputObjects/{id} in the One API docs."],
     },
     CommandSpec {
@@ -3300,7 +3300,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one output-object update envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to PATCH /v4/outputObjects/{id} in the One API docs."],
     },
     CommandSpec {
@@ -3310,7 +3310,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one output-object delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to DELETE /v4/outputObjects/{id} in the One API docs."],
     },
     CommandSpec {
@@ -3320,7 +3320,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one output-object inputs envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/outputObjects/{id}/inputs in the One API docs."],
     },
     CommandSpec {
@@ -3330,7 +3330,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one output-object wrangle-to-python envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to POST /v4/outputObjects/{id}/wrangleToPython in the One API docs."],
     },
     CommandSpec {
@@ -3340,7 +3340,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one webhook-flow-task create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/webhookFlowTasks in the One API docs."],
     },
     CommandSpec {
@@ -3350,7 +3350,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one webhook-flow-task detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/webhookFlowTasks/{id} in the One API docs."],
     },
     CommandSpec {
@@ -3360,7 +3360,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one webhook-flow-task delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to DELETE /v4/webhookFlowTasks/{id} in the One API docs."],
     },
     CommandSpec {
@@ -3370,7 +3370,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one webhooks test envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/webhooks/test in the One API docs."],
     },
     CommandSpec {
@@ -3380,7 +3380,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one write-setting list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/writeSettings in the One API docs."],
     },
     CommandSpec {
@@ -3390,7 +3390,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one write-setting count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/writeSettings/count in the One API docs."],
     },
     CommandSpec {
@@ -3400,7 +3400,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one write-setting create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to POST /v4/writeSettings in the One API docs."],
     },
     CommandSpec {
@@ -3410,7 +3410,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one write-setting detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/writeSettings/{id} in the One API docs."],
     },
     CommandSpec {
@@ -3420,7 +3420,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one write-setting update envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api", "payload json"],
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
         notes: &["Maps to PATCH /v4/writeSettings/{id} in the One API docs."],
     },
     CommandSpec {
@@ -3430,7 +3430,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one write-setting delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to DELETE /v4/writeSettings/{id} in the One API docs."],
     },
     CommandSpec {
@@ -3440,7 +3440,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one scheduling list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /scheduling/v1/schedules in managed-scheduling-v1.yaml."],
     },
     CommandSpec {
@@ -3450,7 +3450,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one billing current-account envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /billing/v1/my/billing-accounts/current in managed-billing-v1.yaml."],
     },
     CommandSpec {
@@ -3460,7 +3460,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one auto-insights status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &[
             "Reserved for Auto Insights workflows.",
             "Scheduling and run semantics may map here or to a later dedicated branch.",
@@ -3473,7 +3473,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one desktop-exec status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &[
             "Reserved for desktop execution workflows.",
             "Keep this branch narrow until the desktop-exec surface is validated.",
@@ -3486,7 +3486,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "license api status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Use to inspect licensing API posture before diagnostics."],
     },
     CommandSpec {
@@ -3496,7 +3496,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "license api diagnostic envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server_api"],
+        prerequisites: &["central runtime profile", "server_api"],
         notes: &["Use before future license api call-style workflows."],
     },
     CommandSpec {
@@ -3536,7 +3536,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "startup diagnosis steps and evidence",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "optional startup error", "optional log file"],
+        prerequisites: &["central runtime profile", "optional startup error", "optional log file"],
         notes: &["Wraps logs, runtime settings, and recent log candidate checks."],
     },
     CommandSpec {
@@ -3546,7 +3546,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "tls diagnosis steps and evidence",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server.webapi_url"],
+        prerequisites: &["central runtime profile", "server.webapi_url"],
         notes: &[
             "Focuses on SSL/TLS, port binding, and proxy configuration.",
             "Use this for gallery binding, controller cert, and HTTPS setup issues.",
@@ -3559,7 +3559,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "log inventory envelope (paths, sizes, mtimes)",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server install path"],
+        prerequisites: &["central runtime profile", "server install path"],
         notes: &[
             "First step in any log triage. Surfaces canonical paths so context queries can target them.",
         ],
@@ -3584,7 +3584,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "inventory envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml"],
+        prerequisites: &["central runtime profile"],
         notes: &["Coarser than `discover`; intended for at-a-glance posture."],
     },
     CommandSpec {
@@ -3604,7 +3604,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "auth status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "server settings"],
+        prerequisites: &["central runtime profile", "server settings"],
         notes: &["Use this before SAML diagnosis or simulation."],
     },
     CommandSpec {
@@ -3614,7 +3614,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "saml diagnosis envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "metadata url or file when available"],
+        prerequisites: &["central runtime profile", "metadata url or file when available"],
         notes: &["Focuses on Server-side SAML configuration and common mismatch checks."],
     },
     CommandSpec {
@@ -3624,7 +3624,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "mongo query envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "mongosh available on PATH"],
+        prerequisites: &["central runtime profile", "mongosh available on PATH"],
         notes: &["Use for targeted inspection of Gallery and Service collections."],
     },
     CommandSpec {
@@ -3634,7 +3634,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "mongo doctor envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "mongosh available on PATH"],
+        prerequisites: &["central runtime profile", "mongosh available on PATH"],
         notes: &["Targets queue, results, users, and app info collections."],
     },
     CommandSpec {
@@ -3644,7 +3644,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "saml log diagnosis envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "SAML login logs"],
+        prerequisites: &["central runtime profile", "SAML login logs"],
         notes: &["Targets alteryx-sso and aas log families."],
     },
     CommandSpec {
@@ -3654,7 +3654,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "certificate diagnosis envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "certificate file when available"],
+        prerequisites: &["central runtime profile", "certificate file when available"],
         notes: &["Focuses on certificate presence, parsing, and likely trust issues."],
     },
     CommandSpec {
@@ -3664,7 +3664,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "legacy ad diagnosis envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml"],
+        prerequisites: &["central runtime profile"],
         notes: &["Kept intentionally narrow as a legacy troubleshooting path."],
     },
     CommandSpec {
@@ -3674,7 +3674,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "saml simulation envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "metadata url or file"],
+        prerequisites: &["central runtime profile", "metadata url or file"],
         notes: &["Designed as a diagnostic harness, not a full IdP emulator."],
     },
     CommandSpec {
@@ -3684,7 +3684,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "startup doctor steps and evidence",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["config.yaml", "optional startup error", "optional log file"],
+        prerequisites: &["central runtime profile", "optional startup error", "optional log file"],
         notes: &["Prescriptive version of server diagnose startup."],
     },
 ];
@@ -3692,12 +3692,12 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerLogsCommand {
     Discover {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Inventory {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Summary {
         #[arg(long)]
@@ -3732,8 +3732,8 @@ pub(crate) enum ServerLogsCommand {
         lines: usize,
     },
     Recent {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long, default_value_t = 7)]
         days: i64,
     },
@@ -3742,36 +3742,36 @@ pub(crate) enum ServerLogsCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerDiagnoseCommand {
     Startup {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         error: Option<String>,
         #[arg(long)]
         log_file: Option<PathBuf>,
     },
     Logs {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Network {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Tls {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     RuntimeSettings {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
 }
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerAuthCommand {
     Status {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Diagnose {
         #[command(subcommand)]
@@ -3786,8 +3786,8 @@ pub(crate) enum ServerAuthCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerAuthDiagnoseCommand {
     Saml {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         metadata_url: Option<String>,
         #[arg(long)]
@@ -3798,20 +3798,20 @@ pub(crate) enum ServerAuthDiagnoseCommand {
         issuer: Option<String>,
     },
     SamlLogs {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long, default_value_t = 7)]
         days: i64,
     },
     Certificate {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         certificate_file: Option<PathBuf>,
     },
     AdLegacy {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         user: Option<String>,
         #[arg(long)]
@@ -3822,8 +3822,8 @@ pub(crate) enum ServerAuthDiagnoseCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerAuthSimulateCommand {
     Saml {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         metadata_url: Option<String>,
         #[arg(long)]
@@ -3844,40 +3844,40 @@ pub(crate) enum ServerAuthSimulateCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerDoctorCommand {
     Startup {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         error: Option<String>,
         #[arg(long)]
         log_file: Option<PathBuf>,
     },
     Logs {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Network {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     RuntimeSettings {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
 }
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerApiCommand {
     Status {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Diagnose {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
     },
     ImportSwagger {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long, default_value = "3")]
         version: String,
         #[arg(long)]
@@ -3886,8 +3886,8 @@ pub(crate) enum ServerApiCommand {
         cache_dir: PathBuf,
     },
     Call {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         operation_id: String,
         #[arg(long, default_value = "3")]
@@ -3915,8 +3915,8 @@ pub(crate) enum UpgradeCommand {
         deployment: String,
     },
     Precheck {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         target: String,
         #[arg(long, default_value = "upgrade-precheck")]
@@ -3925,8 +3925,8 @@ pub(crate) enum UpgradeCommand {
         deployment: String,
     },
     Backup {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         r#type: String,
         #[arg(long, default_value = "upgrade-backup")]
@@ -3951,8 +3951,8 @@ pub(crate) enum UpgradeCommand {
         yes: bool,
     },
     Postcheck {
-        #[arg(long, default_value = "config.yaml")]
-        profile: PathBuf,
+        #[arg(long)]
+        profile: Option<String>,
         #[arg(long)]
         manifest: PathBuf,
         #[arg(long, default_value = "upgrade-postcheck")]
@@ -4126,15 +4126,13 @@ fn execute(cli: Cli) -> Result<Envelope> {
     }
 
     // `load_profile` is intentionally a tiny shim around the environment-aware
-    // Config loader. Lifting it from a captured closure to a `let`-bound
-    // fn-pointer-shaped closure (still capturing `cli.environment`) keeps
-    // every existing call-site `load_profile(&path)` working unchanged, while
-    // the parallel free function `load_profile_with_env` (below `execute`)
-    // is the canonical entry point for code under `cmd/` modules that
-    // doesn't have `cli` in scope.
+    // central runtime loader. Capturing `cli.environment` here keeps the
+    // runtime-only call-sites concise while the explicit path loaders below
+    // remain available for onboarding/editor flows.
     let environment = cli.environment.clone();
-    let load_profile =
-        |path: &Path| -> Result<Config> { load_profile_with_env(path, environment.as_deref()) };
+    let load_profile = |profile: Option<&str>| -> Result<Config> {
+        load_profile_with_env(profile, environment.as_deref())
+    };
     let envelope = match cli.command {
         Command::Mongo { command } => cmd::mongo::execute(cli.environment.as_deref(), command)?,
         Command::Server { command } => cmd::server::execute(cli.environment.as_deref(), command)?,
@@ -4173,7 +4171,12 @@ fn execute(cli: Cli) -> Result<Envelope> {
             command,
             fix,
             profile,
-        } => doctor_envelope(command.as_ref(), &profile, fix, cli.environment.as_deref())?,
+        } => doctor_envelope(
+            command.as_ref(),
+            profile.as_deref(),
+            fix,
+            cli.environment.as_deref(),
+        )?,
         Command::One { command } => cmd::one::execute(
             cmd::one::Ctx {
                 apply: cli.apply,
@@ -4186,20 +4189,20 @@ fn execute(cli: Cli) -> Result<Envelope> {
             None => Envelope::ok("license commands available: api, status, inventory"),
             Some(LicenseCommand::Api { command }) => match command {
                 LicenseApiCommand::Status { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref())?;
                     api_status_envelope(&config, "license")?
                 }
                 LicenseApiCommand::Diagnose { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref())?;
                     api_diagnose_envelope(&config, "license")?
                 }
             },
             Some(LicenseCommand::Status { profile }) => {
-                let config = load_profile(&profile)?;
+                let config = load_profile(profile.as_deref())?;
                 api_status_envelope(&config, "license")?
             }
             Some(LicenseCommand::Inventory { profile }) => {
-                let config = load_profile(&profile)?;
+                let config = load_profile(profile.as_deref())?;
                 api_inventory_envelope(&config, "license")?
             }
         },
@@ -4261,9 +4264,8 @@ fn execute(cli: Cli) -> Result<Envelope> {
             // profile + state knows. The operator can append `--output json`
             // for a structured payload or pipe through `ayx one platform
             // workspace current` for the live workspace.
-            let path = profile.unwrap_or_else(|| PathBuf::from("config.yaml"));
-            let resolved = ayx_core::profile::resolve_profile_path(&path).unwrap_or(path.clone());
-            let config = load_profile(&resolved).ok();
+            let resolution = resolve_runtime_profile(profile.as_deref()).ok();
+            let config = load_profile(profile.as_deref()).ok();
             let state = load_ayx_state().ok();
             let active_profile = state.as_ref().and_then(|s| s.active_profile.clone());
             let active_workspace = state.as_ref().and_then(|s| s.active_workspace.clone());
@@ -4284,9 +4286,12 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     .clone()
                     .unwrap_or_else(|| "(no active profile)".to_string()),
                 json!({
+                    "config_home": resolution.as_ref().map(|r| r.config_home.clone()),
                     "active_profile": active_profile,
                     "active_workspace": active_workspace,
-                    "profile_path": resolved.display().to_string(),
+                    "selected_profile": resolution.as_ref().map(|r| r.selected_profile.clone()),
+                    "selection_source": resolution.as_ref().map(|r| r.selection_source.clone()),
+                    "resolved_profile_path": resolution.as_ref().map(|r| r.resolved_profile_path.clone()),
                     "environment": cli.environment.clone(),
                     "account_email": account_email,
                     "one_base_url": one_base_url,
@@ -4579,37 +4584,33 @@ fn profile_list_envelope() -> Result<Envelope> {
 }
 
 fn profile_current_envelope() -> Result<Envelope> {
-    let state = load_ayx_state()?;
-    let active_name = state
-        .active_profile
-        .clone()
-        .unwrap_or_else(|| "default".to_string());
-    let path = profile_storage_path(&active_name)?;
+    let resolution = resolve_runtime_profile(None)?;
     Ok(Envelope::ok_with_data(
         "current profile resolved",
         json!({
-            "active_profile": active_name,
-            "path": path.display().to_string(),
-            "exists": path.exists(),
+            "config_home": resolution.config_home,
+            "selected_profile": resolution.selected_profile,
+            "selection_source": resolution.selection_source,
+            "resolved_profile_path": resolution.resolved_profile_path.clone(),
+            "active_profile": resolution.active_profile,
+            "exists": Path::new(&resolution.resolved_profile_path).exists(),
             "state_path": ayx_state_path()?.display().to_string(),
         }),
     ))
 }
 
 fn profile_show_envelope(name: Option<&str>) -> Result<Envelope> {
-    let state = load_ayx_state()?;
-    let name = name
-        .map(ToOwned::to_owned)
-        .or(state.active_profile)
-        .unwrap_or_else(|| "default".to_string());
-    let path = profile_storage_path(&name)?;
-    let config = Config::load_from_path(&path)?;
-    let resolution = profile_resolution_detail(&path)?;
+    let resolution = resolve_runtime_profile(name)?;
+    let config = Config::load_runtime_profile_with_environment(name, None)?;
     Ok(Envelope::ok_with_data(
         "profile loaded",
         json!({
-            "name": name,
-            "path": path.display().to_string(),
+            "name": resolution.selected_profile,
+            "config_home": resolution.config_home,
+            "selected_profile": resolution.selected_profile,
+            "selection_source": resolution.selection_source,
+            "resolved_profile_path": resolution.resolved_profile_path,
+            "active_profile": resolution.active_profile,
             "resolution": resolution,
             "profile_name": config.profile_name,
             "sections": {
@@ -4699,7 +4700,7 @@ fn profile_migrate_envelope(profile: &Path, name: Option<&str>) -> Result<Envelo
 
 fn doctor_envelope(
     command: Option<&DoctorCommand>,
-    profile: &Path,
+    profile: Option<&str>,
     fix: bool,
     environment: Option<&str>,
 ) -> Result<Envelope> {
@@ -4715,7 +4716,11 @@ fn doctor_envelope(
     }
 }
 
-fn doctor_full_envelope(profile: &Path, fix: bool, environment: Option<&str>) -> Result<Envelope> {
+fn doctor_full_envelope(
+    profile: Option<&str>,
+    fix: bool,
+    environment: Option<&str>,
+) -> Result<Envelope> {
     let config = doctor_config_envelope(profile, fix)?;
     let auth = doctor_auth_envelope(profile, environment)?;
     let network = doctor_network_envelope(profile, environment)?;
@@ -4739,7 +4744,41 @@ fn doctor_full_envelope(profile: &Path, fix: bool, environment: Option<&str>) ->
     ))
 }
 
-fn doctor_config_envelope(profile: &Path, fix: bool) -> Result<Envelope> {
+fn doctor_config_envelope(profile: Option<&str>, fix: bool) -> Result<Envelope> {
+    if fix {
+        fs::create_dir_all(ayx_profiles_dir()?)?;
+        fs::create_dir_all(ayx_workspaces_dir()?)?;
+        if !ayx_state_path()?.exists() {
+            save_ayx_state(&AyxState::default())?;
+        }
+    }
+    let resolution = resolve_runtime_profile(profile)?;
+    let (shape, inline_risks) = if Path::new(&resolution.resolved_profile_path).exists() {
+        let raw = fs::read_to_string(&resolution.resolved_profile_path)?;
+        let value: serde_yaml::Value = serde_yaml::from_str(&raw)?;
+        (
+            profile_shape_label(&value),
+            collect_inline_secret_warnings(&raw),
+        )
+    } else {
+        ("missing", Vec::new())
+    };
+    Ok(Envelope::ok_with_data(
+        "doctor config completed",
+        json!({
+            "config_home": ayx_config_home()?.display().to_string(),
+            "profiles_dir": ayx_profiles_dir()?.display().to_string(),
+            "workspaces_dir": ayx_workspaces_dir()?.display().to_string(),
+            "state_path": ayx_state_path()?.display().to_string(),
+            "resolution": resolution,
+            "shape": shape,
+            "inline_secret_risks": inline_risks,
+            "fix_applied": fix,
+        }),
+    ))
+}
+
+pub(crate) fn doctor_config_envelope_from_path(profile: &Path, fix: bool) -> Result<Envelope> {
     if fix {
         fs::create_dir_all(ayx_profiles_dir()?)?;
         fs::create_dir_all(ayx_workspaces_dir()?)?;
@@ -4773,7 +4812,45 @@ fn doctor_config_envelope(profile: &Path, fix: bool) -> Result<Envelope> {
     ))
 }
 
-fn doctor_auth_envelope(profile: &Path, environment: Option<&str>) -> Result<Envelope> {
+fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
+    let config = Config::load_runtime_profile_with_environment(profile, environment)?;
+    let one = config.alteryx_one.as_ref();
+    let server = config.server.as_ref();
+    Ok(Envelope::ok_with_data(
+        "doctor auth completed",
+        json!({
+            "profile": config.profile_name,
+            "one": {
+                "configured": one.is_some(),
+                "access_token_present": one.and_then(|v| v.access_token.as_ref()).is_some_and(|v| !v.trim().is_empty()),
+                "refresh_token_present": one.and_then(|v| v.refresh_token.as_ref()).is_some_and(|v| !v.trim().is_empty()),
+                "oauth_client_id_present": one.and_then(|v| v.oauth_client_id.as_ref()).is_some_and(|v| !v.trim().is_empty()),
+                "access_token_source": secret_source(
+                    one.and_then(|v| v.access_token_ref.as_ref()),
+                    one.and_then(|v| v.access_token.as_deref()),
+                ),
+                "refresh_token_source": secret_source(
+                    one.and_then(|v| v.refresh_token_ref.as_ref()),
+                    one.and_then(|v| v.refresh_token.as_deref()),
+                ),
+            },
+            "server": {
+                "configured": server.is_some(),
+                "curator_api_key_present": server.is_some_and(|v| !v.curator_api_key.trim().is_empty()),
+                "curator_api_secret_present": server.is_some_and(|v| !v.curator_api_secret.trim().is_empty()),
+                "curator_api_secret_source": secret_source(
+                    server.and_then(|v| v.curator_api_secret_ref.as_ref()),
+                    server.map(|v| v.curator_api_secret.as_str()),
+                ),
+            }
+        }),
+    ))
+}
+
+pub(crate) fn doctor_auth_envelope_from_path(
+    profile: &Path,
+    environment: Option<&str>,
+) -> Result<Envelope> {
     let config = Config::load_from_path_with_environment(profile, environment)?;
     let one = config.alteryx_one.as_ref();
     let server = config.server.as_ref();
@@ -4808,8 +4885,8 @@ fn doctor_auth_envelope(profile: &Path, environment: Option<&str>) -> Result<Env
     ))
 }
 
-fn doctor_network_envelope(profile: &Path, environment: Option<&str>) -> Result<Envelope> {
-    let config = Config::load_from_path_with_environment(profile, environment)?;
+fn doctor_network_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
+    let config = Config::load_runtime_profile_with_environment(profile, environment)?;
     Ok(Envelope::ok_with_data(
         "doctor network completed",
         json!({
@@ -4833,13 +4910,13 @@ fn doctor_network_envelope(profile: &Path, environment: Option<&str>) -> Result<
     ))
 }
 
-fn doctor_one_envelope(profile: &Path, environment: Option<&str>) -> Result<Envelope> {
-    let config = Config::load_from_path_with_environment(profile, environment)?;
+fn doctor_one_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
+    let config = Config::load_runtime_profile_with_environment(profile, environment)?;
     one_platform_auth_diagnose_envelope(&config)
 }
 
-fn doctor_server_envelope(profile: &Path, environment: Option<&str>) -> Result<Envelope> {
-    let config = Config::load_from_path_with_environment(profile, environment)?;
+fn doctor_server_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
+    let config = Config::load_runtime_profile_with_environment(profile, environment)?;
     let server_ready = config.server.is_some() || config.server_api.is_some();
     Ok(Envelope::ok_with_data(
         "doctor server completed",
@@ -4857,8 +4934,8 @@ fn doctor_server_envelope(profile: &Path, environment: Option<&str>) -> Result<E
     ))
 }
 
-fn doctor_mongo_envelope(profile: &Path, environment: Option<&str>) -> Result<Envelope> {
-    let config = Config::load_from_path_with_environment(profile, environment)?;
+fn doctor_mongo_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
+    let config = Config::load_runtime_profile_with_environment(profile, environment)?;
     Ok(Envelope::ok_with_data(
         "doctor mongo completed",
         json!({
@@ -5009,7 +5086,7 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                 "diagnosis": "alteryx_one.access_token is missing",
                 "recommendations": [
                     "Set AYX_ONE_API_ACCESS_TOKEN in .env",
-                    "Populate alteryx_one.access_token in config.yaml if you prefer config-based storage"
+                    "Populate alteryx_one.access_token in the active central profile if you prefer config-based storage"
                 ],
             }),
         )
@@ -5153,23 +5230,79 @@ fn main() -> Result<()> {
 /// Render an envelope according to the requested output format. Returns a
 /// `Validation` error envelope-as-string for unknown formats so the
 /// failure surfaces uniformly via the outer error path.
-/// Canonical profile loader used by both the closure inside `execute()` and
-/// future code under `cmd/` modules. Single-source-of-truth for how a
-/// `--profile <path>` resolves against `cli.environment`.
-pub(crate) fn load_profile_with_env(path: &Path, environment: Option<&str>) -> Result<Config> {
-    Ok(Config::load_from_path_with_environment(path, environment)?)
+/// Input accepted by the shared profile loader shims. Runtime callers pass a
+/// central profile name while editor/onboarding callers pass an explicit file
+/// path.
+pub(crate) enum ProfileInput<'a> {
+    Runtime(Option<&'a str>),
+    Path(&'a Path),
 }
 
-/// Lenient profile loader for One/dashboard paths that should keep working
-/// even when the Server block is present but not fully provisioned.
-pub(crate) fn load_profile_with_env_lenient(
-    path: &Path,
+impl<'a> From<Option<&'a str>> for ProfileInput<'a> {
+    fn from(profile: Option<&'a str>) -> Self {
+        Self::Runtime(profile)
+    }
+}
+
+impl<'a> From<&'a str> for ProfileInput<'a> {
+    fn from(profile: &'a str) -> Self {
+        Self::Runtime(Some(profile))
+    }
+}
+
+impl<'a> From<&'a Option<String>> for ProfileInput<'a> {
+    fn from(profile: &'a Option<String>) -> Self {
+        Self::Runtime(profile.as_deref())
+    }
+}
+
+impl<'a> From<&'a Path> for ProfileInput<'a> {
+    fn from(path: &'a Path) -> Self {
+        Self::Path(path)
+    }
+}
+
+impl<'a> From<&'a PathBuf> for ProfileInput<'a> {
+    fn from(path: &'a PathBuf) -> Self {
+        Self::Path(path.as_path())
+    }
+}
+
+/// Canonical profile loader used by runtime-facing commands and the smaller
+/// set of explicit path-based editor flows.
+pub(crate) fn load_profile_with_env<'a, P>(profile: P, environment: Option<&str>) -> Result<Config>
+where
+    P: Into<ProfileInput<'a>>,
+{
+    match profile.into() {
+        ProfileInput::Runtime(name) => Ok(Config::load_runtime_profile_with_environment(
+            name,
+            environment,
+        )?),
+        ProfileInput::Path(path) => Ok(Config::load_from_path_with_environment(path, environment)?),
+    }
+}
+
+/// Lenient profile loader for runtime-facing and editor flows that should
+/// keep working even when the Server block is present but not fully
+/// provisioned.
+pub(crate) fn load_profile_with_env_lenient<'a, P>(
+    profile: P,
     environment: Option<&str>,
-) -> Result<Config> {
-    Ok(Config::load_from_path_with_environment_lenient(
-        path,
-        environment,
-    )?)
+) -> Result<Config>
+where
+    P: Into<ProfileInput<'a>>,
+{
+    match profile.into() {
+        ProfileInput::Runtime(name) => Ok(Config::load_runtime_profile_with_environment_lenient(
+            name,
+            environment,
+        )?),
+        ProfileInput::Path(path) => Ok(Config::load_from_path_with_environment_lenient(
+            path,
+            environment,
+        )?),
+    }
 }
 
 fn format_envelope(envelope: &Envelope, output: &str) -> Result<String> {
@@ -5855,5 +5988,30 @@ mod tests {
         }))
         .expect("response should format");
         assert_eq!(token, "Bearer fresh-token");
+    }
+
+    #[test]
+    fn runtime_cli_surfaces_do_not_default_to_config_yaml() {
+        let main_src = include_str!("main.rs");
+        let tui_src = include_str!("tui/mod.rs");
+        let tui_app_src = include_str!("tui/app.rs");
+        let telemetry_src = include_str!("cmd/telemetry/mod.rs");
+        let dashboard_src = include_str!("cmd/dashboard/mod.rs");
+        let one_src = include_str!("cmd/one.rs");
+        let dashboard_doc = include_str!("../../docs/dashboard-handoff.md");
+        let runtime_doc = include_str!("../../docs/runtime-config-contract.md");
+
+        assert_eq!(
+            main_src.matches("default_value = \"config.yaml\"").count(),
+            2
+        );
+        assert!(!telemetry_src.contains("default_value = \"config.yaml\""));
+        assert!(!dashboard_src.contains("default_value = \"config.yaml\""));
+        assert!(!one_src.contains("PathBuf::from(\"config.yaml\")"));
+        assert!(!dashboard_doc.contains("--profile config.yaml"));
+        assert!(tui_src.contains("Runtime selection is central-only"));
+        assert!(tui_src.contains("inspect or edit an explicit profile/workspace file"));
+        assert!(!tui_app_src.contains("profile_resolution_detail(Path::new(\"config.yaml\"))"));
+        assert!(runtime_doc.contains("Runtime config is central-only."));
     }
 }

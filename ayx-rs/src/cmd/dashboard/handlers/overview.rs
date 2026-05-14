@@ -1,6 +1,7 @@
 use axum::extract::State;
 use axum::response::Response;
 
+use crate::cmd::dashboard::resolve_dashboard_profile;
 use crate::cmd::dashboard::server::SharedState;
 use crate::cmd::dashboard::telemetry_bridge::{build_args, run_envelope, PanelQ};
 use crate::cmd::dashboard::views;
@@ -11,7 +12,29 @@ use serde_json::json;
 use super::html;
 
 pub async fn index(State(state): State<SharedState>, q: PanelQ) -> Response {
-    let args = build_args(&q.0, &state.default_source, &state.profile_path);
+    let selected_profile = q.0.profile.as_deref().or(state.selected_profile.as_deref());
+    let resolved = match resolve_dashboard_profile(&state, q.0.profile.as_deref()) {
+        Ok(resolution) => resolution,
+        Err(error) => {
+            let body = views::profile_error_card(&error.message, &error.to_value());
+            return html(views::layout(
+                "overview",
+                "/",
+                body,
+                &state.default_source,
+                state.poll_secs,
+                state.environment.as_deref(),
+                selected_profile,
+                state.profile_resolution.as_ref(),
+                &state.available_profiles,
+            ));
+        }
+    };
+    let args = build_args(
+        &q.0,
+        &state.default_source,
+        Some(&resolved.selected_profile),
+    );
     let env = state.environment.clone();
     let result = run_envelope(move || summary::summary(env.as_deref(), &args)).await;
 
@@ -40,19 +63,32 @@ pub async fn index(State(state): State<SharedState>, q: PanelQ) -> Response {
         state.poll_secs,
         state.environment.as_deref(),
         q.0.since.as_deref().unwrap_or("7d"),
+        selected_profile,
         error_message.as_deref(),
     );
     html(views::layout(
         "overview",
+        "/",
         body,
         &state.default_source,
         state.poll_secs,
         state.environment.as_deref(),
+        selected_profile,
+        Some(&resolved),
+        &state.available_profiles,
     ))
 }
 
 pub async fn weekly_partial(State(state): State<SharedState>, q: PanelQ) -> Response {
-    let args = build_args(&q.0, &state.default_source, &state.profile_path);
+    let resolved = match resolve_dashboard_profile(&state, q.0.profile.as_deref()) {
+        Ok(resolution) => resolution,
+        Err(error) => return html(views::profile_error_card(&error.message, &error.to_value())),
+    };
+    let args = build_args(
+        &q.0,
+        &state.default_source,
+        Some(&resolved.selected_profile),
+    );
     let env = state.environment.clone();
     match run_envelope(move || weekly::run_counts(env.as_deref(), &args)).await {
         Ok(env_) => html(views::overview::weekly_heatmap(&env_.data)),

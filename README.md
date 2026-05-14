@@ -111,7 +111,7 @@ The tool returns a consistent envelope model so humans and agents can parse succ
 
 `ayx` resolves profiles from its central config home by default and keeps an active-profile pointer in local state.
 Use `ayx profile current` to see the active profile, `ayx profile list` to inspect stored profiles, and `ayx profile use <name>` to switch the default profile.
-`--profile <path>` remains available for one-off overrides.
+`--profile <name>` selects a central profile by name. Use `ayx profile migrate --profile <path>` to import a legacy YAML file into the central store; the TUI and onboarding flows are the only places that intentionally operate on explicit file paths.
 
 `environments.yaml` is the canonical multi-environment file shape. It should contain `workspace_name`, `active_environment`, and an `environments` map of named `Config` entries. Use `--environment <name>` to override the active environment for a single run.
 For promotion-style workflows with multiple Server instances, keep one environment per instance and use `tools workspace resolve`, `compare`, or the migration helpers to make source/target selection explicit.

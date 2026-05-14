@@ -8,8 +8,6 @@
 //! Phase 1 implements the One side only. Phase 2 adds Server (Mongo +
 //! Server-API V3); Phase 3 adds cross-source permission summaries.
 
-use std::path::PathBuf;
-
 use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use clap::{Args, Subcommand};
@@ -33,9 +31,9 @@ pub mod workflows;
 /// the declarations.
 #[derive(Args, Debug, Clone)]
 pub struct TelemetryArgs {
-    /// Profile path (default: config.yaml).
-    #[arg(long, default_value = "config.yaml", global = false)]
-    pub profile: PathBuf,
+    /// Central profile name. Defaults to the active central profile.
+    #[arg(long, global = false)]
+    pub profile: Option<String>,
     /// Override backend selection. Default is auto-detection from the profile:
     /// pick the only configured surface, or require an explicit override if
     /// both `alteryx_one` and `server` are configured.
@@ -291,7 +289,7 @@ pub fn load_and_pick_source(
     args: &TelemetryArgs,
     environment: Option<&str>,
 ) -> Result<(ayx_core::profile::Config, source::TelemetrySource)> {
-    let config = load_profile_with_env_lenient(&args.profile, environment)?;
+    let config = load_profile_with_env_lenient(args.profile.as_deref(), environment)?;
     let src = source::pick(&config, Some(&args.source))?;
     Ok((config, src))
 }

@@ -155,11 +155,12 @@ fn build_connectivity_panels(
     vec![
         render_envelope_panel(
             "Doctor Config",
-            crate::doctor_config_envelope(target_path, false).map(|env| env.data),
+            crate::doctor_config_envelope_from_path(target_path, false).map(|env| env.data),
         ),
         render_envelope_panel(
             "Doctor Auth",
-            crate::doctor_auth_envelope(target_path, target_environment).map(|env| env.data),
+            crate::doctor_auth_envelope_from_path(target_path, target_environment)
+                .map(|env| env.data),
         ),
         render_envelope_panel(
             "One Auth Status",

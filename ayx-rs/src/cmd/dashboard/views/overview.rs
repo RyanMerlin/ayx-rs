@@ -3,7 +3,7 @@
 use maud::{html, Markup};
 use serde_json::Value;
 
-use super::{error_card, fmt_f64, s_at};
+use super::{error_card, esc_attr, fmt_f64, profile_href, s_at};
 
 pub fn render(
     summary: &Value,
@@ -11,6 +11,7 @@ pub fn render(
     poll: u64,
     environment: Option<&str>,
     since: &str,
+    selected_profile: Option<&str>,
     error: Option<&str>,
 ) -> Markup {
     html! {
@@ -33,7 +34,7 @@ pub fn render(
                             h3 { "Current context" }
                             span.muted { "source: " strong { (summary["source"].as_str().unwrap_or(source)) } }
                         }
-                        (window_form("/", source, since))
+                        (window_form("/", source, since, selected_profile))
                         div.list {
                             div.list-item {
                                 div.kpi-line {
@@ -101,7 +102,7 @@ pub fn render(
                 }
                 div
                     id="running-jobs"
-                    hx-get={ "/jobs/running?source=" (source) }
+                    hx-get={ "/jobs/running?" (query_suffix(source, since, selected_profile)) }
                     hx-trigger={ "load, every " (poll) "s" }
                     hx-swap="innerHTML"
                 { "Loading…" }
@@ -109,11 +110,11 @@ pub fn render(
             section.panel {
                 header.panel-head {
                     h2 { "Top workflows" }
-                    a.muted href="/workflows" { "view all →" }
+                    a.muted href=(profile_href("/workflows", selected_profile)) { "view all →" }
                 }
                 div
                     id="top-workflows"
-                    hx-get={ "/workflows/top?source=" (source) "&top=5" }
+                    hx-get={ "/workflows/top?" (query_suffix(source, since, selected_profile)) "&top=5" }
                     hx-trigger={ "load, every " (poll) "s" }
                     hx-swap="innerHTML"
                 { "Loading…" }
@@ -124,11 +125,11 @@ pub fn render(
                 h2 { "Weekly activity" }
                 span.muted { "run density by day and hour" }
             }
-            div
-                id="overview-weekly"
-                hx-get={ "/overview/weekly?source=" (source) "&since=" (since) }
-                hx-trigger={ "load, every " (poll) "s" }
-                hx-swap="innerHTML"
+                div
+                    id="overview-weekly"
+                    hx-get={ "/overview/weekly?" (query_suffix(source, since, selected_profile)) }
+                    hx-trigger={ "load, every " (poll) "s" }
+                    hx-swap="innerHTML"
             { "Loading…" }
         }
         section.panel {
@@ -136,11 +137,11 @@ pub fn render(
                 h2 { "Attention queue" }
                 span.muted { "recent failed jobs" }
             }
-            div
-                id="overview-errors"
-                hx-get={ "/workflows/errors?source=" (source) "&top=4" }
-                hx-trigger={ "load, every " (poll) "s" }
-                hx-swap="innerHTML"
+                div
+                    id="overview-errors"
+                    hx-get={ "/workflows/errors?" (query_suffix(source, since, selected_profile)) "&top=4" }
+                    hx-trigger={ "load, every " (poll) "s" }
+                    hx-swap="innerHTML"
             { "Loading…" }
         }
     }
@@ -224,10 +225,13 @@ fn health_label(rate: f64) -> &'static str {
     }
 }
 
-fn window_form(action: &str, source: &str, since: &str) -> Markup {
+fn window_form(action: &str, source: &str, since: &str, selected_profile: Option<&str>) -> Markup {
     html! {
         form.control-row method="get" action=(action) {
             input type="hidden" name="source" value=(source);
+            @if let Some(profile) = selected_profile {
+                input type="hidden" name="profile" value=(profile);
+            }
             label.control-group {
                 span.small { "Window" }
                 select name="since" {
@@ -238,6 +242,18 @@ fn window_form(action: &str, source: &str, since: &str) -> Markup {
             }
             button.button-chip type="submit" { "Apply" }
         }
+    }
+}
+
+fn query_suffix(source: &str, since: &str, selected_profile: Option<&str>) -> String {
+    match selected_profile {
+        Some(profile) if !profile.trim().is_empty() => format!(
+            "source={}&since={}&profile={}",
+            esc_attr(source),
+            esc_attr(since),
+            esc_attr(profile),
+        ),
+        _ => format!("source={}&since={}", esc_attr(source), esc_attr(since)),
     }
 }
 

@@ -13,7 +13,7 @@ Completed items are removed here rather than left to rot in the plan.
 - move remaining inline-secret guidance toward environment-variable or native keychain storage instead of YAML.
 - expand `ayx doctor --fix` from local state/bootstrap repair into deeper safe remediation where the action is deterministic and auditable.
 - add profile/workspace export and import flows that keep shareable configuration separate from machine-local secrets.
-- make the future TUI reuse the same profile resolver, doctor checks, and active-profile state instead of inventing a second config model.
+- make the TUI reuse the same profile resolver, doctor checks, and active-profile state for central profiles while keeping explicit file editing confined to onboarding/editor flows instead of inventing a second runtime config model.
 
 ## 2. Command registry
 - keep the machine-readable command catalog aligned with the live `clap` tree.

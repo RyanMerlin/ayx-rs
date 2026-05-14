@@ -55,6 +55,15 @@ pub struct ResolvedProfilePath {
     pub active_workspace: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct RuntimeProfileResolution {
+    pub config_home: String,
+    pub selected_profile: String,
+    pub selection_source: String,
+    pub resolved_profile_path: String,
+    pub active_profile: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub profile_name: String,
@@ -343,6 +352,28 @@ impl Config {
     ) -> Result<Self, ProfileError> {
         let resolved = resolve_profile_or_workspace_path(path)?;
         Self::load_from_resolved_path_with_environment_lenient(&resolved, environment)
+    }
+
+    pub fn load_runtime_profile_with_environment(
+        profile: Option<&str>,
+        environment: Option<&str>,
+    ) -> Result<Self, ProfileError> {
+        let resolution = resolve_runtime_profile(profile)?;
+        Self::load_from_resolved_path_with_environment(
+            Path::new(&resolution.resolved_profile_path),
+            environment,
+        )
+    }
+
+    pub fn load_runtime_profile_with_environment_lenient(
+        profile: Option<&str>,
+        environment: Option<&str>,
+    ) -> Result<Self, ProfileError> {
+        let resolution = resolve_runtime_profile(profile)?;
+        Self::load_from_resolved_path_with_environment_lenient(
+            Path::new(&resolution.resolved_profile_path),
+            environment,
+        )
     }
 
     fn load_from_resolved_path(path: &Path) -> Result<Self, ProfileError> {
@@ -1470,6 +1501,52 @@ pub fn profile_resolution_detail(path: &Path) -> Result<ResolvedProfilePath, Pro
     })
 }
 
+pub fn resolve_runtime_profile(
+    profile: Option<&str>,
+) -> Result<RuntimeProfileResolution, ProfileError> {
+    let config_home = ayx_config_home()?.display().to_string();
+    let state = load_ayx_state()?;
+    let (selected_profile, selection_source) =
+        match profile.map(str::trim).filter(|v| !v.is_empty()) {
+            Some(name) => (normalize_runtime_profile_name(name)?, "cli".to_string()),
+            None => {
+                if let Ok(env_profile) = env::var("AYX_PROFILE") {
+                    let env_profile = env_profile.trim();
+                    if !env_profile.is_empty() {
+                        (
+                            normalize_runtime_profile_name(env_profile)?,
+                            "environment".to_string(),
+                        )
+                    } else if let Some(active) = state.active_profile.clone() {
+                        (active, "state".to_string())
+                    } else {
+                        (
+                            DEFAULT_ACTIVE_PROFILE_NAME.to_string(),
+                            "default".to_string(),
+                        )
+                    }
+                } else if let Some(active) = state.active_profile.clone() {
+                    (active, "state".to_string())
+                } else {
+                    (
+                        DEFAULT_ACTIVE_PROFILE_NAME.to_string(),
+                        "default".to_string(),
+                    )
+                }
+            }
+        };
+    let resolved_profile_path = profile_storage_path(&selected_profile)?
+        .display()
+        .to_string();
+    Ok(RuntimeProfileResolution {
+        config_home,
+        selected_profile,
+        selection_source,
+        resolved_profile_path,
+        active_profile: state.active_profile,
+    })
+}
+
 pub fn list_central_profiles() -> Result<Vec<String>, ProfileError> {
     list_named_yaml_entries(&ayx_profiles_dir()?)
 }
@@ -1537,6 +1614,29 @@ fn resolve_path_internal(path: &Path, allow_workspace: bool) -> Result<PathBuf, 
     }
 
     Ok(path.to_path_buf())
+}
+
+fn normalize_runtime_profile_name(name: &str) -> Result<String, ProfileError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(ProfileError::Invalid(
+            "runtime profile name must not be empty".to_string(),
+        ));
+    }
+    let candidate = Path::new(trimmed);
+    if candidate.is_absolute()
+        || candidate.components().count() > 1
+        || trimmed == DEFAULT_PROFILE_FILE
+        || trimmed == DEFAULT_ENVIRONMENTS_FILE
+        || trimmed == LEGACY_WORKSPACE_FILE
+        || trimmed.ends_with(".yaml")
+        || trimmed.ends_with(".yml")
+    {
+        return Err(ProfileError::Invalid(format!(
+            "runtime profile '{trimmed}' must be a central profile name, not a path or config file"
+        )));
+    }
+    Ok(trimmed.to_string())
 }
 
 fn is_default_profile_request(path: &Path) -> bool {

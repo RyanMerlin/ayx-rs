@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use super::{esc_attr, s_at, status_class};
 
+#[allow(clippy::too_many_arguments)]
 pub fn page(
     source: &str,
     poll: u64,
@@ -13,8 +14,9 @@ pub fn page(
     status: &str,
     owner: &str,
     sort: &str,
+    selected_profile: Option<&str>,
 ) -> Markup {
-    let filters = query_suffix(source, since, status, owner, sort);
+    let filters = query_suffix(source, since, status, owner, sort, selected_profile);
     html! {
         section.hero.jobs-shell data-testid="jobs-command-center" {
             div.hero-grid {
@@ -29,7 +31,7 @@ pub fn page(
                             h3 { "Operator context" }
                             span.muted { "jobs surface" }
                         }
-                        (window_form("/jobs", source, since, status, owner, sort))
+                        (window_form("/jobs", source, since, status, owner, sort, selected_profile))
                         div.list {
                             div.list-item {
                                 div.kpi-line { strong { "Source" } span.small { (source) } }
@@ -187,7 +189,14 @@ pub fn queued_table(data: &Value) -> Markup {
     }
 }
 
-pub fn history_table(data: &Value, source: &str, since: &str, status: &str, owner: &str) -> Markup {
+pub fn history_table(
+    data: &Value,
+    source: &str,
+    since: &str,
+    status: &str,
+    owner: &str,
+    selected_profile: Option<&str>,
+) -> Markup {
     let items = data["items"].as_array().cloned().unwrap_or_default();
     if items.is_empty() {
         return html! { p.empty { "No jobs in window." } };
@@ -195,11 +204,11 @@ pub fn history_table(data: &Value, source: &str, since: &str, status: &str, owne
     html! {
         table.data {
             thead { tr {
-                th { (sort_link("/jobs", "Flow", source, since, status, owner, "flow")) }
+                th { (sort_link("/jobs", "Flow", source, since, status, owner, "flow", selected_profile)) }
                 th { "Status" }
-                th { (sort_link("/jobs", "Duration (ms)", source, since, status, owner, "duration")) }
+                th { (sort_link("/jobs", "Duration (ms)", source, since, status, owner, "duration", selected_profile)) }
                 th { "Owner" }
-                th { (sort_link("/jobs", "Finished", source, since, status, owner, "finished")) }
+                th { (sort_link("/jobs", "Finished", source, since, status, owner, "finished", selected_profile)) }
             }}
             tbody {
                 @for j in &items {
@@ -241,7 +250,12 @@ pub fn owners_table(data: &Value) -> Markup {
     }
 }
 
-pub fn top_table(data: &Value, source: &str, since: &str) -> Markup {
+pub fn top_table(
+    data: &Value,
+    source: &str,
+    since: &str,
+    selected_profile: Option<&str>,
+) -> Markup {
     let items = data["items"].as_array().cloned().unwrap_or_default();
     if items.is_empty() {
         return html! { p.empty { "No data." } };
@@ -250,9 +264,9 @@ pub fn top_table(data: &Value, source: &str, since: &str) -> Markup {
         table.data {
             thead { tr {
                 th { "Flow" }
-                th { (sort_link("/jobs", "Runs", source, since, "all", "", "runs")) }
+                th { (sort_link("/jobs", "Runs", source, since, "all", "", "runs", selected_profile)) }
                 th { "Mean ms" }
-                th { (sort_link("/jobs", "p95 ms", source, since, "all", "", "duration")) }
+                th { (sort_link("/jobs", "p95 ms", source, since, "all", "", "duration", selected_profile)) }
             }}
             tbody {
                 @for j in &items {
@@ -285,10 +299,14 @@ fn window_form(
     status: &str,
     owner: &str,
     sort: &str,
+    selected_profile: Option<&str>,
 ) -> Markup {
     html! {
         form.control-row method="get" action=(action) {
             input type="hidden" name="source" value=(source);
+            @if let Some(profile) = selected_profile {
+                input type="hidden" name="profile" value=(profile);
+            }
             label.control-group {
                 span.small { "Window" }
                 select name="since" {
@@ -330,17 +348,30 @@ fn window_option(value: &str, current: &str) -> Markup {
     }
 }
 
-fn query_suffix(source: &str, since: &str, status: &str, owner: &str, sort: &str) -> String {
-    format!(
+fn query_suffix(
+    source: &str,
+    since: &str,
+    status: &str,
+    owner: &str,
+    sort: &str,
+    selected_profile: Option<&str>,
+) -> String {
+    let mut query = format!(
         "source={}&since={}&status={}&owner={}&sort={}",
         esc_attr(source),
         esc_attr(since),
         esc_attr(status),
         esc_attr(owner),
         esc_attr(sort)
-    )
+    );
+    if let Some(profile) = selected_profile.filter(|profile| !profile.trim().is_empty()) {
+        query.push_str("&profile=");
+        query.push_str(&esc_attr(profile));
+    }
+    query
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sort_link(
     base: &str,
     label: &str,
@@ -349,8 +380,9 @@ fn sort_link(
     status: &str,
     owner: &str,
     sort: &str,
+    selected_profile: Option<&str>,
 ) -> Markup {
     html! {
-        a href={ (base) "?source=" (esc_attr(source)) "&since=" (esc_attr(since)) "&status=" (esc_attr(status)) "&owner=" (esc_attr(owner)) "&sort=" (sort) } { (label) }
+        a href={ (base) "?source=" (esc_attr(source)) "&since=" (esc_attr(since)) "&status=" (esc_attr(status)) "&owner=" (esc_attr(owner)) "&sort=" (sort) @if let Some(profile) = selected_profile.filter(|profile| !profile.trim().is_empty()) { "&profile=" (esc_attr(profile)) } } { (label) }
     }
 }

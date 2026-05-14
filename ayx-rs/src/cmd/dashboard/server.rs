@@ -9,16 +9,18 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use rust_embed::Embed;
-use std::path::PathBuf;
 use tokio::net::TcpListener;
 use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
 
 use super::handlers;
+use ayx_core::profile::RuntimeProfileResolution;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub profile_path: PathBuf,
+    pub available_profiles: Vec<String>,
+    pub selected_profile: Option<String>,
+    pub profile_resolution: Option<RuntimeProfileResolution>,
     pub default_source: String,
     pub poll_secs: u64,
     pub environment: Option<String>,
@@ -116,11 +118,21 @@ pub(crate) async fn static_handler(AxumPath(path): AxumPath<String>) -> Response
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ayx_core::profile::RuntimeProfileResolution;
     use std::time::Duration;
 
     fn test_state() -> AppState {
+        let resolution = RuntimeProfileResolution {
+            config_home: "/tmp/ayx-home".to_owned(),
+            selected_profile: "prod".to_owned(),
+            selection_source: "state".to_owned(),
+            resolved_profile_path: "/tmp/profiles/prod.yaml".to_owned(),
+            active_profile: Some("prod".to_owned()),
+        };
         AppState {
-            profile_path: PathBuf::from("config.yaml"),
+            available_profiles: vec!["default".to_owned(), "prod".to_owned()],
+            selected_profile: Some("prod".to_owned()),
+            profile_resolution: Some(resolution),
             default_source: "one".to_owned(),
             poll_secs: 10,
             environment: None,
@@ -234,6 +246,79 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(workflow_detail.status(), 200);
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn dashboard_preserves_selected_profile_in_navigation() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(test_state());
+
+        let handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let base = format!("http://{addr}");
+
+        let body = client
+            .get(format!("{base}/jobs?profile=prod"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+
+        assert!(body.contains("href=\"/?profile=prod\""));
+        assert!(body.contains("href=\"/jobs?profile=prod\""));
+        assert!(body.contains("href=\"/failures?profile=prod\""));
+        assert!(body.contains("href=\"/workflows?profile=prod\""));
+        assert!(body.contains("href=\"/jobs?profile=default\""));
+        assert!(body.contains("profile-switcher"));
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn dashboard_renders_structured_profile_resolution_errors() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(test_state());
+
+        let handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let base = format!("http://{addr}");
+
+        let body = client
+            .get(format!("{base}/?profile=config.yaml"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+
+        assert!(body.contains("Profile resolution error"));
+        assert!(body.contains("selected_profile"));
+        assert!(body.contains("selection_source"));
+        assert!(body.contains("config.yaml"));
+        assert!(body.contains("must be a central profile name"));
 
         handle.abort();
     }

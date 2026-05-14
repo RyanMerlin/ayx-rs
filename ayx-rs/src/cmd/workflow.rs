@@ -6,7 +6,6 @@
 //! via `ayx_server_api::workflow_version_upload_envelope`.
 
 use std::fs;
-use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use ayx_core::envelope::Envelope;
@@ -24,7 +23,12 @@ use serde_json::json;
 use crate::{load_profile_with_env, WorkflowCommand};
 
 pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> Result<Envelope> {
-    let load = |p: &Path| load_profile_with_env(p, environment);
+    fn load_profile<'a, P>(p: P, environment: Option<&str>) -> Result<ayx_core::profile::Config>
+    where
+        P: Into<crate::ProfileInput<'a>>,
+    {
+        load_profile_with_env(p, environment)
+    }
     match command {
         None => Ok(Envelope::ok(
             "workflow commands available: inspect, unpack, validate, replace, repackage, recurse, scan, convert-cloud, publish, migrate, yxdb",
@@ -196,7 +200,7 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
             credential_id,
             bypass_workflow_version_check,
         }) => {
-            let config = load(&profile)?;
+            let config = load_profile(profile.as_deref(), environment)?;
             // Accept either a pre-built .yxzp or a directory we'll zip in a
             // tempfile. The temp filename includes pid + nanos so concurrent
             // publishes don't collide.

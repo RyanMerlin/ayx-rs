@@ -9,7 +9,7 @@ Checkpoint for the next session. v1 of the local web dashboard shipped behind th
 ## What it does
 
 ```
-ayx dashboard [--profile config.yaml] [--bind 127.0.0.1] [--port 8765]
+ayx dashboard [--profile <name>] [--bind 127.0.0.1] [--port 8765]
               [--source one|server|auto] [--poll 10]
               [--no-open] [--allow-remote]
 ```
@@ -17,6 +17,7 @@ ayx dashboard [--profile config.yaml] [--bind 127.0.0.1] [--port 8765]
 - Binds loopback by default; non-loopback bind requires `--allow-remote` (the dashboard has no auth — Alteryx tokens live in process memory).
 - Auto-opens the browser unless `--no-open`.
 - Profile-load failure at startup is non-fatal: chrome + `/healthz` + static assets render regardless; per-panel handlers surface telemetry errors as in-page cards.
+- The header includes a visible central-profile switcher. `?profile=<name>` remains the request-level profile contract for pages and partials.
 
 ## Routes
 
@@ -35,7 +36,7 @@ ayx dashboard [--profile config.yaml] [--bind 127.0.0.1] [--port 8765]
 | `GET /healthz` | Plain text | `ok` |
 | `GET /static/*` | rust-embed | `htmx.min.js` (50 KB, v2.0.4), `app.css`, `favicon.svg` |
 
-Query params on every panel route mirror CLI flags: `source`, `since`, `top`, `all`, `max_pages`.
+Query params on every panel route mirror CLI flags: `source`, `since`, `top`, `all`, `max_pages`, `profile`.
 
 ## Code map
 
@@ -94,8 +95,8 @@ All green on commit 512d156 + uncommitted dashboard changes.
 ## Manual verification done
 
 - `cargo build -p ayx-rs` clean
-- `ayx dashboard --profile config.yaml --port 8765 --no-open` — server starts, prints listen URL on stderr
-- With the local `config.yaml` (which is missing One `client_id`/`client_secret`) the startup warns but continues; `/healthz` returns `ok`, all pages return 200, telemetry panels show an in-page error card
+- `ayx dashboard --profile prod --port 8765 --no-open` — server starts, prints listen URL on stderr
+- With the active central profile (if it is missing One `client_id`/`client_secret`) the startup warns but continues; `/healthz` returns `ok`, all pages return 200, telemetry panels show an in-page error card
 - Layout chrome (header / tabs / source pill / footer) renders on every page including error states
 - htmx.min.js served with correct content-type
 - Graceful shutdown on Ctrl-C (tokio signal handler)

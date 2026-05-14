@@ -11,8 +11,9 @@ pub fn page(
     environment: Option<&str>,
     since: &str,
     owner: &str,
+    selected_profile: Option<&str>,
 ) -> Markup {
-    let filters = query_suffix(source, since, owner);
+    let filters = query_suffix(source, since, owner, selected_profile);
     html! {
         section.hero.overview-hero data-testid="failures-command-center" {
             div.hero-grid {
@@ -221,11 +222,16 @@ fn window_option(value: &str, current: &str) -> Markup {
     }
 }
 
-fn query_suffix(source: &str, since: &str, owner: &str) -> String {
-    format!(
+fn query_suffix(source: &str, since: &str, owner: &str, selected_profile: Option<&str>) -> String {
+    let mut query = format!(
         "source={}&since={}&owner={}",
         esc_attr(source),
         esc_attr(since),
         esc_attr(owner),
-    )
+    );
+    if let Some(profile) = selected_profile.filter(|profile| !profile.trim().is_empty()) {
+        query.push_str("&profile=");
+        query.push_str(&esc_attr(profile));
+    }
+    query
 }

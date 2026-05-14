@@ -1538,7 +1538,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
             Span::styled("Profiles", theme::accent_bold()),
             Span::raw("    "),
             Span::styled("Enter", theme::accent()),
-            Span::raw(" activate selected profile, workspace, or environment"),
+            Span::raw(" activate selected central profile, workspace, or environment"),
         ]),
         Line::from(vec![
             Span::styled("Inspect", theme::accent_bold()),
@@ -1556,7 +1556,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
             Span::styled("Alteryx Server", theme::accent_bold()),
             Span::raw("       "),
             Span::styled("3", theme::accent()),
-            Span::raw(" edit Alteryx Server config fields, "),
+            Span::raw(" inspect or edit an explicit profile/workspace file, "),
             Span::styled("s", theme::accent()),
             Span::raw(" save"),
         ]),
@@ -1586,7 +1586,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "Workspace-backed targets keep server settings in the workspace file, while One credentials are stored in the active profile and inherited when the workspace loads.",
+            "Runtime selection is central-only. The TUI can inspect and edit explicit profile/workspace files, but those files are editor targets rather than the normal runtime source.",
             theme::muted(),
         )),
     ];
@@ -1607,7 +1607,9 @@ fn render_help(frame: &mut Frame, area: Rect) {
 
 fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
     let help = match app.screen {
-        Screen::Profiles => "Arrows move · Enter activate · Tab cycle panes · i inspect · Esc back",
+        Screen::Profiles => {
+            "Arrows move · Enter activate central profile · Tab cycle panes · i inspect · Esc back"
+        }
         Screen::Config => {
             if app.config_form.editing {
                 "Enter save buffer · Esc cancel · Backspace delete"

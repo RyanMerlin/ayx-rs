@@ -6,7 +6,7 @@
 //! the rules engine in `ayx_server::upgrade`.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{bail, Result};
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
@@ -36,12 +36,17 @@ use crate::{
 
 #[allow(clippy::too_many_lines)]
 pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Result<Envelope> {
-    let load_profile = |p: &Path| load_profile_with_env(p, environment);
+    fn load_profile<'a, P>(p: P, environment: Option<&str>) -> Result<ayx_core::profile::Config>
+    where
+        P: Into<crate::ProfileInput<'a>>,
+    {
+        load_profile_with_env(p, environment)
+    }
     Ok(match command {
             None => Envelope::ok("server commands: api, system-info, runtime-settings, ayx-paths, server-logs, backup-plan, backup"),
             Some(ServerCommand::Api { command }) => match command {
                 ServerApiCommand::Status { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let server = server_profile(&config)?;
                     let api_logging = config.observability.as_ref().and_then(|obs| {
                         obs.api_logging.as_ref().map(|logging| json!({
@@ -67,7 +72,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     )
                 }
                 ServerApiCommand::Diagnose { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let server = server_profile(&config)?;
                     diagnose_api(server, config.observability.as_ref())?
                 }
@@ -77,7 +82,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     url,
                     cache_dir,
                 } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let server = server_profile(&config)?;
                     let cache_name = format!("{}_swagger_v{}.json", config.profile_name, version);
                     import_swagger(server, config.observability.as_ref(), &url, &cache_dir, &cache_name)?
@@ -91,7 +96,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     body,
                     param,
                 } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let server = server_profile(&config)?;
                     let cache_name = format!("{}_swagger_v{}.json", config.profile_name, version);
                     let swagger_path = swagger
@@ -140,14 +145,14 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
             }
             Some(ServerCommand::ServerLogs { command }) => match command {
                 ServerLogsCommand::Discover { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     Envelope::ok_with_data(
                         "log sources discovered",
                         discover_log_inventory(&config),
                     )
                 }
                 ServerLogsCommand::Inventory { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     Envelope::ok_with_data(
                         "log inventory discovered",
                         discover_log_inventory(&config),
@@ -183,7 +188,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     Envelope::ok_with_data("log tail generated", tail)
                 }
                 ServerLogsCommand::Recent { profile, days } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     Envelope::ok_with_data(
                         "recent log candidates discovered",
                         recent_log_candidates(&config, days),
@@ -192,7 +197,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
             },
             Some(ServerCommand::Diagnose { command }) => match command {
                 ServerDiagnoseCommand::Startup { profile, error, log_file } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let mut steps = vec![
                         json!({
                             "step": "collect_log_sources",
@@ -244,18 +249,18 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     Envelope::ok_with_data(
                         "server startup diagnosis generated",
                         json!({
-                            "profile": profile.display().to_string(),
+                            "profile": config.profile_name.clone(),
                             "steps": steps,
                         }),
                     )
                 }
                 ServerDiagnoseCommand::Logs { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let logs = discover_log_inventory(&config);
                     Envelope::ok_with_data(
                         "server log diagnosis generated",
                         json!({
-                            "profile": profile.display().to_string(),
+                            "profile": config.profile_name.clone(),
                             "steps": [
                                 {
                                     "step": "discover_log_sources",
@@ -268,10 +273,10 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     )
                 }
                 ServerDiagnoseCommand::Network { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let paths = ayx_paths();
                     let detail = json!({
-                        "profile": profile.display().to_string(),
+                        "profile": config.profile_name.clone(),
                         "server": config.server.as_ref().map(|s| json!({
                             "webapi_url": s.webapi_url,
                             "verify_tls": s.verify_tls(),
@@ -287,7 +292,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     Envelope::ok_with_data(
                         "server network diagnosis generated",
                         json!({
-                            "profile": profile.display().to_string(),
+                            "profile": config.profile_name.clone(),
                             "steps": [
                                 {
                                     "step": "check_local_paths",
@@ -306,9 +311,9 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     )
                 }
                 ServerDiagnoseCommand::Tls { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let detail = json!({
-                        "profile": profile.display().to_string(),
+                        "profile": config.profile_name.clone(),
                         "server": config.server.as_ref().map(|s| json!({
                             "webapi_url": s.webapi_url,
                             "verify_tls": s.verify_tls(),
@@ -349,7 +354,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     Envelope::ok_with_data("server tls diagnosis generated", detail)
                 }
                 ServerDiagnoseCommand::RuntimeSettings { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let path = config
                         .mongo
                         .embedded
@@ -361,7 +366,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     Envelope::ok_with_data(
                         "server runtime settings diagnosis generated",
                         json!({
-                            "profile": profile.display().to_string(),
+                            "profile": config.profile_name.clone(),
                             "steps": [
                                 {
                                     "step": "load_runtime_settings",
@@ -379,11 +384,11 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
             },
             Some(ServerCommand::Auth { command }) => match command {
                 ServerAuthCommand::Status { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     Envelope::ok_with_data(
                         "server auth status generated",
                         json!({
-                            "profile": profile.display().to_string(),
+                            "profile": config.profile_name.clone(),
                             "status": build_auth_status(&config, None, None, None, None),
                         }),
                     )
@@ -396,7 +401,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                         acs_url,
                         issuer,
                     } => {
-                        let config = load_profile(&profile)?;
+                        let config = load_profile(profile.as_deref(), environment)?;
                         let status = build_auth_status(
                             &config,
                             metadata_url.as_deref(),
@@ -407,7 +412,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                         Envelope::ok_with_data(
                             "server saml diagnosis generated",
                             json!({
-                                "profile": profile.display().to_string(),
+                                "profile": config.profile_name.clone(),
                                 "status": status,
                                 "checks": [
                                     "Confirm the auth type is SAML",
@@ -420,10 +425,10 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                         )
                     }
                     ServerAuthDiagnoseCommand::SamlLogs { profile, days } => {
-                        let config = load_profile(&profile)?;
+                        let config = load_profile(profile.as_deref(), environment)?;
                         let logs = recent_log_candidates(&config, days);
                         let detail = json!({
-                            "profile": profile.display().to_string(),
+                            "profile": config.profile_name.clone(),
                             "log_families": discover_log_inventory(&config),
                             "recent_candidates": logs,
                             "targets": [
@@ -442,10 +447,10 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                         profile,
                         certificate_file,
                     } => {
-                        let config = load_profile(&profile)?;
+                        let config = load_profile(profile.as_deref(), environment)?;
                         let cert_path = certificate_file.as_ref().map(|p| p.display().to_string());
                         let detail = json!({
-                            "profile": profile.display().to_string(),
+                            "profile": config.profile_name.clone(),
                             "server": config.server.as_ref().map(|s| json!({
                                 "webapi_url": s.webapi_url,
                                 "verify_tls": s.verify_tls(),
@@ -465,9 +470,9 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                         user,
                         domain,
                     } => {
-                        let config = load_profile(&profile)?;
+                        let config = load_profile(profile.as_deref(), environment)?;
                         let detail = json!({
-                            "profile": profile.display().to_string(),
+                            "profile": config.profile_name.clone(),
                             "legacy_auth": {
                                 "user": user,
                                 "domain": domain,
@@ -497,7 +502,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                         certificate_file,
                         prompt,
                     } => {
-                        let config = load_profile(&profile)?;
+                        let config = load_profile(profile.as_deref(), environment)?;
                         let status = build_auth_status(
                             &config,
                             metadata_url.as_deref(),
@@ -522,7 +527,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                                     .flatten()
                             });
                         let detail = json!({
-                            "profile": profile.display().to_string(),
+                            "profile": config.profile_name.clone(),
                             "prompt_mode": prompt,
                             "inputs": {
                                 "metadata_url": metadata_url,
@@ -554,7 +559,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
             },
             Some(ServerCommand::Doctor { command }) => match command {
                 ServerDoctorCommand::Startup { profile, error, log_file } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let runtime_path = config
                         .mongo
                         .embedded
@@ -594,7 +599,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     Envelope::ok_with_data(
                         "server startup doctor workflow generated",
                         json!({
-                            "profile": profile.display().to_string(),
+                            "profile": config.profile_name.clone(),
                             "steps": steps,
                             "recommendations": [
                                 "Use server diagnose startup to inspect a specific failure",
@@ -605,11 +610,11 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     )
                 }
                 ServerDoctorCommand::Logs { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     Envelope::ok_with_data(
                         "server log doctor workflow generated",
                         json!({
-                            "profile": profile.display().to_string(),
+                            "profile": config.profile_name.clone(),
                             "steps": [
                                 {
                                     "step": "discover_log_sources",
@@ -641,11 +646,11 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     )
                 }
                 ServerDoctorCommand::Network { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     Envelope::ok_with_data(
                         "server network doctor workflow generated",
                         json!({
-                            "profile": profile.display().to_string(),
+                            "profile": config.profile_name.clone(),
                             "steps": [
                                 {
                                     "step": "resolve_paths",
@@ -684,7 +689,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     )
                 }
                 ServerDoctorCommand::RuntimeSettings { profile } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let path = config
                         .mongo
                         .embedded
@@ -696,7 +701,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     Envelope::ok_with_data(
                         "server runtime settings doctor workflow generated",
                         json!({
-                            "profile": profile.display().to_string(),
+                            "profile": config.profile_name.clone(),
                             "steps": [
                                 {
                                     "step": "read_runtime_settings",
@@ -738,7 +743,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     out,
                     deployment,
                 } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let detail = run_precheck(&config, &target, &out, &deployment)?;
                     Envelope::ok_with_data("upgrade precheck completed", detail)
                 }
@@ -747,7 +752,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     r#type,
                     out,
                 } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let detail = run_backup(&config, &r#type, &out)?;
                     Envelope::ok_with_data("upgrade backup completed", detail)
                 }
@@ -773,7 +778,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                     manifest,
                     out,
                 } => {
-                    let config = load_profile(&profile)?;
+                    let config = load_profile(profile.as_deref(), environment)?;
                     let detail = run_postcheck(&config, &manifest, &out)?;
                     Envelope::ok_with_data("upgrade postcheck completed", detail)
                 }
@@ -792,7 +797,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                 apply,
                 audit_dir,
             }) => {
-                let config = load_profile(&profile)?;
+                let config = load_profile(profile.as_deref(), environment)?;
                 let data = run_server_backup(&config, &backup_dir, apply, &audit_dir)?;
                 Envelope::ok_with_data(
                     if apply {

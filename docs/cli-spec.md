@@ -1,9 +1,9 @@
-# AYX-RS Spec (v0.4.0)
+# AYX-RS Spec (v0.7.0)
 
 ## Global
 - Binary: `ayx`
 - Output modes: `--output text|json`
-- Default profile resolution: active central profile from the ayx config home, with `--profile <path>` for one-off overrides
+- Default profile resolution: active central profile from the ayx config home, with `--profile <name>` for one-off overrides
 - Envelope root fields: `ok`, `message`, `timestamp_utc`, `data`
 
 ## First Run
@@ -14,7 +14,7 @@ The fastest path from zero to useful output is:
 curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash
 ```
 
-Then initialize the central profile store with `ayx onboard`, or point `--profile` at a one-off YAML file, and start with:
+Then initialize the central profile store with `ayx onboard`, or import a legacy YAML file with `ayx profile migrate --profile <path>`, and start with:
 
 ```powershell
 ayx profile current
