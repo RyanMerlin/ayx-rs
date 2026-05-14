@@ -5160,6 +5160,18 @@ pub(crate) fn load_profile_with_env(path: &Path, environment: Option<&str>) -> R
     Ok(Config::load_from_path_with_environment(path, environment)?)
 }
 
+/// Lenient profile loader for One/dashboard paths that should keep working
+/// even when the Server block is present but not fully provisioned.
+pub(crate) fn load_profile_with_env_lenient(
+    path: &Path,
+    environment: Option<&str>,
+) -> Result<Config> {
+    Ok(Config::load_from_path_with_environment_lenient(
+        path,
+        environment,
+    )?)
+}
+
 fn format_envelope(envelope: &Envelope, output: &str) -> Result<String> {
     match output {
         "json" => Ok(serde_json::to_string_pretty(envelope)?),

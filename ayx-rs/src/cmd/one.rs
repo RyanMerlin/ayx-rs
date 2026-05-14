@@ -9,7 +9,7 @@
 //! Each arm is verbatim from the original dispatch, wrapped in
 //! `Ok(match command { ... })` so the function returns `Result<Envelope>`.
 //! The `load_profile` closure replaces the same-named captured closure
-//! in main.rs by delegating to `load_profile_with_env`.
+//! in main.rs by delegating to the shared profile loader.
 
 use std::path::{Path, PathBuf};
 
@@ -27,7 +27,7 @@ use serde_json::json;
 
 use crate::cmd;
 use crate::{
-    load_payload, load_profile_with_env, one_doctor_billing_envelope, one_doctor_discover_envelope,
+    load_payload, one_doctor_billing_envelope, one_doctor_discover_envelope,
     one_doctor_plans_envelope, one_doctor_platform_envelope, one_doctor_scheduling_envelope,
     one_platform_auth_diagnose_envelope, one_platform_auth_status_envelope, ui_command_envelope,
     OneBillingCommand, OneCommand, OneConnectionPermissionCommand, OneConnectionsCommand,
@@ -51,7 +51,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
     // Capture `environment` up-front so `cli.environment` reads through the
     // closure don't conflict with `cli` itself being borrowed by other arms.
     let environment = cli.environment;
-    let load_profile = |p: &Path| load_profile_with_env(p, environment);
+    let load_profile = |p: &Path| crate::load_profile_with_env_lenient(p, environment);
     Ok(match command {
             None => Envelope::ok(
                 "one commands available: platform, plans, scheduling, billing, auto-insights, desktop-exec",

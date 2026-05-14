@@ -14,7 +14,7 @@ use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use clap::{Args, Subcommand};
 
-use crate::load_profile_with_env;
+use crate::load_profile_with_env_lenient;
 
 pub mod aggregate;
 pub mod errors;
@@ -291,7 +291,7 @@ pub fn load_and_pick_source(
     args: &TelemetryArgs,
     environment: Option<&str>,
 ) -> Result<(ayx_core::profile::Config, source::TelemetrySource)> {
-    let config = load_profile_with_env(&args.profile, environment)?;
+    let config = load_profile_with_env_lenient(&args.profile, environment)?;
     let src = source::pick(&config, Some(&args.source))?;
     Ok((config, src))
 }

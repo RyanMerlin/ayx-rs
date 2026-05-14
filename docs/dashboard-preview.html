@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ayx dashboard preview</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --bg2: #11172a;
+      --panel: #151c31;
+      --panel2: #1a2340;
+      --line: #293252;
+      --text: #ecf0f8;
+      --muted: #93a0bd;
+      --accent: #7dd3fc;
+      --good: #86efac;
+      --warn: #fbbf24;
+      --bad: #fb7185;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--text);
+      font-family: var(--sans);
+      background:
+        radial-gradient(circle at top left, rgba(125, 211, 252, 0.12), transparent 28%),
+        radial-gradient(circle at 80% 0%, rgba(251, 191, 36, 0.10), transparent 24%),
+        linear-gradient(180deg, var(--bg), #090d18 100%);
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .shell { max-width: 1440px; margin: 0 auto; padding: 20px; }
+    .topbar {
+      display: flex; justify-content: space-between; align-items: center; gap: 16px;
+      padding: 18px 20px; border: 1px solid var(--line); border-radius: 16px;
+      background: rgba(21, 28, 49, 0.85); backdrop-filter: blur(12px);
+      position: sticky; top: 12px; z-index: 10;
+    }
+    .brand { display: flex; flex-direction: column; gap: 4px; }
+    .brand h1 { margin: 0; font-size: 20px; letter-spacing: 0.02em; }
+    .brand p { margin: 0; color: var(--muted); font-size: 13px; }
+    .nav { display: flex; gap: 10px; flex-wrap: wrap; }
+    .chip {
+      padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px;
+      background: rgba(255,255,255,0.02); color: var(--muted); font-size: 13px;
+    }
+    .chip strong { color: var(--text); }
+    .hero {
+      margin-top: 22px; padding: 24px; border-radius: 24px;
+      background: linear-gradient(135deg, rgba(21, 28, 49, 0.96), rgba(17, 23, 42, 0.96));
+      border: 1px solid var(--line);
+    }
+    .hero-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 20px; }
+    .hero h2 { margin: 0 0 10px; font-size: 34px; line-height: 1.05; }
+    .hero p { margin: 0 0 16px; color: var(--muted); max-width: 70ch; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .metric {
+      padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel);
+    }
+    .metric .value { font-size: 28px; font-weight: 700; font-family: var(--mono); }
+    .metric .label { margin-top: 6px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .stack { display: grid; gap: 14px; }
+    .panel {
+      margin-top: 18px; padding: 18px; border: 1px solid var(--line); border-radius: 18px;
+      background: rgba(21, 28, 49, 0.88);
+    }
+    .panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 14px; }
+    .panel-head h3 { margin: 0; font-size: 16px; }
+    .muted { color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+    th { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; }
+    td.mono { font-family: var(--mono); }
+    td.num { text-align: right; font-family: var(--mono); }
+    .status { padding: 4px 9px; border-radius: 999px; font-size: 12px; font-family: var(--mono); }
+    .running { background: rgba(125, 211, 252, 0.12); color: var(--accent); }
+    .ok { background: rgba(134, 239, 172, 0.12); color: var(--good); }
+    .warn { background: rgba(251, 191, 36, 0.12); color: var(--warn); }
+    .bad { background: rgba(251, 113, 133, 0.12); color: var(--bad); }
+    .grid-2 { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 18px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .list {
+      display: grid; gap: 10px;
+    }
+    .list-item {
+      padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel2);
+    }
+    .kpi-line { display: flex; justify-content: space-between; gap: 10px; }
+    .small { font-size: 12px; color: var(--muted); }
+    .stacked {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .bars { display: grid; gap: 8px; }
+    .bar-row { display: grid; grid-template-columns: 160px 1fr 74px; gap: 12px; align-items: center; }
+    .bar {
+      height: 10px; border-radius: 999px; background: #0f1427; overflow: hidden; border: 1px solid #24304d;
+    }
+    .bar > span { display: block; height: 100%; background: linear-gradient(90deg, #7dd3fc, #a78bfa); }
+    .foot { margin: 20px 0 8px; color: var(--muted); font-size: 12px; text-align: center; }
+    @media (max-width: 1100px) {
+      .hero-grid, .grid-2, .grid-3, .metrics { grid-template-columns: 1fr; }
+      .topbar { flex-direction: column; align-items: flex-start; }
+      .bar-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <h1>ayx dashboard preview</h1>
+        <p>Standalone HTML for design iteration. No CLI, no telemetry, no routes.</p>
+      </div>
+      <nav class="nav">
+        <span class="chip"><strong>Overview</strong></span>
+        <span class="chip">Jobs</span>
+        <span class="chip">Workflows</span>
+        <span class="chip">Errors</span>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <h2>Operational clarity without the clutter.</h2>
+          <p>
+            This preview is meant for fast visual iteration. It is intentionally static so you can
+            adjust typography, spacing, and hierarchy in a browser before wiring any live data.
+          </p>
+          <div class="metrics">
+            <div class="metric"><div class="value">6</div><div class="label">running jobs</div></div>
+            <div class="metric"><div class="value">184</div><div class="label">jobs today</div></div>
+            <div class="metric"><div class="value">28</div><div class="label">workflows</div></div>
+            <div class="metric"><div class="value">9</div><div class="label">recent errors</div></div>
+          </div>
+        </div>
+        <div class="stack">
+          <div class="panel" style="margin-top:0">
+            <div class="panel-head">
+              <h3>Current context</h3>
+              <span class="muted">source: auto</span>
+            </div>
+            <div class="list">
+              <div class="list-item">
+                <div class="kpi-line"><strong>Environment</strong><span class="small">production</span></div>
+                <div class="small">Default source resolves from the active profile.</div>
+              </div>
+              <div class="list-item">
+                <div class="kpi-line"><strong>Refresh</strong><span class="small">10s</span></div>
+                <div class="small">Panel polling interval shown here for visual balance.</div>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Health snapshot</h3>
+              <span class="status ok">healthy</span>
+            </div>
+            <div class="stacked">
+              <div class="kpi-line"><span class="small">API availability</span><strong>99.9%</strong></div>
+              <div class="kpi-line"><span class="small">Median job runtime</span><strong>14.8s</strong></div>
+              <div class="kpi-line"><span class="small">Failures last 24h</span><strong>3</strong></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>Running jobs</h3>
+        <span class="muted">live table shape, static data</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Flow</th>
+            <th>Status</th>
+            <th>Owner</th>
+            <th>Started</th>
+            <th>Cluster</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Invoice Sync</td><td><span class="status running">running</span></td><td>maria@acme.io</td><td class="mono">09:04</td><td>west</td></tr>
+          <tr><td>ERP Export</td><td><span class="status warn">queued</span></td><td>daniel@acme.io</td><td class="mono">09:01</td><td>east</td></tr>
+          <tr><td>Daily Reconcile</td><td><span class="status ok">succeeded</span></td><td>sasha@acme.io</td><td class="mono">08:42</td><td>west</td></tr>
+          <tr><td>Customer Refresh</td><td><span class="status bad">failed</span></td><td>nina@acme.io</td><td class="mono">08:11</td><td>east</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <div class="grid-2">
+      <section class="panel">
+        <div class="panel-head">
+          <h3>Top workflows</h3>
+          <span class="muted">by run count</span>
+        </div>
+        <div class="bars">
+          <div class="bar-row"><div>Invoice Sync</div><div class="bar"><span style="width:100%"></span></div><div class="num">42</div></div>
+          <div class="bar-row"><div>Compliance Load</div><div class="bar"><span style="width:74%"></span></div><div class="num">31</div></div>
+          <div class="bar-row"><div>ERP Export</div><div class="bar"><span style="width:57%"></span></div><div class="num">24</div></div>
+          <div class="bar-row"><div>Marketing Leads</div><div class="bar"><span style="width:50%"></span></div><div class="num">21</div></div>
+          <div class="bar-row"><div>Risk Feed</div><div class="bar"><span style="width:45%"></span></div><div class="num">19</div></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h3>Recent errors</h3>
+          <span class="muted">attention queue</span>
+        </div>
+        <div class="list">
+          <div class="list-item">
+            <div class="kpi-line"><strong>Invoice Sync</strong><span class="status bad">timeout</span></div>
+            <div class="small">Timeout waiting for upstream file share.</div>
+          </div>
+          <div class="list-item">
+            <div class="kpi-line"><strong>ERP Export</strong><span class="status warn">429</span></div>
+            <div class="small">HTTP 429 from downstream destination.</div>
+          </div>
+          <div class="list-item">
+            <div class="kpi-line"><strong>Compliance Load</strong><span class="status bad">schema</span></div>
+            <div class="small">Schema mismatch in column <span class="mono">region_code</span>.</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>Workflow detail</h3>
+        <span class="muted">drilldown layout candidate</span>
+      </div>
+      <div class="grid-3">
+        <div class="metric"><div class="value">42</div><div class="label">runs</div></div>
+        <div class="metric"><div class="value">2</div><div class="label">failures</div></div>
+        <div class="metric"><div class="value">14.8k</div><div class="label">avg ms</div></div>
+      </div>
+      <table style="margin-top: 14px;">
+        <thead>
+          <tr>
+            <th>Job id</th>
+            <th>Status</th>
+            <th>Owner</th>
+            <th>Started</th>
+            <th>Cluster</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="mono">J-10482</td><td>running</td><td>maria@acme.io</td><td class="mono">09:04</td><td>west</td></tr>
+          <tr><td class="mono">J-10477</td><td>succeeded</td><td>maria@acme.io</td><td class="mono">08:42</td><td>west</td></tr>
+          <tr><td class="mono">J-10469</td><td>failed</td><td>maria@acme.io</td><td class="mono">08:01</td><td>west</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <div class="foot">
+      Open this file directly in a browser. Iterate here first, then translate the winning layout back into the dashboard views.
+    </div>
+  </div>
+</body>
+</html>
