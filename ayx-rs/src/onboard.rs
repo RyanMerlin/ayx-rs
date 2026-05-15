@@ -120,144 +120,147 @@ pub fn run_onboarding(
         config.server = Some(server);
     }
 
-    let backend = prompt_backend(config.mongo.mode.clone())?;
-    match backend {
-        BackendChoice::Embedded => {
-            let mut embedded = config
-                .mongo
-                .embedded
-                .take()
-                .unwrap_or_else(default_embedded);
-            let designer_install = prompt_yes_no("Designer user install", false, false)?;
-            let runtime_settings_input = prompt_text(
-                "RuntimeSettings.xml path",
-                embedded.runtime_settings_path.as_deref(),
-                Some(DEFAULT_RUNTIME_SETTINGS_PATH),
-                false,
-            )?;
-            let runtime_settings_path = if runtime_settings_input.trim().is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(runtime_settings_input))
-            };
-            if let Some(runtime_settings_path) = runtime_settings_path.as_ref() {
-                if runtime_settings_path.exists() {
-                    let summary = runtime_settings_summary(runtime_settings_path)?;
-                    println!("Detected runtime settings:");
-                    println!("{}", serde_yaml::to_string(&summary)?);
-                }
-                embedded.runtime_settings_path = Some(runtime_settings_path.display().to_string());
-            } else {
-                embedded.runtime_settings_path = None;
-            }
-            let detected_service_path =
-                detect_alteryx_service_path(runtime_settings_path.as_deref(), designer_install);
-            if let Some(path) = &detected_service_path {
-                println!("Detected AlteryxService.exe: {}", path.display());
-            }
-            embedded.alteryx_service_path = prompt_optional_path(
-                "AlteryxService.exe path",
-                embedded
-                    .alteryx_service_path
-                    .as_deref()
-                    .map(Path::new)
-                    .or(detected_service_path.as_deref()),
-            )?;
-            embedded.restore_target_path = prompt_optional_path(
-                "Embedded Mongo restore target path",
-                embedded.restore_target_path.as_deref().map(Path::new),
-            )?;
-            config.mongo = MongoProfile {
-                mode: MongoMode::Embedded,
-                databases: config.mongo.databases,
-                embedded: Some(embedded),
-                managed: None,
-            };
-        }
-        BackendChoice::ManagedMongo => {
-            let mut managed = config
-                .mongo
-                .managed
-                .take()
-                .unwrap_or_else(default_managed_mongo);
-            let use_url = prompt_yes_no(
-                "Use a MongoDB URL connection string",
-                managed.url.is_some(),
-                false,
-            )?;
-            if use_url {
-                managed.url = Some(prompt_text(
-                    "MongoDB URL",
-                    managed.url.as_deref(),
-                    None,
-                    true,
-                )?);
-                managed.host = None;
-            } else {
-                managed.url = None;
-                managed.host = Some(prompt_text(
-                    "Mongo host",
-                    managed.host.as_deref(),
-                    None,
-                    true,
-                )?);
-                managed.port = prompt_u16("Mongo port", managed.port, 27017)?;
-                managed.auth_database =
-                    prompt_optional_text("Mongo auth database", managed.auth_database.as_deref())?;
-            }
-            managed.username = prompt_optional_text("Mongo username", managed.username.as_deref())?;
-            managed.password = Some(prompt_secret(
-                "Mongo password",
-                managed.password.as_deref().unwrap_or(""),
-                "stored",
-                "AYX_MONGO_MANAGED_PASSWORD",
-            )?);
-            managed.tls.enabled = prompt_yes_no("Enable TLS", managed.tls.enabled, true)?;
-            if managed.tls.enabled {
-                managed.tls.ca_path = prompt_optional_path(
-                    "Mongo TLS CA path",
-                    managed.tls.ca_path.as_deref().map(Path::new),
-                )?;
-                managed.tls.cert_path = prompt_optional_path(
-                    "Mongo TLS cert path",
-                    managed.tls.cert_path.as_deref().map(Path::new),
-                )?;
-                managed.tls.key_path = prompt_optional_path(
-                    "Mongo TLS key path",
-                    managed.tls.key_path.as_deref().map(Path::new),
-                )?;
-                managed.tls.allow_invalid_hostnames = Some(prompt_yes_no(
-                    "Allow invalid Mongo TLS hostnames",
-                    managed.tls.allow_invalid_hostnames.unwrap_or(false),
+    if configure_server {
+        let backend = prompt_backend(config.mongo.mode.clone())?;
+        match backend {
+            BackendChoice::Embedded => {
+                let mut embedded = config
+                    .mongo
+                    .embedded
+                    .take()
+                    .unwrap_or_else(default_embedded);
+                let runtime_settings_input = prompt_text(
+                    "RuntimeSettings.xml path",
+                    embedded.runtime_settings_path.as_deref(),
+                    Some(DEFAULT_RUNTIME_SETTINGS_PATH),
                     false,
-                )?);
+                )?;
+                let runtime_settings_path = if runtime_settings_input.trim().is_empty() {
+                    None
+                } else {
+                    Some(PathBuf::from(runtime_settings_input))
+                };
+                if let Some(runtime_settings_path) = runtime_settings_path.as_ref() {
+                    if runtime_settings_path.exists() {
+                        let summary = runtime_settings_summary(runtime_settings_path)?;
+                        println!("Detected runtime settings:");
+                        println!("{}", serde_yaml::to_string(&summary)?);
+                    }
+                    embedded.runtime_settings_path =
+                        Some(runtime_settings_path.display().to_string());
+                } else {
+                    embedded.runtime_settings_path = None;
+                }
+                let detected_service_path =
+                    detect_alteryx_service_path(runtime_settings_path.as_deref());
+                if let Some(path) = &detected_service_path {
+                    println!("Detected AlteryxService.exe: {}", path.display());
+                }
+                embedded.alteryx_service_path = prompt_optional_path(
+                    "AlteryxService.exe path",
+                    embedded
+                        .alteryx_service_path
+                        .as_deref()
+                        .map(Path::new)
+                        .or(detected_service_path.as_deref()),
+                )?;
+                // Restore target path is resolved at restore time from RuntimeSettings.xml;
+                // not prompted at onboarding. Existing values are preserved.
+                config.mongo = MongoProfile {
+                    mode: MongoMode::Embedded,
+                    databases: config.mongo.databases,
+                    embedded: Some(embedded),
+                    managed: None,
+                };
             }
-            config.mongo = MongoProfile {
-                mode: MongoMode::Managed,
-                databases: config.mongo.databases,
-                embedded: None,
-                managed: Some(managed),
-            };
-        }
-        BackendChoice::SqlServer => {
-            let mut sqlserver = config.sqlserver.take().unwrap_or_else(default_sqlserver);
-            let controller = prompt_sql_connection(
-                "Controller",
-                sqlserver.controller.take(),
-                &mut secret_refs,
-                "AYX_SQL_CONTROLLER_PASSWORD",
-                true,
-            )?;
-            let server_ui = prompt_sql_connection(
-                "Server UI",
-                sqlserver.server_ui.take(),
-                &mut secret_refs,
-                "AYX_SQL_SERVER_UI_PASSWORD",
-                false,
-            )?;
-            sqlserver.controller = Some(controller);
-            sqlserver.server_ui = Some(server_ui);
-            config.sqlserver = Some(sqlserver);
+            BackendChoice::ManagedMongo => {
+                let mut managed = config
+                    .mongo
+                    .managed
+                    .take()
+                    .unwrap_or_else(default_managed_mongo);
+                let use_url = prompt_yes_no(
+                    "Use a MongoDB URL connection string",
+                    managed.url.is_some(),
+                    false,
+                )?;
+                if use_url {
+                    managed.url = Some(prompt_text(
+                        "MongoDB URL",
+                        managed.url.as_deref(),
+                        None,
+                        true,
+                    )?);
+                    managed.host = None;
+                } else {
+                    managed.url = None;
+                    managed.host = Some(prompt_text(
+                        "Mongo host",
+                        managed.host.as_deref(),
+                        None,
+                        true,
+                    )?);
+                    managed.port = prompt_u16("Mongo port", managed.port, 27017)?;
+                    managed.auth_database = prompt_optional_text(
+                        "Mongo auth database",
+                        managed.auth_database.as_deref(),
+                    )?;
+                }
+                managed.username =
+                    prompt_optional_text("Mongo username", managed.username.as_deref())?;
+                managed.password = Some(prompt_secret(
+                    "Mongo password",
+                    managed.password.as_deref().unwrap_or(""),
+                    "stored",
+                    "AYX_MONGO_MANAGED_PASSWORD",
+                )?);
+                managed.tls.enabled = prompt_yes_no("Enable TLS", managed.tls.enabled, true)?;
+                if managed.tls.enabled {
+                    managed.tls.ca_path = prompt_optional_path(
+                        "Mongo TLS CA path",
+                        managed.tls.ca_path.as_deref().map(Path::new),
+                    )?;
+                    managed.tls.cert_path = prompt_optional_path(
+                        "Mongo TLS cert path",
+                        managed.tls.cert_path.as_deref().map(Path::new),
+                    )?;
+                    managed.tls.key_path = prompt_optional_path(
+                        "Mongo TLS key path",
+                        managed.tls.key_path.as_deref().map(Path::new),
+                    )?;
+                    managed.tls.allow_invalid_hostnames = Some(prompt_yes_no(
+                        "Allow invalid Mongo TLS hostnames",
+                        managed.tls.allow_invalid_hostnames.unwrap_or(false),
+                        false,
+                    )?);
+                }
+                config.mongo = MongoProfile {
+                    mode: MongoMode::Managed,
+                    databases: config.mongo.databases,
+                    embedded: None,
+                    managed: Some(managed),
+                };
+            }
+            BackendChoice::SqlServer => {
+                let mut sqlserver = config.sqlserver.take().unwrap_or_else(default_sqlserver);
+                let controller = prompt_sql_connection(
+                    "Controller",
+                    sqlserver.controller.take(),
+                    &mut secret_refs,
+                    "AYX_SQL_CONTROLLER_PASSWORD",
+                    true,
+                )?;
+                let server_ui = prompt_sql_connection(
+                    "Server UI",
+                    sqlserver.server_ui.take(),
+                    &mut secret_refs,
+                    "AYX_SQL_SERVER_UI_PASSWORD",
+                    false,
+                )?;
+                sqlserver.controller = Some(controller);
+                sqlserver.server_ui = Some(server_ui);
+                config.sqlserver = Some(sqlserver);
+            }
         }
     }
 
@@ -1044,10 +1047,7 @@ fn collect_onboarding_warnings(config: &Config) -> Vec<String> {
     warnings
 }
 
-fn detect_alteryx_service_path(
-    runtime_settings_path: Option<&Path>,
-    designer_install: bool,
-) -> Option<PathBuf> {
+fn detect_alteryx_service_path(runtime_settings_path: Option<&Path>) -> Option<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(runtime_settings_path) = runtime_settings_path {
         if let Some(root) = runtime_settings_path.parent() {
@@ -1056,12 +1056,10 @@ fn detect_alteryx_service_path(
         }
     }
 
-    if designer_install {
-        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-            let base = PathBuf::from(local_app_data);
-            candidates.push(base.join("Alteryx").join("bin").join("AlteryxService.exe"));
-            candidates.push(base.join("Alteryx").join("AlteryxService.exe"));
-        }
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        let base = PathBuf::from(local_app_data);
+        candidates.push(base.join("Alteryx").join("bin").join("AlteryxService.exe"));
+        candidates.push(base.join("Alteryx").join("AlteryxService.exe"));
     }
 
     candidates.push(PathBuf::from(
