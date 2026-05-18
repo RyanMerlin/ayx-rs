@@ -261,7 +261,7 @@ jobs:
             release/ayx-aarch64-apple-darwin.tar.gz
             release/ayx-sbom.tar.gz
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           repository: RyanMerlin/ayx-rs
           token: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
