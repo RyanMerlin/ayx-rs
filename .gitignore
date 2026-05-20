@@ -1,6 +1,5 @@
 target/
 **/target/
-Cargo.lock
 .cargo/
 .idea/
 .vscode/
@@ -10,5 +9,4 @@ Cargo.lock
 *.log
 *.tmp
 .temp/
-
 .codex
