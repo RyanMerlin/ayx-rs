@@ -227,7 +227,7 @@ jobs:
       # transparency log using the workflow's OIDC identity — no keys to
       # rotate, no certs to manage. Verifiers run:
       #   cosign verify-blob \
-      #     --certificate-identity-regexp '^https://github.com/RyanMerlin/ayx-rs/' \
+      #     --certificate-identity-regexp '^https://github.com/.+/ayx-rs/' \
       #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
       #     --bundle release/<file>.sigstore release/<file>
       - name: Install cosign
@@ -246,7 +246,7 @@ jobs:
           done
           ls -la *.sigstore
       # GitHub-native build provenance (SLSA L3). Independent of cosign.
-      # Verifiable with: gh attestation verify <file> --repo RyanMerlin/ayx-rs
+      # Verifiable with: gh attestation verify <file> --repo <owner>/ayx-rs
       # Non-fatal: this feature requires a public repo (or paid plan) and is
       # otherwise a clean failure; the rest of the release pipeline produces
       # the same verifiable provenance via the sigstore .sigstore bundles.
@@ -263,8 +263,6 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3
         with:
-          repository: RyanMerlin/ayx-rs
-          token: ${{ secrets.PUBLIC_RELEASE_TOKEN }}
           files: |
             release/ayx-x86_64-pc-windows-msvc.zip
             release/ayx-x86_64-pc-windows-msvc.zip.sigstore

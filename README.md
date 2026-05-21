@@ -11,6 +11,9 @@ It is designed to operate across the Alteryx surface and enable sophisticated op
 
 ## Quick start
 
+`RyanMerlin/ayx-rs` is the canonical public home for source, releases, and self-update.
+If you mirror this repository elsewhere, treat those copies as non-canonical.
+
 1. Install the binary with a one-liner:
 
 ```bash
@@ -143,6 +146,7 @@ Embedded Mongo discovery looks for `RuntimeSettings.xml` in the standard Alteryx
 ## Release and install
 
 Releases are built for Windows, Linux, and macOS from GitHub Actions.
+The public release channel is this repository's GitHub Releases page.
 
 Release archives:
 - Windows: `ayx-x86_64-pc-windows-msvc.zip`
@@ -153,6 +157,8 @@ Release archives:
 Install scripts:
 - `scripts/install.ps1`
 - `scripts/install.sh`
+
+Repo governance and pre-launch checks live in `docs/public-release-checklist.md`.
 
 The installers prefer dedicated bin directories such as `~/.local/bin` so
 they do not get shadowed by tool-managed PATH entries like `mise` installs.

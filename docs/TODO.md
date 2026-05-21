@@ -5,7 +5,7 @@ This is the working plan for evolving AYX-RS into a production-grade, agent-frie
 Completed items are removed here rather than left to rot in the plan.
 
 ## 1. Public release hygiene
-- finish the `ayx-rs` public release cutover and remove the last old release/install references.
+- finish the `ayx-rs` public release cutover and keep GitHub `RyanMerlin/ayx-rs` as the only public source of truth.
 - keep public fixtures and generated artifacts sanitized so they do not leak real environment state.
 - document the release workflow for building, packaging, and publishing the public binary from this repo.
 

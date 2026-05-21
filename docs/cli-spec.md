@@ -1,4 +1,4 @@
-# AYX-RS Spec (v0.7.0)
+# AYX-RS Spec (v0.8.0)
 
 ## Global
 - Binary: `ayx`
@@ -7,6 +7,9 @@
 - Envelope root fields: `ok`, `message`, `timestamp_utc`, `data`
 
 ## First Run
+
+Public source of truth: `RyanMerlin/ayx-rs` on GitHub.
+Any mirrors are secondary copies and should not replace the GitHub release channel in operator guidance.
 
 The fastest path from zero to useful output is:
 
@@ -111,7 +114,7 @@ upgrade:
 ## Update Command
 - `ayx update [--repo-owner <owner>] [--repo-name <repo>] [--bin-name <name>] [--target-version <tag>] [--skip-confirm]`
 
-`ayx update` checks the latest GitHub release (defaulting to `RyanMerlin/ayx-rs`) and, after prompting unless `--skip-confirm` is used, downloads and replaces the running binary with the release asset named for the current target triple. Use `--target-version` to install a specific tag instead of the latest release, and `--repo-owner/--repo-name` if you host releases in a different repo.
+`ayx update` checks the latest GitHub release (defaulting to `RyanMerlin/ayx-rs`) and, after prompting unless `--skip-confirm` is used, downloads and replaces the running binary with the release asset named for the current target triple. Use `--target-version` to install a specific tag instead of the latest release, and `--repo-owner/--repo-name` only when you intentionally host releases in a different repository.
 - `ayx server api workflow-detail --profile <path> --workflow-id <id>`
 - `ayx server api workflow-jobs --profile <path> --workflow-id <id>`
 - `ayx server api schedules --profile <path> [--view Default|Full]`

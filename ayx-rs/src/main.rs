@@ -2278,7 +2278,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         prerequisites: &["central runtime profile", "server_api"],
         notes: &[
             "Use this before platform, plans, auto-insights, or desktop-exec workflows.",
-            "Managed IAM lives in walter/docs/one/api/managed-iam-v1.yaml.",
+            "Managed IAM is wired from the documented One API surface.",
         ],
     },
     CommandSpec {
@@ -2700,7 +2700,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         prerequisites: &["central runtime profile", "server_api"],
         notes: &[
             "Reserved for plan lifecycle workflows.",
-            "Managed Plans lives in walter/docs/one/api/managed-plans-v1.yaml.",
+            "Managed Plans is wired from the documented One API surface.",
         ],
     },
     CommandSpec {
