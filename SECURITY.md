@@ -59,3 +59,10 @@ security issue and report it.
   envelope before executing.
 - Keep `audits/` on a host-local volume with 0o700 perms; treat audit
   artifacts as sensitive (they may contain workspace ids and request bodies).
+- Treat `profiles/`, `workspaces/`, `state.yaml`, and observability JSONL
+  logs as sensitive local artifacts; they are written with restrictive
+  permissions on supported platforms, but Windows ACL review remains an
+  operator responsibility.
+- If you expose `ayx dashboard` beyond loopback, require dashboard auth
+  (`AYX_DASHBOARD_PASSWORD` or `--auth-password`) and keep it on a trusted
+  network only.

@@ -1,4 +1,4 @@
-# AYX-RS Spec (v0.8.0)
+# AYX-RS Spec (v0.9.0)
 
 ## Global
 - Binary: `ayx`
@@ -16,6 +16,10 @@ The fastest path from zero to useful output is:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash
 ```
+
+The installer verifies `SHA256SUMS` by default. Set `AYX_VERIFY_SIGSTORE=1`
+to additionally verify the published sigstore bundle when `cosign` is
+available on PATH.
 
 Then initialize the central profile store with `ayx onboard`, or import a legacy YAML file with `ayx profile migrate --profile <path>`, and start with:
 

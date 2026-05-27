@@ -32,6 +32,7 @@ tower-http = { version = "0.6", features = ["trace", "compression-gzip"] }
 maud = "0.26"
 rust-embed = "8"
 mime_guess = "2"
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile.workspace = true

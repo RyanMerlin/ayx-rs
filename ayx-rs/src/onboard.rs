@@ -15,6 +15,7 @@ use ayx_core::profile::{
     SqlServerConnectionProfile, SqlServerProfile, TlsConfig, WorkspaceConfig,
 };
 use ayx_core::secrets::{keyring_account, store_secret_with_fallback};
+use ayx_core::sensitive::write_sensitive_file;
 use ayx_server::util::runtime_settings_summary;
 
 pub fn run_onboarding(
@@ -327,13 +328,8 @@ pub fn write_workspace_template(
 }
 
 pub(crate) fn write_workspace_config(path: &Path, workspace: &WorkspaceConfig) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(
-        path,
-        serde_yaml::to_string(&canonical_workspace_value(workspace)?)?,
-    )?;
+    let body = serde_yaml::to_string(&canonical_workspace_value(workspace)?)?;
+    write_sensitive_file(path, body.as_bytes())?;
     Ok(())
 }
 
@@ -772,25 +768,8 @@ pub(crate) fn write_config_with_policy(
 /// Write a file with 0o600 permissions on Unix. On other platforms falls back
 /// to plain write. Existing files have their permissions tightened after write.
 pub(crate) fn write_restricted(path: &Path, contents: &[u8]) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut f = fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)?;
-        std::io::Write::write_all(&mut f, contents)?;
-        // Re-apply permissions in case the file already existed with looser bits.
-        fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        fs::write(path, contents)?;
-        Ok(())
-    }
+    write_sensitive_file(path, contents)?;
+    Ok(())
 }
 
 pub(crate) fn summarize_config(config: &Config) -> Value {

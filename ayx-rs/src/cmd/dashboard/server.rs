@@ -3,11 +3,13 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::Path as AxumPath;
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::extract::{Path as AxumPath, State};
+use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
+use axum::middleware::{from_fn_with_state, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
+use base64::Engine as _;
 use rust_embed::Embed;
 use tokio::net::TcpListener;
 use tower_http::compression::CompressionLayer;
@@ -24,6 +26,8 @@ pub struct AppState {
     pub default_source: String,
     pub poll_secs: u64,
     pub environment: Option<String>,
+    pub remote_mode: bool,
+    pub auth_password: Option<String>,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -69,6 +73,11 @@ pub fn router(state: AppState) -> Router {
         .route("/workflows/:id", get(handlers::workflows::drilldown))
         .route("/healthz", get(healthz))
         .route("/static/*path", get(static_handler))
+        .layer(from_fn_with_state(shared.clone(), auth_middleware))
+        .layer(from_fn_with_state(
+            shared.clone(),
+            security_headers_middleware,
+        ))
         .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(shared)
@@ -115,6 +124,83 @@ pub(crate) async fn static_handler(AxumPath(path): AxumPath<String>) -> Response
     static_handler_inner(path).await
 }
 
+async fn security_headers_middleware(
+    State(state): State<SharedState>,
+    request: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store, private, max-age=0"),
+    );
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+        ),
+    );
+    if state.remote_mode {
+        headers.insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
+    }
+    response
+}
+
+async fn auth_middleware(
+    State(state): State<SharedState>,
+    request: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+    if path == "/healthz" || path.starts_with("/static/") {
+        return next.run(request).await;
+    }
+    if let Some(expected_password) = state.auth_password.as_deref() {
+        if !authorization_is_valid(request.headers(), expected_password) {
+            let mut response =
+                (StatusCode::UNAUTHORIZED, "authentication required").into_response();
+            response.headers_mut().insert(
+                header::WWW_AUTHENTICATE,
+                HeaderValue::from_static(r#"Basic realm="ayx dashboard""#),
+            );
+            return response;
+        }
+    }
+    next.run(request).await
+}
+
+fn authorization_is_valid(headers: &HeaderMap, expected_password: &str) -> bool {
+    let Some(value) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+    else {
+        return false;
+    };
+    let Some(encoded) = value.strip_prefix("Basic ") else {
+        return false;
+    };
+    let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
+        return false;
+    };
+    let Ok(credentials) = String::from_utf8(decoded) else {
+        return false;
+    };
+    let Some((_username, password)) = credentials.split_once(':') else {
+        return false;
+    };
+    password == expected_password
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,6 +222,8 @@ mod tests {
             default_source: "one".to_owned(),
             poll_secs: 10,
             environment: None,
+            remote_mode: false,
+            auth_password: None,
         }
     }
 
@@ -174,8 +262,19 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(htmx.status(), 200);
+        let csp = htmx
+            .headers()
+            .get("content-security-policy")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
         let body = htmx.text().await.unwrap();
         assert!(body.contains("htmx"), "htmx body should mention htmx");
+        assert_eq!(
+            csp.as_deref(),
+            Some(
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+            )
+        );
 
         let css = client
             .get(format!("{base}/static/app.css"))
@@ -190,6 +289,48 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(missing.status(), 404);
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn router_requires_basic_auth_when_password_configured() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut state = test_state();
+        state.auth_password = Some("secret-pass".to_owned());
+        state.remote_mode = true;
+        let app = router(state);
+
+        let handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let base = format!("http://{addr}");
+
+        let unauthorized = client.get(format!("{base}/jobs")).send().await.unwrap();
+        assert_eq!(unauthorized.status(), 401);
+        assert_eq!(
+            unauthorized
+                .headers()
+                .get("www-authenticate")
+                .and_then(|v| v.to_str().ok()),
+            Some(r#"Basic realm="ayx dashboard""#)
+        );
+
+        let authorized = client
+            .get(format!("{base}/jobs"))
+            .basic_auth("ayx", Some("secret-pass"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(authorized.status(), 200);
 
         handle.abort();
     }

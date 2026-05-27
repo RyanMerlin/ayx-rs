@@ -1,5 +1,4 @@
 use std::error::Error as StdError;
-use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -7,6 +6,7 @@ use serde_json::{json, Value};
 use thiserror::Error;
 
 use crate::profile::ObservabilityProfile;
+use crate::sensitive::append_sensitive_file;
 
 #[derive(Debug, Error)]
 pub enum ObservabilityError {
@@ -72,9 +72,14 @@ pub fn record_api_event(
         .unwrap_or("logs/api-events.jsonl");
     let log_path = Path::new(path);
     if let Some(parent) = log_path.parent() {
-        fs::create_dir_all(parent).map_err(|source| ObservabilityError::CreateDir {
-            path: parent.display().to_string(),
-            source,
+        crate::sensitive::ensure_sensitive_dir(parent).map_err(|err| match err {
+            crate::sensitive::SensitiveIoError::CreateDir { path, source } => {
+                ObservabilityError::CreateDir { path, source }
+            }
+            crate::sensitive::SensitiveIoError::Write { path, source }
+            | crate::sensitive::SensitiveIoError::Append { path, source } => {
+                ObservabilityError::Open { path, source }
+            }
         })?;
     }
 
@@ -102,21 +107,17 @@ pub fn record_api_event(
     });
 
     let content = serde_json::to_string(&payload)? + "\n";
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)
-        .map_err(|source| ObservabilityError::Open {
-            path: log_path.display().to_string(),
-            source,
-        })?;
-    use std::io::Write;
-    let mut file = file;
-    file.write_all(content.as_bytes())
-        .map_err(|source| ObservabilityError::Write {
-            path: log_path.display().to_string(),
-            source,
-        })?;
+    append_sensitive_file(log_path, content.as_bytes()).map_err(|err| match err {
+        crate::sensitive::SensitiveIoError::CreateDir { path, source } => {
+            ObservabilityError::CreateDir { path, source }
+        }
+        crate::sensitive::SensitiveIoError::Write { path, source } => {
+            ObservabilityError::Open { path, source }
+        }
+        crate::sensitive::SensitiveIoError::Append { path, source } => {
+            ObservabilityError::Write { path, source }
+        }
+    })?;
     Ok(Some(log_path.to_path_buf()))
 }
 

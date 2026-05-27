@@ -21,6 +21,23 @@ pub use cloud_convert::{
     convert_desktop_to_cloud, CloudConversionOptions, CloudConversionReport, CloudConversionWarning,
 };
 
+const DEFAULT_MAX_WORKFLOW_XML_BYTES: usize = 32 * 1024 * 1024;
+
+#[derive(Debug, Clone)]
+pub struct WorkflowSafetyLimits {
+    pub max_yxdb_file_bytes: Option<u64>,
+    pub max_workflow_xml_bytes: Option<usize>,
+}
+
+impl Default for WorkflowSafetyLimits {
+    fn default() -> Self {
+        Self {
+            max_yxdb_file_bytes: None,
+            max_workflow_xml_bytes: Some(DEFAULT_MAX_WORKFLOW_XML_BYTES),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkflowReplacement {
     pub find: String,
@@ -276,7 +293,7 @@ fn parse_e2_metadata(xml: &str) -> Result<Vec<MetaInfoField>> {
 
 fn detect_yxdb_flavor(header: &[u8; 512]) -> Result<YxdbFlavor> {
     let desc = String::from_utf8_lossy(&header[..64]);
-    let file_id = u32::from_le_bytes(header[64..68].try_into().unwrap());
+    let file_id = read_u32_at(header, 64, "YXDB header file id")?;
     if desc.starts_with("Alteryx e2 Database file") || file_id == 0x0044_0208 {
         return Ok(YxdbFlavor::E2);
     }
@@ -290,7 +307,7 @@ fn parse_e2_header(file: &[u8]) -> Result<(usize, Vec<MetaInfoField>)> {
     if file.len() < 100 {
         bail!("E2 YXDB file too small");
     }
-    let meta_len = u32::from_le_bytes(file[96..100].try_into().unwrap()) as usize;
+    let meta_len = read_u32_at(file, 96, "E2 YXDB metadata length")? as usize;
     let meta_start = 100usize;
     if meta_start + meta_len > file.len() {
         bail!("E2 YXDB metadata extends beyond file");
@@ -305,14 +322,12 @@ fn parse_e2_footer(file: &[u8]) -> Result<(i64, Vec<E2PacketIndexEntry>, u64)> {
     if file.len() < 29 {
         bail!("E2 YXDB file too small");
     }
-    let magic = u32::from_le_bytes(file[file.len() - 4..].try_into().unwrap());
+    let magic = read_u32_at(file, file.len() - 4, "E2 YXDB footer magic")?;
     if magic != 0x3245_5859 {
         bail!("E2 YXDB footer magic not found");
     }
-    let packet_count =
-        i64::from_le_bytes(file[file.len() - 20..file.len() - 12].try_into().unwrap());
-    let record_count =
-        i64::from_le_bytes(file[file.len() - 12..file.len() - 4].try_into().unwrap());
+    let packet_count = read_i64_at(file, file.len() - 20, "E2 YXDB packet count")?;
+    let record_count = read_i64_at(file, file.len() - 12, "E2 YXDB record count")?;
     let footer_len = 29usize + 12usize * packet_count as usize;
     if file.len() < footer_len {
         bail!("E2 YXDB footer truncated");
@@ -381,9 +396,9 @@ fn parse_e2_record_packet(buf: &[u8]) -> Result<E2RecordPacket<'_>> {
     if buf.len() < 8 {
         bail!("E2 YXDB record packet too small");
     }
-    let word0 = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+    let word0 = read_u32_at(buf, 0, "E2 YXDB record packet word0")?;
     let data_len = (word0 & 0x00ff_ffff) as usize;
-    let record_count = u32::from_le_bytes(buf[4..8].try_into().unwrap());
+    let record_count = read_u32_at(buf, 4, "E2 YXDB record packet count")?;
     if buf.len() < 8 + data_len {
         bail!("E2 YXDB record packet truncated");
     }
@@ -817,7 +832,7 @@ fn parse_blob(
             ))
         };
     }
-    let blob_len = u32::from_le_bytes(record[block_start..block_start + 4].try_into().unwrap());
+    let blob_len = read_u32_at(record, block_start, "YXDB blob length")?;
     let len = (blob_len / 2) as usize;
     let end = block_start + 4 + len;
     if end > record.len() {
@@ -842,6 +857,27 @@ fn parse_blob(
     })
 }
 pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
+    read_yxdb_with_limits(path, csv_output, &WorkflowSafetyLimits::default())
+}
+
+pub fn read_yxdb_with_limits(
+    path: &Path,
+    csv_output: Option<&Path>,
+    limits: &WorkflowSafetyLimits,
+) -> Result<Value> {
+    if let Some(max_yxdb_file_bytes) = limits.max_yxdb_file_bytes {
+        let file_len = fs::metadata(path)
+            .with_context(|| format!("failed to stat '{}'", path.display()))?
+            .len();
+        if file_len > max_yxdb_file_bytes {
+            bail!(
+                "YXDB file '{}' is too large ({} bytes > {} byte safety cap)",
+                path.display(),
+                file_len,
+                max_yxdb_file_bytes
+            );
+        }
+    }
     let mut file =
         fs::File::open(path).with_context(|| format!("failed to open '{}'", path.display()))?;
     let mut header = [0u8; 512];
@@ -868,8 +904,8 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
         }
         rows = read_e2_rows(&fields, &full, &packets)?;
     } else {
-        let meta_size = u32::from_le_bytes(header[80..84].try_into().unwrap()) as usize;
-        let num_records = u32::from_le_bytes(header[104..108].try_into().unwrap()) as usize;
+        let meta_size = read_u32_at(&header, 80, "YXDB metadata size")? as usize;
+        let num_records = read_u32_at(&header, 104, "YXDB record count")? as usize;
         let meta_len = meta_size
             .checked_mul(2)
             .and_then(|v| v.checked_sub(2))
@@ -890,7 +926,7 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .collect::<Vec<_>>(),
         );
-        let record_block_index_pos = u64::from_le_bytes(header[96..104].try_into().unwrap());
+        let record_block_index_pos = read_u64_at(&header, 96, "YXDB block index position")?;
         fields = parse_meta_info(&meta_xml)?;
         let record_data_end = record_block_index_pos;
         let record_data_start = file
@@ -914,54 +950,21 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
                     "V_String" | "V_WString" | "Blob" | "SpatialObj"
                 )
             }) {
-                let fixed_size = fields.iter().fold(0usize, |acc, field| {
-                    acc + match field.data_type.as_str() {
-                        "Int16" => 3,
-                        "Int32" => 5,
-                        "Int64" => 9,
-                        "Float" => 5,
-                        "Double" => 9,
-                        "FixedDecimal" => field.size + 1,
-                        "String" => field.size + 1,
-                        "WString" => field.size * 2 + 1,
-                        "V_String" | "V_WString" => 4,
-                        "Date" => 11,
-                        "DateTime" => 20,
-                        "Bool" => 1,
-                        "Byte" => 2,
-                        "Blob" | "SpatialObj" => 4,
-                        other => panic!("unsupported YXDB field type {}", other),
-                    }
-                });
+                let fixed_size = fields.iter().try_fold(0usize, |acc, field| {
+                    Ok::<usize, anyhow::Error>(acc + field_fixed_width(field)?)
+                })?;
                 let fixed_and_len = fixed_size + 4;
                 let prefix = record_cursor.read_exact(fixed_and_len)?.to_vec();
                 let var_len =
-                    u32::from_le_bytes(prefix[fixed_size..fixed_size + 4].try_into().unwrap())
-                        as usize;
+                    read_u32_at(&prefix, fixed_size, "YXDB variable record length")? as usize;
                 let var_bytes = record_cursor.read_exact(var_len)?.to_vec();
                 let mut record = prefix;
                 record.extend_from_slice(&var_bytes);
                 record
             } else {
-                let fixed_size = fields.iter().fold(0usize, |acc, field| {
-                    acc + match field.data_type.as_str() {
-                        "Int16" => 3,
-                        "Int32" => 5,
-                        "Int64" => 9,
-                        "Float" => 5,
-                        "Double" => 9,
-                        "FixedDecimal" => field.size + 1,
-                        "String" => field.size + 1,
-                        "WString" => field.size * 2 + 1,
-                        "V_String" | "V_WString" => 4,
-                        "Date" => 11,
-                        "DateTime" => 20,
-                        "Bool" => 1,
-                        "Byte" => 2,
-                        "Blob" | "SpatialObj" => 4,
-                        other => panic!("unsupported YXDB field type {}", other),
-                    }
-                });
+                let fixed_size = fields.iter().try_fold(0usize, |acc, field| {
+                    Ok::<usize, anyhow::Error>(acc + field_fixed_width(field)?)
+                })?;
                 record_cursor.read_exact(fixed_size)?.to_vec()
             };
             let parsed = read_fixed_record(&fields, &record_len)?;
@@ -993,7 +996,9 @@ pub fn read_yxdb(path: &Path, csv_output: Option<&Path>) -> Result<Value> {
             .as_bytes(),
         )?;
         for row in &rows {
-            let obj = row.as_object().unwrap();
+            let obj = row
+                .as_object()
+                .ok_or_else(|| anyhow::anyhow!("YXDB row rendering expected object"))?;
             let line = headers
                 .iter()
                 .map(|h| csv_escape(obj.get(h).map(render_json_cell).as_deref().unwrap_or("")))
@@ -1033,7 +1038,16 @@ fn normalize_text(text: &str) -> String {
     text.replace("\r\n", "\n")
 }
 
-fn validate_xml_text(text: &str) -> Result<()> {
+fn validate_xml_text(text: &str, limits: &WorkflowSafetyLimits) -> Result<()> {
+    if let Some(max_workflow_xml_bytes) = limits.max_workflow_xml_bytes {
+        if text.len() > max_workflow_xml_bytes {
+            bail!(
+                "workflow XML exceeds safety cap ({} bytes > {})",
+                text.len(),
+                max_workflow_xml_bytes
+            );
+        }
+    }
     let normalized = normalize_text(text);
     Document::parse(&normalized).context("failed to parse workflow xml")?;
     Ok(())
@@ -1202,13 +1216,13 @@ fn write_text(path: &Path, text: &str) -> Result<()> {
     fs::write(path, text).with_context(|| format!("failed to write '{}'", path.display()))
 }
 
-fn inspect_file(path: &Path) -> Result<Value> {
+fn inspect_file(path: &Path, limits: &WorkflowSafetyLimits) -> Result<Value> {
     let metadata =
         fs::metadata(path).with_context(|| format!("failed to stat '{}'", path.display()))?;
     let kind = workflow_kind(path);
     let content = if is_xml_like(path) {
         let text = read_text(path)?;
-        let valid = validate_xml_text(&text).is_ok();
+        let valid = validate_xml_text(&text, limits).is_ok();
         json!({
             "xml_valid": valid,
             "contains": {
@@ -1257,6 +1271,10 @@ fn inspect_package(path: &Path) -> Result<Value> {
 }
 
 pub fn inspect(path: &Path) -> Result<Value> {
+    inspect_with_limits(path, &WorkflowSafetyLimits::default())
+}
+
+pub fn inspect_with_limits(path: &Path, limits: &WorkflowSafetyLimits) -> Result<Value> {
     if path.is_dir() {
         let mut items = Vec::new();
         for entry in WalkDir::new(path)
@@ -1264,7 +1282,7 @@ pub fn inspect(path: &Path) -> Result<Value> {
             .filter_map(|entry| entry.ok())
         {
             if entry.file_type().is_file() && is_workflow_artifact(entry.path()) {
-                items.push(inspect_file(entry.path())?);
+                items.push(inspect_file(entry.path(), limits)?);
             }
         }
         return Ok(json!({
@@ -1284,7 +1302,7 @@ pub fn inspect(path: &Path) -> Result<Value> {
         return inspect_package(path);
     }
 
-    inspect_file(path)
+    inspect_file(path, limits)
 }
 
 pub fn unpack_package(input: &Path, output_dir: &Path) -> Result<Value> {
@@ -1363,6 +1381,10 @@ pub fn repackage_dir(input_dir: &Path, output_path: &Path) -> Result<Value> {
 }
 
 pub fn validate(path: &Path) -> Result<Value> {
+    validate_with_limits(path, &WorkflowSafetyLimits::default())
+}
+
+pub fn validate_with_limits(path: &Path, limits: &WorkflowSafetyLimits) -> Result<Value> {
     let mut issues = Vec::<WorkflowIssue>::new();
     let mut validated = Vec::new();
 
@@ -1373,7 +1395,7 @@ pub fn validate(path: &Path) -> Result<Value> {
         {
             if entry.file_type().is_file() && is_xml_like(entry.path()) {
                 let text = read_text(entry.path())?;
-                match validate_xml_text(&text) {
+                match validate_xml_text(&text, limits) {
                     Ok(()) => validated.push(entry.path().display().to_string()),
                     Err(err) => issues.push(WorkflowIssue {
                         path: entry.path().display().to_string(),
@@ -1399,7 +1421,7 @@ pub fn validate(path: &Path) -> Result<Value> {
             if is_xml_like(entry_path) {
                 let mut buf = String::new();
                 entry.read_to_string(&mut buf)?;
-                match validate_xml_text(&buf) {
+                match validate_xml_text(&buf, limits) {
                     Ok(()) => validated.push(name),
                     Err(err) => issues.push(WorkflowIssue {
                         path: name,
@@ -1410,7 +1432,7 @@ pub fn validate(path: &Path) -> Result<Value> {
         }
     } else if is_xml_like(path) {
         let text = read_text(path)?;
-        validate_xml_text(&text)?;
+        validate_xml_text(&text, limits)?;
         validated.push(path.display().to_string());
     } else {
         bail!("workflow validate expects a .yxmd, .yxmc, .yxzp, or directory");
@@ -1429,6 +1451,22 @@ pub fn replace(
     output: &Path,
     replacements: &[WorkflowReplacement],
     validate_after: bool,
+) -> Result<Value> {
+    replace_with_limits(
+        input,
+        output,
+        replacements,
+        validate_after,
+        &WorkflowSafetyLimits::default(),
+    )
+}
+
+pub fn replace_with_limits(
+    input: &Path,
+    output: &Path,
+    replacements: &[WorkflowReplacement],
+    validate_after: bool,
+    limits: &WorkflowSafetyLimits,
 ) -> Result<Value> {
     if input.is_dir() {
         fs::create_dir_all(output)
@@ -1457,7 +1495,7 @@ pub fn replace(
             }
         }
         let validation = if validate_after {
-            Some(validate(output)?)
+            Some(validate_with_limits(output, limits)?)
         } else {
             None
         };
@@ -1481,7 +1519,13 @@ pub fn replace(
             fs::remove_dir_all(&unpack_dir)?;
         }
         unpack_package(input, &unpack_dir)?;
-        let result = replace(&unpack_dir, &unpack_dir, replacements, validate_after)?;
+        let result = replace_with_limits(
+            &unpack_dir,
+            &unpack_dir,
+            replacements,
+            validate_after,
+            limits,
+        )?;
         repackage_dir(&unpack_dir, output)?;
         return Ok(json!({
             "input": input.display().to_string(),
@@ -1495,7 +1539,7 @@ pub fn replace(
     let text = read_text(input)?;
     let (replaced, found) = apply_replacements(&text, replacements);
     if validate_after && is_xml_like(input) {
-        validate_xml_text(&replaced)?;
+        validate_xml_text(&replaced, limits)?;
     }
     write_text(output, &replaced)?;
     Ok(json!({
@@ -1513,7 +1557,23 @@ pub fn migrate(
     replacements: &[WorkflowReplacement],
     validate_after: bool,
 ) -> Result<Value> {
-    replace(input, output, replacements, validate_after)
+    migrate_with_limits(
+        input,
+        output,
+        replacements,
+        validate_after,
+        &WorkflowSafetyLimits::default(),
+    )
+}
+
+pub fn migrate_with_limits(
+    input: &Path,
+    output: &Path,
+    replacements: &[WorkflowReplacement],
+    validate_after: bool,
+    limits: &WorkflowSafetyLimits,
+) -> Result<Value> {
+    replace_with_limits(input, output, replacements, validate_after, limits)
 }
 
 fn recurse_directory(
@@ -1521,6 +1581,7 @@ fn recurse_directory(
     output_dir: &Path,
     replacements: &[WorkflowReplacement],
     validate_after: bool,
+    limits: &WorkflowSafetyLimits,
 ) -> Result<Value> {
     if input_dir == output_dir {
         let mut touched = Vec::new();
@@ -1544,8 +1605,13 @@ fn recurse_directory(
                     fs::remove_dir_all(&unpack_dir)?;
                 }
                 unpack_package(path, &unpack_dir)?;
-                let nested_result =
-                    recurse_directory(&unpack_dir, &unpack_dir, replacements, validate_after)?;
+                let nested_result = recurse_directory(
+                    &unpack_dir,
+                    &unpack_dir,
+                    replacements,
+                    validate_after,
+                    limits,
+                )?;
                 repackage_dir(&unpack_dir, path)?;
                 nested.push(json!({
                     "package": path.display().to_string(),
@@ -1557,7 +1623,7 @@ fn recurse_directory(
                 let text = read_text(path)?;
                 let (replaced, found) = apply_replacements(&text, replacements);
                 if validate_after && is_xml_like(path) {
-                    validate_xml_text(&replaced)?;
+                    validate_xml_text(&replaced, limits)?;
                 }
                 write_text(path, &replaced)?;
                 let rel = path.strip_prefix(input_dir).unwrap_or(path);
@@ -1568,7 +1634,7 @@ fn recurse_directory(
             }
         }
         let validation = if validate_after {
-            Some(validate(input_dir)?)
+            Some(validate_with_limits(input_dir, limits)?)
         } else {
             None
         };
@@ -1610,8 +1676,13 @@ fn recurse_directory(
                 fs::remove_dir_all(&nested_unpack)?;
             }
             unpack_package(entry.path(), &nested_unpack)?;
-            let nested_result =
-                recurse_directory(&nested_unpack, &nested_unpack, replacements, validate_after)?;
+            let nested_result = recurse_directory(
+                &nested_unpack,
+                &nested_unpack,
+                replacements,
+                validate_after,
+                limits,
+            )?;
             repackage_dir(&nested_unpack, &out_path)?;
             nested.push(json!({
                 "package": rel.to_string_lossy(),
@@ -1626,7 +1697,7 @@ fn recurse_directory(
             let text = read_text(entry.path())?;
             let (replaced, found) = apply_replacements(&text, replacements);
             if validate_after && is_xml_like(entry.path()) {
-                validate_xml_text(&replaced)?;
+                validate_xml_text(&replaced, limits)?;
             }
             write_text(&out_path, &replaced)?;
             touched.push(json!({
@@ -1656,6 +1727,22 @@ pub fn recurse(
     replacements: &[WorkflowReplacement],
     validate_after: bool,
 ) -> Result<Value> {
+    recurse_with_limits(
+        input,
+        output,
+        replacements,
+        validate_after,
+        &WorkflowSafetyLimits::default(),
+    )
+}
+
+pub fn recurse_with_limits(
+    input: &Path,
+    output: &Path,
+    replacements: &[WorkflowReplacement],
+    validate_after: bool,
+    limits: &WorkflowSafetyLimits,
+) -> Result<Value> {
     if input
         .extension()
         .and_then(|ext| ext.to_str())
@@ -1667,7 +1754,13 @@ pub fn recurse(
             fs::remove_dir_all(&unpack_dir)?;
         }
         unpack_package(input, &unpack_dir)?;
-        let result = recurse_directory(&unpack_dir, &unpack_dir, replacements, validate_after)?;
+        let result = recurse_directory(
+            &unpack_dir,
+            &unpack_dir,
+            replacements,
+            validate_after,
+            limits,
+        )?;
         if output
             .extension()
             .and_then(|ext| ext.to_str())
@@ -1686,10 +1779,10 @@ pub fn recurse(
     }
 
     if input.is_dir() {
-        return recurse_directory(input, output, replacements, validate_after);
+        return recurse_directory(input, output, replacements, validate_after, limits);
     }
 
-    replace(input, output, replacements, validate_after)
+    replace_with_limits(input, output, replacements, validate_after, limits)
 }
 
 pub fn package_summary(path: &Path) -> Result<Value> {
@@ -1697,6 +1790,7 @@ pub fn package_summary(path: &Path) -> Result<Value> {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use snap::raw::Encoder as SnapEncoder;
@@ -1866,5 +1960,94 @@ mod tests {
         assert!(strict.is_err());
 
         let _ = fs::remove_file(&input);
+    }
+
+    #[test]
+    fn truncated_yxdb_returns_error_instead_of_panicking() {
+        let bytes = e2_test_file();
+        for len in 0..bytes.len().min(64) {
+            let mut tmp = NamedTempFile::new().unwrap();
+            tmp.write_all(&bytes[..len]).unwrap();
+            let result = std::panic::catch_unwind(|| read_yxdb(tmp.path(), None));
+            assert!(result.is_ok(), "parser panicked for truncated len={len}");
+        }
+    }
+
+    #[test]
+    fn unsupported_yxdb_field_type_returns_error() {
+        let input = temp_path("unsupported.yxdb");
+        let xml = r#"<AlteryxDocument yxmdVer="2025.2"><Node/></AlteryxDocument>"#;
+        let _ = xml;
+        let mut bytes = vec![0u8; 512];
+        let desc = b"Alteryx Database File";
+        bytes[..desc.len()].copy_from_slice(desc);
+        let meta = r#"<MetaInfo><RecordInfo><Field name="bad" type="TotallyUnsupported" size="0"/></RecordInfo></MetaInfo>"#;
+        let meta_utf16: Vec<u16> = meta.encode_utf16().collect();
+        let meta_size_units = (meta_utf16.len() + 1) as u32;
+        bytes[80..84].copy_from_slice(&meta_size_units.to_le_bytes());
+        let mut meta_bytes = Vec::with_capacity(meta_utf16.len() * 2 + 2);
+        for word in meta_utf16 {
+            meta_bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        meta_bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes[96..104].copy_from_slice(&(512u64 + meta_bytes.len() as u64).to_le_bytes());
+        bytes[104..108].copy_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&meta_bytes);
+        bytes.extend_from_slice(&[0u8; 16]);
+        fs::write(&input, &bytes).unwrap();
+        let err = read_yxdb(&input, None).expect_err("unsupported field type should fail");
+        assert!(err.to_string().contains("unsupported YXDB field type"));
+        let _ = fs::remove_file(&input);
+    }
+
+    #[test]
+    fn oversized_workflow_xml_is_rejected() {
+        let limits = WorkflowSafetyLimits::default();
+        let max = limits.max_workflow_xml_bytes.unwrap();
+        let text = "x".repeat(max + 1);
+        let err = validate_xml_text(&text, &limits).expect_err("oversized xml should fail");
+        assert!(err.to_string().contains("safety cap"));
+    }
+}
+
+fn read_le_array<const N: usize>(data: &[u8], start: usize, label: &str) -> Result<[u8; N]> {
+    let end = start
+        .checked_add(N)
+        .ok_or_else(|| anyhow::anyhow!("{label} offset overflow"))?;
+    let slice = data
+        .get(start..end)
+        .ok_or_else(|| anyhow::anyhow!("{label} truncated"))?;
+    <[u8; N]>::try_from(slice).map_err(|_| anyhow::anyhow!("{label} invalid width"))
+}
+
+fn read_u32_at(data: &[u8], start: usize, label: &str) -> Result<u32> {
+    Ok(u32::from_le_bytes(read_le_array::<4>(data, start, label)?))
+}
+
+fn read_u64_at(data: &[u8], start: usize, label: &str) -> Result<u64> {
+    Ok(u64::from_le_bytes(read_le_array::<8>(data, start, label)?))
+}
+
+fn read_i64_at(data: &[u8], start: usize, label: &str) -> Result<i64> {
+    Ok(i64::from_le_bytes(read_le_array::<8>(data, start, label)?))
+}
+
+fn field_fixed_width(field: &MetaInfoField) -> Result<usize> {
+    match field.data_type.as_str() {
+        "Int16" => Ok(3),
+        "Int32" => Ok(5),
+        "Int64" => Ok(9),
+        "Float" => Ok(5),
+        "Double" => Ok(9),
+        "FixedDecimal" => Ok(field.size + 1),
+        "String" => Ok(field.size + 1),
+        "WString" => Ok(field.size * 2 + 1),
+        "V_String" | "V_WString" => Ok(4),
+        "Date" => Ok(11),
+        "DateTime" => Ok(20),
+        "Bool" => Ok(1),
+        "Byte" => Ok(2),
+        "Blob" | "SpatialObj" => Ok(4),
+        other => bail!("unsupported YXDB field type '{}'", other),
     }
 }

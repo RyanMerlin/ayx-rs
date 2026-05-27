@@ -13,7 +13,7 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - name: Install Rust
         shell: pwsh
         run: |
@@ -53,7 +53,7 @@ jobs:
           Copy-Item "README.md" -Destination $packageRoot
           Copy-Item "scripts/install.ps1" -Destination $packageRoot
           Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath (Join-Path $artifactDir "ayx-x86_64-pc-windows-msvc.zip") -Force
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: ayx-x86_64-pc-windows-msvc
           path: dist/ayx-x86_64-pc-windows-msvc.zip
@@ -61,7 +61,7 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - name: Install Rust
         shell: bash
         run: |
@@ -100,7 +100,7 @@ jobs:
           cp README.md "$package_root/"
           cp scripts/install.sh "$package_root/"
           tar -czf "${artifact_dir}/ayx-x86_64-unknown-linux-gnu.tar.gz" -C "$package_root" .
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: ayx-x86_64-unknown-linux-gnu
           path: dist/ayx-x86_64-unknown-linux-gnu.tar.gz
@@ -113,7 +113,7 @@ jobs:
           - x86_64-apple-darwin
           - aarch64-apple-darwin
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - name: Install Rust
         shell: bash
         run: |
@@ -152,7 +152,7 @@ jobs:
           cp README.md "$package_root/"
           cp scripts/install.sh "$package_root/"
           tar -czf "${artifact_dir}/ayx-${{ matrix.target }}.tar.gz" -C "$package_root" .
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: ayx-${{ matrix.target }}
           path: dist/ayx-${{ matrix.target }}.tar.gz
@@ -164,7 +164,7 @@ jobs:
       - build-macos
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-cyclonedx
         run: cargo install --locked cargo-cyclonedx
@@ -175,7 +175,7 @@ jobs:
           # cyclonedx writes per-crate; aggregate into one for upload.
           find . -maxdepth 3 -name 'ayx*.cdx.json' -exec cp {} sbom/ \;
           ls -la sbom/
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: ayx-sbom
           path: sbom/
@@ -198,7 +198,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v4
         with:
           path: dist
       - name: Flatten release artifacts and generate checksums
@@ -252,7 +252,7 @@ jobs:
       # the same verifiable provenance via the sigstore .sigstore bundles.
       - name: Attest build provenance for every release artifact
         continue-on-error: true
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
             release/ayx-x86_64-pc-windows-msvc.zip
@@ -261,7 +261,7 @@ jobs:
             release/ayx-aarch64-apple-darwin.tar.gz
             release/ayx-sbom.tar.gz
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             release/ayx-x86_64-pc-windows-msvc.zip

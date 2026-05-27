@@ -86,6 +86,11 @@ $sumsUrl = if ($Version -eq 'latest') {
 } else {
   "https://github.com/$repoOwner/$repoName/releases/download/$Version/SHA256SUMS"
 }
+$sigstoreUrl = if ($Version -eq 'latest') {
+  "https://github.com/$repoOwner/$repoName/releases/latest/download/$artifactName.sigstore"
+} else {
+  "https://github.com/$repoOwner/$repoName/releases/download/$Version/$artifactName.sigstore"
+}
 
 $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("ayx-install-" + [guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
@@ -119,6 +124,24 @@ try {
       throw "checksum mismatch: expected $expected got $actual. Refusing to install a corrupted or tampered archive."
     }
     Write-Host "Checksum verified: $actual"
+  }
+
+  if ($env:AYX_VERIFY_SIGSTORE -eq '1') {
+    $cosign = Get-Command cosign -ErrorAction SilentlyContinue
+    if (-not $cosign) {
+      throw "AYX_VERIFY_SIGSTORE=1 requires cosign on PATH"
+    }
+    $bundlePath = Join-Path $tmpDir "$artifactName.sigstore"
+    Invoke-WebRequest -Uri $sigstoreUrl -OutFile $bundlePath
+    & $cosign.Source verify-blob `
+      --certificate-identity-regexp "^https://github.com/$repoOwner/$repoName/" `
+      --certificate-oidc-issuer "https://token.actions.githubusercontent.com" `
+      --bundle $bundlePath `
+      $archivePath
+    if ($LASTEXITCODE -ne 0) {
+      throw "sigstore verification failed for $artifactName"
+    }
+    Write-Host "Sigstore provenance verified."
   }
 
   New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null

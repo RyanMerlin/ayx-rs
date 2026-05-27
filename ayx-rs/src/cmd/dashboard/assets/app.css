@@ -161,6 +161,21 @@ header.topbar {
   font-size: 12px;
 }
 
+.remote-warning {
+  max-width: 1440px;
+  margin: 14px auto 0;
+  padding: 12px 16px;
+  border: 1px solid rgba(251, 191, 36, 0.38);
+  border-radius: 14px;
+  background: rgba(83, 48, 5, 0.45);
+  color: #fde68a;
+  box-shadow: var(--shadow);
+}
+
+.remote-warning strong {
+  color: #fff7cc;
+}
+
 .hero,
 .panel,
 .context-card,

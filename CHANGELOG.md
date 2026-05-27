@@ -1,6 +1,21 @@
 # Changelog
 
-## 0.8.0 — 2026-05-14
+## 0.9.0 — 2026-05-27
+
+### Dependency modernization
+
+- Bump workspace dependencies to current patch releases: `clap_complete`, `openssl`, `openssl-sys`, `reqwest`, `rustls-webpki`, `serde_json`, and `tower-http`.
+- Add the direct `base64` dependency in `ayx-rs` so the dashboard/server code uses the workspace-managed crate version.
+
+### Workflow and runtime hardening
+
+- Keep YXDB handling flexible while making workflow parsing safer and more explicit about malformed inputs.
+- Preserve structured failure handling in `ayx-rs` and keep dashboard password handling from mutating opaque secrets.
+
+### Release and docs cleanup
+
+- Refresh the public release docs, install scripts, CI release workflow, and release checklist to match the current repository shape.
+- Update the changelog and package version so tag-based CI can publish the next release line cleanly.
 
 ### Dependency upgrades
 

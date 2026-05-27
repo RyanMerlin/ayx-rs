@@ -95,20 +95,40 @@ require_cmd sha256sum 2>/dev/null || require_cmd shasum
 if [[ "$VERSION" == "latest" ]]; then
   DOWNLOAD_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/${BINARY_NAME}-${PLATFORM}.tar.gz"
   SUMS_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/SHA256SUMS"
+  SIGSTORE_BUNDLE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/${BINARY_NAME}-${PLATFORM}.tar.gz.sigstore"
 else
   DOWNLOAD_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/${BINARY_NAME}-${PLATFORM}.tar.gz"
   SUMS_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/SHA256SUMS"
+  SIGSTORE_BUNDLE_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${VERSION}/${BINARY_NAME}-${PLATFORM}.tar.gz.sigstore"
 fi
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 ARCHIVE="$TMPDIR/${BINARY_NAME}-${PLATFORM}.tar.gz"
 SUMS="$TMPDIR/SHA256SUMS"
+BUNDLE="$TMPDIR/${BINARY_NAME}-${PLATFORM}.tar.gz.sigstore"
 
 echo "Downloading ${DOWNLOAD_URL}"
 if ! curl -fsSL "$DOWNLOAD_URL" -o "$ARCHIVE"; then
   echo "failed to download ${DOWNLOAD_URL}" >&2
   exit 1
+fi
+
+# Optional: verify the published sigstore bundle for stronger provenance than
+# SHA256 alone. Opt in with AYX_VERIFY_SIGSTORE=1. Requires `cosign`.
+if [[ "${AYX_VERIFY_SIGSTORE:-0}" == "1" ]]; then
+  require_cmd cosign
+  echo "Fetching sigstore bundle for provenance verification"
+  if ! curl -fsSL "$SIGSTORE_BUNDLE_URL" -o "$BUNDLE"; then
+    echo "failed to download sigstore bundle ${SIGSTORE_BUNDLE_URL}" >&2
+    exit 1
+  fi
+  cosign verify-blob \
+    --certificate-identity-regexp "^https://github.com/${REPO_OWNER}/${REPO_NAME}/" \
+    --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+    --bundle "$BUNDLE" \
+    "$ARCHIVE"
+  echo "Sigstore provenance verified."
 fi
 
 # Verify integrity against SHA256SUMS published alongside the release.

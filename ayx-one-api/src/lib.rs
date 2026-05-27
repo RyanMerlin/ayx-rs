@@ -9,6 +9,7 @@ use ayx_core::observability::{
     record_api_event, redact_text, response_shape, transport_error_summary, ApiEvent,
 };
 use ayx_core::profile::Config;
+use ayx_core::sensitive::write_sensitive_file;
 use reqwest::blocking::multipart::{Form, Part};
 use reqwest::blocking::Client;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER};
@@ -87,6 +88,13 @@ fn one_dry_run_envelope(
             ),
         }),
     )
+}
+
+fn one_http_envelope(status: StatusCode, message: String, data: Value) -> Envelope {
+    match ayx_core::envelope::ErrorCode::from_http_status(status.as_u16()) {
+        Some(code) => Envelope::err_coded(code, message, data),
+        None => Envelope::ok_with_data(message, data),
+    }
 }
 
 pub use inventory::{inventory_endpoints, one_surface_inventory_envelope};
@@ -503,7 +511,8 @@ pub fn one_api_live_request_with_body(
                         .map(ToOwned::to_owned);
                     let text = response.text().unwrap_or_else(|_| String::new());
                     let response_body = parse_response_text(&content_type, &text);
-                    let mut envelope = Envelope::ok_with_data(
+                    let envelope = one_http_envelope(
+                        status,
                         format!(
                             "{} {} {}",
                             surface,
@@ -526,11 +535,6 @@ pub fn one_api_live_request_with_body(
                                 .map(|c| c.as_str()),
                         }),
                     );
-                    if let Some(code) =
-                        ayx_core::envelope::ErrorCode::from_http_status(status.as_u16())
-                    {
-                        envelope = envelope.with_error_code(code);
-                    }
                     let _ = record_api_event(
                         observability,
                         ApiEvent {
@@ -562,7 +566,8 @@ pub fn one_api_live_request_with_body(
                 let transport = transport_error_summary(&err);
                 if mutating || attempt >= max_attempts {
                     let code = ayx_core::envelope::ErrorCode::Network;
-                    let envelope = Envelope::ok_with_data(
+                    let envelope = Envelope::err_coded(
+                        code,
                         format!("{} {} failed", surface, operation),
                         json!({
                             "surface": surface,
@@ -582,8 +587,7 @@ pub fn one_api_live_request_with_body(
                             "response": Value::Null,
                             "error_code": code.as_str(),
                         }),
-                    )
-                    .with_error_code(code);
+                    );
                     let _ = record_api_event(
                         observability,
                         ApiEvent {
@@ -726,7 +730,8 @@ pub fn flow_import_package_envelope(
         .map(ToOwned::to_owned);
     let text = response.text().unwrap_or_else(|_| String::new());
     let response_body = parse_response_text(&content_type, &text);
-    let envelope = Envelope::ok_with_data(
+    let envelope = one_http_envelope(
+        status,
         format!(
             "flow package {} {}",
             if dry_run { "dry-run" } else { "import" },
@@ -741,6 +746,8 @@ pub fn flow_import_package_envelope(
             "ok": status.is_success(),
             "request_id": request_id,
             "response": response_body,
+            "error_code": ayx_core::envelope::ErrorCode::from_http_status(status.as_u16())
+                .map(|c| c.as_str()),
         }),
     );
     let _ = record_api_event(
@@ -860,7 +867,7 @@ pub fn flow_export_package_envelope(
                 )
             })?;
         }
-        fs::write(output_path, &bytes).with_context(|| {
+        write_sensitive_file(output_path, &bytes).with_context(|| {
             format!(
                 "failed to write flow package to '{}'",
                 output_path.display()
@@ -911,7 +918,8 @@ pub fn flow_export_package_envelope(
         .to_string();
     let text = response.text().unwrap_or_else(|_| String::new());
     let response_body = parse_response_text(&content_type, &text);
-    let envelope = Envelope::ok_with_data(
+    let envelope = one_http_envelope(
+        status,
         format!(
             "flow package {} failed",
             if dry_run { "dry-run" } else { "export" }
@@ -924,6 +932,8 @@ pub fn flow_export_package_envelope(
             "ok": false,
             "request_id": request_id,
             "response": response_body,
+            "error_code": ayx_core::envelope::ErrorCode::from_http_status(status.as_u16())
+                .map(|c| c.as_str()),
         }),
     );
     let _ = record_api_event(
@@ -1102,8 +1112,11 @@ pub fn format_refresh_token_response(token_json: &Value) -> Result<String> {
 }
 
 fn parse_response_text(content_type: &str, text: &str) -> Value {
-    if content_type.to_lowercase().contains("application/json") {
+    let lower = content_type.to_lowercase();
+    if lower.contains("application/json") || lower.contains("+json") {
         serde_json::from_str(text).unwrap_or_else(|_| json!({ "raw": text }))
+    } else if text.trim_start().starts_with('<') {
+        json!({ "raw": text, "content_type": content_type, "response_kind": "html" })
     } else if text.trim().is_empty() {
         Value::Null
     } else {

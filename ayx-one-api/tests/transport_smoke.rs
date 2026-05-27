@@ -127,11 +127,43 @@ fn read_only_get_returns_typed_error_code_on_404() {
     )
     .expect("response");
 
+    assert!(
+        !envelope.ok,
+        "404 should surface as a top-level failure envelope"
+    );
     assert_eq!(envelope.data["status_code"], json!(404));
     assert_eq!(envelope.data["ok"], json!(false));
     // ErrorCode classification is on the envelope itself.
     let serialized = serde_json::to_value(&envelope).unwrap();
     assert_eq!(serialized["error_code"], json!("not_found"));
+}
+
+#[test]
+#[serial]
+fn html_error_response_is_tagged_as_html() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(GET).path("/v4/flows/html-proxy");
+        then.status(502)
+            .header("content-type", "text/html")
+            .body("<html><body>proxy error</body></html>");
+    });
+
+    set_one_apply(false);
+    let config = make_config(&server.base_url(), None);
+    let envelope = one_api_live_request(
+        &config,
+        "flow",
+        "detail",
+        "GET",
+        "/v4/flows/html-proxy",
+        false,
+        &[],
+    )
+    .expect("response");
+
+    assert!(!envelope.ok);
+    assert_eq!(envelope.data["response"]["response_kind"], json!("html"));
 }
 
 #[test]

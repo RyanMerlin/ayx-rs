@@ -14,7 +14,10 @@ It is designed to operate across the Alteryx surface and enable sophisticated op
 `RyanMerlin/ayx-rs` is the canonical public home for source, releases, and self-update.
 If you mirror this repository elsewhere, treat those copies as non-canonical.
 
-1. Install the binary with a one-liner:
+1. Install the binary with a one-liner.
+   By default the installers verify `SHA256SUMS`; set `AYX_VERIFY_SIGSTORE=1`
+   to additionally verify the published sigstore bundle when `cosign` is
+   available:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash
@@ -140,6 +143,9 @@ Minimum expectations:
 Sensitive values should live in the OS keyring by default, with environment variables remaining first-class for automation.
 `ayx doctor config` flags inline secret fields so they can be migrated into keyring-backed refs.
 Use `.env.example` only as a non-secret template for local overrides and automation.
+Central profile files, workspace files, runtime state, audit artifacts, and
+observability logs are all treated as sensitive local artifacts and are written
+with owner-only permissions on supported platforms.
 
 Embedded Mongo discovery looks for `RuntimeSettings.xml` in the standard Alteryx locations first, then falls back to the configured path if provided.
 
@@ -157,6 +163,13 @@ Release archives:
 Install scripts:
 - `scripts/install.ps1`
 - `scripts/install.sh`
+
+Verification:
+- `SHA256SUMS` is verified by default.
+- Sigstore bundle verification is available by setting `AYX_VERIFY_SIGSTORE=1`
+  before running the installer, provided `cosign` is available on PATH.
+- Release artifacts also publish `.sigstore` bundles and GitHub provenance
+  attestations for operators who want stronger supply-chain verification.
 
 Repo governance and pre-launch checks live in `docs/public-release-checklist.md`.
 

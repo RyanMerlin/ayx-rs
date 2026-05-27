@@ -27,6 +27,7 @@ pub async fn index(State(state): State<SharedState>, q: PanelQ) -> Response {
                 selected_profile,
                 state.profile_resolution.as_ref(),
                 &state.available_profiles,
+                state.remote_mode,
             ));
         }
     };
@@ -76,6 +77,7 @@ pub async fn index(State(state): State<SharedState>, q: PanelQ) -> Response {
         selected_profile,
         Some(&resolved),
         &state.available_profiles,
+        state.remote_mode,
     ))
 }
 

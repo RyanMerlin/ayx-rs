@@ -26,6 +26,7 @@ pub fn layout(
     selected_profile: Option<&str>,
     profile_resolution: Option<&RuntimeProfileResolution>,
     profiles: &[String],
+    remote_mode: bool,
 ) -> Markup {
     html! {
         (DOCTYPE)
@@ -93,6 +94,12 @@ pub fn layout(
                                 }
                             }
                         }
+                    }
+                }
+                @if remote_mode {
+                    section.remote-warning {
+                        strong { "Remote mode enabled." }
+                        span { " This dashboard is bound to a non-loopback address. Keep HTTP Basic auth enabled and treat all panel data as sensitive." }
                     }
                 }
                 main { (body) }

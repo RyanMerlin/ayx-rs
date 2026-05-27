@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::secrets::resolve_secret_ref;
+use crate::sensitive::write_sensitive_file;
 
 #[derive(Debug, Error)]
 pub enum ProfileError {
@@ -1424,22 +1425,16 @@ pub fn load_ayx_state() -> Result<AyxState, ProfileError> {
 
 pub fn save_ayx_state(state: &AyxState) -> Result<(), ProfileError> {
     let path = ayx_state_path()?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|source| ProfileError::Write {
-            path: parent.display().to_string(),
-            source,
-        })?;
-    }
-    fs::write(
-        &path,
-        serde_yaml::to_string(state).map_err(|source| ProfileError::Parse {
-            path: path.display().to_string(),
-            source,
-        })?,
-    )
-    .map_err(|source| ProfileError::Write {
+    let body = serde_yaml::to_string(state).map_err(|source| ProfileError::Parse {
         path: path.display().to_string(),
         source,
+    })?;
+    write_sensitive_file(&path, body.as_bytes()).map_err(|err| match err {
+        crate::sensitive::SensitiveIoError::CreateDir { path, source }
+        | crate::sensitive::SensitiveIoError::Write { path, source }
+        | crate::sensitive::SensitiveIoError::Append { path, source } => {
+            ProfileError::Write { path, source }
+        }
     })
 }
 

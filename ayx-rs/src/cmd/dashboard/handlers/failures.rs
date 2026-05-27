@@ -22,6 +22,7 @@ pub async fn page(State(state): State<SharedState>, q: PanelQ) -> Response {
             selected_profile,
             state.profile_resolution.as_ref(),
             &state.available_profiles,
+            state.remote_mode,
         ));
     }
     html(views::layout(
@@ -41,6 +42,7 @@ pub async fn page(State(state): State<SharedState>, q: PanelQ) -> Response {
         selected_profile,
         state.profile_resolution.as_ref(),
         &state.available_profiles,
+        state.remote_mode,
     ))
 }
 

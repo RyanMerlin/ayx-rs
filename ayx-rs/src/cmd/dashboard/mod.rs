@@ -65,10 +65,21 @@ pub struct DashboardCommand {
     /// only enable on a trusted network.
     #[arg(long)]
     pub allow_remote: bool,
+    /// Shared password for HTTP Basic auth. Prefer setting
+    /// `AYX_DASHBOARD_PASSWORD` instead of passing this on the command line.
+    #[arg(long)]
+    pub auth_password: Option<String>,
 }
 
 pub fn execute(environment: Option<&str>, cmd: DashboardCommand) -> Result<Envelope> {
     let addr = parse_bind(&cmd.bind, cmd.port, cmd.allow_remote)?;
+    let remote_mode = !addr.ip().is_loopback();
+    let auth_password = resolve_dashboard_auth_password(&cmd);
+    if remote_mode && auth_password.is_none() {
+        return Err(anyhow!(
+            "validation: remote dashboard mode requires auth. Set AYX_DASHBOARD_PASSWORD or pass --auth-password."
+        ));
+    }
     let available_profiles = list_central_profiles().unwrap_or_default();
     let selected_profile_resolution = match cmd.profile.as_deref() {
         Some(profile) => resolve_runtime_profile(Some(profile)).ok(),
@@ -99,6 +110,8 @@ pub fn execute(environment: Option<&str>, cmd: DashboardCommand) -> Result<Envel
         default_source: cmd.source.clone(),
         poll_secs: cmd.poll,
         environment: environment.map(|s| s.to_owned()),
+        remote_mode,
+        auth_password,
     };
 
     let url = format!("http://{addr}/");
@@ -143,6 +156,13 @@ fn open_browser(url: &str) -> std::io::Result<()> {
         .stderr(std::process::Stdio::null())
         .spawn()
         .map(|_| ())
+}
+
+fn resolve_dashboard_auth_password(cmd: &DashboardCommand) -> Option<String> {
+    cmd.auth_password
+        .clone()
+        .or_else(|| std::env::var("AYX_DASHBOARD_PASSWORD").ok())
+        .filter(|value| !value.is_empty())
 }
 
 pub(crate) fn resolve_dashboard_profile(

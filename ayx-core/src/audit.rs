@@ -5,6 +5,8 @@ use chrono::Utc;
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::sensitive::write_sensitive_file;
+
 #[derive(Debug, Error)]
 pub enum AuditError {
     #[error("failed to create audit directory '{path}': {source}")]
@@ -29,19 +31,15 @@ pub fn write_audit_artifact(
     payload: &Value,
 ) -> Result<PathBuf, AuditError> {
     let resolved = resolve_audit_dir(audit_dir);
-    fs::create_dir_all(&resolved).map_err(|source| AuditError::CreateDir {
-        path: resolved.display().to_string(),
-        source,
+    crate::sensitive::ensure_sensitive_dir(&resolved).map_err(|err| match err {
+        crate::sensitive::SensitiveIoError::CreateDir { path, source } => {
+            AuditError::CreateDir { path, source }
+        }
+        crate::sensitive::SensitiveIoError::Write { path, source }
+        | crate::sensitive::SensitiveIoError::Append { path, source } => {
+            AuditError::Write { path, source }
+        }
     })?;
-
-    // Tighten directory permissions on Unix to 0o700 so audit artifacts
-    // (which may contain workspace ids, request bodies, and operation
-    // metadata) are owner-only.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&resolved, fs::Permissions::from_mode(0o700));
-    }
 
     let op_id = format!(
         "{}-{}",
@@ -51,17 +49,15 @@ pub fn write_audit_artifact(
     let artifact_path = resolved.join(format!("{}.json", op_id));
     let content = serde_json::to_string_pretty(payload)?;
 
-    fs::write(&artifact_path, &content).map_err(|source| AuditError::Write {
-        path: artifact_path.display().to_string(),
-        source,
+    write_sensitive_file(&artifact_path, content.as_bytes()).map_err(|err| match err {
+        crate::sensitive::SensitiveIoError::CreateDir { path, source } => {
+            AuditError::CreateDir { path, source }
+        }
+        crate::sensitive::SensitiveIoError::Write { path, source }
+        | crate::sensitive::SensitiveIoError::Append { path, source } => {
+            AuditError::Write { path, source }
+        }
     })?;
-
-    // Per-file 0o600.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&artifact_path, fs::Permissions::from_mode(0o600));
-    }
 
     Ok(artifact_path)
 }

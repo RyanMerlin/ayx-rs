@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -5195,10 +5196,17 @@ fn main() -> Result<()> {
 
     match execute(cli) {
         Ok(envelope) => {
-            print!("{}", format_envelope(&envelope, &output)?);
-            // Most renderers don't add a trailing newline; add one for shells.
-            println!();
-            Ok(())
+            let rendered = format_envelope(&envelope, &output)?;
+            if envelope.ok {
+                print!("{rendered}");
+                println!();
+                Ok(())
+            } else {
+                eprint!("{rendered}");
+                eprintln!();
+                let _ = io::stderr().lock().flush();
+                std::process::exit(exit_code_for_envelope(&envelope));
+            }
         }
         Err(err) => {
             let code = classify_anyhow_error(&err);
@@ -5224,6 +5232,14 @@ fn main() -> Result<()> {
             }
             Err(err)
         }
+    }
+}
+
+fn exit_code_for_envelope(envelope: &Envelope) -> i32 {
+    if envelope.ok {
+        0
+    } else {
+        1
     }
 }
 
