@@ -220,7 +220,7 @@ jobs:
           fi
           # Generate SHA256SUMS over every release file.
           cd release
-          sha256sum * > SHA256SUMS
+          sha256sum -- * > SHA256SUMS
           echo "---- SHA256SUMS ----"
           cat SHA256SUMS
       # Sigstore keyless signing. Anchors every artifact to the Rekor
@@ -244,7 +244,7 @@ jobs:
               --bundle "$f.sigstore" \
               "$f"
           done
-          ls -la *.sigstore
+          ls -la -- *.sigstore
       # GitHub-native build provenance (SLSA L3). Independent of cosign.
       # Verifiable with: gh attestation verify <file> --repo <owner>/ayx-rs
       # Non-fatal: this feature requires a public repo (or paid plan) and is
