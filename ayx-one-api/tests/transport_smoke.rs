@@ -202,7 +202,7 @@ fn workspace_preflight_fails_closed_on_mismatch() {
         err.contains("workspace mismatch") || err.contains("workspace preflight"),
         "expected workspace error, got: {err}"
     );
-    assert_eq!(mutation_mock.hits(), 0);
+    assert_eq!(mutation_mock.calls(), 0);
 }
 
 #[test]
