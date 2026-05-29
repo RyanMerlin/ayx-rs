@@ -20,7 +20,7 @@
 ## Quality and Release
 - [x] Add unit test suites for Mongo/API core behaviors.
 - [ ] Add containerized integration tests.
-- [ ] Add Windows/Linux/macOS CI release pipeline.
+- [x] Add Windows/Linux/macOS CI release pipeline.
 - [x] Generate docs/cli-spec.md and docs/cli-schema.json.
 
 ## Workflow Cloud Conversion

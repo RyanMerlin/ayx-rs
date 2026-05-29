@@ -5,11 +5,13 @@
 **LOC:** ~30,700 Rust LOC across 8 crates.
 **Goal:** Take `ayx` from "built mostly with codex" to enterprise-grade, on par with `gcloud` / `aws` / `az` / `kubectl`.
 
+> Historical note: this report was written before the v0.9.0 release pass. The follow-up sessions closed the release-cutover, CI, security, and several TUI/transport items called out below. Treat the remaining "remaining for the next pass" section as the live backlog; the earlier red/yellow sections are preserved as a historical snapshot of the state at the time of review.
+
 ---
 
 ## TL;DR — Where You Are
 
-You have an **impressive surface** (300+ commands, full Alteryx-One coverage, embedded+managed Mongo, SQL Server, Workflow XML conversion, TUI, profile/secret system, audit artifacts, doctor, catalog, capability layer). The architecture has the right shape: command catalog, envelope output, dry-run gates, JSONL observability, central profile home, keyring abstraction.
+At the time of the original review, you had an **impressive surface** (300+ commands, full Alteryx-One coverage, embedded+managed Mongo, SQL Server, Workflow XML conversion, TUI, profile/secret system, audit artifacts, doctor, catalog, capability layer). The architecture had the right shape: command catalog, envelope output, dry-run gates, JSONL observability, central profile home, keyring abstraction.
 
 But the **execution gap to enterprise-grade** is real and concentrated in five areas:
 
@@ -17,7 +19,7 @@ But the **execution gap to enterprise-grade** is real and concentrated in five a
 2. **Safety gates are inconsistent** — `--apply` is honored for Mongo/Server, *bypassed entirely* on the One API mutating surface (delete flow, delete person, delete plan, batch invite all execute immediately).
 3. **Secrets fall back to plaintext silently** — `store_keyring_secret` returns `Ok("inline:<secret>")` on keyring failure, so headless/CI environments quietly write tokens into YAML.
 4. **Release pipeline is not enterprise-shippable** — no code signing, no SBOM, no provenance, no checksum verification in install scripts, no `cargo-audit`/`cargo-deny`, no PR CI (only tagged-release CI).
-5. **Workspace identity guardrails (TODO §13) are not wired** — mutating One commands run without preflight workspace verification.
+5. **Workspace identity guardrails (TODO §13) were not wired at the time** — mutating One commands ran without preflight workspace verification.
 
 The rest of this report is the punch list, ordered by severity.
 
@@ -823,24 +825,18 @@ clean.
 The remaining items are structural refactors that warrant standalone PRs:
 
 - **C6 (signing proper)** Actual `signtool` (Windows) + `codesign` +
-  Apple notarization. Needs user-supplied signing identities/certificates
-  uploaded as GitHub secrets; the workflow steps themselves are bounded
-  additions to `build-release.yml`.
-- **H2** Split `main.rs` (8k LOC) into per-command modules under
-  `ayx-rs/src/cmd/{one,server,mongo,workflow,...}.rs`. Mechanical but
-  large diff; do it as a pure-rename PR with no behavior changes.
+  Apple notarization. Native signing/notary hooks are now wired into the
+  release workflow behind secrets-gated steps; what remains is final
+  operator secret provisioning and real release verification.
+- **H2** Continue splitting `main.rs` (8k LOC) into per-command modules
+  under `ayx-rs/src/cmd/{one,server,mongo,workflow,...}.rs`. The
+  `catalog` surface is already carved out; keep extracting the remaining
+  command families in the same mechanical style.
 - **H3** Split `tui/app.rs` (3k LOC) into `state.rs`/`update.rs`/
   `effects.rs`; move network I/O onto a worker thread + `mpsc::channel`
   so the UI stops freezing; share `ProfileResolver` with CLI; fix
   `Screen::Inspect.index()` collision + focus preservation on Inspect
   close.
-- **H4 (rest)** Typed structs for plans, connections, people, workspaces,
-  job-groups, schedules. Pattern is established in `types.rs`; each new
-  one is ~30 LOC + 2 parse tests.
-- **H8 (rest)** Wire pagination into `OnePlatformPersonCommand::List`
-  and `OneWorkspaceCommand::List` (both currently lack a profile field,
-  so adding pagination requires converting from unit/empty struct
-  variants).
-- **L4 (full plumb)** `--no-verify-tls` is accepted but not yet honored
-  by the One transport's reqwest client; `--debug`/`--verbose` print a
-  bootstrap line but no per-call tracing yet.
+- **H4 (rest)** Typed structs for plans, connections, people, job-groups,
+  and schedules. Pattern is established in `types.rs`; each new one is
+  ~30 LOC + 2 parse tests.

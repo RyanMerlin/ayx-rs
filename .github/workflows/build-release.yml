@@ -9,9 +9,16 @@ on:
 permissions:
   contents: write
 
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build-windows:
     runs-on: windows-latest
+    env:
+      WINDOWS_CODESIGN_CERT_PFX_B64: ${{ secrets.AYX_WINDOWS_CODESIGN_CERT_PFX_B64 }}
+      WINDOWS_CODESIGN_CERT_PASSWORD: ${{ secrets.AYX_WINDOWS_CODESIGN_CERT_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
@@ -21,6 +28,9 @@ jobs:
           rustup default stable
           rustup target add x86_64-pc-windows-msvc
           rustup component add rustfmt clippy
+      - name: Install cargo-nextest
+        run: cargo install --locked cargo-nextest
+        shell: pwsh
       - name: Check formatting
         run: cargo fmt --check
         shell: pwsh
@@ -28,11 +38,20 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
         shell: pwsh
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo nextest run --workspace
         shell: pwsh
       - name: Build release
         run: cargo build --release --target x86_64-pc-windows-msvc
         shell: pwsh
+      - name: Sign Windows release binary
+        if: env.WINDOWS_CODESIGN_CERT_PFX_B64 != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = Join-Path "${{ github.workspace }}" "target/x86_64-pc-windows-msvc/release/ayx.exe"
+          $certPath = Join-Path $env:RUNNER_TEMP "ayx-release-signing.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_CERT_PFX_B64))
+          signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certPath /p $env:WINDOWS_CODESIGN_CERT_PASSWORD $binary
       - name: Verify release binary
         shell: pwsh
         run: |
@@ -69,6 +88,9 @@ jobs:
           rustup default stable
           rustup target add x86_64-unknown-linux-gnu
           rustup component add rustfmt clippy
+      - name: Install cargo-nextest
+        run: cargo install --locked cargo-nextest
+        shell: bash
       - name: Check formatting
         run: cargo fmt --check
         shell: bash
@@ -76,7 +98,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
         shell: bash
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo nextest run --workspace
         shell: bash
       - name: Build release
         run: cargo build --release --target x86_64-unknown-linux-gnu
@@ -107,6 +129,13 @@ jobs:
 
   build-macos:
     runs-on: macos-latest
+    env:
+      MACOS_CODESIGN_CERT_P12_B64: ${{ secrets.AYX_MACOS_CODESIGN_CERT_P12_B64 }}
+      MACOS_CODESIGN_CERT_PASSWORD: ${{ secrets.AYX_MACOS_CODESIGN_CERT_PASSWORD }}
+      MACOS_CODESIGN_IDENTITY: ${{ secrets.AYX_MACOS_CODESIGN_IDENTITY }}
+      MACOS_NOTARY_KEY_ID: ${{ secrets.AYX_MACOS_NOTARY_KEY_ID }}
+      MACOS_NOTARY_ISSUER_ID: ${{ secrets.AYX_MACOS_NOTARY_ISSUER_ID }}
+      MACOS_NOTARY_PRIVATE_KEY_B64: ${{ secrets.AYX_MACOS_NOTARY_PRIVATE_KEY_B64 }}
     strategy:
       matrix:
         target:
@@ -121,6 +150,9 @@ jobs:
           rustup default stable
           rustup target add ${{ matrix.target }}
           rustup component add rustfmt clippy
+      - name: Install cargo-nextest
+        run: cargo install --locked cargo-nextest
+        shell: bash
       - name: Check formatting
         run: cargo fmt --check
         shell: bash
@@ -128,11 +160,38 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
         shell: bash
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo nextest run --workspace
         shell: bash
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
         shell: bash
+      - name: Import macOS signing certificate
+        if: env.MACOS_CODESIGN_CERT_P12_B64 != ''
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.AYX_MACOS_CODESIGN_CERT_P12_B64 }}
+          p12-password: ${{ secrets.AYX_MACOS_CODESIGN_CERT_PASSWORD }}
+      - name: Sign macOS release binary
+        if: env.MACOS_CODESIGN_CERT_P12_B64 != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="${GITHUB_WORKSPACE}/target/${{ matrix.target }}/release/ayx"
+          codesign --force --options runtime --timestamp --sign "$MACOS_CODESIGN_IDENTITY" "$binary"
+      - name: Notarize macOS release archive
+        if: env.MACOS_NOTARY_KEY_ID != '' && env.MACOS_NOTARY_ISSUER_ID != '' && env.MACOS_NOTARY_PRIVATE_KEY_B64 != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          key_path="${RUNNER_TEMP}/ayx-notary-key.p8"
+          zip_path="${RUNNER_TEMP}/ayx-${{ matrix.target }}-notary.zip"
+          printf '%s' "$MACOS_NOTARY_PRIVATE_KEY_B64" | base64 --decode > "$key_path"
+          (cd "${GITHUB_WORKSPACE}/target/${{ matrix.target }}/release" && zip -r "$zip_path" ayx)
+          xcrun notarytool submit "$zip_path" \
+            --key "$key_path" \
+            --key-id "$MACOS_NOTARY_KEY_ID" \
+            --issuer "$MACOS_NOTARY_ISSUER_ID" \
+            --wait
       - name: Verify release binary
         shell: bash
         run: |
@@ -170,10 +229,12 @@ jobs:
         run: cargo install --locked cargo-cyclonedx
       - name: Generate SBOM (CycloneDX)
         run: |
+          set -euo pipefail
           mkdir -p sbom
           cargo cyclonedx --format json --override-filename ayx -a
-          # cyclonedx writes per-crate; aggregate into one for upload.
-          find . -maxdepth 3 -name 'ayx*.cdx.json' -exec cp {} sbom/ \;
+          # cargo-cyclonedx v0.5.x writes one ayx.json per crate directory.
+          find . -maxdepth 2 -path './target' -prune -o -name 'ayx.json' -type f -exec cp {} sbom/ \;
+          test -n "$(find sbom -maxdepth 1 -type f -name '*.json' -print -quit)"
           ls -la sbom/
       - uses: actions/upload-artifact@v4
         with:

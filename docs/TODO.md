@@ -5,9 +5,9 @@ This is the working plan for evolving AYX-RS into a production-grade, agent-frie
 Completed items are removed here rather than left to rot in the plan.
 
 ## 1. Public release hygiene
-- finish the `ayx-rs` public release cutover and keep GitHub `RyanMerlin/ayx-rs` as the only public source of truth.
-- keep public fixtures and generated artifacts sanitized so they do not leak real environment state.
-- document the release workflow for building, packaging, and publishing the public binary from this repo.
+- complete: the `ayx-rs` public release cutover is done and GitHub `RyanMerlin/ayx-rs` is the public source of truth.
+- complete: public fixtures and generated artifacts are being kept sanitized so they do not leak real environment state.
+- complete: the release workflow for building, packaging, and publishing the public binary is documented and wired.
 
 ## 1a. Central profile and doctor hardening
 - move remaining inline-secret guidance toward environment-variable or native keychain storage instead of YAML.
@@ -93,7 +93,6 @@ Status:
 - keep the workflow guidance layer responsible for orchestration, but make `ayx-rs` expose the deterministic workspace validation and workflow-open primitives.
 
 ## Current priority
-- finish the public release cutover and keep `ayx-rs` as the published repo.
 - harden the new central profile system with better secret storage and profile import/export ergonomics.
 - finish `ayx tools` source/target workflows for workspace-aware migration planning and comparison.
 - keep the command catalog aligned with the live CLI after the split.

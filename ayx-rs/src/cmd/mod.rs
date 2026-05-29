@@ -10,6 +10,7 @@
 //! need (apply flag, environment override, etc.) as parameters rather than
 //! reaching back into a shared `cli` struct, so the boundary is explicit.
 
+pub mod catalog;
 pub mod confirm;
 pub mod dashboard;
 pub mod mongo;

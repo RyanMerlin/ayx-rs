@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.1 — 2026-05-29
+
+### CI and release fixes
+
+- Pull in the current `cargo-audit` ignore set and lockfile refresh so CI matches the upstream passing dependency state.
+- Switch GitHub Actions test jobs from `cargo test` to `cargo nextest run` for faster, more consistent workspace validation.
+- Replace the broken GitHub Actions lint action, opt workflows into the Node.js 24 runtime early, and keep shell globs actionlint-safe.
+- Fix release signing secret scoping so Windows/macOS signing and notarization steps can actually run when secrets are present.
+- Make SBOM collection deterministic for the current `cargo-cyclonedx` output layout and fail the SBOM job if no JSON files are produced.
+
+### CLI maintenance
+
+- Preserve catalog coverage after the `main.rs` refactor by restoring the stronger catalog describe/tag-filter unit tests.
+- Add workspace summary parsing coverage in `ayx-one-api` for list responses that use `workspaceName`, `workspace_id`, and related aliases.
+- Correct the local source install command in the README to point at the real binary crate path (`ayx-rs/`).
+
 ## 0.9.0 — 2026-05-27
 
 ### Dependency modernization

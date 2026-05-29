@@ -251,6 +251,65 @@ impl FromItems for PersonListPage {
     }
 }
 
+// ─── Workspaces ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WorkspaceSummary {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default, alias = "workspaceId", alias = "workspace_id")]
+    pub workspace_id: Option<String>,
+    #[serde(
+        default,
+        alias = "name",
+        alias = "workspaceName",
+        alias = "workspace_name"
+    )]
+    pub name: Option<String>,
+    #[serde(default, alias = "description")]
+    pub description: Option<String>,
+    #[serde(default, alias = "status")]
+    pub status: Option<String>,
+    #[serde(default, alias = "ownerEmail", alias = "owner_email")]
+    pub owner_email: Option<String>,
+    #[serde(default, alias = "createdAt", alias = "created_at")]
+    pub created_at: Option<String>,
+    #[serde(default, alias = "updatedAt", alias = "updated_at")]
+    pub updated_at: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WorkspaceListPage {
+    #[serde(default)]
+    pub items: Vec<WorkspaceSummary>,
+    #[serde(default, alias = "nextPageToken", alias = "next_page_token")]
+    pub next_page_token: Option<String>,
+    #[serde(default)]
+    pub total: Option<u64>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, Value>,
+}
+
+impl WorkspaceListPage {
+    pub fn from_value(v: &Value) -> Result<Self, serde_json::Error> {
+        from_value_or_array(v)
+    }
+}
+
+impl FromItems for WorkspaceListPage {
+    type Item = WorkspaceSummary;
+    fn from_items(items: Vec<WorkspaceSummary>) -> Self {
+        Self {
+            items,
+            next_page_token: None,
+            total: None,
+            extra: Default::default(),
+        }
+    }
+}
+
 // ─── Job groups ────────────────────────────────────────────────────────────
 
 /// One row from `/v4/jobLibrary` or `/v4/jobGroups`. The two list endpoints
@@ -513,6 +572,41 @@ mod tests {
         let p = PersonListPage::from_value(&payload).expect("parses");
         assert_eq!(p.items[0].is_admin, Some(true));
         assert_eq!(p.items[0].is_suspended, Some(false));
+    }
+
+    #[test]
+    fn workspace_list_parses_workspace_name_and_aliases() {
+        let payload = json!({
+            "items": [
+                {
+                    "id": "w1",
+                    "workspaceName": "Prod",
+                    "workspace_id": "ws-123",
+                    "ownerEmail": "ops@example.com",
+                    "status": "active",
+                    "updatedAt": "2026-05-10T13:00:00Z"
+                }
+            ],
+            "nextPageToken": "next-1"
+        });
+        let p = WorkspaceListPage::from_value(&payload).expect("parses");
+        assert_eq!(p.items[0].name.as_deref(), Some("Prod"));
+        assert_eq!(p.items[0].workspace_id.as_deref(), Some("ws-123"));
+        assert_eq!(p.items[0].owner_email.as_deref(), Some("ops@example.com"));
+        assert_eq!(p.items[0].status.as_deref(), Some("active"));
+        assert_eq!(
+            p.items[0].updated_at.as_deref(),
+            Some("2026-05-10T13:00:00Z")
+        );
+        assert_eq!(p.next_page_token.as_deref(), Some("next-1"));
+    }
+
+    #[test]
+    fn workspace_list_parses_bare_array() {
+        let payload = json!([{"id":"w1","name":"Dev"}]);
+        let p = WorkspaceListPage::from_value(&payload).expect("parses");
+        assert_eq!(p.items.len(), 1);
+        assert_eq!(p.items[0].name.as_deref(), Some("Dev"));
     }
 
     #[test]

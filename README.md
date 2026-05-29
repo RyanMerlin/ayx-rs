@@ -76,7 +76,7 @@ ayx server api status
 4. Build from source if you want to hack on it locally:
 
 ```powershell
-cargo install --locked --path .
+cargo install --locked --path ayx-rs
 ```
 
 5. Use `--output json` when another tool should consume the result. For `workflow yxdb`, pair `--csv <path>` with top-level `--output json` if you want both export and structured metadata.
