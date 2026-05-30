@@ -10,6 +10,7 @@ members = [
   "ayx-one",
   "ayx-docs-schema",
   "ayx-registry",
+  "xtask",
 ]
 
 [workspace.package]

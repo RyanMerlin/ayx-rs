@@ -1,251 +1,196 @@
-# AYX-RS Spec (v0.9.1)
+# AYX-RS CLI Spec (v0.9.1)
 
-## Global
-- Binary: `ayx`
-- Output modes: `--output text|json`
-- Default profile resolution: active central profile from the ayx config home, with `--profile <name>` for one-off overrides
-- Envelope root fields: `ok`, `message`, `timestamp_utc`, `data`
+This document is the stable contract for how `ayx` behaves. It is intentionally
+shorter than a full command inventory so it does not drift every time a command
+surface grows.
+
+For the live command tree, use:
+
+- `ayx --help`
+- `ayx <group> --help`
+- `ayx catalog list`
+- `ayx catalog describe <command-or-capability>`
+- `docs/command-surface.md` after running `cargo run -q -p xtask -- refresh-command-surface`
+- `README.md`
+
+## Product Identity
+
+- Binary name: `ayx`
+- Primary source of truth: `RyanMerlin/ayx-rs` on GitHub
+- Supported operator surfaces: local CLI, local dashboard, structured catalog
+- Supported release targets: Windows, Linux, macOS
+
+## Runtime Model
+
+`ayx` is central-profile-first.
+
+- Runtime commands resolve the active profile from the ayx config home.
+- `--profile <name>` selects a central profile by name for one run.
+- `AYX_PROFILE=<name>` is the environment-variable equivalent.
+- Filesystem paths are not valid runtime profile selectors.
+- Explicit file paths are reserved for onboarding, migration, and editor-style
+  flows such as `ayx profile migrate --profile <path>`.
+
+Multi-environment workflows use `environments.yaml`.
+
+- `--environment <name>` overrides the active environment for one run.
+- Workspace-style source/target resolution belongs in the `tools workspace`
+  family, not in ad hoc path-based command flags.
 
 ## First Run
 
-Public source of truth: `RyanMerlin/ayx-rs` on GitHub.
-Any mirrors are secondary copies and should not replace the GitHub release channel in operator guidance.
+The shortest supported setup path is:
 
-The fastest path from zero to useful output is:
+1. Install from the public GitHub release channel.
+2. Run `ayx onboard`.
+3. Confirm the active profile with `ayx profile current`.
+4. Run a read-only command such as `ayx one platform workspace current` or
+   `ayx server api status`.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash
-```
+Legacy YAML import remains supported through:
 
-The installer verifies `SHA256SUMS` by default. Set `AYX_VERIFY_SIGSTORE=1`
-to additionally verify the published sigstore bundle when `cosign` is
-available on PATH.
+- `ayx profile migrate --profile <path>`
 
-Then initialize the central profile store with `ayx onboard`, or import a legacy YAML file with `ayx profile migrate --profile <path>`, and start with:
+## Output Contract
+
+`ayx` supports:
+
+- `--output text`
+- `--output json`
+
+Structured responses use a consistent envelope model. The top-level contract is:
+
+- `ok`
+- `message`
+- `timestamp_utc`
+- `data`
+
+Commands may also emit artifact paths, warnings, or audit metadata inside the
+envelope payload.
+
+## Safety Model
+
+The CLI is conservative by default.
+
+- Read-only commands run without an extra safety flag.
+- Mutating commands require `--apply`.
+- When `--apply` is omitted on a mutating command, the CLI should return a
+  dry-run style response instead of silently performing the write.
+- Audit artifacts are expected for destructive or operationally significant
+  workflows.
+
+## Configuration Contract
+
+The runtime config shape is `ayx-core::profile::Config`.
+
+Minimum practical expectations depend on the product surface in use, but the
+common baseline is:
+
+- `profile_name`
+- `server.api.base_url`, `server.api.client_id`, `server.api.client_secret`
+  for Server API usage
+- `server.storage.kind`
+- `server.storage.mongo.mode`
+- `server.storage.mongo.databases.gallery_name`
+- `server.storage.mongo.databases.service_name`
+- `alteryx_one.account_email` for One ownership and identity workflows
+- One OAuth/token fields when using One API families
+
+Sensitive values should prefer keyring-backed refs or environment variables over
+inline plaintext config.
+
+## Command Families
+
+The CLI is product-first. The stable top-level families are:
+
+- `catalog`
+- `doctor`
+- `license`
+- `mongo`
+- `onboard`
+- `profile`
+- `one`
+- `server`
+- `workflow`
+- `tools`
+- `dashboard`
+- `update`
+- `tui`
+
+The exact leaf inventory can expand, but the design rules are stable:
+
+- product surfaces stay grouped under product roots
+- read-only and mutating actions are visibly distinct
+- catalog-capable features should be discoverable through `ayx catalog`
+- command help should be the authoritative source for exact flags and leaf names
+
+## Catalog Contract
+
+The catalog layer is the structured discovery surface for humans and agents.
+
+- `ayx catalog list` enumerates commands and capabilities.
+- `ayx catalog describe <id>` resolves either a command path or capability id.
+- `ayx catalog run <capability> --json <payload-or-@file>` is the structured
+  execution surface for native capabilities.
+
+Capability ids should remain more stable than help text or internal module
+layouts.
+
+## Mongo and Server Rules
+
+- Embedded Mongo discovery should prefer standard `RuntimeSettings.xml`
+  locations, then explicit configured overrides.
+- Managed Mongo workflows should use the configured managed connection settings
+  and native Mongo tooling.
+- Server API workflows use the active central profile and should preserve
+  structured HTTP/result reporting for automation.
+- Backups, restores, and ownership-transfer workflows should keep writing audit
+  evidence.
+
+## Alteryx One Rules
+
+- One command families should validate workspace context before mutating.
+- Workspace identity must be treated as runtime state, not inferred from stale
+  browser context or copied URLs.
+- Structured API and auth diagnostics should remain available even when a
+  product surface is only partially implemented.
+
+## Dashboard Contract
+
+`ayx dashboard` is a local operator surface served from the CLI binary.
+
+- It binds loopback by default.
+- Non-loopback binding requires `--allow-remote`.
+- Non-loopback binding also requires auth via `AYX_DASHBOARD_PASSWORD` or
+  `--auth-password`.
+- Profile failures should surface in-page instead of crashing the dashboard
+  shell.
+
+## Update and Release Contract
+
+- `ayx update` targets the GitHub release channel by default.
+- Release artifacts publish platform-specific archives plus checksums.
+- Install/update instructions should prefer the published release binary over a
+  source-build shim when self-update is expected to work.
+
+## Validation Contract
+
+Repo-level validation guidance should stay aligned with CI:
 
 ```powershell
-ayx profile current
-ayx one platform workspace current
-ayx one flows list
-ayx server api status
-ayx catalog list
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo nextest run --workspace --locked
 ```
 
-If you want the command to feed another tool, add `--output json`.
+## Non-goals for This Doc
 
-## Configuration
+This spec intentionally does not duplicate:
 
-`ayx` reads JSON/YAML profiles through `ayx-core::profile::Config`. By default it resolves the active profile from the central ayx config home, then loads any adjacent `.env` file for placeholder expansion and resolves keyring-backed secret refs. `environments.yaml` is the canonical multi-environment form; it holds multiple named `Config` entries and an explicit `active_environment`. Replace the placeholders before committing the file for production usage. When pointing at a live Server, make sure the `server` object is internally consistent across API, storage kind, Mongo, SQL Server, observability, and Alteryx One fields.
+- every leaf command
+- every payload schema
+- every API endpoint path
+- every implementation detail of module layout
 
-Runtime commands select central profiles by name, not by filesystem path. Use
-`--profile <name>` for one-off runtime selection, and reserve explicit file
-paths for onboarding, migration, or editor flows such as
-`ayx profile migrate --profile <path>`.
-
-Central profile commands:
-- `ayx profile list`
-- `ayx profile current`
-- `ayx profile show [name]`
-- `ayx profile use <name>`
-- `ayx profile migrate [--profile config.yaml] [--name <name>]`
-- `ayx doctor`
-- `ayx doctor config [--fix]`
-
-### Required Config Fields
-- `profile_name`: user-friendly label surfaced in audit/output envelopes.
-- `alteryx_one.account_email` is the Alteryx One identity used throughout owner-transfer and gallery operations.
-- `server.api.base_url` plus OAuth2 client-credential inputs (`server.api.client_id`, `server.api.client_secret` or `server.api.client_secret_ref`) for the Server API surface.
-- `server.storage.kind` selects the primary server storage mode.
-- `server.storage.mongo.mode`: `embedded` or `managed`.
-- `server.storage.mongo.databases.gallery_name` and `server.storage.mongo.databases.service_name`: required database names so every operation knows which namespaces to touch.
-- For embedded mode, `server.storage.mongo.embedded.runtime_settings_path` may remain null; runtime discovery handles the default Server layout.
-- In managed mode, provide `server.storage.mongo.managed.url` or `server.storage.mongo.managed.host` plus `server.storage.mongo.managed.port`. TLS and credentials control how `mongodump/mongorestore` authenticate.
-- `server.storage.sqlserver.controller.*` and `server.storage.sqlserver.server_ui.*` are used when the deployment uses SQL-backed storage, and their password fields may use keyring refs.
-- future product API branches will carry their own config blocks under the product root.
-
-## Embedded RuntimeSettings Discovery
-
-- `server.storage.mongo.embedded.runtime_settings_path` defaults to `null`; the CLI tries the documented Server location (`C:\ProgramData\Alteryx\RuntimeSettings.xml`) first, then `%ProgramData%/Alteryx/*`, `%ProgramFiles%/Alteryx/*`, `%ProgramFiles(x86)%/Alteryx/*`, and finally probes relocated drives (for example `D:\ProgramData\Alteryx\RuntimeSettings.xml`). The CLI bails with a helpful error if no candidate exists, instructing you to set the path manually.
-- `server.storage.mongo.embedded.alteryx_service_path` is optional; the embedding logic derives the install root from RuntimeSettings and looks for `bin/AlteryxService.exe` before asking for an override.
-- `server.storage.mongo.embedded.restore_target_path` is optional; the CLI uses the runtime payload to infer the persistence target, defaulting to `C:\ProgramData\Alteryx\Service\Persistence\MongoDB` when the XML lacks the field.
-- The repo includes `examples/RuntimeSettings.xml` as a fixture — copy your Server runtime settings there or point `server.storage.mongo.embedded.runtime_settings_path` at your install when validating the embedded workflow locally.
-
-## Mongo Commands
-- `ayx mongo status --profile <name>`
-- `ayx mongo inventory --profile <name>`
-- `ayx mongo backup --profile <name> --output-dir <dir> [--apply] [--audit-dir <dir>]`
-- `ayx mongo restore --profile <name> --input-path <path> [--apply] [--audit-dir <dir>]`
-
-Mutating commands (`backup`, `restore`) default to dry-run and require `--apply` to execute. Every mutating command writes an audit artifact JSON file.
-
-Execution behavior:
-- Embedded mode uses the AlteryxService wrappers:
-  - `emongodump=path`
-  - `emongorestore=source,target`
-- Managed mode uses the MongoDB CLI tools (`mongodump`, `mongorestore`) and honors the TLS flags, credentials, and connection-time tuning parameters configured in `server.storage.mongo.managed`.
-
-## API Commands
-- `ayx server api status --profile <name>`
-- `ayx server api users --profile <name> [--view Default|Full]`
-- `ayx server api user-detail --profile <name> --user-id <id>`
-- `ayx server api user-update --profile <name> --user-id <id> --payload-file <path> [--apply]`
-- `ayx server api user-delete --profile <name> --user-id <id> [--apply]`
-- `ayx server api user-assets --profile <name> --user-id <id> [--asset-type All|Workflows|Schedules|Collections]`
-- `ayx server api user-transfer-assets --profile <name> --user-id <id> --payload-file <path> [--apply]`
-- `ayx server api user-deactivate --profile <name> --user-id <id> [--apply]`
-- `ayx server api user-password-reset --profile <name> --user-id <id> [--apply]`
-- `ayx server api workflows --profile <name> [--view Default|Full]`
-- `ayx server api workflow-detail --profile <name> --workflow-id <id>`
-- `ayx server api workflow-jobs --profile <name> --workflow-id <id>`
-- `ayx server api workflow-questions --profile <name> --workflow-id <id> [--version-id <id>]`
-- `ayx server api workflow-package --profile <name> --workflow-id <id> [--version-id <id>] [--output-path <path>]`
-- `ayx server api workflow-version-upload --profile <name> --workflow-id <id> --file-path <path> --name <value> --owner-id <id> [--execution-mode Safe|SemiSafe|Standard] [--workflow-credential-type Default|Required|Specific] [--others-may-download] [--others-can-execute] [--has-private-data-exemption] [--comments <text>] [--make-published] [--credential-id <id>] [--bypass-workflow-version-check] [--apply]`
-
-## Upgrade Commands
-- `ayx server upgrade path --from <source> --to <target> [--deployment embedded-mongo|user-mongo|sql]`
-- `ayx server upgrade precheck --profile <name> --target <version> --out <dir> [--deployment embedded-mongo|user-mongo|sql]`
-- `ayx server upgrade backup --profile <name> --type <mongo|runtime|logs|all> --out <dir>`
-- `ayx server upgrade plan --from <source> --to <target> --out <dir> [--deployment embedded-mongo|user-mongo|sql]`
-- `ayx server upgrade apply --manifest <path> --apply --yes`
-- `ayx server upgrade postcheck --profile <name> --manifest <path> --out <dir>`
-- `ayx server upgrade bundle --input <dir> --out <zip>`
-
-Upgrade commands rely on the optional `upgrade` block in `config.yaml`, for example:
-
-```
-upgrade:
-  target_version: 2024.1
-  deployment: embedded-mongo
-```
-
-`server upgrade precheck` validates runtime/service expectations and curator access before evaluating the supported path between the configured `target_version` and the CLI `--target`. `server upgrade backup` captures runtime/service files, writes `backup_results.csv`, and records instructions for embedded Mongo. `server upgrade plan` writes `upgrade_plan.json` plus the hashed `plan_manifest.json` and a run manifest describing each hop. `server upgrade apply` replays the plan manifest with simulated steps (`execution_audit.csv`), while `server upgrade postcheck` verifies migration logs and the manifest hash. `server upgrade bundle` zips an input directory for sharing with operations or support.
-
-## Update Command
-- `ayx update [--repo-owner <owner>] [--repo-name <repo>] [--bin-name <name>] [--target-version <tag>] [--skip-confirm]`
-
-`ayx update` checks the latest GitHub release (defaulting to `RyanMerlin/ayx-rs`) and, after prompting unless `--skip-confirm` is used, downloads and replaces the running binary with the release asset named for the current target triple. Use `--target-version` to install a specific tag instead of the latest release, and `--repo-owner/--repo-name` only when you intentionally host releases in a different repository.
-- `ayx server api workflow-detail --profile <name> --workflow-id <id>`
-- `ayx server api workflow-jobs --profile <name> --workflow-id <id>`
-- `ayx server api schedules --profile <name> [--view Default|Full]`
-- `ayx server api schedule-detail --profile <name> --schedule-id <id>`
-- `ayx server api schedule-create --profile <name> --payload-file <path> [--apply]`
-- `ayx server api schedule-update --profile <name> --schedule-id <id> --payload-file <path> [--apply]`
-- `ayx server api schedule-patch --profile <name> --schedule-id <id> --payload-file <path> [--apply]`
-- `ayx server api schedule-delete --profile <name> --schedule-id <id> [--apply]`
-- `ayx server api collections --profile <name> [--view Default|Full]`
-- `ayx server api collection-detail --profile <name> --collection-id <id>`
-- `ayx server api collection-create --profile <name> --name <value> [--apply]`
-- `ayx server api collection-update --profile <name> --collection-id <id> --payload-file <path> [--apply]`
-- `ayx server api collection-delete --profile <name> --collection-id <id> [--force] [--apply]`
- - `ayx server api collection-add-user --profile <name> --collection-id <id> --payload-file <path> [--apply]`
- - `ayx server api collection-remove-user --profile <name> --collection-id <id> --user-id <id> [--apply]`
- - `ayx server api collection-add-schedule --profile <name> --collection-id <id> --payload-file <path> [--apply]`
- - `ayx server api collection-remove-schedule --profile <name> --collection-id <id> --schedule-id <id> [--apply]`
- - `ayx server api collection-add-workflow --profile <name> --collection-id <id> --payload-file <path> [--apply]`
- - `ayx server api collection-remove-workflow --profile <name> --collection-id <id> --workflow-id <id> [--apply]`
- - `ayx server api collection-add-user-group --profile <name> --collection-id <id> --payload-file <path> [--apply]`
- - `ayx server api collection-remove-user-group --profile <name> --collection-id <id> --user-group-id <id> [--apply]`
- - `ayx server api collection-update-user-permissions --profile <name> --collection-id <id> --user-id <id> --payload-file <path> [--apply]`
- - `ayx server api collection-update-user-group-permissions --profile <name> --collection-id <id> --user-group-id <id> --payload-file <path> [--apply]`
-- `ayx server api usergroups --profile <name> [--view Default|Full]`
-- `ayx server api usergroup-detail --profile <name> --user-group-id <id>`
-- `ayx server api usergroup-create --profile <name> --payload-file <path> [--apply]`
-- `ayx server api usergroup-update --profile <name> --user-group-id <id> --payload-file <path> [--apply]`
-- `ayx server api usergroup-delete --profile <name> --user-group-id <id> [--force] [--apply]`
-- `ayx server api usergroup-add-users --profile <name> --user-group-id <id> --payload-file <path> [--apply]`
-- `ayx server api usergroup-remove-user --profile <name> --user-group-id <id> --user-id <id> [--apply]`
-- `ayx server api usergroup-add-adgroup --profile <name> --user-group-id <id> --payload-file <path> [--apply]`
-- `ayx server api usergroup-remove-adgroup --profile <name> --user-group-id <id> --ad-group-id <sid> [--apply]`
-- `ayx server api dcm-connections --profile <name>`
-- `ayx server api dcm-connection-lookup --profile <name> --connection-id <id>`
-- `ayx server api dcm-connection-share-collaboration --profile <name> --connection-id <id> --payload-file <path> [--apply]`
-- `ayx server api dcm-connection-share-execution --profile <name> --connection-id <id> --payload-file <path> [--apply]`
-- `ayx server api dcm-admin-connections --profile <name> [--connection-id <value>] [--visible-by <userId>]`
-- `ayx server api dcm-admin-connection-detail --profile <name> --connection-id <id>`
-- `ayx server api dcm-admin-connection-upsert --profile <name> --payload-file <path> [--apply]`
-- `ayx server api dcm-admin-connection-delete --profile <name> --connection-id <id> [--apply]`
-- `ayx server api dcm-admin-connection-remove-collaboration --profile <name> --connection-id <id> [--apply]`
-- `ayx server api dcm-admin-connection-remove-execution --profile <name> --connection-id <id> [--apply]`
-- `ayx server api credential-share-user --profile <name> --credential-id <id> --payload-file <path> [--apply]`
-- `ayx server api credential-unshare-user --profile <name> --credential-id <id> --user-id <user> [--apply]`
-- `ayx server api credential-share-user-group --profile <name> --credential-id <id> --payload-file <path> [--apply]`
-- `ayx server api credential-unshare-user-group --profile <name> --credential-id <id> --user-group-id <group> [--apply]`
-- `ayx server api subscriptions --profile <name> [--name <value>] [--can-share-schedule <bool>] [--default-workflow-credential-id <id>] [--user-count-gte <int>] [--user-count-lte <int>] [--workflow-count-gte <int>] [--workflow-count-lte <int>]`
-- `ayx server api subscription-detail --profile <name> --subscription-id <id>`
-- `ayx server api subscription-create --profile <name> --payload-file <path> [--apply]`
-- `ayx server api subscription-update --profile <name> --subscription-id <id> --payload-file <path> [--apply]`
-- `ayx server api subscription-delete --profile <name> --subscription-id <id> [--apply]`
-- `ayx server api subscription-change-users --profile <name> --subscription-id <id> --payload-file <path> [--apply]`
-- `ayx server api credentials --profile <name> [--view Default|Full] [--user-id <id>] [--user-group-id <id>]`
-- `ayx server api credential-detail --profile <name> --credential-id <id>`
-- `ayx server api credential-add --profile <name> --payload-file <path> [--apply]`
-- `ayx server api credential-update --profile <name> --credential-id <id> --payload-file <path> [--apply]`
-- `ayx server api credential-delete --profile <name> --credential-id <id> [--force] [--apply]`
-- `ayx server api transfer-workflow-owner --profile <name> --workflow-id <id> --owner-id <id> [--transfer-schedules <bool>] [--apply] [--audit-dir <dir>]`
-
-## Server Commands
-- `ayx server api import-swagger --profile <name> --url <url> [--version 3] [--cache-dir .omni/swagger]`
-- `ayx server api call --profile <name> --operation-id <id> [--version 3] [--cache-dir .omni/swagger] [--swagger <path>] [--param KEY=VALUE ...] [--body <path>]`
-
-Server commands reuse the active profile but require the `server` object illustrated above. The loader still accepts the old flattened `server_api`, `mongo`, and `sqlserver` shapes for compatibility. `import-swagger` downloads the OpenAPI document for the requested version and caches it under `cache-dir/<profile>_swagger_v<version>.json`. `call` loads the cached Swagger, resolves the `operationId`, substitutes path/query parameters supplied via `--param`, and exchanges JSON payloads with the Server API using the curator credentials so automation can inspect `status_code`, `url`, and the parsed response.
-
-## Product-Scoped API Branches
-
-The CLI is intentionally product-first:
-
-- `ayx server api`
-- `ayx license api`
-- `ayx one platform api`
-- `ayx one platform auth`
-- `ayx one plans`
-- `ayx one scheduling`
-- `ayx one billing`
-- `ayx one auto-insights`
-- `ayx one desktop-exec`
-
-`server` is the mature branch today. `license` and `one` are separate product roots so each Alteryx surface can grow independently. `one platform` is the managed IAM / workspace-admin entry point, `one platform auth` covers token posture and workspace reachability, `one plans` is the managed plans entry point, `one scheduling` covers schedule lifecycle, and `one billing` covers billing posture / usage export. The remaining `one` branches stay reserved until their support use-cases justify more deterministic commands.
-
-Workspace hardening rule:
-- every mutating workflow should validate the active workspace before execution
-- if the resolved workspace does not match the requested workspace, fail immediately
-- CLI and harness layers should both record the workspace GID / slug in evidence artifacts
-- stale browser tabs are not a valid source of truth for workspace identity
-
-Mutating commands (`schedule-create`, `schedule-update`, `schedule-patch`, `schedule-delete`, `collection-create`, `collection-update`, `collection-delete`, any collection membership mutation or permission update, `credential-add`, `credential-update`, `credential-delete`, `credential-share-user`, `credential-share-user-group`, `credential-unshare-*`, `subscription-create`, `subscription-update`, `subscription-delete`, `subscription-change-users`, `user-update`, `user-delete`, `user-transfer-assets`, `user-deactivate`, `user-password-reset`, `workflow-version-upload`, `usergroup-create`, `usergroup-update`, `usergroup-delete`, `usergroup-*` membership moves, and all DCM admin mutators) require `--apply` before they invoke the live API to avoid accidental writes; when that flag is omitted the CLI returns a dry-run envelope with guidance to provide the safety gate.
-
-Ownership transfer is API-first through `PUT /v3/workflows/{workflowId}/transfer`. HTTP retries/backoff handle 429/5xx responses, and the CLI surface maps API failures into structured envelope data for downstream automation.
-
-## Payload files
-
-- `schedule-create` expects a JSON file matching the `CreateScheduleContract` from the Swagger schema (minimum `workflowId` and `iteration` properties; the repo’s `docs/swagger-v3.json` contains the full contract).
-- `schedule-update` requires a JSON payload adhering to `UpdateScheduleContract`.
-- `collection-update` expects a JSON payload matching `UpdateCollectionContract` (usually `name` and `ownerId`).
-- `schedule-patch` expects a JSON payload matching `PatchScheduleContract`.
-- `dcm-connection-share-collaboration` expects `DCMEShareForCollaborationContract`.
-- `dcm-connection-share-execution` expects `DCMEShareForExecutionContract`.
-- `credential-share-user` expects `AddCredentialsUserContract`.
-- `credential-share-user-group` expects `AddCredentialsUserGroupContract`.
-- `dcm-admin-connection-upsert` expects a JSON payload matching `DCMEUpsertConnectionAdminContract`.
-- `credential-add` expects `CredentialAddContract`.
-- `credential-update` expects `CredentialUpdateContract`.
-- `subscription-create` expects `CreateSubscriptionContract`.
-- `subscription-update` expects `UpdateSubscriptionContract`.
-- `subscription-change-users` expects `ChangeUsersSubscriptionContract`.
-- `user-update` expects `UpdateUserContract`.
-- `user-transfer-assets` expects `TransferUserAssetsContract`.
-- `workflow-version-upload` uploads a `.yxzp` package via multipart form data; required fields are `name`, `ownerId`, `executionMode`, `workflowCredentialType`, `makePublished`, `othersMayDownload`, `othersCanExecute`, and `bypassWorkflowVersionCheck`, while optional booleans are `hasPrivateDataExemption` and `credentialId`, and `comments` can be supplied.
-- `collection-add-user` expects `AddUserContract`.
-- `collection-add-schedule` expects `AddScheduleContract`.
-- `collection-add-workflow` expects `AddWorkflowContract`.
-- `collection-add-user-group` expects `AddUserGroupContract`.
-- `collection-update-user-permissions` expects `UpdatePermissionsContract`.
-- `collection-update-user-group-permissions` expects `UpdatePermissionsContract`.
-- `workflow yxdb --input <file>` reads `.yxdb` files and can export the full result set to CSV with `--csv <path>`.
-- `workflow yxdb --input <file> --csv <path> --output json` exports CSV and returns a structured JSON envelope with path, field, row, and CSV metadata.
-- `workflow convert-cloud --input <file.yxmd> --output <file.json> [--fail-on-unsupported]` converts Desktop workflows to Designer Cloud JSON, preserves unsupported tools generically, and emits warnings in the CLI envelope.
-- `onboard --profile <file> --non-interactive` validates an existing profile and returns a machine-readable summary without prompting.
-- `onboard --profile environments.yaml --environments` writes a starter environments file with `dev` and `prod` entries.
-- `--environment <name>` selects the active environment when loading an environments file with multiple named environments.
-- `tools workspace init --output environments.yaml` writes the canonical environments template, while `tools workspace resolve --workspace environments.yaml --source dev --target prod` resolves explicit source/target environments for future cross-environment operations.
-- `workflow-package` saves the yxzp to the filesystem (default `<workflowId>.yxzp`) and accepts an optional `versionId`.
-- Payload files are supplied via `--payload-file <path>` and only evaluated when `--apply` is supplied; otherwise the CLI emits a dry-run envelope pointing to the payload file.
+Those details belong in command help, the catalog surface, targeted handoff
+docs, or generated references.
