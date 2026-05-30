@@ -1,4 +1,4 @@
-# AYX-RS Spec (v0.9.0)
+# AYX-RS Spec (v0.9.1)
 
 ## Global
 - Binary: `ayx`
@@ -37,6 +37,11 @@ If you want the command to feed another tool, add `--output json`.
 
 `ayx` reads JSON/YAML profiles through `ayx-core::profile::Config`. By default it resolves the active profile from the central ayx config home, then loads any adjacent `.env` file for placeholder expansion and resolves keyring-backed secret refs. `environments.yaml` is the canonical multi-environment form; it holds multiple named `Config` entries and an explicit `active_environment`. Replace the placeholders before committing the file for production usage. When pointing at a live Server, make sure the `server` object is internally consistent across API, storage kind, Mongo, SQL Server, observability, and Alteryx One fields.
 
+Runtime commands select central profiles by name, not by filesystem path. Use
+`--profile <name>` for one-off runtime selection, and reserve explicit file
+paths for onboarding, migration, or editor flows such as
+`ayx profile migrate --profile <path>`.
+
 Central profile commands:
 - `ayx profile list`
 - `ayx profile current`
@@ -66,10 +71,10 @@ Central profile commands:
 - The repo includes `examples/RuntimeSettings.xml` as a fixture — copy your Server runtime settings there or point `server.storage.mongo.embedded.runtime_settings_path` at your install when validating the embedded workflow locally.
 
 ## Mongo Commands
-- `ayx mongo status --profile <path>`
-- `ayx mongo inventory --profile <path>`
-- `ayx mongo backup --profile <path> --output-dir <dir> [--apply] [--audit-dir <dir>]`
-- `ayx mongo restore --profile <path> --input-path <path> [--apply] [--audit-dir <dir>]`
+- `ayx mongo status --profile <name>`
+- `ayx mongo inventory --profile <name>`
+- `ayx mongo backup --profile <name> --output-dir <dir> [--apply] [--audit-dir <dir>]`
+- `ayx mongo restore --profile <name> --input-path <path> [--apply] [--audit-dir <dir>]`
 
 Mutating commands (`backup`, `restore`) default to dry-run and require `--apply` to execute. Every mutating command writes an audit artifact JSON file.
 
@@ -80,29 +85,29 @@ Execution behavior:
 - Managed mode uses the MongoDB CLI tools (`mongodump`, `mongorestore`) and honors the TLS flags, credentials, and connection-time tuning parameters configured in `server.storage.mongo.managed`.
 
 ## API Commands
-- `ayx server api status --profile <path>`
-- `ayx server api users --profile <path> [--view Default|Full]`
-- `ayx server api user-detail --profile <path> --user-id <id>`
-- `ayx server api user-update --profile <path> --user-id <id> --payload-file <path> [--apply]`
-- `ayx server api user-delete --profile <path> --user-id <id> [--apply]`
-- `ayx server api user-assets --profile <path> --user-id <id> [--asset-type All|Workflows|Schedules|Collections]`
-- `ayx server api user-transfer-assets --profile <path> --user-id <id> --payload-file <path> [--apply]`
-- `ayx server api user-deactivate --profile <path> --user-id <id> [--apply]`
-- `ayx server api user-password-reset --profile <path> --user-id <id> [--apply]`
-- `ayx server api workflows --profile <path> [--view Default|Full]`
-- `ayx server api workflow-detail --profile <path> --workflow-id <id>`
-- `ayx server api workflow-jobs --profile <path> --workflow-id <id>`
-- `ayx server api workflow-questions --profile <path> --workflow-id <id> [--version-id <id>]`
-- `ayx server api workflow-package --profile <path> --workflow-id <id> [--version-id <id>] [--output-path <path>]`
-- `ayx server api workflow-version-upload --profile <path> --workflow-id <id> --file-path <path> --name <value> --owner-id <id> [--execution-mode Safe|SemiSafe|Standard] [--workflow-credential-type Default|Required|Specific] [--others-may-download] [--others-can-execute] [--has-private-data-exemption] [--comments <text>] [--make-published] [--credential-id <id>] [--bypass-workflow-version-check] [--apply]`
+- `ayx server api status --profile <name>`
+- `ayx server api users --profile <name> [--view Default|Full]`
+- `ayx server api user-detail --profile <name> --user-id <id>`
+- `ayx server api user-update --profile <name> --user-id <id> --payload-file <path> [--apply]`
+- `ayx server api user-delete --profile <name> --user-id <id> [--apply]`
+- `ayx server api user-assets --profile <name> --user-id <id> [--asset-type All|Workflows|Schedules|Collections]`
+- `ayx server api user-transfer-assets --profile <name> --user-id <id> --payload-file <path> [--apply]`
+- `ayx server api user-deactivate --profile <name> --user-id <id> [--apply]`
+- `ayx server api user-password-reset --profile <name> --user-id <id> [--apply]`
+- `ayx server api workflows --profile <name> [--view Default|Full]`
+- `ayx server api workflow-detail --profile <name> --workflow-id <id>`
+- `ayx server api workflow-jobs --profile <name> --workflow-id <id>`
+- `ayx server api workflow-questions --profile <name> --workflow-id <id> [--version-id <id>]`
+- `ayx server api workflow-package --profile <name> --workflow-id <id> [--version-id <id>] [--output-path <path>]`
+- `ayx server api workflow-version-upload --profile <name> --workflow-id <id> --file-path <path> --name <value> --owner-id <id> [--execution-mode Safe|SemiSafe|Standard] [--workflow-credential-type Default|Required|Specific] [--others-may-download] [--others-can-execute] [--has-private-data-exemption] [--comments <text>] [--make-published] [--credential-id <id>] [--bypass-workflow-version-check] [--apply]`
 
 ## Upgrade Commands
 - `ayx server upgrade path --from <source> --to <target> [--deployment embedded-mongo|user-mongo|sql]`
-- `ayx server upgrade precheck --profile <path> --target <version> --out <dir> [--deployment embedded-mongo|user-mongo|sql]`
-- `ayx server upgrade backup --profile <path> --type <mongo|runtime|logs|all> --out <dir>`
+- `ayx server upgrade precheck --profile <name> --target <version> --out <dir> [--deployment embedded-mongo|user-mongo|sql]`
+- `ayx server upgrade backup --profile <name> --type <mongo|runtime|logs|all> --out <dir>`
 - `ayx server upgrade plan --from <source> --to <target> --out <dir> [--deployment embedded-mongo|user-mongo|sql]`
 - `ayx server upgrade apply --manifest <path> --apply --yes`
-- `ayx server upgrade postcheck --profile <path> --manifest <path> --out <dir>`
+- `ayx server upgrade postcheck --profile <name> --manifest <path> --out <dir>`
 - `ayx server upgrade bundle --input <dir> --out <zip>`
 
 Upgrade commands rely on the optional `upgrade` block in `config.yaml`, for example:
@@ -119,68 +124,68 @@ upgrade:
 - `ayx update [--repo-owner <owner>] [--repo-name <repo>] [--bin-name <name>] [--target-version <tag>] [--skip-confirm]`
 
 `ayx update` checks the latest GitHub release (defaulting to `RyanMerlin/ayx-rs`) and, after prompting unless `--skip-confirm` is used, downloads and replaces the running binary with the release asset named for the current target triple. Use `--target-version` to install a specific tag instead of the latest release, and `--repo-owner/--repo-name` only when you intentionally host releases in a different repository.
-- `ayx server api workflow-detail --profile <path> --workflow-id <id>`
-- `ayx server api workflow-jobs --profile <path> --workflow-id <id>`
-- `ayx server api schedules --profile <path> [--view Default|Full]`
-- `ayx server api schedule-detail --profile <path> --schedule-id <id>`
-- `ayx server api schedule-create --profile <path> --payload-file <path> [--apply]`
-- `ayx server api schedule-update --profile <path> --schedule-id <id> --payload-file <path> [--apply]`
-- `ayx server api schedule-patch --profile <path> --schedule-id <id> --payload-file <path> [--apply]`
-- `ayx server api schedule-delete --profile <path> --schedule-id <id> [--apply]`
-- `ayx server api collections --profile <path> [--view Default|Full]`
-- `ayx server api collection-detail --profile <path> --collection-id <id>`
-- `ayx server api collection-create --profile <path> --name <value> [--apply]`
-- `ayx server api collection-update --profile <path> --collection-id <id> --payload-file <path> [--apply]`
-- `ayx server api collection-delete --profile <path> --collection-id <id> [--force] [--apply]`
- - `ayx server api collection-add-user --profile <path> --collection-id <id> --payload-file <path> [--apply]`
- - `ayx server api collection-remove-user --profile <path> --collection-id <id> --user-id <id> [--apply]`
- - `ayx server api collection-add-schedule --profile <path> --collection-id <id> --payload-file <path> [--apply]`
- - `ayx server api collection-remove-schedule --profile <path> --collection-id <id> --schedule-id <id> [--apply]`
- - `ayx server api collection-add-workflow --profile <path> --collection-id <id> --payload-file <path> [--apply]`
- - `ayx server api collection-remove-workflow --profile <path> --collection-id <id> --workflow-id <id> [--apply]`
- - `ayx server api collection-add-user-group --profile <path> --collection-id <id> --payload-file <path> [--apply]`
- - `ayx server api collection-remove-user-group --profile <path> --collection-id <id> --user-group-id <id> [--apply]`
- - `ayx server api collection-update-user-permissions --profile <path> --collection-id <id> --user-id <id> --payload-file <path> [--apply]`
- - `ayx server api collection-update-user-group-permissions --profile <path> --collection-id <id> --user-group-id <id> --payload-file <path> [--apply]`
-- `ayx server api usergroups --profile <path> [--view Default|Full]`
-- `ayx server api usergroup-detail --profile <path> --user-group-id <id>`
-- `ayx server api usergroup-create --profile <path> --payload-file <path> [--apply]`
-- `ayx server api usergroup-update --profile <path> --user-group-id <id> --payload-file <path> [--apply]`
-- `ayx server api usergroup-delete --profile <path> --user-group-id <id> [--force] [--apply]`
-- `ayx server api usergroup-add-users --profile <path> --user-group-id <id> --payload-file <path> [--apply]`
-- `ayx server api usergroup-remove-user --profile <path> --user-group-id <id> --user-id <id> [--apply]`
-- `ayx server api usergroup-add-adgroup --profile <path> --user-group-id <id> --payload-file <path> [--apply]`
-- `ayx server api usergroup-remove-adgroup --profile <path> --user-group-id <id> --ad-group-id <sid> [--apply]`
-- `ayx server api dcm-connections --profile <path>`
-- `ayx server api dcm-connection-lookup --profile <path> --connection-id <id>`
-- `ayx server api dcm-connection-share-collaboration --profile <path> --connection-id <id> --payload-file <path> [--apply]`
-- `ayx server api dcm-connection-share-execution --profile <path> --connection-id <id> --payload-file <path> [--apply]`
-- `ayx server api dcm-admin-connections --profile <path> [--connection-id <value>] [--visible-by <userId>]`
-- `ayx server api dcm-admin-connection-detail --profile <path> --connection-id <id>`
-- `ayx server api dcm-admin-connection-upsert --profile <path> --payload-file <path> [--apply]`
-- `ayx server api dcm-admin-connection-delete --profile <path> --connection-id <id> [--apply]`
-- `ayx server api dcm-admin-connection-remove-collaboration --profile <path> --connection-id <id> [--apply]`
-- `ayx server api dcm-admin-connection-remove-execution --profile <path> --connection-id <id> [--apply]`
-- `ayx server api credential-share-user --profile <path> --credential-id <id> --payload-file <path> [--apply]`
-- `ayx server api credential-unshare-user --profile <path> --credential-id <id> --user-id <user> [--apply]`
-- `ayx server api credential-share-user-group --profile <path> --credential-id <id> --payload-file <path> [--apply]`
-- `ayx server api credential-unshare-user-group --profile <path> --credential-id <id> --user-group-id <group> [--apply]`
-- `ayx server api subscriptions --profile <path> [--name <value>] [--can-share-schedule <bool>] [--default-workflow-credential-id <id>] [--user-count-gte <int>] [--user-count-lte <int>] [--workflow-count-gte <int>] [--workflow-count-lte <int>]`
-- `ayx server api subscription-detail --profile <path> --subscription-id <id>`
-- `ayx server api subscription-create --profile <path> --payload-file <path> [--apply]`
-- `ayx server api subscription-update --profile <path> --subscription-id <id> --payload-file <path> [--apply]`
-- `ayx server api subscription-delete --profile <path> --subscription-id <id> [--apply]`
-- `ayx server api subscription-change-users --profile <path> --subscription-id <id> --payload-file <path> [--apply]`
-- `ayx server api credentials --profile <path> [--view Default|Full] [--user-id <id>] [--user-group-id <id>]`
-- `ayx server api credential-detail --profile <path> --credential-id <id>`
-- `ayx server api credential-add --profile <path> --payload-file <path> [--apply]`
-- `ayx server api credential-update --profile <path> --credential-id <id> --payload-file <path> [--apply]`
-- `ayx server api credential-delete --profile <path> --credential-id <id> [--force] [--apply]`
-- `ayx server api transfer-workflow-owner --profile <path> --workflow-id <id> --owner-id <id> [--transfer-schedules <bool>] [--apply] [--audit-dir <dir>]`
+- `ayx server api workflow-detail --profile <name> --workflow-id <id>`
+- `ayx server api workflow-jobs --profile <name> --workflow-id <id>`
+- `ayx server api schedules --profile <name> [--view Default|Full]`
+- `ayx server api schedule-detail --profile <name> --schedule-id <id>`
+- `ayx server api schedule-create --profile <name> --payload-file <path> [--apply]`
+- `ayx server api schedule-update --profile <name> --schedule-id <id> --payload-file <path> [--apply]`
+- `ayx server api schedule-patch --profile <name> --schedule-id <id> --payload-file <path> [--apply]`
+- `ayx server api schedule-delete --profile <name> --schedule-id <id> [--apply]`
+- `ayx server api collections --profile <name> [--view Default|Full]`
+- `ayx server api collection-detail --profile <name> --collection-id <id>`
+- `ayx server api collection-create --profile <name> --name <value> [--apply]`
+- `ayx server api collection-update --profile <name> --collection-id <id> --payload-file <path> [--apply]`
+- `ayx server api collection-delete --profile <name> --collection-id <id> [--force] [--apply]`
+ - `ayx server api collection-add-user --profile <name> --collection-id <id> --payload-file <path> [--apply]`
+ - `ayx server api collection-remove-user --profile <name> --collection-id <id> --user-id <id> [--apply]`
+ - `ayx server api collection-add-schedule --profile <name> --collection-id <id> --payload-file <path> [--apply]`
+ - `ayx server api collection-remove-schedule --profile <name> --collection-id <id> --schedule-id <id> [--apply]`
+ - `ayx server api collection-add-workflow --profile <name> --collection-id <id> --payload-file <path> [--apply]`
+ - `ayx server api collection-remove-workflow --profile <name> --collection-id <id> --workflow-id <id> [--apply]`
+ - `ayx server api collection-add-user-group --profile <name> --collection-id <id> --payload-file <path> [--apply]`
+ - `ayx server api collection-remove-user-group --profile <name> --collection-id <id> --user-group-id <id> [--apply]`
+ - `ayx server api collection-update-user-permissions --profile <name> --collection-id <id> --user-id <id> --payload-file <path> [--apply]`
+ - `ayx server api collection-update-user-group-permissions --profile <name> --collection-id <id> --user-group-id <id> --payload-file <path> [--apply]`
+- `ayx server api usergroups --profile <name> [--view Default|Full]`
+- `ayx server api usergroup-detail --profile <name> --user-group-id <id>`
+- `ayx server api usergroup-create --profile <name> --payload-file <path> [--apply]`
+- `ayx server api usergroup-update --profile <name> --user-group-id <id> --payload-file <path> [--apply]`
+- `ayx server api usergroup-delete --profile <name> --user-group-id <id> [--force] [--apply]`
+- `ayx server api usergroup-add-users --profile <name> --user-group-id <id> --payload-file <path> [--apply]`
+- `ayx server api usergroup-remove-user --profile <name> --user-group-id <id> --user-id <id> [--apply]`
+- `ayx server api usergroup-add-adgroup --profile <name> --user-group-id <id> --payload-file <path> [--apply]`
+- `ayx server api usergroup-remove-adgroup --profile <name> --user-group-id <id> --ad-group-id <sid> [--apply]`
+- `ayx server api dcm-connections --profile <name>`
+- `ayx server api dcm-connection-lookup --profile <name> --connection-id <id>`
+- `ayx server api dcm-connection-share-collaboration --profile <name> --connection-id <id> --payload-file <path> [--apply]`
+- `ayx server api dcm-connection-share-execution --profile <name> --connection-id <id> --payload-file <path> [--apply]`
+- `ayx server api dcm-admin-connections --profile <name> [--connection-id <value>] [--visible-by <userId>]`
+- `ayx server api dcm-admin-connection-detail --profile <name> --connection-id <id>`
+- `ayx server api dcm-admin-connection-upsert --profile <name> --payload-file <path> [--apply]`
+- `ayx server api dcm-admin-connection-delete --profile <name> --connection-id <id> [--apply]`
+- `ayx server api dcm-admin-connection-remove-collaboration --profile <name> --connection-id <id> [--apply]`
+- `ayx server api dcm-admin-connection-remove-execution --profile <name> --connection-id <id> [--apply]`
+- `ayx server api credential-share-user --profile <name> --credential-id <id> --payload-file <path> [--apply]`
+- `ayx server api credential-unshare-user --profile <name> --credential-id <id> --user-id <user> [--apply]`
+- `ayx server api credential-share-user-group --profile <name> --credential-id <id> --payload-file <path> [--apply]`
+- `ayx server api credential-unshare-user-group --profile <name> --credential-id <id> --user-group-id <group> [--apply]`
+- `ayx server api subscriptions --profile <name> [--name <value>] [--can-share-schedule <bool>] [--default-workflow-credential-id <id>] [--user-count-gte <int>] [--user-count-lte <int>] [--workflow-count-gte <int>] [--workflow-count-lte <int>]`
+- `ayx server api subscription-detail --profile <name> --subscription-id <id>`
+- `ayx server api subscription-create --profile <name> --payload-file <path> [--apply]`
+- `ayx server api subscription-update --profile <name> --subscription-id <id> --payload-file <path> [--apply]`
+- `ayx server api subscription-delete --profile <name> --subscription-id <id> [--apply]`
+- `ayx server api subscription-change-users --profile <name> --subscription-id <id> --payload-file <path> [--apply]`
+- `ayx server api credentials --profile <name> [--view Default|Full] [--user-id <id>] [--user-group-id <id>]`
+- `ayx server api credential-detail --profile <name> --credential-id <id>`
+- `ayx server api credential-add --profile <name> --payload-file <path> [--apply]`
+- `ayx server api credential-update --profile <name> --credential-id <id> --payload-file <path> [--apply]`
+- `ayx server api credential-delete --profile <name> --credential-id <id> [--force] [--apply]`
+- `ayx server api transfer-workflow-owner --profile <name> --workflow-id <id> --owner-id <id> [--transfer-schedules <bool>] [--apply] [--audit-dir <dir>]`
 
 ## Server Commands
-- `ayx server api import-swagger --profile <path> --url <url> [--version 3] [--cache-dir .omni/swagger]`
-- `ayx server api call --profile <path> --operation-id <id> [--version 3] [--cache-dir .omni/swagger] [--swagger <path>] [--param KEY=VALUE ...] [--body <path>]`
+- `ayx server api import-swagger --profile <name> --url <url> [--version 3] [--cache-dir .omni/swagger]`
+- `ayx server api call --profile <name> --operation-id <id> [--version 3] [--cache-dir .omni/swagger] [--swagger <path>] [--param KEY=VALUE ...] [--body <path>]`
 
 Server commands reuse the active profile but require the `server` object illustrated above. The loader still accepts the old flattened `server_api`, `mongo`, and `sqlserver` shapes for compatibility. `import-swagger` downloads the OpenAPI document for the requested version and caches it under `cache-dir/<profile>_swagger_v<version>.json`. `call` loads the cached Swagger, resolves the `operationId`, substitutes path/query parameters supplied via `--param`, and exchanges JSON payloads with the Server API using the curator credentials so automation can inspect `status_code`, `url`, and the parsed response.
 

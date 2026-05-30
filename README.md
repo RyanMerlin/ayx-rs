@@ -231,9 +231,9 @@ Agent-oriented catalog notes:
 Run checks locally:
 
 ```powershell
-cargo fmt --check
+cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
+cargo nextest run --workspace --locked
 ```
 
 ## Fixtures

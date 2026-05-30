@@ -4,6 +4,21 @@ Captured from a Codex review (2026-05-11) of the `ayx-rs` binary crate. The
 workspace-level architecture is fine — the work below is scoped entirely to the
 CLI binary crate at `ayx-rs/`.
 
+## Status Checkpoint (2026-05-29)
+
+This note is now partly historical. Several items from the original review have
+already moved:
+
+- `catalog` dispatch is no longer root-only; the binary now has
+  `ayx-rs/src/cmd/catalog.rs`.
+- `ayx dashboard` also lives under `ayx-rs/src/cmd/dashboard/`.
+- `ayx-rs/src/main.rs` is still large, but it is now **5,389 lines** rather
+  than the original 5,815 cited below.
+
+What remains useful here is the direction of travel: keep shrinking the root
+dispatcher, keep moving command-local helpers beside their surfaces, and keep
+tests from depending on specific source-file layouts.
+
 ## Diagnosis
 
 The repo is **not** a monolithic `main.rs` at the workspace level. Domain
@@ -17,13 +32,14 @@ crates are sensibly split:
 
 The concentration of debt is in the binary crate:
 
-- `ayx-rs/src/main.rs` is **5,815 lines** and owns 51 `Subcommand` enums plus
-  profile / doctor / catalog / self-update helpers.
+- `ayx-rs/src/main.rs` is still **5,389 lines** and still owns a large share of
+  clap definitions plus profile / doctor / self-update helpers.
 - `ayx-rs/src/cmd/one.rs` is **2,119 lines** and was extracted verbatim — it
   still imports a large set of root enums and helpers from `main.rs`, so
   ownership is root-centric rather than local.
-- `ayx-rs/tests/cli_smoke.rs:61` regexes HTTP method/path literals out of
-  `src/main.rs`, making `main.rs` structurally load-bearing for tests.
+- `ayx-rs/tests/cli_smoke.rs` still regexes HTTP method/path literals out of
+  `src/main.rs`, making `main.rs` structurally load-bearing for endpoint
+  inventory drift detection.
 
 Top-level dispatch is already shallow (`main.rs:4112`), so the bones are good.
 The remaining work is finishing the extraction, not redesigning.
@@ -58,7 +74,7 @@ in larger CLIs; single tree is less ceremony. Pick one and apply consistently.
 
 ### 2. Replace the `cli_smoke` source-scraping test
 
-Currently `tests/cli_smoke.rs:61` reads `src/main.rs` and regexes endpoint
+Currently `tests/cli_smoke.rs` reads `src/main.rs` and regexes endpoint
 literals. Replace with runtime introspection of the clap `Command` tree via
 `Cli::command()`.
 

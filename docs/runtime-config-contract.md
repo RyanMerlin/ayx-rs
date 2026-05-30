@@ -22,6 +22,6 @@ Forbidden patterns:
 
 When adding a new runtime command:
 
-- Use the shared runtime loader in `ayx-rs/src/main.rs` / `ayx-core::profile`.
+- Use the shared runtime loader in the CLI dispatch/runtime layer plus `ayx-core::profile`.
 - Treat any file-path config input as import, migrate, or onboard-only.
 - If the command returns config metadata, include the selected central profile and resolved central profile path.

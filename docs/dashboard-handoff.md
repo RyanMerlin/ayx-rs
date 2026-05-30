@@ -17,12 +17,14 @@ The dashboard is a read-only operational web UI served from the `ayx` binary. It
 ```text
 ayx dashboard [--profile <name>] [--bind 127.0.0.1] [--port 8765]
               [--source one|server|auto] [--poll 10]
-              [--no-open] [--allow-remote]
+              [--no-open] [--allow-remote] [--auth-password <value>]
 ```
 
 ## Important Constraints
 
-- The dashboard has no built-in auth layer; remote exposure should remain opt-in and deliberate.
+- The dashboard binds loopback by default.
+- Non-loopback binding requires `--allow-remote`.
+- Remote mode also requires HTTP Basic auth via `AYX_DASHBOARD_PASSWORD` or `--auth-password`.
 - Profile-load failures are surfaced in-page instead of crashing the server.
 - Telemetry panels reuse the existing CLI telemetry layer so the browser surface stays consistent with the CLI data model.
 
@@ -50,9 +52,9 @@ ayx-rs/src/cmd/dashboard/
 Use the normal workspace checks:
 
 ```powershell
-cargo fmt --check
+cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo nextest run --workspace
 ```
 
 For design iteration, `docs/dashboard-preview.html` remains the standalone preview artifact.
