@@ -18,10 +18,9 @@ use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 use serde_json::json;
 
 use crate::{
-    load_payload, ui_command_envelope, OneBillingCommand, OneCommand, OneOutputObjectCommand,
-    OneSchedulingCommand, OneWebhookFlowTaskCommand, OneWriteSettingCommand, UiCommand,
-    UiDataCommand, UiJobsCommand, UiLibraryCommand, UiSchedulesCommand, UiSessionCommand,
-    UiWorkflowCommand,
+    load_payload, ui_command_envelope, OneBillingCommand, OneCommand, OneSchedulingCommand,
+    OneWebhookFlowTaskCommand, OneWriteSettingCommand, UiCommand, UiDataCommand, UiJobsCommand,
+    UiLibraryCommand, UiSchedulesCommand, UiSessionCommand, UiWorkflowCommand,
 };
 
 /// Borrow Cli's apply + yes for the TTY confirm prompts inside delete arms.
@@ -53,148 +52,9 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
             Some(OneCommand::JobGroups { command }) => {
                 super::one_job_groups::execute(&runtime, command)?
             }
-            Some(OneCommand::OutputObjects { command }) => match command {
-                None => Envelope::ok(
-                    "one output-object commands available: list, count, create, detail, update, delete, inputs, wrangle-to-python",
-                ),
-                Some(OneOutputObjectCommand::List {
-                    profile,
-                    limit,
-                    page_token,
-                    all,
-                    max_pages,
-                }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    let params = ayx_one_api::OneListParams::new()
-                        .with_limit(limit)
-                        .with_page_token(page_token)
-                        .with_all(all, max_pages);
-                    ayx_one_api::one_api_list_request(
-                        &config,
-                        "outputObject",
-                        "list",
-                        "/v4/outputObjects",
-                        &[],
-                        &params,
-                    )?
-                }
-                Some(OneOutputObjectCommand::Count { profile }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    one_api_live_request(
-                        &config,
-                        "outputObject",
-                        "count",
-                        "GET",
-                        "/v4/outputObjects/count",
-                        false,
-                        &[],
-                    )?
-                }
-                Some(OneOutputObjectCommand::Create { profile, body }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    let payload = load_payload(&body)?;
-                    one_api_live_request_with_body(
-                        &config,
-                        "outputObject",
-                        "create",
-                        "POST",
-                        "/v4/outputObjects",
-                        true,
-                        &[],
-                        Some(payload),
-                    )?
-                }
-                Some(OneOutputObjectCommand::Detail { profile, output_object_id }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
-                    one_api_live_request(
-                        &config,
-                        "outputObject",
-                        "detail",
-                        "GET",
-                        "/v4/outputObjects/{id}",
-                        false,
-                        &[("id", output_object_id.as_str())],
-                    )?
-                }
-                Some(OneOutputObjectCommand::Update {
-                    profile,
-                    output_object_id,
-                    body,
-                }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
-                    let payload = load_payload(&body)?;
-                    one_api_live_request_with_body(
-                        &config,
-                        "outputObject",
-                        "update",
-                        "PATCH",
-                        "/v4/outputObjects/{id}",
-                        true,
-                        &[("id", output_object_id.as_str())],
-                        Some(payload),
-                    )?
-                }
-                Some(OneOutputObjectCommand::Delete { profile, output_object_id }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
-                    one_api_live_request(
-                        &config,
-                        "outputObject",
-                        "delete",
-                        "DELETE",
-                        "/v4/outputObjects/{id}",
-                        true,
-                        &[("id", output_object_id.as_str())],
-                    )?
-                }
-                Some(OneOutputObjectCommand::Inputs { profile, output_object_id }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
-                    one_api_live_request(
-                        &config,
-                        "outputObject",
-                        "inputs",
-                        "GET",
-                        "/v4/outputObjects/{id}/inputs",
-                        false,
-                        &[("id", output_object_id.as_str())],
-                    )?
-                }
-                Some(OneOutputObjectCommand::WrangleToPython {
-                    profile,
-                    output_object_id,
-                    body,
-                }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
-                    match body {
-                        Some(body) => {
-                            let payload = load_payload(&body)?;
-                            one_api_live_request_with_body(
-                                &config,
-                                "outputObject",
-                                "wrangle-to-python",
-                                "POST",
-                                "/v4/outputObjects/{id}/wrangleToPython",
-                                true,
-                                &[("id", output_object_id.as_str())],
-                                Some(payload),
-                            )?
-                        }
-                        None => one_api_live_request(
-                            &config,
-                            "outputObject",
-                            "wrangle-to-python",
-                            "POST",
-                            "/v4/outputObjects/{id}/wrangleToPython",
-                            false,
-                            &[("id", output_object_id.as_str())],
-                        )?,
-                    }
-                }
-            },
+            Some(OneCommand::OutputObjects { command }) => {
+                super::one_output_objects::execute(&runtime, command)?
+            }
             Some(OneCommand::WebhookFlowTasks { command }) => match command {
                 None => Envelope::ok("one webhook-flow-task commands available: create, detail, delete, test"),
                 Some(OneWebhookFlowTaskCommand::Create { profile, body }) => {

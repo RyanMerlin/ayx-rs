@@ -21,6 +21,7 @@ mod one_connections;
 mod one_doctor;
 mod one_flows;
 mod one_job_groups;
+mod one_output_objects;
 mod one_plans;
 mod one_platform;
 pub mod registry;
