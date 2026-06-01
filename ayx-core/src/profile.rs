@@ -463,7 +463,7 @@ impl Config {
             })?;
             let config = apply_env_fallbacks(config.clone(), &env_values);
             let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
-            return Ok(overlay_active_profile_one(config));
+            return Ok(overlay_active_profile_one_from_state(config, path));
         }
         let config: Self = serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
             path: path_str,
@@ -471,7 +471,7 @@ impl Config {
         })?;
         let config = apply_env_fallbacks(config, &env_values);
         let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
-        Ok(overlay_active_profile_one(config))
+        Ok(overlay_active_profile_one_from_state(config, path))
     }
 
     fn with_server_api_overrides(mut self) -> Result<Self, ProfileError> {
@@ -980,8 +980,10 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
     config
 }
 
-fn overlay_active_profile_one(mut config: Config) -> Config {
-    let Some(shared_one) = load_active_profile_one() else {
+/// Overlay One credentials from the active central profile, unless the
+/// profile currently being loaded is itself the active profile file.
+fn overlay_active_profile_one_from_state(mut config: Config, current_path: &Path) -> Config {
+    let Some(shared_one) = load_active_profile_one_from_state(current_path) else {
         return config;
     };
 
@@ -993,10 +995,13 @@ fn overlay_active_profile_one(mut config: Config) -> Config {
     config
 }
 
-fn load_active_profile_one() -> Option<AlteryxOneProfile> {
+fn load_active_profile_one_from_state(current_path: &Path) -> Option<AlteryxOneProfile> {
     let state = load_ayx_state().ok()?;
     let profile_name = state.active_profile?;
     let path = profile_storage_path(&profile_name).ok()?;
+    if path == current_path {
+        return None;
+    }
     Config::load_from_path_lenient(&path)
         .ok()?
         .alteryx_one
@@ -1947,6 +1952,66 @@ mod tests {
                 .database
                 .as_deref(),
             Some("DevService")
+        );
+    }
+
+    #[test]
+    fn active_profile_one_overlay_does_not_recurse_on_self() {
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let config_home = temp.path().join("ayx-home");
+        let profiles_dir = config_home.join("profiles");
+        fs::create_dir_all(&profiles_dir).unwrap();
+
+        let _guard = EnvGuard::set("AYX_CONFIG_HOME", config_home.to_str().unwrap());
+        save_ayx_state(&AyxState {
+            active_profile: Some("default".to_string()),
+            active_workspace: None,
+        })
+        .unwrap();
+
+        let mut profile = base_config("default", "ServiceDb");
+        profile.alteryx_one.as_mut().unwrap().account_email = "self@example.com".to_string();
+        let profile_path = profile_storage_path("default").unwrap();
+        fs::write(&profile_path, serde_yaml::to_string(&profile).unwrap()).unwrap();
+
+        let loaded = Config::load_from_path_lenient(&profile_path).unwrap();
+        assert_eq!(
+            loaded
+                .alteryx_one
+                .as_ref()
+                .map(|one| one.account_email.as_str()),
+            Some("self@example.com")
+        );
+    }
+
+    #[test]
+    fn runtime_profile_loader_does_not_recurse_on_self() {
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let config_home = temp.path().join("ayx-home");
+        let profiles_dir = config_home.join("profiles");
+        fs::create_dir_all(&profiles_dir).unwrap();
+
+        let _guard = EnvGuard::set("AYX_CONFIG_HOME", config_home.to_str().unwrap());
+        save_ayx_state(&AyxState {
+            active_profile: Some("default".to_string()),
+            active_workspace: None,
+        })
+        .unwrap();
+
+        let mut profile = base_config("default", "ServiceDb");
+        profile.alteryx_one.as_mut().unwrap().account_email = "runtime@example.com".to_string();
+        let profile_path = profile_storage_path("default").unwrap();
+        fs::write(&profile_path, serde_yaml::to_string(&profile).unwrap()).unwrap();
+
+        let loaded = Config::load_runtime_profile_with_environment_lenient(None, None).unwrap();
+        assert_eq!(
+            loaded
+                .alteryx_one
+                .as_ref()
+                .map(|one| one.account_email.as_str()),
+            Some("runtime@example.com")
         );
     }
 
