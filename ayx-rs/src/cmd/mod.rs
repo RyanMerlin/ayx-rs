@@ -24,6 +24,7 @@ mod one_job_groups;
 mod one_output_objects;
 mod one_plans;
 mod one_platform;
+mod one_write_settings;
 pub mod registry;
 pub mod server;
 pub mod sqlserver;

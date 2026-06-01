@@ -19,8 +19,8 @@ use serde_json::json;
 
 use crate::{
     load_payload, ui_command_envelope, OneBillingCommand, OneCommand, OneSchedulingCommand,
-    OneWebhookFlowTaskCommand, OneWriteSettingCommand, UiCommand, UiDataCommand, UiJobsCommand,
-    UiLibraryCommand, UiSchedulesCommand, UiSessionCommand, UiWorkflowCommand,
+    OneWebhookFlowTaskCommand, UiCommand, UiDataCommand, UiJobsCommand, UiLibraryCommand,
+    UiSchedulesCommand, UiSessionCommand, UiWorkflowCommand,
 };
 
 /// Borrow Cli's apply + yes for the TTY confirm prompts inside delete arms.
@@ -120,110 +120,9 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
             },
-            Some(OneCommand::WriteSettings { command }) => match command {
-                None => Envelope::ok("one write-setting commands available: list, count, create, detail, update, delete"),
-                Some(OneWriteSettingCommand::List {
-                    profile,
-                    limit,
-                    page_token,
-                    all,
-                    max_pages,
-                }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    let params = ayx_one_api::OneListParams::new()
-                        .with_limit(limit)
-                        .with_page_token(page_token)
-                        .with_all(all, max_pages);
-                    ayx_one_api::one_api_list_request(
-                        &config,
-                        "writeSetting",
-                        "list",
-                        "/v4/writeSettings",
-                        &[],
-                        &params,
-                    )?
-                }
-                Some(OneWriteSettingCommand::Count { profile }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    one_api_live_request(
-                        &config,
-                        "writeSetting",
-                        "count",
-                        "GET",
-                        "/v4/writeSettings/count",
-                        false,
-                        &[],
-                    )?
-                }
-                Some(OneWriteSettingCommand::Create { profile, body }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    let payload = load_payload(&body)?;
-                    one_api_live_request_with_body(
-                        &config,
-                        "writeSetting",
-                        "create",
-                        "POST",
-                        "/v4/writeSettings",
-                        true,
-                        &[],
-                        Some(payload),
-                    )?
-                }
-                Some(OneWriteSettingCommand::Detail {
-                    profile,
-                    write_setting_id,
-                }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    let write_setting_id =
-                        write_setting_id.ok_or_else(|| anyhow!("--write-setting-id is required"))?;
-                    one_api_live_request(
-                        &config,
-                        "writeSetting",
-                        "detail",
-                        "GET",
-                        "/v4/writeSettings/{id}",
-                        false,
-                        &[("id", write_setting_id.as_str())],
-                    )?
-                }
-                Some(OneWriteSettingCommand::Update {
-                    profile,
-                    write_setting_id,
-                    body,
-                }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    let write_setting_id =
-                        write_setting_id.ok_or_else(|| anyhow!("--write-setting-id is required"))?;
-                    let payload = load_payload(&body)?;
-                    one_api_live_request_with_body(
-                        &config,
-                        "writeSetting",
-                        "update",
-                        "PATCH",
-                        "/v4/writeSettings/{id}",
-                        true,
-                        &[("id", write_setting_id.as_str())],
-                        Some(payload),
-                    )?
-                }
-                Some(OneWriteSettingCommand::Delete {
-                    profile,
-                    write_setting_id,
-                }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    let write_setting_id =
-                        write_setting_id.ok_or_else(|| anyhow!("--write-setting-id is required"))?;
-                    one_api_live_request(
-                        &config,
-                        "writeSetting",
-                        "delete",
-                        "DELETE",
-                        "/v4/writeSettings/{id}",
-                        true,
-                        &[("id", write_setting_id.as_str())],
-                    )?
-                }
-            },
+            Some(OneCommand::WriteSettings { command }) => {
+                super::one_write_settings::execute(&runtime, command)?
+            }
             Some(OneCommand::Status { profile }) => {
                 let config = load_profile!(profile.as_deref(), environment)?;
                 api_status_envelope(&config, "one")?
