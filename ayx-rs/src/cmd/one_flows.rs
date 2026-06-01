@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{
     flow_export_package_envelope, flow_import_package_envelope, one_api_live_request,
@@ -8,9 +8,8 @@ use ayx_one_api::{
 };
 
 use crate::{
-    OneFlowsCommand,
     cmd::{self, RuntimeCtx},
-    load_payload,
+    load_payload, OneFlowsCommand,
 };
 
 pub(crate) fn execute(

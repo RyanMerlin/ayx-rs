@@ -21,6 +21,7 @@ mod one_connections;
 mod one_doctor;
 mod one_flows;
 mod one_plans;
+mod one_platform;
 pub mod registry;
 pub mod server;
 pub mod sqlserver;

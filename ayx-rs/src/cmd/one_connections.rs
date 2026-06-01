@@ -1,10 +1,10 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
 use crate::{
-    OneConnectionPermissionCommand, OneConnectionsCommand, OneConnectorMetadataCommand,
-    OneConnectorMetadataOverridesCommand, cmd::RuntimeCtx, load_payload,
+    cmd::RuntimeCtx, load_payload, OneConnectionPermissionCommand, OneConnectionsCommand,
+    OneConnectorMetadataCommand, OneConnectorMetadataOverridesCommand,
 };
 
 pub(crate) fn execute(
