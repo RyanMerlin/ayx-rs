@@ -17,6 +17,7 @@ pub mod confirm;
 pub mod dashboard;
 pub mod mongo;
 pub mod one;
+mod one_doctor;
 pub mod registry;
 pub mod server;
 pub mod sqlserver;

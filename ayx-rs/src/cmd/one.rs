@@ -27,11 +27,9 @@ use serde_json::json;
 
 use crate::cmd;
 use crate::{
-    load_payload, one_doctor_billing_envelope, one_doctor_discover_envelope,
-    one_doctor_plans_envelope, one_doctor_platform_envelope, one_doctor_scheduling_envelope,
-    one_platform_auth_diagnose_envelope, one_platform_auth_status_envelope, ui_command_envelope,
-    OneBillingCommand, OneCommand, OneConnectionPermissionCommand, OneConnectionsCommand,
-    OneConnectorMetadataCommand, OneConnectorMetadataOverridesCommand, OneDoctorCommand,
+    load_payload, one_platform_auth_diagnose_envelope, one_platform_auth_status_envelope,
+    ui_command_envelope, OneBillingCommand, OneCommand, OneConnectionPermissionCommand,
+    OneConnectionsCommand, OneConnectorMetadataCommand, OneConnectorMetadataOverridesCommand,
     OneFlowsCommand, OneJobGroupCommand, OneOutputObjectCommand, OnePlansCommand,
     OnePlatformApiCommand, OnePlatformAuthCommand, OnePlatformCommand, OnePlatformPersonCommand,
     OnePlatformTokenCommand, OneRoleCommand, OneSchedulingCommand, OneWebhookFlowTaskCommand,
@@ -61,33 +59,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
             None => Envelope::ok(
                 "one commands available: platform, plans, scheduling, billing, auto-insights, desktop-exec",
             ),
-            Some(OneCommand::Doctor { command }) => match command {
-                Some(OneDoctorCommand::Auth { profile }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    one_platform_auth_diagnose_envelope(&config)?
-                }
-                Some(OneDoctorCommand::Discover { profile }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    one_doctor_discover_envelope(&config)?
-                }
-                Some(OneDoctorCommand::Platform { profile }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    one_doctor_platform_envelope(&config)?
-                }
-                Some(OneDoctorCommand::Plans { profile }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    one_doctor_plans_envelope(&config)?
-                }
-                Some(OneDoctorCommand::Scheduling { profile }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    one_doctor_scheduling_envelope(&config)?
-                }
-                Some(OneDoctorCommand::Billing { profile }) => {
-                    let config = load_profile!(profile.as_deref(), environment)?;
-                    one_doctor_billing_envelope(&config)?
-                }
-                None => Envelope::ok("one doctor commands available: auth, discover, platform, plans, scheduling, billing"),
-            },
+            Some(OneCommand::Doctor { command }) => super::one_doctor::execute(&runtime, command)?,
             Some(OneCommand::Platform { command }) => match command {
                 Some(OnePlatformCommand::Api { command }) => match command {
                     OnePlatformApiCommand::Status { profile } => {
