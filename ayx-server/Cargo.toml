@@ -8,7 +8,7 @@ authors.workspace = true
 [dependencies]
 anyhow.workspace = true
 ayx-core = { path = "../ayx-core" }
-base64 = "0.21"
+base64 = "0.22"
 chrono.workspace = true
 csv = "1"
 fs_extra = "1.3"
