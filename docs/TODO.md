@@ -76,6 +76,7 @@ Status:
 - moved One transport out of `ayx-rs` and into `ayx-one-api`; existing One live calls now reuse the shared helper there.
 - added a machine-readable One surface inventory in `ayx-one-api` with `implemented`, `partial`, and `documented_only` buckets.
 - wired live One commands for managed IAM workspace/role, connections and connector metadata current/defaults/overrides, flow lifecycle/package handling, job groups and job publishing, output objects, webhook flow tasks, write settings, plan, plans, scheduling, billing, current user, people, apiAccessTokens, and workspace listing/configuration/transfer.
+- flattened the `ayx-rs` One dispatcher into focused modules so platform, job groups, output objects, webhook flow tasks, write settings, scheduling, billing, UI, auto-insights, and desktop-exec each route through a dedicated handler.
 - the inventory now treats `misc` as implemented and the remaining surface gaps live in the partial buckets rather than documented-only.
 - retired the placeholder `one platform` branches for `group`, `sso`, `audit`, `session`, `oauth-client`, `env-param`, `pdh`, `app`, and `health`; `user`, `person`, `token`, and workspace-list/configuration flows remain wired.
 
@@ -95,17 +96,16 @@ Status:
 ## Current priority
 - harden the new central profile system with better secret storage and profile import/export ergonomics.
 - finish `ayx tools` source/target workflows for workspace-aware migration planning and comparison.
-- keep the command catalog aligned with the live CLI after the split.
+- keep the command catalog aligned with the live CLI after the dispatcher split and version bump.
+- keep the generated docs and start-here examples aligned whenever the One surface changes.
 - finish the Mongo query registry and doctor suite before adding any Mongo remediation/mutation workflows.
 - keep Server auth focused on the SAML simulation and diagnosis primitives the documented support cases actually support.
-- continue expanding One's remaining documented-only families before moving to the rest of the gaps.
+- continue hardening One transport and the live smoke coverage before adding more bulk or destructive workflows.
 - keep License expansion gated on the documented support case set.
-- harden One API execution before adding more mutating One workflows or bulk operations.
 - track the live One smoke checkpoint and next-phase sequencing in `docs/one-roadmap.md`.
 
 ## Next phase
 - add native keychain-backed secret storage for interactive operator use while keeping environment variables first-class for automation.
 - add TUI surfaces on top of the new central profile resolver and top-level doctor system.
-- finish the remaining One partial surfaces: `connection`, `flow`, `jobGroup`, `outputObject`, `webhookFlowTask`, `writeSetting`, `apiAccessTokens`, `person`, and `workspace`.
-- keep `ui`, `auto-insights`, and `desktop-exec` reserved until their contracts are stable enough to expose publicly.
+- keep the live One inventory and docs synchronized as transport hardening continues.
 - document any newly wired One branch in the inventory, catalog tests, and README start-here examples before moving on.

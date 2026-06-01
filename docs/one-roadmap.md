@@ -6,10 +6,10 @@ surface reliable for humans and agents while we widen coverage in measured steps
 ## Task List
 
 - [x] Validate the live auth and workspace smoke checks against env-backed credentials.
-- [ ] Keep the machine-readable catalog and generated command surface aligned with the live CLI.
-- [ ] Expand read-only One coverage before adding more mutating or bulk workflows.
-- [ ] Reduce the remaining stack-pressure workaround only after the One dispatch path is flatter.
-- [ ] Update docs and examples whenever a new One branch becomes first-class.
+- [x] Keep the machine-readable catalog and generated command surface aligned with the live CLI.
+- [x] Expand read-only One coverage before adding more mutating or bulk workflows.
+- [x] Reduce the remaining stack-pressure workaround only after the One dispatch path is flatter.
+- [x] Update docs and examples whenever a new One branch becomes first-class.
 
 ## Validation Gates
 
@@ -21,7 +21,6 @@ surface reliable for humans and agents while we widen coverage in measured steps
 
 ## Recommended Next Sequence
 
-1. Run the live smoke suite with `AYX_ONE_LIVE_SMOKE=1`.
-2. Confirm the One auth, platform API status, and workspace list envelopes all return `ok: true`.
-3. Keep the catalog and `docs/command-surface.md` in sync with any new One command leaves.
-4. Only then consider deeper refactors to the One dispatcher or profile-loading path.
+1. Run the live smoke suite with `AYX_ONE_LIVE_SMOKE=1` after any One transport or auth change.
+2. Keep `docs/command-surface.md`, `docs/cli-spec.md`, and the catalog tests synchronized with any new One command leaves.
+3. Focus the next round on transport hardening and documented-only inventory gaps, not further dispatcher reshaping.
