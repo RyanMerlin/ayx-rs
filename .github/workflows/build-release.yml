@@ -167,7 +167,7 @@ jobs:
         shell: bash
       - name: Import macOS signing certificate
         if: env.MACOS_CODESIGN_CERT_P12_B64 != ''
-        uses: apple-actions/import-codesign-certs@v3
+        uses: apple-actions/import-codesign-certs@v7
         with:
           p12-file-base64: ${{ secrets.AYX_MACOS_CODESIGN_CERT_P12_B64 }}
           p12-password: ${{ secrets.AYX_MACOS_CODESIGN_CERT_PASSWORD }}
