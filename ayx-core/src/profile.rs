@@ -384,34 +384,8 @@ impl Config {
     }
 
     fn load_from_resolved_path_lenient(path: &Path) -> Result<Self, ProfileError> {
-        let path_str = path.display().to_string();
-        let content = fs::read_to_string(path).map_err(|source| ProfileError::Read {
-            path: path_str.clone(),
-            source,
-        })?;
-        let env_path = path
-            .parent()
-            .map(|parent| parent.join(".env"))
-            .unwrap_or_else(|| Path::new(".env").to_path_buf());
-        let env_values = collect_env_overrides(path).map_err(|source| ProfileError::Read {
-            path: env_path.display().to_string(),
-            source,
-        })?;
-        let expanded = expand_env_placeholders(&content, &env_values);
-
-        let value: serde_yaml::Value =
-            serde_yaml::from_str(&expanded).map_err(|source| ProfileError::Parse {
-                path: path_str.clone(),
-                source,
-            })?;
-        let value = normalize_profile_value(value)?;
-        let config: Self = serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
-            path: path_str,
-            source,
-        })?;
-        let config = apply_env_fallbacks(config, &env_values);
-        let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
-        Ok(config)
+        let (path_str, env_values, value) = Self::read_profile_value(path)?;
+        Self::load_config_from_value(path, path_str, value, env_values, None)
     }
 
     fn load_from_resolved_path_with_environment(
@@ -427,6 +401,13 @@ impl Config {
         path: &Path,
         environment: Option<&str>,
     ) -> Result<Self, ProfileError> {
+        let (path_str, env_values, value) = Self::read_profile_value(path)?;
+        Self::load_config_from_value(path, path_str, value, env_values, environment)
+    }
+
+    fn read_profile_value(
+        path: &Path,
+    ) -> Result<(String, HashMap<String, String>, serde_yaml::Value), ProfileError> {
         let path_str = path.display().to_string();
         let content = fs::read_to_string(path).map_err(|source| ProfileError::Read {
             path: path_str.clone(),
@@ -441,37 +422,52 @@ impl Config {
             source,
         })?;
         let expanded = expand_env_placeholders(&content, &env_values);
-
         let value: serde_yaml::Value =
             serde_yaml::from_str(&expanded).map_err(|source| ProfileError::Parse {
                 path: path_str.clone(),
                 source,
             })?;
-        let value = normalize_profile_value(value)?;
-        if is_workspace_value(&value) {
+        Ok((path_str, env_values, normalize_profile_value(value)?))
+    }
+
+    fn load_config_from_value(
+        path: &Path,
+        path_str: String,
+        value: serde_yaml::Value,
+        env_values: HashMap<String, String>,
+        environment: Option<&str>,
+    ) -> Result<Self, ProfileError> {
+        let config = if is_workspace_value(&value) {
             let workspace: WorkspaceConfig =
                 serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
                     path: path_str.clone(),
                     source,
                 })?;
             let active = environment.unwrap_or(&workspace.active_environment);
-            let config = workspace.environments.get(active).ok_or_else(|| {
+            workspace.environments.get(active).cloned().ok_or_else(|| {
                 ProfileError::Invalid(format!(
                     "workspace '{}' does not contain environment '{}'",
                     workspace.workspace_name, active
                 ))
-            })?;
-            let config = apply_env_fallbacks(config.clone(), &env_values);
-            let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
-            return Ok(overlay_active_profile_one_from_state(config, path));
-        }
-        let config: Self = serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
-            path: path_str,
-            source,
-        })?;
+            })?
+        } else {
+            serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+                path: path_str,
+                source,
+            })?
+        };
+
+        Self::finalize_loaded_config(config, env_values, path)
+    }
+
+    fn finalize_loaded_config(
+        config: Self,
+        env_values: HashMap<String, String>,
+        current_path: &Path,
+    ) -> Result<Self, ProfileError> {
         let config = apply_env_fallbacks(config, &env_values);
         let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
-        Ok(overlay_active_profile_one_from_state(config, path))
+        Ok(overlay_active_profile_one_from_state(config, current_path))
     }
 
     fn with_server_api_overrides(mut self) -> Result<Self, ProfileError> {

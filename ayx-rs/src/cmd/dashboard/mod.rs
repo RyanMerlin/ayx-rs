@@ -93,7 +93,8 @@ pub fn execute(environment: Option<&str>, cmd: DashboardCommand) -> Result<Envel
     // immediately, but don't fail hard — the dashboard shell, healthz, and
     // static assets render even when telemetry is misconfigured, and each
     // panel surfaces its own error card on request.
-    if let Err(e) = crate::load_profile_with_env_lenient(cmd.profile.as_deref(), environment) {
+    let runtime = crate::cmd::RuntimeCtx::new(environment);
+    if let Err(e) = runtime.load_profile_lenient(cmd.profile.as_deref()) {
         eprintln!("dashboard: warning — profile failed to load: {e}");
         eprintln!("dashboard: server will start; telemetry panels will report errors until the profile is fixed.");
     }

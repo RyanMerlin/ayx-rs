@@ -5,7 +5,7 @@ surface reliable for humans and agents while we widen coverage in measured steps
 
 ## Task List
 
-- [ ] Validate the live auth and workspace smoke checks against env-backed credentials.
+- [x] Validate the live auth and workspace smoke checks against env-backed credentials.
 - [ ] Keep the machine-readable catalog and generated command surface aligned with the live CLI.
 - [ ] Expand read-only One coverage before adding more mutating or bulk workflows.
 - [ ] Reduce the remaining stack-pressure workaround only after the One dispatch path is flatter.
@@ -25,4 +25,3 @@ surface reliable for humans and agents while we widen coverage in measured steps
 2. Confirm the One auth, platform API status, and workspace list envelopes all return `ok: true`.
 3. Keep the catalog and `docs/command-surface.md` in sync with any new One command leaves.
 4. Only then consider deeper refactors to the One dispatcher or profile-loading path.
-

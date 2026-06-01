@@ -20,14 +20,14 @@ use ayx_workflow::{
 use chrono::Utc;
 use serde_json::json;
 
-use crate::{load_profile_with_env, WorkflowCommand};
+use crate::WorkflowCommand;
 
 pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> Result<Envelope> {
-    fn load_profile<'a, P>(p: P, environment: Option<&str>) -> Result<ayx_core::profile::Config>
-    where
-        P: Into<crate::ProfileInput<'a>>,
-    {
-        load_profile_with_env(p, environment)
+    let runtime = crate::cmd::RuntimeCtx::new(environment);
+    macro_rules! load_profile {
+        ($profile:expr) => {
+            runtime.load_profile($profile)
+        };
     }
     match command {
         None => Ok(Envelope::ok(
@@ -200,7 +200,7 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
             credential_id,
             bypass_workflow_version_check,
         }) => {
-            let config = load_profile(profile.as_deref(), environment)?;
+            let config = load_profile!(profile.as_deref())?;
             // Accept either a pre-built .yxzp or a directory we'll zip in a
             // tempfile. The temp filename includes pid + nanos so concurrent
             // publishes don't collide.

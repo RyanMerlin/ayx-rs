@@ -51,11 +51,11 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
     // Capture `environment` up-front so `cli.environment` reads through the
     // helper don't conflict with `cli` itself being borrowed by other arms.
     let environment = cli.environment;
-    fn load_profile<'a, P>(p: P, environment: Option<&str>) -> Result<ayx_core::profile::Config>
-    where
-        P: Into<crate::ProfileInput<'a>>,
-    {
-        crate::load_profile_with_env_lenient(p, environment)
+    let runtime = crate::cmd::RuntimeCtx::new(environment);
+    macro_rules! load_profile {
+        ($profile:expr, $environment:expr) => {
+            runtime.load_profile_lenient($profile)
+        };
     }
     Ok(match command {
             None => Envelope::ok(
@@ -63,27 +63,27 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
             ),
             Some(OneCommand::Doctor { command }) => match command {
                 Some(OneDoctorCommand::Auth { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_platform_auth_diagnose_envelope(&config)?
                 }
                 Some(OneDoctorCommand::Discover { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_doctor_discover_envelope(&config)?
                 }
                 Some(OneDoctorCommand::Platform { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_doctor_platform_envelope(&config)?
                 }
                 Some(OneDoctorCommand::Plans { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_doctor_plans_envelope(&config)?
                 }
                 Some(OneDoctorCommand::Scheduling { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_doctor_scheduling_envelope(&config)?
                 }
                 Some(OneDoctorCommand::Billing { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_doctor_billing_envelope(&config)?
                 }
                 None => Envelope::ok("one doctor commands available: auth, discover, platform, plans, scheduling, billing"),
@@ -91,15 +91,15 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
             Some(OneCommand::Platform { command }) => match command {
                 Some(OnePlatformCommand::Api { command }) => match command {
                     OnePlatformApiCommand::Status { profile } => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         api_status_envelope(&config, "one platform")?
                     }
                     OnePlatformApiCommand::Diagnose { profile } => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         api_diagnose_envelope(&config, "one platform")?
                     }
                     OnePlatformApiCommand::OpenApiSpec { profile } => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -112,11 +112,11 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     }
                 },
                 Some(OnePlatformCommand::Status { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     api_status_envelope(&config, "one platform")?
                 }
                 Some(OnePlatformCommand::Inventory { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_surface_inventory_envelope(&config)?
                 }
                 Some(OnePlatformCommand::Workspace { command }) => match command {
@@ -127,7 +127,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         all,
                         max_pages,
                     } => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let params = ayx_one_api::OneListParams::new()
                             .with_limit(limit)
                             .with_page_token(page_token)
@@ -142,7 +142,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::ConfigurationV4 { workspace_id } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -154,7 +154,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::CurrentConfiguration => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -166,7 +166,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::SaveCurrentConfiguration { profile, body } => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let payload = load_payload(&body)?;
                         one_api_live_request_with_body(
                             &config,
@@ -184,7 +184,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         workspace_id,
                         body,
                     } => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let payload = load_payload(&body)?;
                         one_api_live_request_with_body(
                             &config,
@@ -198,7 +198,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::Current => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -210,7 +210,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::ConfigurationSchema { workspace_id } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -222,7 +222,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::CurrentConfigurationSchema => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -234,7 +234,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::DeleteCurrentConfiguration { profile } => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -246,7 +246,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::DeleteConfiguration { workspace_id } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -258,7 +258,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::Configuration { workspace_id } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -270,7 +270,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::People { workspace_id } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -282,7 +282,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::Admins { workspace_id } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -294,7 +294,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::InviteUsers { workspace_id } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -309,7 +309,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         workspace_id,
                         person_id,
                     } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -321,7 +321,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::SuspendUsers { workspace_id } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -333,7 +333,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::UnsuspendUsers { workspace_id } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -345,7 +345,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::Transfer { workspace_id } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -357,7 +357,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneWorkspaceCommand::TransferAssets { profile, body } => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let payload = load_payload(&body)?;
                         one_api_live_request_with_body(
                             &config,
@@ -373,7 +373,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                 },
                 Some(OnePlatformCommand::Role { command }) => match command {
                     OneRoleCommand::ListAssignments { role_id } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -385,7 +385,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneRoleCommand::Assign { role_id, subject_id } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -397,7 +397,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     OneRoleCommand::Unassign { role_id, subject_id } => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -411,16 +411,16 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                 },
                 Some(OnePlatformCommand::Auth { command }) => match command {
                     OnePlatformAuthCommand::Status { profile } => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         one_platform_auth_status_envelope(&config)?
                     }
                     OnePlatformAuthCommand::Diagnose { profile } => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         one_platform_auth_diagnose_envelope(&config)?
                     }
                 },
                 Some(OnePlatformCommand::User) => {
-                    let config = load_profile(None, environment)?;
+                    let config = load_profile!(None, environment)?;
                     one_api_live_request(
                         &config,
                         "platform",
@@ -435,7 +435,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     None => {
                         // Bare `ayx one platform person` runs an unpaginated list
                         // against the default config.yaml for back-compat.
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -453,7 +453,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         all,
                         max_pages,
                     }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let params = ayx_one_api::OneListParams::new()
                             .with_limit(limit)
                             .with_page_token(page_token)
@@ -468,7 +468,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     Some(OnePlatformPersonCommand::Count) => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -480,7 +480,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     Some(OnePlatformPersonCommand::Current) => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -492,7 +492,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     Some(OnePlatformPersonCommand::Detail { profile, person_id }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -508,7 +508,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         person_id,
                         body,
                     }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let payload = load_payload(&body)?;
                         one_api_live_request_with_body(
                             &config,
@@ -526,7 +526,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         person_id,
                         body,
                     }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let payload = load_payload(&body)?;
                         one_api_live_request_with_body(
                             &config,
@@ -540,7 +540,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     Some(OnePlatformPersonCommand::Delete { profile, person_id }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         if cli.apply {
                             cmd::confirm::require_tty_confirmation(
                                 cli.yes,
@@ -558,7 +558,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     Some(OnePlatformPersonCommand::Create { profile, body }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let payload = load_payload(&body)?;
                         one_api_live_request_with_body(
                             &config,
@@ -572,7 +572,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     Some(OnePlatformPersonCommand::UpdatePassword { profile, body }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let payload = load_payload(&body)?;
                         one_api_live_request_with_body(
                             &config,
@@ -586,7 +586,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     Some(OnePlatformPersonCommand::PasswordResetRequest { profile, body }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let payload = load_payload(&body)?;
                         one_api_live_request_with_body(
                             &config,
@@ -602,7 +602,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                 },
                 Some(OnePlatformCommand::Token { command }) => match command {
                     None | Some(OnePlatformTokenCommand::List) => {
-                        let config = load_profile(None, environment)?;
+                        let config = load_profile!(None, environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -614,7 +614,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     Some(OnePlatformTokenCommand::Create { profile, body }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let payload = load_payload(&body)?;
                         one_api_live_request_with_body(
                             &config,
@@ -628,7 +628,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     Some(OnePlatformTokenCommand::Detail { profile, token_id }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -640,7 +640,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     Some(OnePlatformTokenCommand::Delete { profile, token_id }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         one_api_live_request(
                             &config,
                             "platform",
@@ -665,7 +665,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     all,
                     max_pages,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let params = ayx_one_api::OneListParams::new()
                         .with_limit(limit)
                         .with_page_token(page_token)
@@ -680,7 +680,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneJobGroupCommand::Count { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_api_live_request(
                         &config,
                         "jobGroup",
@@ -692,7 +692,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneJobGroupCommand::Run { profile, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
                         &config,
@@ -710,7 +710,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     job_group_id,
                     body,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let job_group_id =
                         job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
                     let payload = load_payload(&body)?;
@@ -726,7 +726,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneJobGroupCommand::PdfResults { profile, job_group_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let job_group_id =
                         job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
                     one_api_live_request(
@@ -740,7 +740,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneJobGroupCommand::Detail { profile, job_group_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -753,7 +753,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneJobGroupCommand::Cancel { profile, job_group_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -766,7 +766,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneJobGroupCommand::Status { profile, job_group_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -779,7 +779,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneJobGroupCommand::Inputs { profile, job_group_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -792,7 +792,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneJobGroupCommand::Outputs { profile, job_group_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -805,7 +805,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneJobGroupCommand::Jobs { profile, job_group_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -818,7 +818,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneJobGroupCommand::Publications { profile, job_group_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -831,7 +831,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneJobGroupCommand::Profile { profile, job_group_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -844,7 +844,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneJobGroupCommand::ProfileResults { profile, job_group_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -868,7 +868,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     all,
                     max_pages,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let params = ayx_one_api::OneListParams::new()
                         .with_limit(limit)
                         .with_page_token(page_token)
@@ -883,7 +883,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneOutputObjectCommand::Count { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_api_live_request(
                         &config,
                         "outputObject",
@@ -895,7 +895,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneOutputObjectCommand::Create { profile, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
                         &config,
@@ -909,7 +909,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneOutputObjectCommand::Detail { profile, output_object_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -926,7 +926,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     output_object_id,
                     body,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
@@ -941,7 +941,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneOutputObjectCommand::Delete { profile, output_object_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -954,7 +954,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneOutputObjectCommand::Inputs { profile, output_object_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -971,7 +971,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     output_object_id,
                     body,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let output_object_id = output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
                     match body {
                         Some(body) => {
@@ -1002,7 +1002,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
             Some(OneCommand::WebhookFlowTasks { command }) => match command {
                 None => Envelope::ok("one webhook-flow-task commands available: create, detail, delete, test"),
                 Some(OneWebhookFlowTaskCommand::Create { profile, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
                         &config,
@@ -1019,7 +1019,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     profile,
                     webhook_flow_task_id,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let webhook_flow_task_id =
                         webhook_flow_task_id.ok_or_else(|| anyhow!("--webhook-flow-task-id is required"))?;
                     one_api_live_request(
@@ -1036,7 +1036,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     profile,
                     webhook_flow_task_id,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let webhook_flow_task_id =
                         webhook_flow_task_id.ok_or_else(|| anyhow!("--webhook-flow-task-id is required"))?;
                     one_api_live_request(
@@ -1050,7 +1050,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneWebhookFlowTaskCommand::Test { profile, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
                         &config,
@@ -1073,7 +1073,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     all,
                     max_pages,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let params = ayx_one_api::OneListParams::new()
                         .with_limit(limit)
                         .with_page_token(page_token)
@@ -1088,7 +1088,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneWriteSettingCommand::Count { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_api_live_request(
                         &config,
                         "writeSetting",
@@ -1100,7 +1100,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneWriteSettingCommand::Create { profile, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
                         &config,
@@ -1117,7 +1117,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     profile,
                     write_setting_id,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let write_setting_id =
                         write_setting_id.ok_or_else(|| anyhow!("--write-setting-id is required"))?;
                     one_api_live_request(
@@ -1135,7 +1135,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     write_setting_id,
                     body,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let write_setting_id =
                         write_setting_id.ok_or_else(|| anyhow!("--write-setting-id is required"))?;
                     let payload = load_payload(&body)?;
@@ -1154,7 +1154,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     profile,
                     write_setting_id,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let write_setting_id =
                         write_setting_id.ok_or_else(|| anyhow!("--write-setting-id is required"))?;
                     one_api_live_request(
@@ -1169,11 +1169,11 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                 }
             },
             Some(OneCommand::Status { profile }) => {
-                let config = load_profile(profile.as_deref(), environment)?;
+                let config = load_profile!(profile.as_deref(), environment)?;
                 api_status_envelope(&config, "one")?
             }
             Some(OneCommand::Inventory { profile }) => {
-                let config = load_profile(profile.as_deref(), environment)?;
+                let config = load_profile!(profile.as_deref(), environment)?;
                 api_inventory_envelope(&config, "one")?
             }
             Some(OneCommand::Connections { command }) => match command {
@@ -1187,7 +1187,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     all,
                     max_pages,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let params = ayx_one_api::OneListParams::new()
                         .with_limit(limit)
                         .with_page_token(page_token)
@@ -1202,7 +1202,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneConnectionsCommand::Count { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_api_live_request(
                         &config,
                         "connection",
@@ -1214,7 +1214,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneConnectionsCommand::Create { profile, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
                         &config,
@@ -1228,7 +1228,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneConnectionsCommand::DryRun { profile, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
                         &config,
@@ -1242,7 +1242,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneConnectionsCommand::Detail { profile, connection_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let connection_id =
                         connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
                     one_api_live_request(
@@ -1256,7 +1256,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneConnectionsCommand::Status { profile, connection_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let connection_id =
                         connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
                     one_api_live_request(
@@ -1274,7 +1274,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     connection_id,
                     body,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let connection_id =
                         connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
                     let payload = load_payload(&body)?;
@@ -1290,7 +1290,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneConnectionsCommand::Delete { profile, connection_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let connection_id =
                         connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
                     one_api_live_request(
@@ -1308,7 +1308,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         "one connections connector-metadata commands available: defaults, detail, publish-info, overrides",
                     ),
                     Some(OneConnectorMetadataCommand::Defaults { profile, connector }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         one_api_live_request(
                             &config,
                             "connection",
@@ -1320,7 +1320,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     Some(OneConnectorMetadataCommand::Detail { profile, connector }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         one_api_live_request(
                             &config,
                             "connection",
@@ -1332,7 +1332,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         )?
                     }
                     Some(OneConnectorMetadataCommand::PublishInfo { profile, connector }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         one_api_live_request(
                             &config,
                             "connection",
@@ -1348,7 +1348,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                             "one connections connector-metadata overrides commands available: list, create, delete",
                         ),
                         Some(OneConnectorMetadataOverridesCommand::List { profile, connector }) => {
-                            let config = load_profile(profile.as_deref(), environment)?;
+                            let config = load_profile!(profile.as_deref(), environment)?;
                             one_api_live_request(
                                 &config,
                                 "connection",
@@ -1364,7 +1364,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                             connector,
                             body,
                         }) => {
-                            let config = load_profile(profile.as_deref(), environment)?;
+                            let config = load_profile!(profile.as_deref(), environment)?;
                             let payload = load_payload(&body)?;
                             one_api_live_request_with_body(
                                 &config,
@@ -1378,7 +1378,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                             )?
                         }
                         Some(OneConnectorMetadataOverridesCommand::Delete { profile, connector }) => {
-                            let config = load_profile(profile.as_deref(), environment)?;
+                            let config = load_profile!(profile.as_deref(), environment)?;
                             one_api_live_request(
                                 &config,
                                 "connection",
@@ -1396,7 +1396,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         "one connection permissions commands available: list, create, detail, delete",
                     ),
                     Some(OneConnectionPermissionCommand::List { profile, connection_id }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let connection_id =
                             connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
                         one_api_live_request(
@@ -1414,7 +1414,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         connection_id,
                         body,
                     }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let connection_id =
                             connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
                         let payload = load_payload(&body)?;
@@ -1434,7 +1434,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         connection_id,
                         aid,
                     }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let connection_id =
                             connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
                         one_api_live_request(
@@ -1452,7 +1452,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                         connection_id,
                         aid,
                     }) => {
-                        let config = load_profile(profile.as_deref(), environment)?;
+                        let config = load_profile!(profile.as_deref(), environment)?;
                         let connection_id =
                             connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
                         one_api_live_request(
@@ -1478,7 +1478,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     all,
                     max_pages,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let params = ayx_one_api::OneListParams::new()
                         .with_limit(limit)
                         .with_page_token(page_token)
@@ -1488,11 +1488,11 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneFlowsCommand::Count { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_api_live_request(&config, "flow", "count", "GET", "/v4/flows/count", false, &[])?
                 }
                 Some(OneFlowsCommand::Create { profile, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
                         &config,
@@ -1506,7 +1506,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneFlowsCommand::Detail { profile, flow_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -1519,7 +1519,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneFlowsCommand::Update { profile, flow_id, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
@@ -1534,7 +1534,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneFlowsCommand::Delete { profile, flow_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
                     if cli.apply {
                         // Only gate on confirmation when actually applying.
@@ -1556,7 +1556,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneFlowsCommand::Copy { profile, flow_id, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
                     let payload = body.map(|path| load_payload(&path)).transpose()?;
                     match payload {
@@ -1582,7 +1582,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     }
                 }
                 Some(OneFlowsCommand::Run { profile, flow_id, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
                     let payload = body.map(|path| load_payload(&path)).transpose()?;
                     match payload {
@@ -1608,7 +1608,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     }
                 }
                 Some(OneFlowsCommand::Validate { profile, flow_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -1625,7 +1625,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     flow_id,
                     output_object_type,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
                     let endpoint = if let Some(value) = output_object_type.as_deref() {
                         format!("/v4/flows/{}/recipeParameters?outputObjectType={}", flow_id, value)
@@ -1635,7 +1635,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     one_api_live_request(&config, "flow", "parameters", "GET", &endpoint, false, &[])?
                 }
                 Some(OneFlowsCommand::Inputs { profile, flow_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -1648,7 +1648,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneFlowsCommand::Outputs { profile, flow_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -1667,7 +1667,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     from_ui,
                     override_js_udfs,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     flow_import_package_envelope(
                         &config,
                         &input,
@@ -1684,7 +1684,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     from_ui,
                     override_js_udfs,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     flow_import_package_envelope(
                         &config,
                         &input,
@@ -1699,12 +1699,12 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     flow_id,
                     output,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
                     flow_export_package_envelope(&config, &flow_id, &output, false)?
                 }
                 Some(OneFlowsCommand::ExportDryRun { profile, flow_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
                     flow_export_package_envelope(&config, &flow_id, Path::new("unused"), true)?
                 }
@@ -1720,7 +1720,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     all,
                     max_pages,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let params = ayx_one_api::OneListParams::new()
                         .with_limit(limit)
                         .with_page_token(page_token)
@@ -1735,7 +1735,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OnePlansCommand::Create { profile, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
                         &config,
@@ -1749,7 +1749,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OnePlansCommand::Detail { profile, plan_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -1762,7 +1762,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OnePlansCommand::Full { profile, plan_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -1775,7 +1775,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OnePlansCommand::Run { profile, plan_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -1788,11 +1788,11 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OnePlansCommand::Count { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_api_live_request(&config, "plans", "count", "GET", "/plans/v1/plans/count", false, &[])?
                 }
                 Some(OnePlansCommand::RunParameters { profile, plan_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -1805,7 +1805,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OnePlansCommand::Schedules { profile, plan_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -1818,7 +1818,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OnePlansCommand::Export { profile, plan_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -1831,7 +1831,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OnePlansCommand::Update { profile, plan_id, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
@@ -1846,7 +1846,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OnePlansCommand::Delete { profile, plan_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
                     if cli.apply {
                         cmd::confirm::require_tty_confirmation(
@@ -1865,7 +1865,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OnePlansCommand::Share { profile, plan_id, body }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
@@ -1880,11 +1880,11 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OnePlansCommand::Import { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_api_live_request(&config, "plans", "import", "POST", "/plans/v1/plans/package", true, &[])?
                 }
                 Some(OnePlansCommand::Permissions { profile, plan_id, subject_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
                     let subject_id = subject_id.unwrap_or_default();
                     if subject_id.is_empty() {
@@ -1921,7 +1921,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     all,
                     max_pages,
                 }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let params = ayx_one_api::OneListParams::new()
                         .with_limit(limit)
                         .with_page_token(page_token)
@@ -1936,7 +1936,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneSchedulingCommand::Detail { profile, schedule_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let schedule_id = schedule_id.ok_or_else(|| anyhow!("--schedule-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -1949,7 +1949,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneSchedulingCommand::Enable { profile, schedule_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let schedule_id = schedule_id.ok_or_else(|| anyhow!("--schedule-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -1962,7 +1962,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneSchedulingCommand::Disable { profile, schedule_id }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     let schedule_id = schedule_id.ok_or_else(|| anyhow!("--schedule-id is required"))?;
                     one_api_live_request(
                         &config,
@@ -1975,18 +1975,18 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                     )?
                 }
                 Some(OneSchedulingCommand::Count { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_api_live_request(&config, "scheduling", "count", "GET", "/scheduling/v1/schedules/count", false, &[])?
                 }
             },
             Some(OneCommand::Billing { command }) => match command {
                 None => Envelope::ok("one billing commands available: current-account, usage-export"),
                 Some(OneBillingCommand::CurrentAccount { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_api_live_request(&config, "billing", "current-account", "GET", "/billing/v1/my/billing-accounts/current", false, &[])?
                 }
                 Some(OneBillingCommand::UsageExport { profile }) => {
-                    let config = load_profile(profile.as_deref(), environment)?;
+                    let config = load_profile!(profile.as_deref(), environment)?;
                     one_api_live_request(&config, "billing", "usage-export", "GET", "/billing/v1/usage/export", false, &[])?
                 }
             },
@@ -2113,11 +2113,11 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
                 },
             },
             Some(OneCommand::AutoInsights { profile }) => {
-                let config = load_profile(profile.as_deref(), environment)?;
+                let config = load_profile!(profile.as_deref(), environment)?;
                 api_diagnose_envelope(&config, "one auto-insights")?
             }
             Some(OneCommand::DesktopExec { profile }) => {
-                let config = load_profile(profile.as_deref(), environment)?;
+                let config = load_profile!(profile.as_deref(), environment)?;
                 api_status_envelope(&config, "one desktop-exec")?
             }
     })

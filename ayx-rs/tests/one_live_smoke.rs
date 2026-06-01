@@ -15,14 +15,105 @@ fn live_smoke_enabled() -> bool {
     )
 }
 
-fn run_ayx_with_env(args: &[&str], envs: &[(&str, &str)]) -> String {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_ayx"));
-    command.args(args);
-    for (key, value) in envs {
-        command.env(key, value);
+struct LiveSmokeContext {
+    config_home: TempDir,
+}
+
+impl LiveSmokeContext {
+    fn new() -> Self {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_home = temp.path();
+        let env = repo_env_values();
+        fs::create_dir_all(config_home.join("profiles")).expect("profiles dir");
+        fs::create_dir_all(config_home.join("workspaces")).expect("workspaces dir");
+
+        let state = AyxState {
+            active_profile: Some("live".to_string()),
+            active_workspace: None,
+        };
+        fs::write(
+            config_home.join("state.yaml"),
+            serde_yaml::to_string(&state).expect("state yaml"),
+        )
+        .expect("write state");
+
+        let profile = Config {
+            profile_name: "live".to_string(),
+            mongo: MongoProfile {
+                mode: MongoMode::Embedded,
+                databases: MongoDatabases {
+                    gallery_name: "AlteryxGallery".to_string(),
+                    service_name: "AlteryxService".to_string(),
+                },
+                embedded: Some(MongoEmbedded {
+                    runtime_settings_path: Some("RuntimeSettings.xml".to_string()),
+                    alteryx_service_path: None,
+                    restore_target_path: None,
+                }),
+                managed: None,
+            },
+            alteryx_one: Some(AlteryxOneProfile {
+                account_email: repo_env(&env, "AYX_ACCOUNT_EMAIL", "user@example.com"),
+                base_url: Some("https://api.us1.alteryxcloud.com".to_string()),
+                oauth_client_id: Some(repo_env(&env, "AYX_ONE_OAUTH_CLIENT_ID", "client-id")),
+                token_endpoint_url: Some(repo_env(
+                    &env,
+                    "AYX_ONE_TOKEN_ENDPOINT_URL",
+                    "https://pingauth.alteryxcloud.com/as",
+                )),
+                access_token: Some(repo_env(&env, "AYX_ONE_API_ACCESS_TOKEN", "topsecret")),
+                access_token_ref: None,
+                refresh_token: Some(repo_env(&env, "AYX_ONE_API_REFRESH_TOKEN", "topsecret")),
+                refresh_token_ref: None,
+                expected_workspace_id: None,
+            }),
+            observability: None,
+            server_api: None,
+            api: Some(ApiProfile {
+                base_url: "https://api.us1.alteryxcloud.com".to_string(),
+                auth: ApiAuth {
+                    mode: ApiAuthMode::Oauth2ClientCredentials,
+                    pat: None,
+                    client_id: Some("client-id".to_string()),
+                    client_secret: Some("client-secret".to_string()),
+                    client_secret_ref: None,
+                    scope: None,
+                },
+                timeout_ms: Some(60_000),
+            }),
+            server: None,
+            sqlserver: None,
+            upgrade: None,
+        };
+        fs::write(
+            config_home.join("profiles").join("live.yaml"),
+            serde_yaml::to_string(&profile).expect("profile yaml"),
+        )
+        .expect("write profile");
+
+        Self { config_home: temp }
     }
 
-    let output = command.output().expect("ayx binary should run");
+    fn run(&self, args: &[&str]) -> std::process::Output {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ayx"));
+        command.args(args);
+        command.env("AYX_CONFIG_HOME", self.config_home.path());
+        command.env("AYX_PROFILE", "live");
+        command.output().expect("ayx binary should run")
+    }
+}
+
+fn run_ayx_result(args: &[&str], context: &LiveSmokeContext) -> (bool, String, String) {
+    let output = context.run(args);
+    (
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    )
+}
+
+fn run_ayx_stdout(args: &[&str], context: &LiveSmokeContext) -> String {
+    let output = context.run(args);
 
     assert!(
         output.status.success(),
@@ -33,21 +124,6 @@ fn run_ayx_with_env(args: &[&str], envs: &[(&str, &str)]) -> String {
     );
 
     String::from_utf8_lossy(&output.stdout).to_string()
-}
-
-fn run_ayx_result(args: &[&str], envs: &[(&str, &str)]) -> (bool, String, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_ayx"));
-    command.args(args);
-    for (key, value) in envs {
-        command.env(key, value);
-    }
-
-    let output = command.output().expect("ayx binary should run");
-    (
-        output.status.success(),
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    )
 }
 
 fn repo_env_values() -> HashMap<String, String> {
@@ -84,80 +160,6 @@ fn repo_env(values: &HashMap<String, String>, key: &str, fallback: &str) -> Stri
         .unwrap_or_else(|| fallback.to_string())
 }
 
-fn live_config_home() -> TempDir {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let config_home = temp.path();
-    let env = repo_env_values();
-    fs::create_dir_all(config_home.join("profiles")).expect("profiles dir");
-    fs::create_dir_all(config_home.join("workspaces")).expect("workspaces dir");
-
-    let state = AyxState {
-        active_profile: Some("live".to_string()),
-        active_workspace: None,
-    };
-    fs::write(
-        config_home.join("state.yaml"),
-        serde_yaml::to_string(&state).expect("state yaml"),
-    )
-    .expect("write state");
-
-    let profile = Config {
-        profile_name: "live".to_string(),
-        mongo: MongoProfile {
-            mode: MongoMode::Embedded,
-            databases: MongoDatabases {
-                gallery_name: "AlteryxGallery".to_string(),
-                service_name: "AlteryxService".to_string(),
-            },
-            embedded: Some(MongoEmbedded {
-                runtime_settings_path: Some("RuntimeSettings.xml".to_string()),
-                alteryx_service_path: None,
-                restore_target_path: None,
-            }),
-            managed: None,
-        },
-        alteryx_one: Some(AlteryxOneProfile {
-            account_email: repo_env(&env, "AYX_ACCOUNT_EMAIL", "user@example.com"),
-            base_url: Some("https://api.us1.alteryxcloud.com".to_string()),
-            oauth_client_id: Some(repo_env(&env, "AYX_ONE_OAUTH_CLIENT_ID", "client-id")),
-            token_endpoint_url: Some(repo_env(
-                &env,
-                "AYX_ONE_TOKEN_ENDPOINT_URL",
-                "https://pingauth.alteryxcloud.com/as",
-            )),
-            access_token: Some(repo_env(&env, "AYX_ONE_API_ACCESS_TOKEN", "topsecret")),
-            access_token_ref: None,
-            refresh_token: Some(repo_env(&env, "AYX_ONE_API_REFRESH_TOKEN", "topsecret")),
-            refresh_token_ref: None,
-            expected_workspace_id: None,
-        }),
-        observability: None,
-        server_api: None,
-        api: Some(ApiProfile {
-            base_url: "https://api.us1.alteryxcloud.com".to_string(),
-            auth: ApiAuth {
-                mode: ApiAuthMode::Oauth2ClientCredentials,
-                pat: None,
-                client_id: Some("client-id".to_string()),
-                client_secret: Some("client-secret".to_string()),
-                client_secret_ref: None,
-                scope: None,
-            },
-            timeout_ms: Some(60_000),
-        }),
-        server: None,
-        sqlserver: None,
-        upgrade: None,
-    };
-    fs::write(
-        config_home.join("profiles").join("live.yaml"),
-        serde_yaml::to_string(&profile).expect("profile yaml"),
-    )
-    .expect("write profile");
-
-    temp
-}
-
 fn assert_contains(stdout: &str, needle: &str) {
     assert!(
         stdout.contains(needle),
@@ -175,8 +177,7 @@ fn one_platform_workspace_current_live() {
         return;
     }
 
-    let config_home = live_config_home();
-    let config_home_str = config_home.path().to_string_lossy().to_string();
+    let live = LiveSmokeContext::new();
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
@@ -186,10 +187,7 @@ fn one_platform_workspace_current_live() {
             "workspace",
             "current",
         ],
-        &[
-            ("AYX_CONFIG_HOME", &config_home_str),
-            ("AYX_PROFILE", "live"),
-        ],
+        &live,
     );
     if !success {
         assert_contains(&stderr, "\"error_code\": \"not_found\"");
@@ -207,15 +205,9 @@ fn one_plans_count_live() {
         return;
     }
 
-    let config_home = live_config_home();
-    let config_home_str = config_home.path().to_string_lossy().to_string();
-    let (success, stdout, stderr) = run_ayx_result(
-        &["--output", "json", "one", "plans", "count"],
-        &[
-            ("AYX_CONFIG_HOME", &config_home_str),
-            ("AYX_PROFILE", "live"),
-        ],
-    );
+    let live = LiveSmokeContext::new();
+    let (success, stdout, stderr) =
+        run_ayx_result(&["--output", "json", "one", "plans", "count"], &live);
     if !success {
         assert_contains(&stderr, "\"error_code\": \"permission_denied\"");
         assert_contains(&stderr, "refresh token request returned error status");
@@ -232,15 +224,9 @@ fn one_doctor_discover_live() {
         return;
     }
 
-    let config_home = live_config_home();
-    let config_home_str = config_home.path().to_string_lossy().to_string();
-    let (success, stdout, stderr) = run_ayx_result(
-        &["--output", "json", "one", "doctor", "discover"],
-        &[
-            ("AYX_CONFIG_HOME", &config_home_str),
-            ("AYX_PROFILE", "live"),
-        ],
-    );
+    let live = LiveSmokeContext::new();
+    let (success, stdout, stderr) =
+        run_ayx_result(&["--output", "json", "one", "doctor", "discover"], &live);
     if !success {
         assert_contains(&stderr, "\"error_code\": \"permission_denied\"");
         assert_contains(&stderr, "refresh token request returned error status");
@@ -256,15 +242,8 @@ fn one_doctor_auth_live() {
         return;
     }
 
-    let config_home = live_config_home();
-    let config_home_str = config_home.path().to_string_lossy().to_string();
-    let stdout = run_ayx_with_env(
-        &["--output", "json", "one", "doctor", "auth"],
-        &[
-            ("AYX_CONFIG_HOME", &config_home_str),
-            ("AYX_PROFILE", "live"),
-        ],
-    );
+    let live = LiveSmokeContext::new();
+    let stdout = run_ayx_stdout(&["--output", "json", "one", "doctor", "auth"], &live);
     assert_live_ok(&stdout);
     assert_contains(&stdout, "\"surface\": \"platform\"");
     assert_contains(&stdout, "\"diagnosis\":");
@@ -278,14 +257,10 @@ fn one_platform_api_status_live() {
         return;
     }
 
-    let config_home = live_config_home();
-    let config_home_str = config_home.path().to_string_lossy().to_string();
-    let stdout = run_ayx_with_env(
+    let live = LiveSmokeContext::new();
+    let stdout = run_ayx_stdout(
         &["--output", "json", "one", "platform", "api", "status"],
-        &[
-            ("AYX_CONFIG_HOME", &config_home_str),
-            ("AYX_PROFILE", "live"),
-        ],
+        &live,
     );
     assert_live_ok(&stdout);
     assert_contains(&stdout, "\"product\": \"one platform\"");
@@ -299,14 +274,10 @@ fn one_platform_workspace_list_live() {
         return;
     }
 
-    let config_home = live_config_home();
-    let config_home_str = config_home.path().to_string_lossy().to_string();
-    let stdout = run_ayx_with_env(
+    let live = LiveSmokeContext::new();
+    let stdout = run_ayx_stdout(
         &["--output", "json", "one", "platform", "workspace", "list"],
-        &[
-            ("AYX_CONFIG_HOME", &config_home_str),
-            ("AYX_PROFILE", "live"),
-        ],
+        &live,
     );
     assert_live_ok(&stdout);
     assert_contains(&stdout, "\"surface\": \"platform\"");

@@ -10,6 +10,8 @@
 //! need (apply flag, environment override, etc.) as parameters rather than
 //! reaching back into a shared `cli` struct, so the boundary is explicit.
 
+use anyhow::Result;
+
 pub mod catalog;
 pub mod confirm;
 pub mod dashboard;
@@ -21,3 +23,28 @@ pub mod sqlserver;
 pub mod telemetry;
 pub mod tools;
 pub mod workflow;
+
+/// Shared runtime context for command families that need to load profiles.
+pub(crate) struct RuntimeCtx<'a> {
+    pub environment: Option<&'a str>,
+}
+
+impl<'a> RuntimeCtx<'a> {
+    pub(crate) fn new(environment: Option<&'a str>) -> Self {
+        Self { environment }
+    }
+
+    pub(crate) fn load_profile<P>(&self, profile: P) -> Result<ayx_core::profile::Config>
+    where
+        P: Into<crate::ProfileInput<'a>>,
+    {
+        crate::load_profile_with_env(profile, self.environment)
+    }
+
+    pub(crate) fn load_profile_lenient<P>(&self, profile: P) -> Result<ayx_core::profile::Config>
+    where
+        P: Into<crate::ProfileInput<'a>>,
+    {
+        crate::load_profile_with_env_lenient(profile, self.environment)
+    }
+}

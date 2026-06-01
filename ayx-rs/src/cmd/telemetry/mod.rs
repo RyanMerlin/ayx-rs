@@ -12,8 +12,6 @@ use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use clap::{Args, Subcommand};
 
-use crate::load_profile_with_env_lenient;
-
 pub mod aggregate;
 pub mod errors;
 pub mod jobs;
@@ -289,7 +287,8 @@ pub fn load_and_pick_source(
     args: &TelemetryArgs,
     environment: Option<&str>,
 ) -> Result<(ayx_core::profile::Config, source::TelemetrySource)> {
-    let config = load_profile_with_env_lenient(args.profile.as_deref(), environment)?;
+    let runtime = crate::cmd::RuntimeCtx::new(environment);
+    let config = runtime.load_profile_lenient(args.profile.as_deref())?;
     let src = source::pick(&config, Some(&args.source))?;
     Ok((config, src))
 }

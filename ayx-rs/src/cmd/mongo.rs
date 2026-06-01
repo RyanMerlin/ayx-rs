@@ -12,22 +12,17 @@ use ayx_server::mongo::{
     query_envelope as mongo_query_envelope, restore_envelope, status_envelope,
 };
 
-use crate::{load_profile_with_env, MongoCommand};
+use crate::MongoCommand;
 
 pub fn execute(environment: Option<&str>, command: MongoCommand) -> Result<Envelope> {
-    fn load_profile<'a, P>(p: P, environment: Option<&str>) -> Result<ayx_core::profile::Config>
-    where
-        P: Into<crate::ProfileInput<'a>>,
-    {
-        load_profile_with_env(p, environment)
-    }
+    let runtime = crate::cmd::RuntimeCtx::new(environment);
     match command {
         MongoCommand::Status { profile } => {
-            let profile = load_profile(profile.as_deref(), environment)?;
+            let profile = runtime.load_profile(profile.as_deref())?;
             status_envelope(&profile)
         }
         MongoCommand::Inventory { profile } => {
-            let profile = load_profile(profile.as_deref(), environment)?;
+            let profile = runtime.load_profile(profile.as_deref())?;
             inventory_envelope(&profile)
         }
         MongoCommand::Backup {
@@ -36,7 +31,7 @@ pub fn execute(environment: Option<&str>, command: MongoCommand) -> Result<Envel
             apply,
             audit_dir,
         } => {
-            let profile = load_profile(profile.as_deref(), environment)?;
+            let profile = runtime.load_profile(profile.as_deref())?;
             backup_envelope(&profile, &output_dir, apply, &audit_dir)
         }
         MongoCommand::Restore {
@@ -45,7 +40,7 @@ pub fn execute(environment: Option<&str>, command: MongoCommand) -> Result<Envel
             apply,
             audit_dir,
         } => {
-            let profile = load_profile(profile.as_deref(), environment)?;
+            let profile = runtime.load_profile(profile.as_deref())?;
             restore_envelope(&profile, &input_path, apply, &audit_dir)
         }
         MongoCommand::Query {
@@ -60,7 +55,7 @@ pub fn execute(environment: Option<&str>, command: MongoCommand) -> Result<Envel
             apply,
             template,
         } => {
-            let profile = load_profile(profile.as_deref(), environment)?;
+            let profile = runtime.load_profile(profile.as_deref())?;
             let spec = ayx_server::mongo::resolve_query_spec(
                 &profile,
                 database.as_deref(),
@@ -74,7 +69,7 @@ pub fn execute(environment: Option<&str>, command: MongoCommand) -> Result<Envel
             mongo_query_envelope(&profile, &spec, print, apply)
         }
         MongoCommand::Doctor { profile } => {
-            let profile = load_profile(profile.as_deref(), environment)?;
+            let profile = runtime.load_profile(profile.as_deref())?;
             mongo_doctor_envelope(&profile)
         }
         MongoCommand::Mutate {
@@ -88,7 +83,7 @@ pub fn execute(environment: Option<&str>, command: MongoCommand) -> Result<Envel
             apply,
             accept_mutation_risk,
         } => {
-            let profile = load_profile(profile.as_deref(), environment)?;
+            let profile = runtime.load_profile(profile.as_deref())?;
             ayx_server::mongo::mutate_envelope(
                 &profile,
                 database.as_deref(),
