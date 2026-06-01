@@ -465,30 +465,12 @@ pub fn one_api_live_request_with_body(
             request = request.header(CONTENT_TYPE, "application/json");
         }
 
-        if debug_trace() {
-            eprintln!(
-                "[debug] one→ {} {} (attempt {}, mutating={}, body={})",
-                method_name,
-                ayx_core::observability::redact_url(&url),
-                attempt,
-                mutating,
-                body.is_some()
-            );
-        }
         let response = request.send();
         match response {
             Ok(response) => {
                 let status = response.status();
                 last_status = Some(status);
                 retry_after_seconds = parse_retry_after(response.headers().get(RETRY_AFTER));
-                if debug_trace() {
-                    eprintln!(
-                        "[debug] one← {} status={} attempt={}",
-                        method_name,
-                        status.as_u16(),
-                        attempt
-                    );
-                }
                 if status == StatusCode::UNAUTHORIZED && !refreshed_once {
                     access_token = refresh_one_access_token(config, &client)?;
                     refreshed_once = true;

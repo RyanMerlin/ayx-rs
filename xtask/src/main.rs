@@ -19,21 +19,41 @@ enum CommandKind {
     RefreshCommandSurface {
         #[arg(long, default_value = "docs/command-surface.md")]
         output: PathBuf,
+        #[arg(long)]
+        check: bool,
     },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        CommandKind::RefreshCommandSurface { output } => refresh_command_surface(&output),
+        CommandKind::RefreshCommandSurface { output, check } => {
+            refresh_command_surface(&output, check)
+        }
     }
 }
 
-fn refresh_command_surface(output: &Path) -> Result<()> {
+fn refresh_command_surface(output: &Path, check: bool) -> Result<()> {
     let repo_root = workspace_root()?;
     let catalog = run_catalog_list(&repo_root)?;
     let generated = render_command_surface(&catalog)?;
     let output_path = repo_root.join(output);
+    if check {
+        let existing = fs::read_to_string(&output_path).with_context(|| {
+            format!(
+                "failed to read existing command surface '{}'",
+                output_path.display()
+            )
+        })?;
+        if normalize_generated_surface(&existing) != normalize_generated_surface(&generated) {
+            bail!(
+                "{} is stale; run `cargo run -q -p xtask -- refresh-command-surface`",
+                output_path.display()
+            );
+        }
+        println!("{} is fresh", output_path.display());
+        return Ok(());
+    }
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create output directory '{}'", parent.display()))?;
@@ -223,4 +243,11 @@ fn yes_no(value: Option<bool>) -> &'static str {
         Some(false) => "no",
         None => "",
     }
+}
+
+fn normalize_generated_surface(text: &str) -> String {
+    text.lines()
+        .filter(|line| !line.starts_with("_Generated from_ "))
+        .collect::<Vec<_>>()
+        .join("\n")
 }

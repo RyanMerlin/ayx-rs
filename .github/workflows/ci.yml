@@ -23,6 +23,7 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all --check
+      - run: cargo run -q -p xtask -- refresh-command-surface --check
 
   clippy:
     name: Clippy

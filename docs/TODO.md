@@ -101,6 +101,7 @@ Status:
 - continue expanding One's remaining documented-only families before moving to the rest of the gaps.
 - keep License expansion gated on the documented support case set.
 - harden One API execution before adding more mutating One workflows or bulk operations.
+- track the live One smoke checkpoint and next-phase sequencing in `docs/one-roadmap.md`.
 
 ## Next phase
 - add native keychain-backed secret storage for interactive operator use while keeping environment variables first-class for automation.
