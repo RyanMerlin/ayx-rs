@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.9.3 — 2026-06-01
+
+First complete release since 0.9.1. The 0.9.2 tag never published artifacts
+because its release build failed on the Windows job; this release drops Windows
+to ship cleanly on Linux and macOS.
+
+### Platform support
+
+- Drop Windows from CI and the release pipeline. Tests run on Linux and macOS;
+  release artifacts are `x86_64-unknown-linux-gnu` and the two macOS targets.
+- Fix the Windows-only `cli_smoke` build break that triggered this (the
+  `std::fs` import is now gated to match its `#[cfg(not(windows))]` usage),
+  kept for correctness even though Windows is no longer built.
+
+### Dependencies
+
+- Defer the breaking `keyring` 4.x and `axum` 0.8.x upgrades; stay on the
+  latest 3.x / 0.7.x (both `cargo-audit` clean) and add `dependabot.yml` ignore
+  rules so the breaking majors stop being re-proposed.
+
 ## 0.9.1 — 2026-05-29
 
 ### CI and release fixes
