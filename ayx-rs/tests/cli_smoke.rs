@@ -1,3 +1,6 @@
+// `fs` is only used by the `#[cfg(not(windows))]` smoke tests below; gate the
+// import to match so Windows builds don't trip `-D warnings` on an unused import.
+#[cfg(not(windows))]
 use std::fs;
 use std::process::Command;
 
