@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-core"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "apple-native-keyring-store",
  "chrono",
@@ -397,7 +397,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-docs-schema"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -405,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-one"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -415,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-one-api"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-registry"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-rs"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "axum",
@@ -480,7 +480,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-server"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -502,7 +502,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-server-api"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-workflow"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "lzf",
@@ -4907,7 +4907,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xtask"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "anyhow",
  "chrono",

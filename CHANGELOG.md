@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.9.4 — 2026-06-02
+
+Completes the two breaking dependency upgrades that 0.9.3 deliberately deferred.
+Both landed as isolated, reviewed changes and are green on Linux and macOS CI.
+
+### Dependencies
+
+- Migrate `keyring` 3.6 → 4.0. keyring 4.x moved the `Entry` API to
+  `keyring-core` and split the platform credential stores into separate crates
+  that are registered at runtime. ayx-core now depends on `keyring-core` plus a
+  per-OS store (zbus Secret Service on Linux, native Keychain on macOS, native
+  Credential Manager on Windows) and registers it once before first use. Also
+  replaces a fragile error-string match with `Error::NoEntry` so not-found
+  handling is correct under the new error type.
+- Upgrade `axum` 0.7 → 0.8 and convert the dashboard router to the new
+  path-capture syntax (`:id` → `{id}`, `*path` → `{*path}`); the old form is a
+  router-build panic under 0.8, not a compile error.
+- Drop the `keyring` / `axum` major-version ignore rules from `dependabot.yml`
+  now that the deferred migrations are done, so future updates are tracked again.
+
 ## 0.9.3 — 2026-06-01
 
 First complete release since 0.9.1. The 0.9.2 tag never published artifacts
