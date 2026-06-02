@@ -12,4 +12,18 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
 tempfile = "3"
-keyring.workspace = true
+keyring-core = "1"
+
+# keyring 4.x split the platform credential stores into separate crates that
+# are registered with keyring-core at runtime. Pick one store per OS:
+#  - Linux/FreeBSD: zbus Secret Service (pure-Rust, no system libdbus needed)
+#  - macOS: native Keychain
+#  - Windows: native Credential Manager
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store = "1"

@@ -1,10 +1,37 @@
 use std::env;
+use std::sync::Once;
 
-use keyring::Entry;
+use keyring_core::{Entry, Error};
 
 use crate::profile::ProfileError;
 
 const SECRET_SERVICE: &str = "ayx";
+
+/// Register the platform credential store as keyring-core's default, exactly once.
+///
+/// keyring 4.x (keyring-core) selects the credential store at runtime rather than
+/// via a compile-time feature, so a store must be registered before any `Entry`
+/// is created. If the store cannot be created — e.g. no Secret Service / D-Bus
+/// session on a headless host — we leave the default unset; subsequent `Entry`
+/// operations then return `NoDefaultStore`, which callers already treat as
+/// "keyring unavailable" (inline fallback where permitted).
+fn ensure_keyring_store() {
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        if let Ok(store) = zbus_secret_service_keyring_store::Store::new() {
+            keyring_core::set_default_store(store);
+        }
+        #[cfg(target_os = "macos")]
+        if let Ok(store) = apple_native_keyring_store::keychain::Store::new() {
+            keyring_core::set_default_store(store);
+        }
+        #[cfg(target_os = "windows")]
+        if let Ok(store) = windows_native_keyring_store::Store::new() {
+            keyring_core::set_default_store(store);
+        }
+    });
+}
 
 pub fn keyring_secret_ref(scope: &str) -> String {
     format!("keyring:{scope}")
@@ -34,6 +61,7 @@ pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileErro
         return Ok(env::var(name).ok());
     }
     if let Some(account) = reference.strip_prefix("keyring:") {
+        ensure_keyring_store();
         let entry = Entry::new(SECRET_SERVICE, account).map_err(|source| {
             ProfileError::Invalid(format!(
                 "unable to open keyring entry '{}': {}",
@@ -42,17 +70,11 @@ pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileErro
         })?;
         return match entry.get_password() {
             Ok(value) => Ok(Some(value)),
-            Err(err) => {
-                let message = err.to_string();
-                if message.contains("NoEntry") {
-                    Ok(None)
-                } else {
-                    Err(ProfileError::Invalid(format!(
-                        "unable to load keyring secret '{}': {}",
-                        account, err
-                    )))
-                }
-            }
+            Err(Error::NoEntry) => Ok(None),
+            Err(err) => Err(ProfileError::Invalid(format!(
+                "unable to load keyring secret '{}': {}",
+                account, err
+            ))),
         };
     }
     Ok(None)
@@ -64,6 +86,7 @@ pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileErro
 /// callers must decide explicitly whether to fall back. Use
 /// [`store_secret_with_fallback`] when an inline fallback is acceptable.
 pub fn store_keyring_secret(account: &str, secret: &str) -> Result<String, ProfileError> {
+    ensure_keyring_store();
     let entry = Entry::new(SECRET_SERVICE, account).map_err(|source| {
         ProfileError::Invalid(format!(
             "unable to open keyring entry '{}': {}. Set AYX_ALLOW_INLINE_SECRETS=1 to store in YAML instead, or configure a keyring backend.",
@@ -114,5 +137,20 @@ mod tests {
             resolve_secret_ref("inline:fresh-token").expect("inline ref should resolve"),
             Some("fresh-token".to_string())
         );
+    }
+
+    #[test]
+    fn keyring_ref_never_panics_or_fabricates() {
+        // Exercises the keyring-core runtime store registration. The host may or
+        // may not have a Secret Service backend (CI runners are headless), so
+        // both outcomes are valid: `Ok(None)` when the backend is present but the
+        // entry is absent, or `Err` when no store could be registered. The
+        // contract under test is that we never panic and never fabricate a secret
+        // for a missing entry.
+        match resolve_secret_ref("keyring:ayx-core-nonexistent-test-account") {
+            Ok(None) => {}
+            Ok(Some(_)) => panic!("must not fabricate a secret for a missing keyring entry"),
+            Err(_) => {}
+        }
     }
 }
