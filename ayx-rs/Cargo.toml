@@ -25,11 +25,11 @@ ayx_one_api = { package = "ayx-one-api", path = "../ayx-one-api" }
 ayx-server = { path = "../ayx-server" }
 ayx-registry = { path = "../ayx-registry" }
 self_update = "0.44.0"
-axum = "0.7"
+axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "compression-gzip"] }
-maud = "0.26"
+maud = "0.27"
 rust-embed = "8"
 mime_guess = "2"
 base64 = "0.22"

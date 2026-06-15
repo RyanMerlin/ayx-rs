@@ -15,6 +15,46 @@
 - `cargo test -p ayx-one-api refresh_token_uses_refresh_token_only -- --nocapture`
 - `cargo test -p ayx-rs --no-run`
 
+## 0.9.4 — 2026-06-02
+
+Completes the two breaking dependency upgrades that 0.9.3 deliberately deferred.
+Both landed as isolated, reviewed changes and are green on Linux and macOS CI.
+
+### Dependencies
+
+- Migrate `keyring` 3.6 → 4.0. keyring 4.x moved the `Entry` API to
+  `keyring-core` and split the platform credential stores into separate crates
+  that are registered at runtime. ayx-core now depends on `keyring-core` plus a
+  per-OS store (zbus Secret Service on Linux, native Keychain on macOS, native
+  Credential Manager on Windows) and registers it once before first use. Also
+  replaces a fragile error-string match with `Error::NoEntry` so not-found
+  handling is correct under the new error type.
+- Upgrade `axum` 0.7 → 0.8 and convert the dashboard router to the new
+  path-capture syntax (`:id` → `{id}`, `*path` → `{*path}`); the old form is a
+  router-build panic under 0.8, not a compile error.
+- Drop the `keyring` / `axum` major-version ignore rules from `dependabot.yml`
+  now that the deferred migrations are done, so future updates are tracked again.
+
+## 0.9.3 — 2026-06-01
+
+First complete release since 0.9.1. The 0.9.2 tag never published artifacts
+because its release build failed on the Windows job; this release drops Windows
+to ship cleanly on Linux and macOS.
+
+### Platform support
+
+- Drop Windows from CI and the release pipeline. Tests run on Linux and macOS;
+  release artifacts are `x86_64-unknown-linux-gnu` and the two macOS targets.
+- Fix the Windows-only `cli_smoke` build break that triggered this (the
+  `std::fs` import is now gated to match its `#[cfg(not(windows))]` usage),
+  kept for correctness even though Windows is no longer built.
+
+### Dependencies
+
+- Defer the breaking `keyring` 4.x and `axum` 0.8.x upgrades; stay on the
+  latest 3.x / 0.7.x (both `cargo-audit` clean) and add `dependabot.yml` ignore
+  rules so the breaking majors stop being re-proposed.
+
 ## 0.9.1 — 2026-05-29
 
 ### CI and release fixes

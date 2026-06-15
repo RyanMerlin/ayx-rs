@@ -70,9 +70,9 @@ pub fn router(state: AppState) -> Router {
             "/workflows/errors",
             get(handlers::workflows::errors_partial),
         )
-        .route("/workflows/:id", get(handlers::workflows::drilldown))
+        .route("/workflows/{id}", get(handlers::workflows::drilldown))
         .route("/healthz", get(healthz))
-        .route("/static/*path", get(static_handler))
+        .route("/static/{*path}", get(static_handler))
         .layer(from_fn_with_state(shared.clone(), auth_middleware))
         .layer(from_fn_with_state(
             shared.clone(),
@@ -289,6 +289,36 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(missing.status(), 404);
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn router_matches_workflow_drilldown_param_route() {
+        // Guards the axum 0.8 path-param conversion `/workflows/:id` -> `/workflows/{id}`.
+        // axum 0.8 rejects the old `:param` syntax at router-build time (a runtime panic
+        // the compiler cannot catch); a mis-converted route would 404 at the router.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(test_state());
+
+        let handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+
+        let resp = client
+            .get(format!("http://{addr}/workflows/example-id"))
+            .send()
+            .await
+            .unwrap();
+        // Route matched and the handler rendered (200), rather than a router 404.
+        assert_eq!(resp.status(), 200);
 
         handle.abort();
     }
