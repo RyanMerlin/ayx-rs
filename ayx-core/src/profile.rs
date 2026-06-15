@@ -245,11 +245,6 @@ impl AlteryxOneProfile {
         self.base_url
             .as_deref()
             .and_then(normalize_alteryx_one_base_url)
-            .or_else(|| {
-                self.token_endpoint_url
-                    .as_deref()
-                    .and_then(infer_alteryx_one_base_url)
-            })
     }
 
     pub fn effective_token_endpoint_url(&self) -> Option<String> {
@@ -259,7 +254,7 @@ impl AlteryxOneProfile {
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            return Some(url.to_string());
+            return Some(normalize_alteryx_one_token_endpoint(url));
         }
         self.normalized_base_url()
             .map(|base_url| derive_alteryx_one_token_endpoint(&base_url))
@@ -755,10 +750,20 @@ pub fn derive_alteryx_one_token_endpoint(base_url: &str) -> String {
     format!("{}/as/token", base_url.trim().trim_end_matches('/'))
 }
 
+pub fn normalize_alteryx_one_token_endpoint(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.ends_with("/as") {
+        derive_alteryx_one_token_endpoint(trimmed.trim_end_matches("/as").trim_end_matches('/'))
+    } else {
+        trimmed.to_string()
+    }
+}
+
 pub fn infer_alteryx_one_base_url(token_endpoint_url: &str) -> Option<String> {
     let trimmed = token_endpoint_url.trim().trim_end_matches('/');
     trimmed
         .strip_suffix("/as/token")
+        .or_else(|| trimmed.strip_suffix("/as"))
         .and_then(normalize_alteryx_one_base_url)
 }
 
@@ -1978,6 +1983,51 @@ mod tests {
                 .as_ref()
                 .map(|one| one.account_email.as_str()),
             Some("self@example.com")
+        );
+    }
+
+    #[test]
+    fn one_token_endpoint_normalizes_issuer_root() {
+        let profile = AlteryxOneProfile {
+            account_email: "user@example.com".to_string(),
+            base_url: Some("https://pingauth.alteryxcloud.com".to_string()),
+            oauth_client_id: None,
+            token_endpoint_url: Some("https://pingauth.alteryxcloud.com/as".to_string()),
+            access_token: None,
+            access_token_ref: None,
+            refresh_token: None,
+            refresh_token_ref: None,
+            expected_workspace_id: None,
+        };
+
+        assert_eq!(
+            profile.effective_token_endpoint_url().as_deref(),
+            Some("https://pingauth.alteryxcloud.com/as/token")
+        );
+        assert_eq!(
+            profile.normalized_base_url().as_deref(),
+            Some("https://pingauth.alteryxcloud.com")
+        );
+    }
+
+    #[test]
+    fn one_token_endpoint_does_not_infer_api_base_url_from_auth_host() {
+        let profile = AlteryxOneProfile {
+            account_email: "user@example.com".to_string(),
+            base_url: None,
+            oauth_client_id: None,
+            token_endpoint_url: Some("https://pingauth.alteryxcloud.com/as".to_string()),
+            access_token: None,
+            access_token_ref: None,
+            refresh_token: None,
+            refresh_token_ref: None,
+            expected_workspace_id: None,
+        };
+
+        assert_eq!(profile.normalized_base_url(), None);
+        assert_eq!(
+            profile.effective_token_endpoint_url().as_deref(),
+            Some("https://pingauth.alteryxcloud.com/as/token")
         );
     }
 

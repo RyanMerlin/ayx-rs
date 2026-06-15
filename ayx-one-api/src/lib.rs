@@ -1041,13 +1041,6 @@ pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<Stri
         .alteryx_one
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("config missing alteryx_one section"))?;
-    let client_id = one
-        .oauth_client_id
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            anyhow::anyhow!("alteryx_one.oauth_client_id is required for refresh_token support")
-        })?;
     let refresh_token = one
         .refresh_token
         .as_ref()
@@ -1066,7 +1059,6 @@ pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<Stri
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
         .form(&[
             ("grant_type", "refresh_token"),
-            ("client_id", client_id),
             ("refresh_token", refresh_token),
         ])
         .send()
@@ -1200,6 +1192,9 @@ pub fn resolve_one_base_url(config: &Config) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ayx_core::profile::{AlteryxOneProfile, Config};
+    use httpmock::prelude::*;
+    use serde_yaml::from_str;
 
     #[test]
     fn refresh_token_response_formats_access_token() {
@@ -1209,5 +1204,49 @@ mod tests {
         }))
         .expect("response should format");
         assert_eq!(token, "Bearer fresh-token");
+    }
+
+    #[test]
+    fn refresh_token_uses_refresh_token_only() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/as/token")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body("grant_type=refresh_token&refresh_token=refresh-123");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"token_type":"Bearer","access_token":"fresh"}"#);
+        });
+
+        let mut config: Config = from_str(
+            r#"
+profile_name: test
+mongo:
+  mode: embedded
+  databases:
+    gallery_name: AlteryxGallery
+    service_name: AlteryxService
+  embedded: {}
+"#,
+        )
+        .expect("config parses");
+        config.alteryx_one = Some(AlteryxOneProfile {
+            account_email: "tester@example.com".to_string(),
+            base_url: Some(server.base_url()),
+            oauth_client_id: Some("client-id".to_string()),
+            token_endpoint_url: Some(format!("{}/as", server.base_url())),
+            access_token: None,
+            access_token_ref: None,
+            refresh_token: Some("refresh-123".to_string()),
+            refresh_token_ref: None,
+            expected_workspace_id: None,
+        });
+
+        let client = reqwest::blocking::Client::new();
+        let token = refresh_one_access_token(&config, &client).expect("refresh succeeds");
+
+        mock.assert();
+        assert_eq!(token, "Bearer fresh");
     }
 }

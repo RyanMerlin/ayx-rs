@@ -46,6 +46,7 @@ That writes the active profile to the central profile store. If you prefer to ed
 ```yaml
 profile_name: demo
 alteryx_one:
+  base_url: https://api.us1.alteryxcloud.com
   account_email: you@example.com
 server:
   api:
@@ -124,6 +125,7 @@ For promotion-style workflows with multiple Server instances, keep one environme
 
 Minimum expectations:
 - `profile_name`
+- `alteryx_one.base_url` for the One API host
 - `alteryx_one.account_email` when using ownership-transfer and related automation
 - `alteryx_one.oauth_client_id` and `alteryx_one.token_endpoint_url` for One OAuth token posture
 - `alteryx_one.access_token` when using One API commands

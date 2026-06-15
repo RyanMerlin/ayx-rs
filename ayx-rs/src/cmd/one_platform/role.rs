@@ -13,7 +13,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneRoleCommand) -> Resu
                 "platform",
                 "role-list-assignments",
                 "GET",
-                "/iam/v1/authorization/roles/{id}/people",
+                "/v4/authorization/roles/{id}/people",
                 false,
                 &[("id", &role_id)],
             )?
@@ -28,7 +28,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneRoleCommand) -> Resu
                 "platform",
                 "role-assign",
                 "POST",
-                "/iam/v1/authorization/roles/{id}/people/{subjectId}",
+                "/v4/authorization/roles/{id}/people/{subjectId}",
                 true,
                 &[("id", &role_id), ("subjectId", &subject_id)],
             )?
@@ -43,7 +43,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneRoleCommand) -> Resu
                 "platform",
                 "role-unassign",
                 "DELETE",
-                "/iam/v1/authorization/roles/{id}/people/{subjectId}",
+                "/v4/authorization/roles/{id}/people/{subjectId}",
                 true,
                 &[("id", &role_id), ("subjectId", &subject_id)],
             )?

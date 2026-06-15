@@ -156,7 +156,7 @@ pub(crate) fn execute(
                 "platform",
                 "workspace-configuration",
                 "GET",
-                "/iam/v1/workspaces/{id}/configuration",
+                "/v4/workspaces/{id}/configuration",
                 false,
                 &[("id", &workspace_id)],
             )?
@@ -168,7 +168,7 @@ pub(crate) fn execute(
                 "platform",
                 "workspace-people",
                 "GET",
-                "/iam/v1/workspaces/{id}/people",
+                "/v4/workspaces/{id}/people",
                 false,
                 &[("id", &workspace_id)],
             )?
@@ -180,7 +180,7 @@ pub(crate) fn execute(
                 "platform",
                 "workspace-admins",
                 "GET",
-                "/iam/v1/workspaces/{workspaceId}/admins",
+                "/v4/workspaces/{workspaceId}/admins",
                 false,
                 &[("workspaceId", &workspace_id)],
             )?
@@ -192,7 +192,7 @@ pub(crate) fn execute(
                 "platform",
                 "workspace-invite-users",
                 "POST",
-                "/iam/v1/workspaces/{id}/people/batch",
+                "/v4/workspaces/{id}/people/batch",
                 true,
                 &[("id", &workspace_id)],
             )?
@@ -207,9 +207,9 @@ pub(crate) fn execute(
                 "platform",
                 "workspace-remove-user",
                 "DELETE",
-                "/iam/v1/workspaces/{id}/people/{personId}",
+                "/v4/workspaces/{workspaceId}/people/{id}",
                 true,
-                &[("id", &workspace_id), ("personId", &person_id)],
+                &[("workspaceId", &workspace_id), ("id", &person_id)],
             )?
         }
         Some(OneWorkspaceCommand::SuspendUsers { workspace_id }) => {
@@ -243,7 +243,7 @@ pub(crate) fn execute(
                 "platform",
                 "workspace-transfer",
                 "POST",
-                "/iam/v1/workspaces/{id}/transfer",
+                "/v4/workspaces/{id}/transfer",
                 true,
                 &[("id", &workspace_id)],
             )?

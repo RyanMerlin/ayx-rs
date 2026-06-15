@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.5 — 2026-06-15
+
+### One API host and auth fixes
+
+- Require an explicit `AYX_ONE_BASE_URL` for One API requests instead of inferring the API host from the token endpoint.
+- Keep `AYX_ONE_TOKEN_ENDPOINT_URL` pointed at the auth issuer and normalize `/as` to `/as/token` when refreshing access tokens.
+- Align the One platform workspace and role routes with the published v4 OpenAPI surface.
+- Refresh the user and agent guidance in the sample config and docs so the API host and auth host are clearly separated.
+
+### Verification
+
+- `cargo test -p ayx-core one_token_endpoint -- --nocapture`
+- `cargo test -p ayx-one-api refresh_token_uses_refresh_token_only -- --nocapture`
+- `cargo test -p ayx-rs --no-run`
+
 ## 0.9.1 — 2026-05-29
 
 ### CI and release fixes

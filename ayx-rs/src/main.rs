@@ -2513,7 +2513,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /iam/v1/workspaces/{id}/people in managed-iam-v1.yaml."],
+        notes: &["Maps to GET /v4/workspaces/{id}/people in the One API docs."],
     },
     CommandSpec {
         name: "one platform workspace admins",
@@ -2523,7 +2523,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /iam/v1/workspaces/{workspaceId}/admins in managed-iam-v1.yaml."],
+        notes: &["Maps to GET /v4/workspaces/{workspaceId}/admins in the One API docs."],
     },
     CommandSpec {
         name: "one platform role list-assignments",
@@ -2533,7 +2533,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /iam/v1/authorization/roles/{id}/people in managed-iam-v1.yaml."],
+        notes: &["Maps to GET /v4/authorization/roles/{id}/people in the One API docs."],
     },
     CommandSpec {
         name: "one platform auth status",
@@ -5073,6 +5073,8 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                 "refresh_token_present": has_refresh_token,
                 "diagnosis": "alteryx_one.access_token is missing",
                 "recommendations": [
+                    "Set AYX_ONE_BASE_URL to the API host, not the auth issuer",
+                    "Set AYX_ONE_TOKEN_ENDPOINT_URL to the auth issuer root (for example https://pingauth.alteryxcloud.com/as)",
                     "Set AYX_ONE_API_ACCESS_TOKEN in .env",
                     "Populate alteryx_one.access_token in the active central profile if you prefer config-based storage"
                 ],
@@ -5095,7 +5097,7 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                 "diagnosis": "token present and workspace probe executed",
                 "workspace_probe": workspace_probe.data,
                 "recommendations": [
-                    "Use one platform workspace current or people for evidence",
+                    "Use one platform workspace current or admins for evidence",
                     "Route any failing symptoms into the workflow guidance layer",
                 ],
             }),
