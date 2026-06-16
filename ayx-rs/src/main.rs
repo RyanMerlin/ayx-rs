@@ -1468,6 +1468,14 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long)]
         profile: Option<String>,
     },
+    Library {
+        #[command(subcommand)]
+        command: Option<OneFlowLibraryCommand>,
+    },
+    Folders {
+        #[command(subcommand)]
+        command: Option<OneFlowFoldersCommand>,
+    },
     Create {
         #[arg(long)]
         profile: Option<String>,
@@ -1536,6 +1544,30 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long)]
         flow_id: Option<String>,
     },
+    Permissions {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        flow_id: Option<String>,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Move {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        flow_id: Option<String>,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    ReplaceDataset {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        flow_id: Option<String>,
+        #[arg(long)]
+        body: PathBuf,
+    },
     Import {
         #[arg(long)]
         profile: Option<String>,
@@ -1573,6 +1605,88 @@ pub(crate) enum OneFlowsCommand {
         profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum OneFlowLibraryCommand {
+    List {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        offset: Option<u32>,
+    },
+    Count {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum OneFlowFoldersCommand {
+    List {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        offset: Option<u32>,
+    },
+    Count {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    Detail {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        folder_id: Option<String>,
+    },
+    Create {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Update {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        folder_id: Option<String>,
+        #[arg(long)]
+        body: PathBuf,
+    },
+    Delete {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        folder_id: Option<String>,
+    },
+    Flows {
+        #[command(subcommand)]
+        command: Option<OneFlowFolderFlowsCommand>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum OneFlowFolderFlowsCommand {
+    List {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        folder_id: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        offset: Option<u32>,
+    },
+    Count {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        folder_id: Option<String>,
     },
 }
 
@@ -2930,6 +3044,106 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to GET /v4/flows/count in the One API docs."],
     },
     CommandSpec {
+        name: "one flows library list",
+        path: "one/flows/library/list",
+        summary: "List the One flow library.",
+        output: "one flows library list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to GET /v4/flowsLibrary in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows library count",
+        path: "one/flows/library/count",
+        summary: "Count the One flow library.",
+        output: "one flows library count envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to GET /v4/flowsLibrary/count in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows folders list",
+        path: "one/flows/folders/list",
+        summary: "List flow folders.",
+        output: "one flows folders list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to GET /v4/folders in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows folders count",
+        path: "one/flows/folders/count",
+        summary: "Count flow folders.",
+        output: "one flows folders count envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to GET /v4/folders/count in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows folders detail",
+        path: "one/flows/folders/detail",
+        summary: "Inspect a flow folder by id.",
+        output: "one flows folders detail envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to GET /v4/folders/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows folders create",
+        path: "one/flows/folders/create",
+        summary: "Create a flow folder from JSON payload.",
+        output: "one flows folders create envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/folders in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows folders update",
+        path: "one/flows/folders/update",
+        summary: "Update a flow folder from JSON payload.",
+        output: "one flows folders update envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        notes: &["Maps to PATCH /v4/folders/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows folders delete",
+        path: "one/flows/folders/delete",
+        summary: "Delete a flow folder.",
+        output: "one flows folders delete envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to DELETE /v4/folders/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows folders flows list",
+        path: "one/flows/folders/flows/list",
+        summary: "List flows in a folder.",
+        output: "one flows folders flows list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to GET /v4/folders/{id}/flows in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows folders flows count",
+        path: "one/flows/folders/flows/count",
+        summary: "Count flows in a folder.",
+        output: "one flows folders flows count envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to GET /v4/folders/{id}/flows/count in the One API docs."],
+    },
+    CommandSpec {
         name: "one flows detail",
         path: "one/flows/detail",
         summary: "Inspect a One flow by id.",
@@ -3028,6 +3242,36 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/flows/{id}/outputs in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows permissions",
+        path: "one/flows/permissions",
+        summary: "Share a flow from JSON payload.",
+        output: "one flows permissions envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/flows/{id}/permissions in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows move",
+        path: "one/flows/move",
+        summary: "Move a One flow from JSON payload.",
+        output: "one flows move envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        notes: &["Maps to POST /v4/flows/{id}/move in the One API docs."],
+    },
+    CommandSpec {
+        name: "one flows replace-dataset",
+        path: "one/flows/replace-dataset",
+        summary: "Replace a dataset in a One flow from JSON payload.",
+        output: "one flows replace-dataset envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        notes: &["Maps to PATCH /v4/flows/{id}/replaceDataset in the One API docs."],
     },
     CommandSpec {
         name: "one flows import",

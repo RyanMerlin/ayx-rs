@@ -6,11 +6,24 @@ use ayx_one_api::{
     flow_export_package_envelope, flow_import_package_envelope, one_api_live_request,
     one_api_live_request_with_body,
 };
+use url::form_urlencoded::Serializer;
 
 use crate::{
     cmd::{self, RuntimeCtx},
-    load_payload, OneFlowsCommand,
+    load_payload, OneFlowFolderFlowsCommand, OneFlowFoldersCommand, OneFlowLibraryCommand,
+    OneFlowsCommand,
 };
+
+fn append_query(endpoint: &str, query: &[(&str, String)]) -> String {
+    if query.is_empty() {
+        return endpoint.to_string();
+    }
+    let mut serializer = Serializer::new(String::new());
+    for (key, value) in query {
+        serializer.append_pair(key, value);
+    }
+    format!("{endpoint}?{}", serializer.finish())
+}
 
 pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
@@ -20,7 +33,7 @@ pub(crate) fn execute(
 ) -> Result<Envelope> {
     Ok(match command {
         None => Envelope::ok(
-            "one flows commands available: list, count, detail, create, update, delete, copy, run, validate, parameters, inputs, outputs, import, import-dry-run, export, export-dry-run",
+            "one flows commands available: list, count, library, folders, detail, create, update, delete, copy, run, validate, parameters, inputs, outputs, permissions, move, replace-dataset, import, import-dry-run, export, export-dry-run",
         ),
         Some(OneFlowsCommand::List {
             profile,
@@ -48,6 +61,196 @@ pub(crate) fn execute(
                 &[],
             )?
         }
+        Some(OneFlowsCommand::Library { command }) => match command {
+            None => Envelope::ok("one flows library commands available: list, count"),
+            Some(OneFlowLibraryCommand::List {
+                profile,
+                limit,
+                offset,
+            }) => {
+                let config = runtime.load_profile_lenient(profile.as_deref())?;
+                let mut query = Vec::new();
+                if let Some(limit) = limit {
+                    query.push(("limit", limit.to_string()));
+                }
+                if let Some(offset) = offset {
+                    query.push(("offset", offset.to_string()));
+                }
+                let endpoint = append_query("/v4/flowsLibrary", &query);
+                one_api_live_request(
+                    &config,
+                    "flow",
+                    "library-list",
+                    "GET",
+                    &endpoint,
+                    false,
+                    &[],
+                )?
+            }
+            Some(OneFlowLibraryCommand::Count { profile }) => {
+                let config = runtime.load_profile_lenient(profile.as_deref())?;
+                one_api_live_request(
+                    &config,
+                    "flow",
+                    "library-count",
+                    "GET",
+                    "/v4/flowsLibrary/count",
+                    false,
+                    &[],
+                )?
+            }
+        },
+        Some(OneFlowsCommand::Folders { command }) => match command {
+            None => Envelope::ok(
+                "one flows folders commands available: list, count, detail, create, update, delete, flows",
+            ),
+            Some(OneFlowFoldersCommand::List {
+                profile,
+                limit,
+                offset,
+            }) => {
+                let config = runtime.load_profile_lenient(profile.as_deref())?;
+                let mut query = Vec::new();
+                if let Some(limit) = limit {
+                    query.push(("limit", limit.to_string()));
+                }
+                if let Some(offset) = offset {
+                    query.push(("offset", offset.to_string()));
+                }
+                let endpoint = append_query("/v4/folders", &query);
+                one_api_live_request(
+                    &config,
+                    "flow",
+                    "folders-list",
+                    "GET",
+                    &endpoint,
+                    false,
+                    &[],
+                )?
+            }
+            Some(OneFlowFoldersCommand::Count { profile }) => {
+                let config = runtime.load_profile_lenient(profile.as_deref())?;
+                one_api_live_request(
+                    &config,
+                    "flow",
+                    "folders-count",
+                    "GET",
+                    "/v4/folders/count",
+                    false,
+                    &[],
+                )?
+            }
+            Some(OneFlowFoldersCommand::Detail { profile, folder_id }) => {
+                let config = runtime.load_profile_lenient(profile.as_deref())?;
+                let folder_id = folder_id.ok_or_else(|| anyhow!("--folder-id is required"))?;
+                one_api_live_request(
+                    &config,
+                    "flow",
+                    "folders-detail",
+                    "GET",
+                    "/v4/folders/{id}",
+                    false,
+                    &[("id", folder_id.as_str())],
+                )?
+            }
+            Some(OneFlowFoldersCommand::Create { profile, body }) => {
+                let config = runtime.load_profile_lenient(profile.as_deref())?;
+                let payload = load_payload(&body)?;
+                one_api_live_request_with_body(
+                    &config,
+                    "flow",
+                    "folders-create",
+                    "POST",
+                    "/v4/folders",
+                    true,
+                    &[],
+                    Some(payload),
+                )?
+            }
+            Some(OneFlowFoldersCommand::Update {
+                profile,
+                folder_id,
+                body,
+            }) => {
+                let config = runtime.load_profile_lenient(profile.as_deref())?;
+                let folder_id = folder_id.ok_or_else(|| anyhow!("--folder-id is required"))?;
+                let payload = load_payload(&body)?;
+                one_api_live_request_with_body(
+                    &config,
+                    "flow",
+                    "folders-update",
+                    "PATCH",
+                    "/v4/folders/{id}",
+                    true,
+                    &[("id", folder_id.as_str())],
+                    Some(payload),
+                )?
+            }
+            Some(OneFlowFoldersCommand::Delete { profile, folder_id }) => {
+                let config = runtime.load_profile_lenient(profile.as_deref())?;
+                let folder_id = folder_id.ok_or_else(|| anyhow!("--folder-id is required"))?;
+                if apply {
+                    cmd::confirm::require_tty_confirmation(
+                        yes,
+                        &format!(
+                            "About to DELETE folder id='{folder_id}' on profile '{}'. This cannot be undone.",
+                            config.profile_name
+                        ),
+                    )?;
+                }
+                one_api_live_request(
+                    &config,
+                    "flow",
+                    "folders-delete",
+                    "DELETE",
+                    "/v4/folders/{id}",
+                    true,
+                    &[("id", folder_id.as_str())],
+                )?
+            }
+            Some(OneFlowFoldersCommand::Flows { command }) => match command {
+                None => Envelope::ok("one flows folders flows commands available: list, count"),
+                Some(OneFlowFolderFlowsCommand::List {
+                    profile,
+                    folder_id,
+                    limit,
+                    offset,
+                }) => {
+                    let config = runtime.load_profile_lenient(profile.as_deref())?;
+                    let folder_id = folder_id.ok_or_else(|| anyhow!("--folder-id is required"))?;
+                    let mut query = Vec::new();
+                    if let Some(limit) = limit {
+                        query.push(("limit", limit.to_string()));
+                    }
+                    if let Some(offset) = offset {
+                        query.push(("offset", offset.to_string()));
+                    }
+                    let endpoint = append_query("/v4/folders/{id}/flows", &query);
+                    one_api_live_request(
+                        &config,
+                        "flow",
+                        "folder-flows-list",
+                        "GET",
+                        &endpoint,
+                        false,
+                        &[("id", folder_id.as_str())],
+                    )?
+                }
+                Some(OneFlowFolderFlowsCommand::Count { profile, folder_id }) => {
+                    let config = runtime.load_profile_lenient(profile.as_deref())?;
+                    let folder_id = folder_id.ok_or_else(|| anyhow!("--folder-id is required"))?;
+                    one_api_live_request(
+                        &config,
+                        "flow",
+                        "folder-flows-count",
+                        "GET",
+                        "/v4/folders/{id}/flows/count",
+                        false,
+                        &[("id", folder_id.as_str())],
+                    )?
+                }
+            },
+        },
         Some(OneFlowsCommand::Create { profile, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
@@ -233,6 +436,63 @@ pub(crate) fn execute(
                 "/v4/flows/{id}/outputs",
                 false,
                 &[("id", flow_id.as_str())],
+            )?
+        }
+        Some(OneFlowsCommand::Permissions {
+            profile,
+            flow_id,
+            body,
+        }) => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+            let payload = load_payload(&body)?;
+            one_api_live_request_with_body(
+                &config,
+                "flow",
+                "permissions",
+                "POST",
+                "/v4/flows/{id}/permissions",
+                true,
+                &[("id", flow_id.as_str())],
+                Some(payload),
+            )?
+        }
+        Some(OneFlowsCommand::Move {
+            profile,
+            flow_id,
+            body,
+        }) => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+            let payload = load_payload(&body)?;
+            one_api_live_request_with_body(
+                &config,
+                "flow",
+                "move",
+                "POST",
+                "/v4/flows/{id}/move",
+                true,
+                &[("id", flow_id.as_str())],
+                Some(payload),
+            )?
+        }
+        Some(OneFlowsCommand::ReplaceDataset {
+            profile,
+            flow_id,
+            body,
+        }) => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+            let payload = load_payload(&body)?;
+            one_api_live_request_with_body(
+                &config,
+                "flow",
+                "replace-dataset",
+                "PATCH",
+                "/v4/flows/{id}/replaceDataset",
+                true,
+                &[("id", flow_id.as_str())],
+                Some(payload),
             )?
         }
         Some(OneFlowsCommand::Import {

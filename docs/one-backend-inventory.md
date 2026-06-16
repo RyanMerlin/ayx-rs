@@ -72,6 +72,39 @@ The public One API surface exposed here does not provide a general-purpose workf
 - `billing`
   - `GET /billing/v1/my/billing-accounts/current`
   - `GET /billing/v1/usage/export`
+- `flow`
+  - `POST /v4/flows`
+  - `GET /v4/flows`
+  - `GET /v4/flows/count`
+  - `GET /v4/flows/{id}`
+  - `PUT /v4/flows/{id}`
+  - `DELETE /v4/flows/{id}`
+  - `POST /v4/flows/{id}/copy`
+  - `POST /v4/flows/{id}/run`
+  - `GET /v4/flows/{id}/validate`
+  - `GET /v4/flows/{id}/recipeParameters`
+  - `GET /v4/flows/{id}/inputs`
+  - `GET /v4/flows/{id}/outputs`
+  - `POST /v4/flows/package`
+  - `POST /v4/flows/package/dryRun`
+  - `GET /v4/flows/{id}/package`
+  - `GET /v4/flows/{id}/package/dryRun`
+  - `GET /v4/flowsLibrary`
+  - `GET /v4/flowsLibrary/count`
+  - `GET /v4/folders`
+  - `GET /v4/folders/count`
+  - `GET /v4/folders/{id}`
+  - `POST /v4/folders`
+  - `PATCH /v4/folders/{id}`
+  - `DELETE /v4/folders/{id}`
+  - `GET /v4/folders/{id}/flows`
+  - `GET /v4/folders/{id}/flows/count`
+  - `POST /v4/flows/{id}/permissions`
+  - `POST /v4/flows/{id}/move`
+  - `PATCH /v4/flows/{id}/replaceDataset`
+  - Notes:
+    - Lifecycle, package, parameter, library, folder, and permission commands are wired.
+    - The One surface does not expose arbitrary workflow authoring through this family.
 
 ## Partial Surfaces
 
@@ -98,27 +131,6 @@ The public One API surface exposed here does not provide a general-purpose workf
     - Connection lifecycle, dry-run, status, and permission commands are wired.
     - Connector metadata defaults, current values, and overrides are wired for JDBC behavior control.
     - Credential-backend specifics still live in the API payloads rather than a local domain model.
-- `flow`
-  - `POST /v4/flows`
-  - `GET /v4/flows`
-  - `GET /v4/flows/count`
-  - `GET /v4/flows/{id}`
-  - `PUT /v4/flows/{id}`
-  - `DELETE /v4/flows/{id}`
-  - `POST /v4/flows/{id}/copy`
-  - `POST /v4/flows/{id}/run`
-  - `GET /v4/flows/{id}/validate`
-  - `GET /v4/flows/{id}/recipeParameters`
-  - `GET /v4/flows/{id}/inputs`
-  - `GET /v4/flows/{id}/outputs`
-  - `POST /v4/flows/package`
-  - `POST /v4/flows/package/dryRun`
-  - `GET /v4/flows/{id}/package`
-  - `GET /v4/flows/{id}/package/dryRun`
-  - Notes:
-    - Lifecycle, package, parameter, and run-inspection commands are wired.
-    - Flow library, folder-scoped, and permission-specific endpoints still need work.
-    - This surface is shell-oriented: you can create a flow and attach or replace assets, but not author arbitrary workflow logic through a single public create call.
 - `jobGroup`
   - `GET /v4/jobLibrary`
   - `GET /v4/jobLibrary/count`

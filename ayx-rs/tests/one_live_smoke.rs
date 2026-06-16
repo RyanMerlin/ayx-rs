@@ -220,6 +220,42 @@ fn require_live_flow_id(live: &LiveSmokeContext) -> Option<String> {
     )
 }
 
+fn require_live_folder_id(live: &LiveSmokeContext) -> Option<String> {
+    require_live_list_item_id(
+        live,
+        &["--output", "json", "one", "flows", "folders", "list"],
+        &["id", "folderId", "folder_id"],
+        "folder",
+    )
+}
+
+fn require_live_job_group_id(live: &LiveSmokeContext) -> Option<String> {
+    require_live_list_item_id(
+        live,
+        &["--output", "json", "one", "job-groups", "list"],
+        &["id", "jobGroupId", "job_group_id"],
+        "job group",
+    )
+}
+
+fn require_live_output_object_id(live: &LiveSmokeContext) -> Option<String> {
+    require_live_list_item_id(
+        live,
+        &["--output", "json", "one", "output-objects", "list"],
+        &["id", "outputObjectId", "output_object_id"],
+        "output object",
+    )
+}
+
+fn require_live_write_setting_id(live: &LiveSmokeContext) -> Option<String> {
+    require_live_list_item_id(
+        live,
+        &["--output", "json", "one", "write-settings", "list"],
+        &["id", "writeSettingId", "write_setting_id"],
+        "write setting",
+    )
+}
+
 fn require_live_list_item_id(
     live: &LiveSmokeContext,
     args: &[&str],
@@ -581,6 +617,445 @@ live_page_boundary_case!(
     ],
     ok = ["\"surface\": \"flow\"", "\"operation\": \"list\""]
 );
+
+live_case!(
+    one_flows_library_list_live,
+    args = ["--output", "json", "one", "flows", "library", "list"],
+    ok = ["\"surface\": \"flow\"", "\"operation\": \"library-list\""],
+    fail = [
+        "\"error_code\": \"permission_denied\"",
+        "\"error_code\": \"not_found\""
+    ]
+);
+
+live_case!(
+    one_flows_library_count_live,
+    args = ["--output", "json", "one", "flows", "library", "count"],
+    ok = ["\"surface\": \"flow\"", "\"operation\": \"library-count\""],
+    fail = [
+        "\"error_code\": \"permission_denied\"",
+        "\"error_code\": \"not_found\""
+    ]
+);
+
+live_case!(
+    one_flows_folders_list_live,
+    args = ["--output", "json", "one", "flows", "folders", "list"],
+    ok = ["\"surface\": \"flow\"", "\"operation\": \"folders-list\""],
+    fail = [
+        "\"error_code\": \"permission_denied\"",
+        "\"error_code\": \"not_found\""
+    ]
+);
+
+live_case!(
+    one_flows_folders_count_live,
+    args = ["--output", "json", "one", "flows", "folders", "count"],
+    ok = ["\"surface\": \"flow\"", "\"operation\": \"folders-count\""],
+    fail = [
+        "\"error_code\": \"permission_denied\"",
+        "\"error_code\": \"not_found\""
+    ]
+);
+
+live_page_boundary_case!(
+    one_flows_folders_list_page_boundary_live,
+    args = ["--output", "json", "one", "flows", "folders", "list", "--limit", "1"],
+    ok = ["\"surface\": \"flow\"", "\"operation\": \"folders-list\""]
+);
+
+#[test]
+fn one_flows_folders_detail_live_real_object() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(folder_id) = require_live_folder_id(&live) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "flows",
+            "folders",
+            "detail",
+            "--folder-id",
+            &folder_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one flows folders detail --folder-id {folder_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"flow\"");
+    assert_contains(&stdout, "\"operation\": \"folders-detail\"");
+    assert_contains(&stdout, &folder_id);
+}
+
+#[test]
+fn one_flows_folders_detail_not_found_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(folder_id) = require_live_folder_id(&live) else {
+        return;
+    };
+    let invalid_folder_id = format!("{folder_id}-missing");
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "flows",
+            "folders",
+            "detail",
+            "--folder-id",
+            &invalid_folder_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        assert_contains(&stderr, "\"surface\": \"flow\"");
+        assert_contains(&stderr, "\"operation\": \"folders-detail\"");
+        assert_live_error_code(&stderr, &["not_found", "validation"]);
+        return;
+    }
+    panic!("expected invalid folder id to fail\nstdout:\n{stdout}\nstderr:\n{stderr}");
+}
+
+#[test]
+fn one_flows_folder_flows_list_live_real_object() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(folder_id) = require_live_folder_id(&live) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "flows",
+            "folders",
+            "flows",
+            "list",
+            "--folder-id",
+            &folder_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one flows folders flows list --folder-id {folder_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"flow\"");
+    assert_contains(&stdout, "\"operation\": \"folder-flows-list\"");
+}
+
+#[test]
+fn one_flows_folder_flows_count_live_real_object() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(folder_id) = require_live_folder_id(&live) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "flows",
+            "folders",
+            "flows",
+            "count",
+            "--folder-id",
+            &folder_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one flows folders flows count --folder-id {folder_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"flow\"");
+    assert_contains(&stdout, "\"operation\": \"folder-flows-count\"");
+}
+
+#[test]
+fn one_flows_permissions_dry_run_shape_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(flow_id) = require_live_flow_id(&live) else {
+        return;
+    };
+    let payload = write_json_payload(
+        r#"{"data":[{"email":"user@example.com","role":"readOnly","policy":"flow_editor"}]}"#,
+    );
+    let payload_path = payload.path().to_string_lossy().to_string();
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "flows",
+            "permissions",
+            "--flow-id",
+            &flow_id,
+            "--body",
+            &payload_path,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one flows permissions --flow-id {flow_id} --body <payload>\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"flow\"");
+    assert_contains(&stdout, "\"operation\": \"permissions\"");
+    assert_contains(&stdout, "\"dry_run\": true");
+}
+
+#[test]
+fn one_flows_move_dry_run_shape_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(flow_id) = require_live_flow_id(&live) else {
+        return;
+    };
+    let payload = write_json_payload(r#"{"folderId":1}"#);
+    let payload_path = payload.path().to_string_lossy().to_string();
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "flows",
+            "move",
+            "--flow-id",
+            &flow_id,
+            "--body",
+            &payload_path,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one flows move --flow-id {flow_id} --body <payload>\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"flow\"");
+    assert_contains(&stdout, "\"operation\": \"move\"");
+    assert_contains(&stdout, "\"dry_run\": true");
+}
+
+#[test]
+fn one_flows_replace_dataset_dry_run_shape_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(flow_id) = require_live_flow_id(&live) else {
+        return;
+    };
+    let payload = write_json_payload(r#"{"flowNodeId":1,"newImportedDatasetId":2}"#);
+    let payload_path = payload.path().to_string_lossy().to_string();
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "flows",
+            "replace-dataset",
+            "--flow-id",
+            &flow_id,
+            "--body",
+            &payload_path,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one flows replace-dataset --flow-id {flow_id} --body <payload>\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"flow\"");
+    assert_contains(&stdout, "\"operation\": \"replace-dataset\"");
+    assert_contains(&stdout, "\"dry_run\": true");
+}
+
+#[test]
+fn one_flows_folder_create_dry_run_shape_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let payload = write_json_payload(r#"{"name":"ayx-rs temp folder","description":"smoke"}"#);
+    let payload_path = payload.path().to_string_lossy().to_string();
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "flows",
+            "folders",
+            "create",
+            "--body",
+            &payload_path,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one flows folders create --body <payload>\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"flow\"");
+    assert_contains(&stdout, "\"operation\": \"folders-create\"");
+    assert_contains(&stdout, "\"dry_run\": true");
+}
+
+#[test]
+fn one_flows_folder_update_dry_run_shape_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(folder_id) = require_live_folder_id(&live) else {
+        return;
+    };
+    let payload = write_json_payload(r#"{"name":"ayx-rs temp folder","description":"updated"}"#);
+    let payload_path = payload.path().to_string_lossy().to_string();
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "flows",
+            "folders",
+            "update",
+            "--folder-id",
+            &folder_id,
+            "--body",
+            &payload_path,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one flows folders update --folder-id {folder_id} --body <payload>\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"flow\"");
+    assert_contains(&stdout, "\"operation\": \"folders-update\"");
+    assert_contains(&stdout, "\"dry_run\": true");
+}
+
+#[test]
+fn one_flows_folder_delete_dry_run_shape_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(folder_id) = require_live_folder_id(&live) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "flows",
+            "folders",
+            "delete",
+            "--folder-id",
+            &folder_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one flows folders delete --folder-id {folder_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"flow\"");
+    assert_contains(&stdout, "\"operation\": \"folders-delete\"");
+    assert_contains(&stdout, "\"dry_run\": true");
+}
 
 #[test]
 fn one_flows_detail_live_real_object() {
@@ -946,6 +1421,42 @@ live_page_boundary_case!(
     ok = ["\"surface\": \"jobGroup\"", "\"operation\": \"list\""]
 );
 
+#[test]
+fn one_job_groups_detail_not_found_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(job_group_id) = require_live_job_group_id(&live) else {
+        return;
+    };
+    let invalid_job_group_id = format!("{job_group_id}-missing");
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "job-groups",
+            "detail",
+            "--job-group-id",
+            &invalid_job_group_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        assert_contains(&stderr, "\"surface\": \"jobGroup\"");
+        assert_contains(&stderr, "\"operation\": \"detail\"");
+        assert_live_error_code(&stderr, &["not_found", "validation"]);
+        return;
+    }
+    panic!("expected invalid job group id to fail\nstdout:\n{stdout}\nstderr:\n{stderr}");
+}
+
 live_case!(
     one_output_objects_list_live,
     args = ["--output", "json", "one", "output-objects", "list"],
@@ -978,6 +1489,42 @@ live_page_boundary_case!(
     ok = ["\"surface\": \"outputObject\"", "\"operation\": \"list\""]
 );
 
+#[test]
+fn one_output_objects_detail_not_found_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(output_object_id) = require_live_output_object_id(&live) else {
+        return;
+    };
+    let invalid_output_object_id = format!("{output_object_id}-missing");
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "output-objects",
+            "detail",
+            "--output-object-id",
+            &invalid_output_object_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        assert_contains(&stderr, "\"surface\": \"outputObject\"");
+        assert_contains(&stderr, "\"operation\": \"detail\"");
+        assert_live_error_code(&stderr, &["not_found", "validation"]);
+        return;
+    }
+    panic!("expected invalid output object id to fail\nstdout:\n{stdout}\nstderr:\n{stderr}");
+}
+
 live_case!(
     one_write_settings_list_live,
     args = ["--output", "json", "one", "write-settings", "list"],
@@ -1009,6 +1556,42 @@ live_page_boundary_case!(
     ],
     ok = ["\"surface\": \"writeSetting\"", "\"operation\": \"list\""]
 );
+
+#[test]
+fn one_write_settings_detail_not_found_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(write_setting_id) = require_live_write_setting_id(&live) else {
+        return;
+    };
+    let invalid_write_setting_id = format!("{write_setting_id}-missing");
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "write-settings",
+            "detail",
+            "--write-setting-id",
+            &invalid_write_setting_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        assert_contains(&stderr, "\"surface\": \"writeSetting\"");
+        assert_contains(&stderr, "\"operation\": \"detail\"");
+        assert_live_error_code(&stderr, &["not_found", "validation"]);
+        return;
+    }
+    panic!("expected invalid write setting id to fail\nstdout:\n{stdout}\nstderr:\n{stderr}");
+}
 
 live_case!(
     one_scheduling_list_live,
