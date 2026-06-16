@@ -147,6 +147,7 @@ mod tests {
         assert!(names.contains(&"catalog list"));
         assert!(names.contains(&"license api status"));
         assert!(names.contains(&"license status"));
+        assert!(names.contains(&"discover"));
         assert!(names.contains(&"one platform status"));
         assert!(names.contains(&"one platform inventory"));
         assert!(names.contains(&"one platform user"));

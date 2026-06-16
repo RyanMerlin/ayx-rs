@@ -271,6 +271,13 @@ enum Command {
         #[command(subcommand)]
         command: ProfileCommand,
     },
+    #[command(about = "Progressive live discovery of the CLI tree and metadata")]
+    Discover {
+        #[arg(long)]
+        deep: bool,
+        #[arg(value_name = "PATH")]
+        path: Vec<String>,
+    },
     #[command(about = "Run configuration, auth, network, and product health diagnostics")]
     Doctor {
         #[command(subcommand)]
@@ -3659,6 +3666,19 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Accepts either a name or a path-like catalog key."],
     },
     CommandSpec {
+        name: "discover",
+        path: "discover",
+        summary: "Progressively discover the live CLI tree and metadata.",
+        output: "live cli discovery tree",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["none"],
+        notes: &[
+            "Top-level progressive disclosure entry point for agent harnesses.",
+            "Use --deep to expand the full subtree or pass a path to drill down.",
+        ],
+    },
+    CommandSpec {
         name: "server diagnose startup",
         path: "server/diagnose/startup",
         summary: "Run a guided startup failure diagnosis.",
@@ -4306,6 +4326,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
             fix,
             cli.environment.as_deref(),
         )?,
+        Command::Discover { deep, path } => cmd::discover::execute(path, deep)?,
         Command::One { command } => cmd::one::execute(
             cmd::one::Ctx {
                 apply: cli.apply,

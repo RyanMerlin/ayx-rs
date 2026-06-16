@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-06-01 19:37:29 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-06-16 03:06:30 UTC._
 
 This file is generated. Refresh it with:
 
@@ -10,7 +10,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 166
+- Commands: 167
 - Capabilities: 8
 
 ## Commands
@@ -21,6 +21,12 @@ cargo run -q -p xtask -- refresh-command-surface
 | --- | --- | --- | --- | --- |
 | catalog describe | `catalog/describe` | read-only | no | Describe a single command in the catalog. |
 | catalog list | `catalog/list` | read-only | no | List machine-readable command metadata. |
+
+### `discover`
+
+| Name | Path | Safety | Mutating | Summary |
+| --- | --- | --- | --- | --- |
+| discover | `discover` | read-only | no | Progressively discover the live CLI tree and metadata. |
 
 ### `doctor`
 

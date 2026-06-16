@@ -15,6 +15,7 @@ use anyhow::Result;
 pub mod catalog;
 pub mod confirm;
 pub mod dashboard;
+pub mod discover;
 pub mod mongo;
 pub mod one;
 mod one_auto_insights;

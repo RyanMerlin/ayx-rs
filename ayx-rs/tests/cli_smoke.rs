@@ -94,6 +94,7 @@ fn catalog_surface_lists_core_one_commands() {
     assert!(names.contains(&"one plans status"));
     assert!(names.contains(&"one flows list"));
     assert!(names.contains(&"one connections list"));
+    assert!(names.contains(&"discover"));
 }
 
 #[test]
@@ -160,6 +161,39 @@ fn one_doctor_help_renders() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("discover"));
     assert!(stdout.contains("platform"));
+}
+
+#[test]
+fn discover_help_renders() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["discover", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Progressive live discovery"));
+    assert!(stdout.contains("--deep"));
+}
+
+#[test]
+fn discover_root_lists_top_level_commands() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["--output", "json", "discover"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid json");
+    assert_eq!(json["data"]["schema_version"], serde_json::json!(1));
+    assert_eq!(json["data"]["binary"], serde_json::json!("ayx"));
+    let tree = &json["data"]["tree"];
+    assert_eq!(tree["name"], serde_json::json!("ayx"));
+    let subcommands = tree["subcommands"].as_array().expect("subcommands");
+    assert!(subcommands.iter().any(|item| item["name"] == "discover"));
+    assert!(subcommands.iter().any(|item| item["name"] == "catalog"));
+    assert!(subcommands.iter().any(|item| item["name"] == "one"));
 }
 
 #[test]
