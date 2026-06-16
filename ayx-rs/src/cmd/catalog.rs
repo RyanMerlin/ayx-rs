@@ -1,8 +1,8 @@
 //! Dispatch for `ayx catalog ...`.
 //!
-//! The catalog surface is self-contained and only needs the CLI command
-//! metadata plus the capability registry, so it can live outside `main.rs`
-//! without any profile/environment plumbing.
+//! The catalog surface is the machine-readable registry view: a stable index
+//! of commands and capabilities that complements `ayx discover` rather than
+//! replacing the live CLI tree.
 
 use anyhow::{anyhow, bail, Context, Result};
 use ayx_core::envelope::Envelope;
@@ -29,7 +29,7 @@ pub fn execute(command: Option<CatalogCommand>) -> Result<Envelope> {
             json_input,
             dry_run,
         }) => catalog_run_envelope(&capability, &json_input, dry_run)?,
-        None => Envelope::ok("catalog commands available: list, describe, run"),
+        None => Envelope::ok("catalog registry commands available: list, describe, run"),
     })
 }
 

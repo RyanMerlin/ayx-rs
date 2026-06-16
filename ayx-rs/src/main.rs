@@ -176,8 +176,8 @@ fn sanitize_live_probe_for_user(probe_data: &Value, access_token: &str) -> Value
                   mutating One API calls behind --apply (dry-run by default), records audit \
                   artifacts for destructive operations, and resolves profiles from a central \
                   config home so promotion-style workflows can switch environments cleanly. \
-                  See `ayx <command> --help` for branch-specific help, and `ayx catalog list` \
-                  for the machine-readable command registry.",
+                  See `ayx <command> --help` for branch-specific help, `ayx discover` for the \
+                  live CLI tree, and `ayx catalog list` for the machine-readable registry.",
     disable_help_subcommand = true
 )]
 struct Cli {
@@ -271,7 +271,7 @@ enum Command {
         #[command(subcommand)]
         command: ProfileCommand,
     },
-    #[command(about = "Progressive live discovery of the CLI tree and metadata")]
+    #[command(about = "Progressive live discovery of the CLI tree")]
     Discover {
         #[arg(long)]
         deep: bool,

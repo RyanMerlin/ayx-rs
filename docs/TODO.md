@@ -21,6 +21,13 @@ Completed items are removed here rather than left to rot in the plan.
 - expose stable public discovery surfaces for the capability registry once the contract is settled, instead of advertising internal execution paths too early.
 - keep `ayx catalog`, `ayx doctor`, the One inventory, and the generated command surface synchronized so humans and agents always see the same surface truth.
 
+## 1c. Discovery shape for v0.9.8
+- keep `ayx discover` as the only live-tree entry point humans and agents should reach for first.
+- add path drill-down for capability, tactic, and workflow leaves only when those surfaces are actually wired and tested.
+- keep `catalog` as a supporting registry index until discovery exposes the same stable concepts directly.
+- if `catalog` ever becomes redundant, deprecate it with a compatibility window or alias rather than removing it abruptly.
+- do not add a second federated or multi-binary discovery model; `ayx` should remain a single canonical command surface.
+
 ## 2. Command registry
 - keep the machine-readable command catalog aligned with the live `clap` tree.
 - extend the catalog with richer command metadata for safety, mutating vs read-only behavior, and agent-friendly discovery.
