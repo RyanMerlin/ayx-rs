@@ -16,7 +16,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER};
 use reqwest::StatusCode;
 use serde_json::{json, Value};
 use url::form_urlencoded::Serializer;
-const ONE_API_BASE_URL: &str = "https://api.us1.alteryxcloud.com";
+const ONE_API_BASE_URL: &str = "https://us1.alteryxcloud.com";
 
 mod inventory;
 pub mod types;
@@ -961,10 +961,9 @@ fn resolve_one_access_token(config: &Config, client: &Client) -> Result<String> 
     if let Some(access_token) = config
         .alteryx_one
         .as_ref()
-        .and_then(|one| one.access_token.as_ref())
-        .filter(|token| !token.trim().is_empty())
+        .and_then(|one| one.resolved_access_token())
     {
-        return Ok(access_token.clone());
+        return Ok(access_token.to_string());
     }
 
     refresh_one_access_token(config, client)
@@ -1041,24 +1040,27 @@ pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<Stri
         .alteryx_one
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("config missing alteryx_one section"))?;
-    let refresh_token = one
-        .refresh_token
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            anyhow::anyhow!("alteryx_one.refresh_token is required to refresh access tokens")
-        })?;
-    let token_endpoint_url = one.effective_token_endpoint_url().ok_or_else(|| {
-        anyhow::anyhow!(
-            "alteryx_one.base_url or token_endpoint_url is required to refresh access tokens"
-        )
+    let workspace_id = one.active_workspace_id();
+    let client_id = one.resolved_oauth_client_id().ok_or_else(|| {
+        anyhow::anyhow!("alteryx_one.oauth_client_id is required to refresh access tokens")
     })?;
+    let refresh_token = one.resolved_refresh_token().ok_or_else(|| {
+        anyhow::anyhow!("alteryx_one.refresh_token is required to refresh access tokens")
+    })?;
+    let token_endpoint_url = one
+        .effective_token_endpoint_url_for_workspace(workspace_id)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "alteryx_one.base_url or token_endpoint_url is required to refresh access tokens"
+            )
+        })?;
 
     let response = client
         .post(&token_endpoint_url)
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
         .form(&[
             ("grant_type", "refresh_token"),
+            ("client_id", client_id),
             ("refresh_token", refresh_token),
         ])
         .send()
@@ -1169,8 +1171,8 @@ fn apply_jitter(base_ms: u64, pct: u64) -> u64 {
 ///
 /// Precedence: `alteryx_one.base_url` in the profile, then the `AYX_ONE_API_BASE_URL`
 /// environment variable, then the `us1` default. Region-specific examples:
-/// `https://api.us1.alteryxcloud.com`, `https://api.eu1.alteryxcloud.com`,
-/// `https://api.ap1.alteryxcloud.com`.
+/// `https://us1.alteryxcloud.com`, `https://eu1.alteryxcloud.com`,
+/// `https://ap1.alteryxcloud.com`.
 pub fn resolve_one_base_url(config: &Config) -> String {
     if let Some(one) = config.alteryx_one.as_ref() {
         if let Some(url) = one.normalized_base_url() {
@@ -1192,9 +1194,10 @@ pub fn resolve_one_base_url(config: &Config) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ayx_core::profile::{AlteryxOneProfile, Config};
+    use ayx_core::profile::{AlteryxOneProfile, Config, WorkspaceCredential};
     use httpmock::prelude::*;
     use serde_yaml::from_str;
+    use std::collections::BTreeMap;
 
     #[test]
     fn refresh_token_response_formats_access_token() {
@@ -1207,13 +1210,13 @@ mod tests {
     }
 
     #[test]
-    fn refresh_token_uses_refresh_token_only() {
+    fn refresh_token_includes_client_id_and_refresh_token() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/as/token")
                 .header("content-type", "application/x-www-form-urlencoded")
-                .body("grant_type=refresh_token&refresh_token=refresh-123");
+                .body("grant_type=refresh_token&client_id=client-id&refresh_token=refresh-123");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"token_type":"Bearer","access_token":"fresh"}"#);
@@ -1240,11 +1243,69 @@ mongo:
             access_token_ref: None,
             refresh_token: Some("refresh-123".to_string()),
             refresh_token_ref: None,
+            workspace_credentials: Default::default(),
             expected_workspace_id: None,
         });
 
         let client = reqwest::blocking::Client::new();
         let token = refresh_one_access_token(&config, &client).expect("refresh succeeds");
+
+        mock.assert();
+        assert_eq!(token, "Bearer fresh");
+    }
+
+    #[test]
+    fn refresh_token_prefers_workspace_credential_fields() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/workspace-token")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body("grant_type=refresh_token&client_id=workspace-client&refresh_token=workspace-refresh");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"token_type":"Bearer","access_token":"fresh"}"#);
+        });
+
+        let mut config: Config = from_str(
+            r#"
+profile_name: test
+mongo:
+  mode: embedded
+  databases:
+    gallery_name: AlteryxGallery
+    service_name: AlteryxService
+  embedded: {}
+"#,
+        )
+        .expect("config parses");
+        let mut workspace_credentials = BTreeMap::new();
+        workspace_credentials.insert(
+            "ws-123".to_string(),
+            WorkspaceCredential {
+                access_token: Some("workspace-stale".to_string()),
+                access_token_ref: None,
+                refresh_token: Some("workspace-refresh".to_string()),
+                refresh_token_ref: None,
+                oauth_client_id: Some("workspace-client".to_string()),
+                token_endpoint_url: Some(format!("{}/workspace-token", server.base_url())),
+            },
+        );
+        config.alteryx_one = Some(AlteryxOneProfile {
+            account_email: "tester@example.com".to_string(),
+            base_url: Some(server.base_url()),
+            oauth_client_id: Some("legacy-client".to_string()),
+            token_endpoint_url: Some(format!("{}/as", server.base_url())),
+            access_token: Some("legacy-stale".to_string()),
+            access_token_ref: None,
+            refresh_token: Some("legacy-refresh".to_string()),
+            refresh_token_ref: None,
+            workspace_credentials,
+            expected_workspace_id: Some("ws-123".to_string()),
+        });
+
+        let client = reqwest::blocking::Client::new();
+        let token = refresh_one_access_token(&config, &client).expect("workspace refresh succeeds");
 
         mock.assert();
         assert_eq!(token, "Bearer fresh");

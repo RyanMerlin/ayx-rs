@@ -46,7 +46,7 @@ That writes the active profile to the central profile store. If you prefer to ed
 ```yaml
 profile_name: demo
 alteryx_one:
-  base_url: https://api.us1.alteryxcloud.com
+  base_url: https://us1.alteryxcloud.com
   account_email: you@example.com
 server:
   api:

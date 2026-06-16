@@ -621,6 +621,7 @@ fn update_or_create_one(
         access_token_ref: None,
         refresh_token: None,
         refresh_token_ref: None,
+        workspace_credentials: Default::default(),
         expected_workspace_id: None,
     });
     one.account_email = account_email;

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.6 — 2026-06-15
+
+### Workspace credential mapping
+
+- Add workspace-scoped One API credentials and prefer them over legacy top-level tokens when a workspace is known.
+- Resolve One refresh and auth status paths through the active workspace credential when present.
+- Keep the release docs and smoke tests aligned with the `us1` API host and auth issuer split.
+
 ## 0.9.5 — 2026-06-15
 
 ### One API host and auth fixes

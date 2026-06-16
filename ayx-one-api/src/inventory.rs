@@ -974,6 +974,7 @@ mod tests {
                 access_token_ref: None,
                 refresh_token: Some("refresh".to_string()),
                 refresh_token_ref: None,
+                workspace_credentials: Default::default(),
                 expected_workspace_id: None,
             }),
             observability: None,
