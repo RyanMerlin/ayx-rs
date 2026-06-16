@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.7 — 2026-06-15
+
+### Progressive discovery
+
+- Add a first-class `ayx discover` entry point for the live `clap` tree.
+- Keep `catalog` as the machine-readable registry view while discovery becomes the progressive agent substrate.
+- Regenerate the command-surface docs and smoke tests so the live binary, docs, and catalog stay aligned.
+
 ## 0.9.6 — 2026-06-15
 
 ### Workspace credential mapping

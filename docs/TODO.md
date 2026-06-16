@@ -15,6 +15,12 @@ Completed items are removed here rather than left to rot in the plan.
 - add profile/workspace export and import flows that keep shareable configuration separate from machine-local secrets.
 - make the TUI reuse the same profile resolver, doctor checks, and active-profile state for central profiles while keeping explicit file editing confined to onboarding/editor flows instead of inventing a second runtime config model.
 
+## 1b. Discovery substrate completion
+- keep `ayx discover` as the primary live-tree entry point and grow it toward capability/tactic/workflow drill-down.
+- make the command → capability → tactic → workflow ladder complete and first-class.
+- expose stable public discovery surfaces for the capability registry once the contract is settled, instead of advertising internal execution paths too early.
+- keep `ayx catalog`, `ayx doctor`, the One inventory, and the generated command surface synchronized so humans and agents always see the same surface truth.
+
 ## 2. Command registry
 - keep the machine-readable command catalog aligned with the live `clap` tree.
 - extend the catalog with richer command metadata for safety, mutating vs read-only behavior, and agent-friendly discovery.
@@ -94,6 +100,7 @@ Status:
 - keep the workflow guidance layer responsible for orchestration, but make `ayx-rs` expose the deterministic workspace validation and workflow-open primitives.
 
 ## Current priority
+- finish the progressive discovery substrate so agents can move from command discovery to capability/tactic/workflow discovery without guessing.
 - harden the new central profile system with better secret storage and profile import/export ergonomics.
 - finish `ayx tools` source/target workflows for workspace-aware migration planning and comparison.
 - keep the command catalog aligned with the live CLI after the dispatcher split and version bump.

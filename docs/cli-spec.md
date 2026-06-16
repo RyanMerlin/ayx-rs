@@ -1,4 +1,4 @@
-# AYX-RS CLI Spec (v0.9.2)
+# AYX-RS CLI Spec (v0.9.7)
 
 This document is the stable contract for how `ayx` behaves. It is intentionally
 shorter than a full command inventory so it does not drift every time a command
@@ -126,12 +126,14 @@ The exact leaf inventory can expand, but the design rules are stable:
 
 ## Catalog Contract
 
-The catalog layer is the structured discovery surface for humans and agents.
+`ayx discover` is the structured discovery surface for humans and agents.
 
+- `ayx discover [path] [--deep]` walks the live CLI tree.
 - `ayx catalog list` enumerates commands and capabilities.
 - `ayx catalog describe <id>` resolves either a command path or capability id.
-- `ayx catalog run <capability> --json <payload-or-@file>` is the structured
-  execution surface for native capabilities.
+- `catalog` remains the registry view for commands and capabilities.
+- The discovery ladder grows from commands to capabilities to tactics and
+  workflows without changing the public ids.
 
 Capability ids should remain more stable than help text or internal module
 layouts.

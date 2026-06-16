@@ -23,4 +23,5 @@ surface reliable for humans and agents while we widen coverage in measured steps
 
 1. Run the live smoke suite with `AYX_ONE_LIVE_SMOKE=1` after any One transport or auth change.
 2. Keep `docs/command-surface.md`, `docs/cli-spec.md`, and the catalog tests synchronized with any new One command leaves.
-3. Focus the next round on transport hardening and documented-only inventory gaps, not further dispatcher reshaping.
+3. Finish the progressive discovery surface so `ayx discover`-style workflows can move from command discovery to capability and tactic discovery without guesswork.
+4. Focus the next round on transport hardening and documented-only inventory gaps, not further dispatcher reshaping.

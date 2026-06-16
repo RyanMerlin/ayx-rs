@@ -7,7 +7,9 @@ It is designed to operate across the Alteryx surface and enable sophisticated op
 - automation-friendly: a single native binary with predictable output and no interpreter dependency
 - secure: explicit `--apply` gates, audit artifacts, and conservative defaults
 - portable: Windows, Linux, and macOS release targets
-- agent-friendly: structured envelopes and a future command/tactics/workflow registry
+- agent-friendly: structured envelopes and a growing command/tactics/workflow registry
+
+> Status: `ayx` ships a stable CLI, a machine-readable command catalog, a first-class live `discover` entry point, and a live One surface inventory. The registry layer is still growing, but `catalog` remains the machine-readable view rather than a replacement for the live tree.
 
 ## Quick start
 
@@ -188,6 +190,7 @@ The long-term goal is not just a CLI. It is a secure, portable operator for the 
 
 That means:
 - a stable command catalog
+- a progressive discovery ladder from commands to capabilities to tactics to workflows
 - a tactical registry for repeatable playbooks
 - workflow/skill descriptions for multi-step operations
 - structured evidence after every run
@@ -196,10 +199,11 @@ That means:
 Start with:
 
 ```powershell
+ayx discover
 ayx catalog list
 ayx catalog describe mongo/backup
 ayx catalog describe designer.workflow.context
-ayx catalog run designer.workflow.context --json '{"workflow_path":"sample.yxmd"}'
+ayx one doctor discover
 ayx one platform workspace current
 ayx one platform person count
 ayx one flows list
@@ -223,10 +227,11 @@ ayx mongo doctor
 ```
 
 Agent-oriented catalog notes:
+- `ayx discover [path] [--deep]` is the progressive live entry point for the actual `clap` command tree.
 - `ayx catalog list --tag designer --format full` surfaces capability ids, schemas, safety, and provider type alongside the existing command catalog.
 - `ayx catalog describe <command-or-capability>` resolves either a legacy command path/name or a capability id such as `designer.tool.add`.
-- `ayx catalog run <capability> --json <payload-or-@file> [--dry-run]` is the structured execution entry point for the native capability layer.
-- The catalog layer is designed so a live IPC backend can slot in later without changing the public ids.
+- `catalog` remains the registry view for commands and capabilities; it is not the primary discovery entry point anymore.
+- Capability ids, validation metadata, and executor wiring already exist inside the registry layer so we can progressively expose deeper discovery without changing the ids.
 
 ## Development
 
