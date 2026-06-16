@@ -4,6 +4,7 @@ use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use clap::{Parser, Subcommand};
 use reqwest::blocking::Client;
 use roxmltree::Document;
@@ -37,6 +38,133 @@ mod cmd;
 mod onboard;
 mod render;
 mod tui;
+
+fn decode_token_claims(access_token: &str) -> Option<Value> {
+    let mut parts = access_token.split('.');
+    let _header = parts.next()?;
+    let payload = parts.next()?;
+    let decoded = URL_SAFE_NO_PAD.decode(payload.as_bytes()).ok()?;
+    serde_json::from_slice::<Value>(&decoded)
+        .ok()
+        .filter(|value| value.is_object())
+}
+
+fn verification_record_matches_claims(
+    record: &Value,
+    sub: Option<&str>,
+    email: Option<&str>,
+) -> bool {
+    fn matches_value(value: &Value, expected: &str, casefold: bool) -> bool {
+        match value {
+            Value::Object(map) => map
+                .values()
+                .any(|nested| matches_value(nested, expected, casefold)),
+            Value::Array(items) => items
+                .iter()
+                .any(|nested| matches_value(nested, expected, casefold)),
+            Value::String(observed) => {
+                if casefold {
+                    observed.eq_ignore_ascii_case(expected)
+                } else {
+                    observed == expected
+                }
+            }
+            Value::Number(number) => number.to_string() == expected,
+            Value::Bool(boolean) => boolean.to_string() == expected,
+            Value::Null => false,
+        }
+    }
+
+    let Some(obj) = record.as_object() else {
+        return false;
+    };
+
+    let subject_keys = [
+        "sub",
+        "subject",
+        "userId",
+        "createdBy",
+        "createdById",
+        "ownerId",
+        "accountId",
+    ];
+    let email_keys = [
+        "email",
+        "createdByEmail",
+        "ownerEmail",
+        "userEmail",
+        "createdByUserEmail",
+    ];
+
+    if let Some(expected_sub) = sub {
+        if subject_keys.iter().any(|key| {
+            obj.get(*key)
+                .is_some_and(|value| matches_value(value, expected_sub, false))
+        }) {
+            return true;
+        }
+    }
+
+    if let Some(expected_email) = email {
+        if email_keys.iter().any(|key| {
+            obj.get(*key)
+                .is_some_and(|value| matches_value(value, expected_email, true))
+        }) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn sanitize_verification_payload_for_user(
+    verification_payload: &Value,
+    access_token: &str,
+) -> Value {
+    let Some(obj) = verification_payload.as_object() else {
+        return verification_payload.clone();
+    };
+    let Some(data) = obj.get("data").and_then(Value::as_array) else {
+        return verification_payload.clone();
+    };
+    let Some(claims) = decode_token_claims(access_token) else {
+        return verification_payload.clone();
+    };
+    let sub = claims.get("sub").and_then(Value::as_str);
+    let email = claims.get("email").and_then(Value::as_str);
+
+    let filtered_data: Vec<Value> = data
+        .iter()
+        .filter(|item| verification_record_matches_claims(item, sub, email))
+        .cloned()
+        .collect();
+
+    let mut sanitized = obj.clone();
+    sanitized.insert("data".to_string(), Value::Array(filtered_data.clone()));
+    sanitized.insert(
+        "count".to_string(),
+        Value::Number(serde_json::Number::from(filtered_data.len() as u64)),
+    );
+    Value::Object(sanitized)
+}
+
+fn sanitize_live_probe_for_user(probe_data: &Value, access_token: &str) -> Value {
+    let Some(obj) = probe_data.as_object() else {
+        return probe_data.clone();
+    };
+    let Some(response) = obj.get("response") else {
+        return probe_data.clone();
+    };
+
+    let sanitized_response = sanitize_verification_payload_for_user(response, access_token);
+    if sanitized_response == *response {
+        return probe_data.clone();
+    }
+
+    let mut sanitized = obj.clone();
+    sanitized.insert("response".to_string(), sanitized_response);
+    Value::Object(sanitized)
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -2543,7 +2671,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
-        notes: &["Confirms OAuth client ID, token endpoint, access token presence, refresh token presence, and whether a safe workspace endpoint is reachable."],
+        notes: &["Confirms OAuth client ID, token endpoint, access token presence, refresh token presence, and whether the token can reach the token inventory surface."],
     },
     CommandSpec {
         name: "one platform token",
@@ -2593,7 +2721,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
-        notes: &["Uses the managed IAM current workspace endpoint as the safe validation target."],
+        notes: &["Uses the token inventory endpoint as the safe validation target, while mutating operations still preflight workspace identity separately."],
     },
     CommandSpec {
         name: "one doctor auth",
@@ -4884,10 +5012,10 @@ fn doctor_network_envelope(profile: Option<&str>, environment: Option<&str>) -> 
                     .alteryx_one
                     .as_ref()
                     .and_then(|v| v.normalized_base_url()),
-                "one_token_endpoint": config
-                    .alteryx_one
-                    .as_ref()
-                    .and_then(|v| v.effective_token_endpoint_url()),
+                "one_token_endpoint": config.alteryx_one.as_ref().and_then(|v| {
+                    let workspace_id = v.active_workspace_id();
+                    v.effective_token_endpoint_url_for_workspace(workspace_id)
+                }),
                 "server_base_url": config.server.as_ref().map(|v| v.webapi_url.clone()),
                 "server_api_base_url": config.server_api.as_ref().map(|v| v.base_url.clone()),
             },
@@ -4983,6 +5111,17 @@ pub(crate) fn one_platform_auth_status_envelope(config: &Config) -> Result<Envel
         .alteryx_one
         .as_ref()
         .ok_or_else(|| anyhow!("config missing alteryx_one section"))?;
+    let workspace_id = one.active_workspace_id();
+    let access_token = one.resolved_access_token();
+    let refresh_token = one.resolved_refresh_token();
+    let oauth_client_id = one.resolved_oauth_client_id();
+    let workspace_access_token_present =
+        one.active_workspace_credential().is_some_and(|credential| {
+            credential
+                .access_token
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+        });
     let api_logging = config.observability.as_ref().and_then(|obs| {
         obs.api_logging.as_ref().map(|logging| {
             json!({
@@ -4994,17 +5133,13 @@ pub(crate) fn one_platform_auth_status_envelope(config: &Config) -> Result<Envel
             })
         })
     });
-    let workspace_probe = if one
-        .access_token
-        .as_ref()
-        .is_some_and(|v| !v.trim().is_empty())
-    {
+    let workspace_probe = if access_token.is_some() {
         Some(one_api_live_request(
             config,
             "platform",
             "auth-status",
             "GET",
-            "/v4/workspaces/current",
+            "/v4/apiAccessTokens",
             false,
             &[],
         )?)
@@ -5018,19 +5153,27 @@ pub(crate) fn one_platform_auth_status_envelope(config: &Config) -> Result<Envel
             "product": "one",
             "surface": "platform",
             "profile": config.profile_name,
-            "oauth_client_id_present": one.oauth_client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
+            "workspace_id": workspace_id,
+            "oauth_client_id_present": oauth_client_id.is_some(),
             "base_url": one.normalized_base_url(),
-            "token_endpoint_url": one.effective_token_endpoint_url(),
-            "access_token_present": one.access_token.as_ref().is_some_and(|v| !v.trim().is_empty()),
-            "refresh_token_present": one.refresh_token.as_ref().is_some_and(|v| !v.trim().is_empty()),
+            "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
+            "access_token_present": access_token.is_some(),
+            "refresh_token_present": refresh_token.is_some(),
             "observability": api_logging,
-            "token_source": if one.access_token.as_ref().is_some_and(|v| !v.trim().is_empty()) {
-                "config/env"
+            "token_source": if workspace_access_token_present {
+                "workspace"
+            } else if access_token.is_some() {
+                "profile"
             } else {
                 "missing"
             },
-            "validation_target": "/v4/workspaces/current",
-            "workspace_probe": workspace_probe.as_ref().map(|probe| probe.data.clone()),
+            "validation_target": "/v4/apiAccessTokens",
+            "workspace_probe": workspace_probe.as_ref().map(|probe| {
+                sanitize_live_probe_for_user(
+                    &probe.data,
+                    access_token.unwrap_or(""),
+                )
+            }),
             "message": "One API token posture captured",
         }),
     ))
@@ -5041,21 +5184,19 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
         .alteryx_one
         .as_ref()
         .ok_or_else(|| anyhow!("config missing alteryx_one section"))?;
-    let has_token = one
-        .access_token
-        .as_ref()
-        .is_some_and(|v| !v.trim().is_empty());
-    let has_refresh_token = one
-        .refresh_token
-        .as_ref()
-        .is_some_and(|v| !v.trim().is_empty());
+    let workspace_id = one.active_workspace_id();
+    let access_token = one.resolved_access_token();
+    let refresh_token = one.resolved_refresh_token();
+    let oauth_client_id = one.resolved_oauth_client_id();
+    let has_token = access_token.is_some();
+    let has_refresh_token = refresh_token.is_some();
     let workspace_probe = if has_token {
         one_api_live_request(
             config,
             "platform",
             "auth-diagnose",
             "GET",
-            "/v4/workspaces/current",
+            "/v4/apiAccessTokens",
             false,
             &[],
         )?
@@ -5066,9 +5207,10 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                 "product": "one",
                 "surface": "platform",
                 "profile": config.profile_name,
-                "oauth_client_id_present": one.oauth_client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
+                "workspace_id": workspace_id,
+                "oauth_client_id_present": oauth_client_id.is_some(),
                 "base_url": one.normalized_base_url(),
-                "token_endpoint_url": one.effective_token_endpoint_url(),
+                "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
                 "access_token_present": false,
                 "refresh_token_present": has_refresh_token,
                 "diagnosis": "alteryx_one.access_token is missing",
@@ -5089,15 +5231,19 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                 "product": "one",
                 "surface": "platform",
                 "profile": config.profile_name,
-                "oauth_client_id_present": one.oauth_client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
+                "workspace_id": workspace_id,
+                "oauth_client_id_present": oauth_client_id.is_some(),
                 "base_url": one.normalized_base_url(),
-                "token_endpoint_url": one.effective_token_endpoint_url(),
+                "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
                 "access_token_present": true,
                 "refresh_token_present": has_refresh_token,
                 "diagnosis": "token present and workspace probe executed",
-                "workspace_probe": workspace_probe.data,
+                "workspace_probe": sanitize_live_probe_for_user(
+                    &workspace_probe.data,
+                    access_token.unwrap_or(""),
+                ),
                 "recommendations": [
-                    "Use one platform workspace current or admins for evidence",
+                    "Use one platform token or auth status for evidence",
                     "Route any failing symptoms into the workflow guidance layer",
                 ],
             }),

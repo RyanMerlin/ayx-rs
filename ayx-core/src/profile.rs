@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -212,6 +212,22 @@ pub struct ApiLoggingProfile {
     pub log_responses: Option<bool>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct WorkspaceCredential {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+    #[serde(default)]
+    pub access_token_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub refresh_token_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_endpoint_url: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AlteryxOneProfile {
     pub account_email: String,
@@ -229,6 +245,8 @@ pub struct AlteryxOneProfile {
     pub refresh_token: Option<String>,
     #[serde(default)]
     pub refresh_token_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub workspace_credentials: BTreeMap<String, WorkspaceCredential>,
     /// Expected workspace id for mutation safety preflight.
     ///
     /// When set, every mutating One API request (after `--apply`) makes a
@@ -245,6 +263,84 @@ impl AlteryxOneProfile {
         self.base_url
             .as_deref()
             .and_then(normalize_alteryx_one_base_url)
+    }
+
+    pub fn workspace_credential_for(
+        &self,
+        workspace_id: Option<&str>,
+    ) -> Option<&WorkspaceCredential> {
+        let workspace_id = workspace_id?;
+        self.workspace_credentials.get(workspace_id)
+    }
+
+    pub fn active_workspace_id(&self) -> Option<&str> {
+        if let Some(expected_workspace_id) = self.expected_workspace_id.as_deref() {
+            if self
+                .workspace_credentials
+                .contains_key(expected_workspace_id)
+            {
+                return Some(expected_workspace_id);
+            }
+        }
+        if self.workspace_credentials.len() == 1 {
+            return self.workspace_credentials.keys().next().map(String::as_str);
+        }
+        None
+    }
+
+    pub fn active_workspace_credential(&self) -> Option<&WorkspaceCredential> {
+        self.active_workspace_id()
+            .and_then(|workspace_id| self.workspace_credential_for(Some(workspace_id)))
+    }
+
+    pub fn resolved_access_token(&self) -> Option<&str> {
+        self.active_workspace_credential()
+            .and_then(|credential| credential.access_token.as_deref())
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                self.access_token
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+            })
+    }
+
+    pub fn resolved_refresh_token(&self) -> Option<&str> {
+        self.active_workspace_credential()
+            .and_then(|credential| credential.refresh_token.as_deref())
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                self.refresh_token
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+            })
+    }
+
+    pub fn resolved_oauth_client_id(&self) -> Option<&str> {
+        self.active_workspace_credential()
+            .and_then(|credential| credential.oauth_client_id.as_deref())
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                self.oauth_client_id
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+            })
+    }
+
+    pub fn effective_token_endpoint_url_for_workspace(
+        &self,
+        workspace_id: Option<&str>,
+    ) -> Option<String> {
+        if let Some(credential) = self.workspace_credential_for(workspace_id) {
+            if let Some(url) = credential
+                .token_endpoint_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                return Some(normalize_alteryx_one_token_endpoint(url));
+            }
+        }
+        self.effective_token_endpoint_url()
     }
 
     pub fn effective_token_endpoint_url(&self) -> Option<String> {
@@ -270,6 +366,16 @@ impl AlteryxOneProfile {
                 .is_some_and(|inferred| inferred == base_url)
             {
                 self.token_endpoint_url = None;
+            }
+        }
+        for credential in self.workspace_credentials.values_mut() {
+            if let Some(url) = credential
+                .token_endpoint_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                credential.token_endpoint_url = Some(normalize_alteryx_one_token_endpoint(url));
             }
         }
     }
@@ -508,6 +614,18 @@ impl Config {
                     one.refresh_token = resolve_secret_ref(reference)?;
                 }
             }
+            for credential in one.workspace_credentials.values_mut() {
+                if credential.access_token.is_none() {
+                    if let Some(reference) = credential.access_token_ref.as_deref() {
+                        credential.access_token = resolve_secret_ref(reference)?;
+                    }
+                }
+                if credential.refresh_token.is_none() {
+                    if let Some(reference) = credential.refresh_token_ref.as_deref() {
+                        credential.refresh_token = resolve_secret_ref(reference)?;
+                    }
+                }
+            }
             one.canonicalize();
         }
 
@@ -681,6 +799,40 @@ impl Config {
                     return Err(ProfileError::Invalid(
                         "alteryx_one.refresh_token cannot be empty when set".to_string(),
                     ));
+                }
+                if one
+                    .oauth_client_id
+                    .as_ref()
+                    .is_none_or(|value| value.trim().is_empty())
+                {
+                    return Err(ProfileError::Invalid(
+                        "alteryx_one.oauth_client_id is required when refresh_token is set"
+                            .to_string(),
+                    ));
+                }
+            }
+            for (workspace_id, credential) in &one.workspace_credentials {
+                let access_token_present = credential
+                    .access_token
+                    .as_ref()
+                    .is_some_and(|token| !token.trim().is_empty());
+                if !access_token_present {
+                    return Err(ProfileError::Invalid(format!(
+                        "alteryx_one.workspace_credentials['{workspace_id}'].access_token is required"
+                    )));
+                }
+                if credential
+                    .refresh_token
+                    .as_ref()
+                    .is_some_and(|token| !token.trim().is_empty())
+                    && credential
+                        .oauth_client_id
+                        .as_ref()
+                        .is_none_or(|value| value.trim().is_empty())
+                {
+                    return Err(ProfileError::Invalid(format!(
+                        "alteryx_one.workspace_credentials['{workspace_id}'].oauth_client_id is required when refresh_token is set"
+                    )));
                 }
             }
         }
@@ -934,6 +1086,7 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
             access_token_ref: None,
             refresh_token: None,
             refresh_token_ref: None,
+            workspace_credentials: BTreeMap::new(),
             expected_workspace_id: None,
         });
         if let Some(value) = account_email {
@@ -1059,6 +1212,12 @@ fn merge_one_profiles(
     }
     if current.refresh_token_ref.is_none() {
         current.refresh_token_ref = fallback.refresh_token_ref.clone();
+    }
+    for (workspace_id, credential) in &fallback.workspace_credentials {
+        current
+            .workspace_credentials
+            .entry(workspace_id.clone())
+            .or_insert_with(|| credential.clone());
     }
     current.canonicalize();
     current
@@ -1763,6 +1922,7 @@ mod tests {
                 access_token_ref: None,
                 refresh_token: None,
                 refresh_token_ref: None,
+                workspace_credentials: Default::default(),
                 expected_workspace_id: None,
             }),
             observability: None,
@@ -1997,6 +2157,7 @@ mod tests {
             access_token_ref: None,
             refresh_token: None,
             refresh_token_ref: None,
+            workspace_credentials: Default::default(),
             expected_workspace_id: None,
         };
 
@@ -2021,6 +2182,7 @@ mod tests {
             access_token_ref: None,
             refresh_token: None,
             refresh_token_ref: None,
+            workspace_credentials: Default::default(),
             expected_workspace_id: None,
         };
 
@@ -2028,6 +2190,86 @@ mod tests {
         assert_eq!(
             profile.effective_token_endpoint_url().as_deref(),
             Some("https://pingauth.alteryxcloud.com/as/token")
+        );
+    }
+
+    #[test]
+    fn one_prefers_expected_workspace_credential_over_legacy_fields() {
+        let mut workspace_credentials = BTreeMap::new();
+        workspace_credentials.insert(
+            "ws-1".to_string(),
+            WorkspaceCredential {
+                access_token: Some("workspace-access".to_string()),
+                access_token_ref: None,
+                refresh_token: Some("workspace-refresh".to_string()),
+                refresh_token_ref: None,
+                oauth_client_id: Some("workspace-client".to_string()),
+                token_endpoint_url: Some("https://pingauth.alteryxcloud.com/as".to_string()),
+            },
+        );
+
+        let profile = AlteryxOneProfile {
+            account_email: "user@example.com".to_string(),
+            base_url: Some("https://us1.alteryxcloud.com".to_string()),
+            oauth_client_id: Some("legacy-client".to_string()),
+            token_endpoint_url: Some("https://legacy.example/as".to_string()),
+            access_token: Some("legacy-access".to_string()),
+            access_token_ref: None,
+            refresh_token: Some("legacy-refresh".to_string()),
+            refresh_token_ref: None,
+            workspace_credentials,
+            expected_workspace_id: Some("ws-1".to_string()),
+        };
+
+        assert_eq!(profile.active_workspace_id(), Some("ws-1"));
+        assert_eq!(profile.resolved_access_token(), Some("workspace-access"));
+        assert_eq!(profile.resolved_refresh_token(), Some("workspace-refresh"));
+        assert_eq!(profile.resolved_oauth_client_id(), Some("workspace-client"));
+        assert_eq!(
+            profile
+                .effective_token_endpoint_url_for_workspace(profile.active_workspace_id())
+                .as_deref(),
+            Some("https://pingauth.alteryxcloud.com/as/token")
+        );
+    }
+
+    #[test]
+    fn one_uses_single_workspace_credential_without_expected_workspace_id() {
+        let mut workspace_credentials = BTreeMap::new();
+        workspace_credentials.insert(
+            "ws-2".to_string(),
+            WorkspaceCredential {
+                access_token: Some("single-access".to_string()),
+                access_token_ref: None,
+                refresh_token: Some("single-refresh".to_string()),
+                refresh_token_ref: None,
+                oauth_client_id: Some("single-client".to_string()),
+                token_endpoint_url: Some("https://tenant.example/as".to_string()),
+            },
+        );
+
+        let profile = AlteryxOneProfile {
+            account_email: "user@example.com".to_string(),
+            base_url: Some("https://us1.alteryxcloud.com".to_string()),
+            oauth_client_id: Some("legacy-client".to_string()),
+            token_endpoint_url: None,
+            access_token: Some("legacy-access".to_string()),
+            access_token_ref: None,
+            refresh_token: Some("legacy-refresh".to_string()),
+            refresh_token_ref: None,
+            workspace_credentials,
+            expected_workspace_id: None,
+        };
+
+        assert_eq!(profile.active_workspace_id(), Some("ws-2"));
+        assert_eq!(profile.resolved_access_token(), Some("single-access"));
+        assert_eq!(profile.resolved_refresh_token(), Some("single-refresh"));
+        assert_eq!(profile.resolved_oauth_client_id(), Some("single-client"));
+        assert_eq!(
+            profile
+                .effective_token_endpoint_url_for_workspace(profile.active_workspace_id())
+                .as_deref(),
+            Some("https://tenant.example/as/token")
         );
     }
 

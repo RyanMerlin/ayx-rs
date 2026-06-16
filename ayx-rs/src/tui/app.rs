@@ -1879,6 +1879,7 @@ impl App {
             access_token_ref: None,
             refresh_token: None,
             refresh_token_ref: None,
+            workspace_credentials: Default::default(),
             expected_workspace_id: None,
         });
 

@@ -54,7 +54,7 @@ impl LiveSmokeContext {
             },
             alteryx_one: Some(AlteryxOneProfile {
                 account_email: repo_env(&env, "AYX_ACCOUNT_EMAIL", "user@example.com"),
-                base_url: Some("https://api.us1.alteryxcloud.com".to_string()),
+                base_url: Some("https://us1.alteryxcloud.com".to_string()),
                 oauth_client_id: Some(repo_env(&env, "AYX_ONE_OAUTH_CLIENT_ID", "client-id")),
                 token_endpoint_url: Some(repo_env(
                     &env,
@@ -65,12 +65,13 @@ impl LiveSmokeContext {
                 access_token_ref: None,
                 refresh_token: Some(repo_env(&env, "AYX_ONE_API_REFRESH_TOKEN", "topsecret")),
                 refresh_token_ref: None,
+                workspace_credentials: Default::default(),
                 expected_workspace_id: None,
             }),
             observability: None,
             server_api: None,
             api: Some(ApiProfile {
-                base_url: "https://api.us1.alteryxcloud.com".to_string(),
+                base_url: "https://us1.alteryxcloud.com".to_string(),
                 auth: ApiAuth {
                     mode: ApiAuthMode::Oauth2ClientCredentials,
                     pat: None,
