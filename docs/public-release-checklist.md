@@ -58,7 +58,6 @@ Current required status checks should match:
 - `Rustfmt`
 - `Clippy`
 - `Test (ubuntu-latest)`
-- `Test (windows-latest)`
 - `Test (macos-latest)`
 
 `cargo-audit` currently runs as advisory coverage and should remain optional unless you want it to block merges.

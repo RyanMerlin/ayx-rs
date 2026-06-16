@@ -124,7 +124,7 @@ Single PUT for owner + optional schedule transfer. On partial failure, no rollba
 405 transitive deps and no vuln scanning anywhere. **Fix:** add `cargo-audit` to a new `.github/workflows/ci.yml` (PR + main); add `dependabot.yml`; pin a baseline in `deny.toml`.
 
 ### H14. No PR-time CI
-Only `build-release.yml` exists, gated on tags. `fmt`, `clippy`, `test` run only at release time. Stuff *will* land broken. **Fix:** add `ci.yml` running `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --locked` on every PR and push to `main`, on the same matrix as releases.
+Only `build-release.yml` exists, gated on tags. `fmt`, `clippy`, `test` run only at release time. Stuff *will* land broken. **Fix:** add `ci.yml` running `cargo fmt --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo nextest run --workspace --locked` on every PR and push to `main`, on the same matrix as releases.
 
 ### H15. License field mismatch
 Workspace `Cargo.toml:16` says `license = "MIT"`; repository `LICENSE` is Apache-2.0. Enterprise procurement teams *will* notice. **Fix:** align to Apache-2.0 in `Cargo.toml` and confirm the intent.
@@ -236,7 +236,7 @@ Everything else is mechanical engineering — your codex-generated foundation is
 
 Stage 1+2 of the roadmap shipped this session. All builds, `cargo fmt`,
 `cargo clippy --workspace --all-targets -- -D warnings`, and
-`cargo test --workspace` pass.
+`cargo nextest run --workspace` pass.
 
 ### Safety (Stage 1)
 - **C1** Fail-loud keyring + opt-in inline fallback (`AYX_ALLOW_INLINE_SECRETS`).
@@ -286,7 +286,7 @@ Stage 1+2 of the roadmap shipped this session. All builds, `cargo fmt`,
 ### Implementation log (session 3, 2026-05-10)
 
 Eight more items closed; 87 tests passing; `cargo fmt`, `cargo clippy
---workspace --all-targets -- -D warnings`, and `cargo test --workspace`
+--workspace --all-targets -- -D warnings`, and `cargo nextest run --workspace`
 all green.
 
 - **L1** Dropped hand-rolled `print_help()` and `wants_help()`; clap now
@@ -336,7 +336,7 @@ all green.
 
 Two strategic bets landed: **A — TUI quality** and **B — agent substrate
 (registry)**. All green: `cargo fmt --check`, `cargo clippy --workspace
---all-targets -- -D warnings`, `cargo test --workspace` (90 tests).
+--all-targets -- -D warnings`, `cargo nextest run --workspace` (90 tests).
 
 #### A — TUI quality (H3)
 

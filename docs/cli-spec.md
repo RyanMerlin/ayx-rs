@@ -1,4 +1,4 @@
-# AYX-RS CLI Spec (v0.9.7)
+# AYX-RS CLI Spec (v0.9.8)
 
 This document is the stable contract for how `ayx` behaves. It is intentionally
 shorter than a full command inventory so it does not drift every time a command
@@ -18,7 +18,7 @@ For the live command tree, use:
 - Binary name: `ayx`
 - Primary source of truth: `RyanMerlin/ayx-rs` on GitHub
 - Supported operator surfaces: local CLI, local dashboard, structured catalog
-- Supported release targets: Windows, Linux, macOS
+- Supported release targets: Linux, macOS
 
 ## Runtime Model
 

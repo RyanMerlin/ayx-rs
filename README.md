@@ -6,7 +6,7 @@ It is designed to operate across the Alteryx surface and enable sophisticated op
 - administrator-friendly: clear command surfaces for common Alteryx operations
 - automation-friendly: a single native binary with predictable output and no interpreter dependency
 - secure: explicit `--apply` gates, audit artifacts, and conservative defaults
-- portable: Windows, Linux, and macOS release targets
+- portable: Windows, Linux, and macOS
 - agent-friendly: structured envelopes and a growing command/tactics/workflow registry
 
 > Status: `ayx` ships a stable CLI, a machine-readable command catalog, a first-class live `discover` entry point, and a live One surface inventory. The registry layer is still growing, but `catalog` remains the machine-readable view rather than a replacement for the live tree.
@@ -132,6 +132,11 @@ Minimum expectations:
 - `alteryx_one.oauth_client_id` and `alteryx_one.token_endpoint_url` for One OAuth token posture
 - `alteryx_one.access_token` when using One API commands
 - `alteryx_one.refresh_token` when you want to keep the token pair together locally
+- `alteryx_one.client_secret` or `alteryx_one.client_secret_ref` when you use service-principal
+  client credentials; pair them with `alteryx_one.oauth_client_id` and let `token_endpoint_url`
+  derive from the base URL when possible.
+- `AYX_ONE_CLIENT_ID`, `AYX_ONE_CLIENT_SECRET`, `AYX_ONE_TOKEN_ENDPOINT_URL`, `AYX_ONE_API_ACCESS_TOKEN`,
+  and `AYX_ONE_API_REFRESH_TOKEN` are the generic env overrides used by the loader.
 - `server.api.base_url`, `server.api.client_id`, and `server.api.client_secret`
 - `server.storage.kind`
 - `server.storage.mongo.mode`
@@ -155,11 +160,10 @@ Embedded Mongo discovery looks for `RuntimeSettings.xml` in the standard Alteryx
 
 ## Release and install
 
-Releases are built for Windows, Linux, and macOS from GitHub Actions.
+Release artifacts are built for Linux and macOS from GitHub Actions.
 The public release channel is this repository's GitHub Releases page.
 
 Release archives:
-- Windows: `ayx-x86_64-pc-windows-msvc.zip`
 - Linux: `ayx-x86_64-unknown-linux-gnu.tar.gz`
 - macOS Intel: `ayx-x86_64-apple-darwin.tar.gz`
 - macOS Apple Silicon: `ayx-aarch64-apple-darwin.tar.gz`
@@ -242,6 +246,8 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo nextest run --workspace --locked
 ```
+
+For the One surface specifically, the live validation plan is documented in `docs/one-live-validation.md`.
 
 ## Fixtures
 

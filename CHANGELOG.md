@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.8 — 2026-06-16
+
+### One hardening and release prep
+
+- Tighten the One transport envelope so live requests, dry-runs, auth failures, and backend errors report a stable shape with request metadata.
+- Add a table-driven live validation matrix for the wired One surface so the smoke suite proves real API reachability instead of just envelope construction.
+- Standardize auth failure, permission failure, and transport failure classification so blocked environments are reported explicitly.
+- Update the contributor and release docs to prefer `cargo nextest run` and align the public release checklist with the current CI matrix.
+
+### Verification
+
+- `cargo nextest run -p ayx-one-api --lib`
+- `cargo nextest run -p ayx-rs --test one_live_smoke`
+
 ## 0.9.7 — 2026-06-15
 
 ### Progressive discovery
@@ -27,9 +41,9 @@
 
 ### Verification
 
-- `cargo test -p ayx-core one_token_endpoint -- --nocapture`
-- `cargo test -p ayx-one-api refresh_token_uses_refresh_token_only -- --nocapture`
-- `cargo test -p ayx-rs --no-run`
+- `cargo nextest run -p ayx-core one_token_endpoint`
+- `cargo nextest run -p ayx-one-api refresh_token_uses_refresh_token_only`
+- `cargo nextest run -p ayx-rs`
 
 ## 0.9.4 — 2026-06-02
 
@@ -76,7 +90,7 @@ to ship cleanly on Linux and macOS.
 ### CI and release fixes
 
 - Pull in the current `cargo-audit` ignore set and lockfile refresh so CI matches the upstream passing dependency state.
-- Switch GitHub Actions test jobs from `cargo test` to `cargo nextest run` for faster, more consistent workspace validation.
+- Switch GitHub Actions test jobs to `cargo nextest run` for faster, more consistent workspace validation.
 - Replace the broken GitHub Actions lint action, opt workflows into the Node.js 24 runtime early, and keep shell globs actionlint-safe.
 - Fix release signing secret scoping so Windows/macOS signing and notarization steps can actually run when secrets are present.
 - Make SBOM collection deterministic for the current `cargo-cyclonedx` output layout and fail the SBOM job if no JSON files are produced.
@@ -125,7 +139,7 @@ to ship cleanly on Linux and macOS.
 ### Verification
 
 - `cargo build --workspace` clean.
-- `cargo test -p ayx-workflow -p ayx-server -p ayx-rs` passes (including `workflow_canary` and `one_live_smoke` integration tests).
+- `cargo nextest run -p ayx-workflow -p ayx-server -p ayx-rs` passes (including `workflow_canary` and `one_live_smoke` integration tests).
 
 ## 0.7.0
 

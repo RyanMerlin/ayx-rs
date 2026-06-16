@@ -13,7 +13,7 @@ surface reliable for humans and agents while we widen coverage in measured steps
 
 ## Validation Gates
 
-- `cargo-fmt.exe --all --check`
+- `cargo fmt --all --check`
 - `cargo nextest run -p ayx-rs --test one_live_smoke`
 - `AYX_ONE_LIVE_SMOKE=1 cargo nextest run -p ayx-rs --test one_live_smoke`
 - `cargo nextest run --workspace`
