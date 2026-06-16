@@ -26,3 +26,4 @@ surface reliable for humans and agents while we widen coverage in measured steps
 3. Finish the progressive discovery surface so `ayx discover`-style workflows can move from command discovery to capability and tactic discovery without guesswork.
 4. Decide whether `catalog` remains a long-term registry helper or becomes a compatibility alias once discovery exposes the same stable concepts directly.
 5. Focus the next round on transport hardening and documented-only inventory gaps, not further dispatcher reshaping.
+6. Use `docs/one-backend-inventory.md` as the source of truth for remaining One backend wiring work.

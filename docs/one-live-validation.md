@@ -32,6 +32,7 @@ Test the currently wired One families in the CLI and API layers:
 - For list endpoints: verify pagination or empty-result handling where possible.
 - For mutating endpoints: prefer dry-run or a reversible safe case before any real mutation.
 - Every result must record the command, endpoint family, status bucket, and whether it was truly live.
+- Current smoke coverage includes invalid-id failures for representative detail commands and pagination-boundary checks for the major list families.
 
 ## Pressure Test Level
 
@@ -41,6 +42,12 @@ Use the default "happy path + one edge" matrix:
 - edge path: exercise invalid id, empty page, pagination boundary, or permission failure
 
 Escalate to broader matrices only for families that are known to be flaky or stateful.
+
+## Live Validation Hygiene
+
+- Use `cargo nextest run` for all repo and smoke validation going forward.
+- Keep One-only live tests on a minimal profile that still satisfies the config model, but avoid mixing in unrelated Server storage assumptions when validating the One cloud API.
+- If auth fails, classify it as an environment blocker first. Only treat the surface as broken after a confirmed live request reaches the One host and returns a backend error.
 
 ## Current Harness
 
