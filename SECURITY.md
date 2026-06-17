@@ -5,6 +5,10 @@
 If you believe you have found a security issue in `ayx-rs`, please report it
 privately first. **Do not** open a public GitHub issue.
 
+This project is provided as-is, with no warranty or formal support commitment.
+I will still try to address concerns, and if you prefer the normal GitHub
+issue channel for a non-sensitive report, that is fine too.
+
 Please use GitHub Security Advisories for private reporting. PGP / Signal can
 be arranged after the initial advisory is opened.
 
