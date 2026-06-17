@@ -21,7 +21,7 @@ Completed items are removed here rather than left to rot in the plan.
 - expose stable public discovery surfaces for the capability registry once the contract is settled, instead of advertising internal execution paths too early.
 - keep `ayx catalog`, `ayx doctor`, the One inventory, and the generated command surface synchronized so humans and agents always see the same surface truth.
 
-## 1c. Discovery shape for v0.9.8
+## 1c. Discovery shape for v0.9.9
 - keep `ayx discover` as the only live-tree entry point humans and agents should reach for first.
 - add path drill-down for capability, tactic, and workflow leaves only when those surfaces are actually wired and tested.
 - keep `catalog` as a supporting registry index until discovery exposes the same stable concepts directly.
