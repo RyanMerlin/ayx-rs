@@ -16,7 +16,7 @@ members = [
 [workspace.package]
 edition = "2024"
 license = "Apache-2.0"
-version = "0.9.9"
+version = "0.9.10"
 authors = ["AYX Team", "Ryan Merlin"]
 
 [workspace.dependencies]

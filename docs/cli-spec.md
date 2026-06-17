@@ -1,4 +1,4 @@
-# AYX-RS CLI Spec (v0.9.9)
+# AYX-RS CLI Spec (v0.9.10)
 
 This document is the stable contract for how `ayx` behaves. It is intentionally
 shorter than a full command inventory so it does not drift every time a command
