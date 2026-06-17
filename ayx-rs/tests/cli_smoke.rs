@@ -211,6 +211,42 @@ fn one_platform_role_help_renders_assignments() {
 }
 
 #[test]
+fn one_connections_help_renders_surface_groups() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "connections", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("connector-metadata"));
+    assert!(stdout.contains("permissions"));
+    assert!(stdout.contains("dry-run"));
+    assert!(stdout.contains("delete"));
+}
+
+#[test]
+fn one_connections_connector_metadata_overrides_create_help_renders_connector_arg() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "one",
+            "connections",
+            "connector-metadata",
+            "overrides",
+            "create",
+            "--help",
+        ])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("create"));
+    assert!(stdout.contains("--connector"));
+    assert!(stdout.contains("--body"));
+}
+
+#[test]
 fn one_platform_token_help_renders_access_token_actions() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(["one", "platform", "token", "--help"])

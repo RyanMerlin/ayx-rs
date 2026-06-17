@@ -64,7 +64,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
             api_inventory_envelope(&config, "one")?
         }
         Some(OneCommand::Connections { command }) => {
-            super::one_connections::execute(&runtime, command)?
+            super::one_connections::execute(&runtime, cli.apply, cli.yes, command)?
         }
         Some(OneCommand::Flows { command }) => {
             super::one_flows::execute(&runtime, cli.apply, cli.yes, command)?

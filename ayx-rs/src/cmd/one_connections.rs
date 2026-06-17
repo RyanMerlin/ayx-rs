@@ -4,11 +4,15 @@ use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
 use crate::{
     OneConnectionPermissionCommand, OneConnectionsCommand, OneConnectorMetadataCommand,
-    OneConnectorMetadataOverridesCommand, cmd::RuntimeCtx, load_payload,
+    OneConnectorMetadataOverridesCommand,
+    cmd::{self, RuntimeCtx},
+    load_payload,
 };
 
 pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
+    apply: bool,
+    yes: bool,
     command: Option<OneConnectionsCommand>,
 ) -> Result<Envelope> {
     Ok(match command {
@@ -137,6 +141,16 @@ pub(crate) fn execute(
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let connection_id =
                 connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::destructive_action_message(
+                        "delete",
+                        &format!("connection id='{connection_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
             one_api_live_request(
                 &config,
                 "connection",
@@ -223,6 +237,18 @@ pub(crate) fn execute(
                 }
                 Some(OneConnectorMetadataOverridesCommand::Delete { profile, connector }) => {
                     let config = runtime.load_profile_lenient(profile.as_deref())?;
+                    if apply {
+                        cmd::confirm::require_tty_confirmation(
+                            yes,
+                            &cmd::confirm::destructive_action_message(
+                                "delete",
+                                &format!(
+                                    "connector metadata overrides for connector '{connector}'"
+                                ),
+                                &config.profile_name,
+                            ),
+                        )?;
+                    }
                     one_api_live_request(
                         &config,
                         "connection",
@@ -302,6 +328,18 @@ pub(crate) fn execute(
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 let connection_id =
                     connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
+                if apply {
+                    cmd::confirm::require_tty_confirmation(
+                        yes,
+                        &cmd::confirm::destructive_action_message(
+                            "delete",
+                            &format!(
+                                "permission subject id='{subject_id}' on connection id='{connection_id}'"
+                            ),
+                            &config.profile_name,
+                        ),
+                    )?;
+                }
                 one_api_live_request(
                     &config,
                     "connection",

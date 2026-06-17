@@ -52,3 +52,10 @@ pub fn access_change_message(action: &str, subject: &str, profile: &str) -> Stri
         "About to {action} {subject} on profile '{profile}'. This changes access and may affect active users. Review carefully before proceeding."
     )
 }
+
+/// Build a consistent warning for destructive non-governance actions.
+pub fn destructive_action_message(action: &str, subject: &str, profile: &str) -> String {
+    format!(
+        "About to {action} {subject} on profile '{profile}'. This is destructive and may affect live workflows or users. Review carefully before proceeding."
+    )
+}

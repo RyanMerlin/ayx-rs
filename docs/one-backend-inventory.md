@@ -133,6 +133,7 @@ The public One API surface exposed here does not provide a general-purpose workf
     - Connection lifecycle, dry-run, status, and permission commands are wired.
     - Connector metadata defaults, current values, and overrides are wired for JDBC behavior control.
     - Credential-backend specifics still live in the API payloads rather than a local domain model.
+    - Delete operations prompt for TTY confirmation unless `--yes` is supplied, so destructive runs stay explicit in automation and interactive use.
 - `jobGroup`
   - `GET /v4/jobLibrary`
   - `GET /v4/jobLibrary/count`
