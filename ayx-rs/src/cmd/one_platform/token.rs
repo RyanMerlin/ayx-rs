@@ -2,10 +2,16 @@ use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
-use crate::{OnePlatformTokenCommand, cmd::RuntimeCtx, load_payload};
+use crate::{
+    OnePlatformTokenCommand,
+    cmd::{self, RuntimeCtx},
+    load_payload,
+};
 
 pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
+    apply: bool,
+    yes: bool,
     command: Option<OnePlatformTokenCommand>,
 ) -> Result<Envelope> {
     Ok(match command {
@@ -49,6 +55,16 @@ pub(crate) fn execute(
         }
         Some(OnePlatformTokenCommand::Delete { profile, token_id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "delete",
+                        &format!("token id='{token_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
             one_api_live_request(
                 &config,
                 "platform",

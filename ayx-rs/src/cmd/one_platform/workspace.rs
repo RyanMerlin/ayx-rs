@@ -2,10 +2,16 @@ use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
-use crate::{OneWorkspaceCommand, cmd::RuntimeCtx, load_payload};
+use crate::{
+    OneWorkspaceCommand,
+    cmd::{self, RuntimeCtx},
+    load_payload,
+};
 
 pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
+    apply: bool,
+    yes: bool,
     command: Option<OneWorkspaceCommand>,
 ) -> Result<Envelope> {
     Ok(match command {
@@ -208,6 +214,16 @@ pub(crate) fn execute(
             person_id,
         }) => {
             let config = runtime.load_profile_lenient(None)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "remove",
+                        &format!("user person id='{person_id}' from workspace id='{workspace_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
             one_api_live_request(
                 &config,
                 "platform",
@@ -220,6 +236,16 @@ pub(crate) fn execute(
         }
         Some(OneWorkspaceCommand::SuspendUsers { workspace_id }) => {
             let config = runtime.load_profile_lenient(None)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "suspend",
+                        &format!("users in workspace id='{workspace_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
             one_api_live_request(
                 &config,
                 "platform",
@@ -232,6 +258,16 @@ pub(crate) fn execute(
         }
         Some(OneWorkspaceCommand::UnsuspendUsers { workspace_id }) => {
             let config = runtime.load_profile_lenient(None)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "unsuspend",
+                        &format!("users in workspace id='{workspace_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
             one_api_live_request(
                 &config,
                 "platform",
@@ -244,6 +280,16 @@ pub(crate) fn execute(
         }
         Some(OneWorkspaceCommand::Transfer { workspace_id }) => {
             let config = runtime.load_profile_lenient(None)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "transfer",
+                        &format!("workspace id='{workspace_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
             one_api_live_request(
                 &config,
                 "platform",

@@ -60,6 +60,16 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
     },
     EndpointSpec {
         method: "POST",
+        path: "/iam/v1/workspaces/{id}/people/suspend",
+        command: "one platform workspace suspend-users",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/iam/v1/workspaces/{id}/people/unsuspend",
+        command: "one platform workspace unsuspend-users",
+    },
+    EndpointSpec {
+        method: "POST",
         path: "/v4/workspaces/{id}/transfer",
         command: "one platform workspace transfer",
     },

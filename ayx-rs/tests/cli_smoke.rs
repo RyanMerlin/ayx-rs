@@ -164,6 +164,67 @@ fn one_doctor_help_renders() {
 }
 
 #[test]
+fn one_platform_help_renders_governance_groups() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "platform", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("workspace"));
+    assert!(stdout.contains("role"));
+    assert!(stdout.contains("token"));
+    assert!(stdout.contains("person"));
+    assert!(stdout.contains("user"));
+}
+
+#[test]
+fn one_platform_workspace_help_renders_governance_actions() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "platform", "workspace", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("admins"));
+    assert!(stdout.contains("invite-users"));
+    assert!(stdout.contains("remove-user"));
+    assert!(stdout.contains("suspend-users"));
+    assert!(stdout.contains("unsuspend-users"));
+    assert!(stdout.contains("transfer"));
+}
+
+#[test]
+fn one_platform_role_help_renders_assignments() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "platform", "role", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("list-assignments"));
+    assert!(stdout.contains("assign"));
+    assert!(stdout.contains("unassign"));
+}
+
+#[test]
+fn one_platform_token_help_renders_access_token_actions() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "platform", "token", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("create"));
+    assert!(stdout.contains("detail"));
+    assert!(stdout.contains("delete"));
+}
+
+#[test]
 fn one_connection_permission_help_renders_subject_id() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(["one", "connections", "permissions", "detail", "--help"])

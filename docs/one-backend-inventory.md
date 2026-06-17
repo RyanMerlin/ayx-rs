@@ -31,6 +31,8 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `DELETE /v4/workspaces/{workspaceId}/people/{id}`
   - `PUT /v4/workspaces/{id}/people/{personId}/suspended`
   - `DELETE /v4/workspaces/{id}/people/{personId}/suspended`
+  - `POST /iam/v1/workspaces/{id}/people/suspend`
+  - `POST /iam/v1/workspaces/{id}/people/unsuspend`
   - `POST /v4/workspaces/{id}/transfer`
   - `GET /v4/authorization/roles/{id}/people`
   - `POST /v4/authorization/roles/{id}/people/{subjectId}`

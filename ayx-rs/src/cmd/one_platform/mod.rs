@@ -33,9 +33,9 @@ pub(crate) fn execute(
             one_surface_inventory_envelope(&config)?
         }
         Some(OnePlatformCommand::Workspace { command }) => {
-            workspace::execute(runtime, Some(command))?
+            workspace::execute(runtime, apply, yes, Some(command))?
         }
-        Some(OnePlatformCommand::Role { command }) => role::execute(runtime, command)?,
+        Some(OnePlatformCommand::Role { command }) => role::execute(runtime, apply, yes, command)?,
         Some(OnePlatformCommand::User) => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
@@ -48,7 +48,9 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OnePlatformCommand::Token { command }) => token::execute(runtime, command)?,
+        Some(OnePlatformCommand::Token { command }) => {
+            token::execute(runtime, apply, yes, command)?
+        }
         Some(OnePlatformCommand::Person { command }) => {
             person::execute(runtime, apply, yes, command)?
         }

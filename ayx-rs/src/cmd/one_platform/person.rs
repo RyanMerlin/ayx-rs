@@ -127,9 +127,10 @@ pub(crate) fn execute(
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
-                    &format!(
-                        "About to DELETE person id='{person_id}' on profile '{}'. This cannot be undone.",
-                        config.profile_name
+                    &cmd::confirm::access_change_message(
+                        "delete",
+                        &format!("person id='{person_id}'"),
+                        &config.profile_name,
                     ),
                 )?;
             }

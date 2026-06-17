@@ -2,9 +2,17 @@ use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::one_api_live_request;
 
-use crate::{OneRoleCommand, cmd::RuntimeCtx};
+use crate::{
+    OneRoleCommand,
+    cmd::{self, RuntimeCtx},
+};
 
-pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneRoleCommand) -> Result<Envelope> {
+pub(crate) fn execute(
+    runtime: &RuntimeCtx<'_>,
+    apply: bool,
+    yes: bool,
+    command: OneRoleCommand,
+) -> Result<Envelope> {
     Ok(match command {
         OneRoleCommand::ListAssignments { role_id } => {
             let config = runtime.load_profile_lenient(None)?;
@@ -38,6 +46,16 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneRoleCommand) -> Resu
             subject_id,
         } => {
             let config = runtime.load_profile_lenient(None)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "unassign",
+                        &format!("subject id='{subject_id}' from role id='{role_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
             one_api_live_request(
                 &config,
                 "platform",

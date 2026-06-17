@@ -42,3 +42,13 @@ pub fn require_tty_confirmation(consent: bool, message: &str) -> Result<()> {
         );
     }
 }
+
+/// Build a consistent warning for governance actions that change access.
+///
+/// We keep the phrasing short and explicit so destructive IAM flows all feel
+/// like the same class of operation in help text and interactive prompts.
+pub fn access_change_message(action: &str, subject: &str, profile: &str) -> String {
+    format!(
+        "About to {action} {subject} on profile '{profile}'. This changes access and may affect active users. Review carefully before proceeding."
+    )
+}
