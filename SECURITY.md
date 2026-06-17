@@ -5,8 +5,8 @@
 If you believe you have found a security issue in `ayx-rs`, please report it
 privately first. **Do not** open a public GitHub issue.
 
-Email: `rmerlin5@pm.me`
-PGP / Signal on request.
+Please use GitHub Security Advisories for private reporting. PGP / Signal can
+be arranged after the initial advisory is opened.
 
 Please include:
 

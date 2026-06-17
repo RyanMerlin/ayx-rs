@@ -1717,6 +1717,193 @@ fn one_job_groups_detail_not_found_live() {
     panic!("expected invalid job group id to fail\nstdout:\n{stdout}\nstderr:\n{stderr}");
 }
 
+#[test]
+fn one_job_groups_detail_live_real_object() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(job_group_id) = require_live_job_group_id(&live) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "job-groups",
+            "detail",
+            "--job-group-id",
+            &job_group_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one job-groups detail --job-group-id {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"jobGroup\"");
+    assert_contains(&stdout, "\"operation\": \"detail\"");
+    assert_contains(&stdout, &job_group_id);
+}
+
+#[test]
+fn one_job_groups_status_live_real_object() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(job_group_id) = require_live_job_group_id(&live) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "job-groups",
+            "status",
+            "--job-group-id",
+            &job_group_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one job-groups status --job-group-id {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"jobGroup\"");
+    assert_contains(&stdout, "\"operation\": \"status\"");
+    assert_contains(&stdout, &job_group_id);
+}
+
+#[test]
+fn one_job_groups_inspection_live_real_object() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(job_group_id) = require_live_job_group_id(&live) else {
+        return;
+    };
+
+    for (operation, args) in [
+        (
+            "inputs",
+            vec![
+                "--output",
+                "json",
+                "one",
+                "job-groups",
+                "inputs",
+                "--job-group-id",
+                job_group_id.as_str(),
+            ],
+        ),
+        (
+            "outputs",
+            vec![
+                "--output",
+                "json",
+                "one",
+                "job-groups",
+                "outputs",
+                "--job-group-id",
+                job_group_id.as_str(),
+            ],
+        ),
+        (
+            "jobs",
+            vec![
+                "--output",
+                "json",
+                "one",
+                "job-groups",
+                "jobs",
+                "--job-group-id",
+                job_group_id.as_str(),
+            ],
+        ),
+        (
+            "publications",
+            vec![
+                "--output",
+                "json",
+                "one",
+                "job-groups",
+                "publications",
+                "--job-group-id",
+                job_group_id.as_str(),
+            ],
+        ),
+        (
+            "profile",
+            vec![
+                "--output",
+                "json",
+                "one",
+                "job-groups",
+                "profile",
+                "--job-group-id",
+                job_group_id.as_str(),
+            ],
+        ),
+        (
+            "profile-results",
+            vec![
+                "--output",
+                "json",
+                "one",
+                "job-groups",
+                "profile-results",
+                "--job-group-id",
+                job_group_id.as_str(),
+            ],
+        ),
+        (
+            "pdf-results",
+            vec![
+                "--output",
+                "json",
+                "one",
+                "job-groups",
+                "pdf-results",
+                "--job-group-id",
+                job_group_id.as_str(),
+            ],
+        ),
+    ] {
+        let (success, stdout, stderr) = run_ayx_result(&args, &live);
+        if !success {
+            if live_auth_unavailable(&stderr) {
+                return;
+            }
+            panic!(
+                "command failed: --output json one job-groups {operation} --job-group-id {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            );
+        }
+        assert_live_ok(&stdout);
+        assert_contains(&stdout, "\"surface\": \"jobGroup\"");
+        assert_contains(&stdout, &format!("\"operation\": \"{operation}\""));
+        assert_contains(&stdout, &job_group_id);
+    }
+}
+
 live_case!(
     one_output_objects_list_live,
     args = ["--output", "json", "one", "output-objects", "list"],

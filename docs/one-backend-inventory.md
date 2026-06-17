@@ -147,8 +147,8 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `GET /v4/jobGroups/{id}/profile`
   - `GET /v4/jobGroups/{id}/profileResults`
   - Notes:
-    - Execution, publish, and inspection commands are wired.
-    - PDF/log artifact downloads and deeper job-library paths still need coverage.
+    - Execution, publish, status, and inspection commands are wired.
+    - Live smoke coverage now exercises detail, status, inputs, outputs, jobs, publications, profile, profile-results, and pdf-results on real job groups.
 - `outputObject`
   - `GET /v4/outputObjects`
   - `GET /v4/outputObjects/count`
@@ -233,6 +233,15 @@ The live smoke suite currently proves a representative path for:
 - `connections.connector-metadata.defaults`
 - `connections.connector-metadata.publish-info`
 - `job-groups.list`
+- `job-groups.detail`
+- `job-groups.status`
+- `job-groups.inputs`
+- `job-groups.outputs`
+- `job-groups.jobs`
+- `job-groups.publications`
+- `job-groups.profile`
+- `job-groups.profile-results`
+- `job-groups.pdf-results`
 - `output-objects.list`
 - `write-settings.list`
 - `scheduling.list`
@@ -251,7 +260,6 @@ It also exercises edge coverage for representative families:
 
 Priority order for the next implementation slice:
 
-1. Expand `jobGroup` around artifact downloads, deeper job-library inspection, and missing status variants.
-2. Fill the remaining `connection` edges around permissions and metadata override ergonomics.
-3. Decide whether `outputObject`, `webhookFlowTask`, and `writeSetting` need first-class CLI commands or should stay API-only for now.
-4. Add edge-case live tests for invalid ids, empty lists, and pagination boundaries as each family is completed.
+1. Fill the remaining `connection` edges around permissions and metadata override ergonomics.
+2. Decide whether `outputObject`, `webhookFlowTask`, and `writeSetting` need first-class CLI commands or should stay API-only for now.
+3. Add edge-case live tests for invalid ids, empty lists, and pagination boundaries as each family is completed.

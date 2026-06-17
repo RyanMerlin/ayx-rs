@@ -22,6 +22,16 @@ Test the currently wired One families in the CLI and API layers:
   - connector-metadata defaults
   - connector-metadata publish-info
 - job-group
+  - list
+  - detail
+  - status
+  - inputs
+  - outputs
+  - jobs
+  - publications
+  - profile
+  - profile-results
+  - pdf-results
 - output-object
 - webhook-flow-task
 - write-setting
