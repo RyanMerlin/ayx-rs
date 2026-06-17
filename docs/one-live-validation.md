@@ -17,6 +17,10 @@ Test the currently wired One families in the CLI and API layers:
 - plans
 - flows
 - connections
+  - detail
+  - permissions list
+  - connector-metadata defaults
+  - connector-metadata publish-info
 - job-group
 - output-object
 - webhook-flow-task

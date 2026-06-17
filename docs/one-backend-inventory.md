@@ -228,6 +228,10 @@ The live smoke suite currently proves a representative path for:
 - `plans.list`
 - `flows.list`
 - `connections.list`
+- `connections.detail`
+- `connections.permissions.list`
+- `connections.connector-metadata.defaults`
+- `connections.connector-metadata.publish-info`
 - `job-groups.list`
 - `output-objects.list`
 - `write-settings.list`
@@ -247,8 +251,7 @@ It also exercises edge coverage for representative families:
 
 Priority order for the next implementation slice:
 
-1. Finish the remaining `flow` subfamilies, especially library, folder, and permission-oriented paths.
-2. Expand `jobGroup` around artifact downloads, deeper job-library inspection, and missing status variants.
-3. Fill the remaining `connection` edges around permissions and metadata override ergonomics.
-4. Decide whether `outputObject`, `webhookFlowTask`, and `writeSetting` need first-class CLI commands or should stay API-only for now.
-5. Add edge-case live tests for invalid ids, empty lists, and pagination boundaries as each family is completed.
+1. Expand `jobGroup` around artifact downloads, deeper job-library inspection, and missing status variants.
+2. Fill the remaining `connection` edges around permissions and metadata override ergonomics.
+3. Decide whether `outputObject`, `webhookFlowTask`, and `writeSetting` need first-class CLI commands or should stay API-only for now.
+4. Add edge-case live tests for invalid ids, empty lists, and pagination boundaries as each family is completed.

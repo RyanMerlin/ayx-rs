@@ -211,6 +211,32 @@ fn first_list_item_id(stdout: &str, id_keys: &[&str]) -> Option<String> {
     None
 }
 
+fn first_list_item_field(stdout: &str, field_keys: &[&str]) -> Option<String> {
+    let value = json_value(stdout)?;
+    let candidates = [
+        &value["data"]["response"]["items"],
+        &value["data"]["items"],
+        &value["response"]["items"],
+        &value["items"],
+        &value["data"]["response"],
+        &value["data"],
+    ];
+
+    for candidate in candidates {
+        if let Some(items) = candidate.as_array() {
+            if let Some(first) = items.first() {
+                for key in field_keys {
+                    if let Some(value) = first.get(*key).and_then(|value| value.as_str()) {
+                        return Some(value.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn require_live_flow_id(live: &LiveSmokeContext) -> Option<String> {
     require_live_list_item_id(
         live,
@@ -1355,6 +1381,240 @@ fn one_connections_detail_not_found_live() {
         return;
     }
     panic!("expected invalid connection id to fail\nstdout:\n{stdout}\nstderr:\n{stderr}");
+}
+
+#[test]
+fn one_connections_detail_live_real_object() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(connection_id) = require_live_list_item_id(
+        &live,
+        &["--output", "json", "one", "connections", "list"],
+        &["id", "connectionId", "connection_id"],
+        "connection",
+    ) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "connections",
+            "detail",
+            "--connection-id",
+            &connection_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one connections detail --connection-id {connection_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"connection\"");
+    assert_contains(&stdout, "\"operation\": \"detail\"");
+    assert_contains(&stdout, &connection_id);
+}
+
+#[test]
+fn one_connections_permissions_list_live_real_object() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(connection_id) = require_live_list_item_id(
+        &live,
+        &["--output", "json", "one", "connections", "list"],
+        &["id", "connectionId", "connection_id"],
+        "connection",
+    ) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "connections",
+            "permissions",
+            "list",
+            "--connection-id",
+            &connection_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one connections permissions list --connection-id {connection_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"connection\"");
+    assert_contains(&stdout, "\"operation\": \"permissions\"");
+    assert_contains(&stdout, &connection_id);
+}
+
+#[test]
+fn one_connections_permissions_detail_not_found_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(connection_id) = require_live_list_item_id(
+        &live,
+        &["--output", "json", "one", "connections", "list"],
+        &["id", "connectionId", "connection_id"],
+        "connection",
+    ) else {
+        return;
+    };
+    let invalid_aid = "missing-aid";
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "connections",
+            "permissions",
+            "detail",
+            "--connection-id",
+            &connection_id,
+            "--aid",
+            invalid_aid,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        assert_contains(&stderr, "\"surface\": \"connection\"");
+        assert_contains(&stderr, "\"operation\": \"permissions-detail\"");
+        assert_live_error_code(&stderr, &["not_found", "validation"]);
+        return;
+    }
+    panic!(
+        "expected invalid connection permission aid to fail\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+}
+
+#[test]
+fn one_connections_connector_metadata_defaults_live_real_object() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let (success, list_stdout, list_stderr) =
+        run_ayx_result(&["--output", "json", "one", "connections", "list"], &live);
+    if !success {
+        if live_auth_unavailable(&list_stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one connections list\nstdout:\n{list_stdout}\nstderr:\n{list_stderr}"
+        );
+    }
+    let Some(connector_id) =
+        first_list_item_field(&list_stdout, &["connectorId", "connector_id", "connector"])
+    else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "connections",
+            "connector-metadata",
+            "defaults",
+            "--connector",
+            &connector_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one connections connector-metadata defaults --connector {connector_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"connection\"");
+    assert_contains(&stdout, "\"operation\": \"connector-metadata-defaults\"");
+    assert_contains(&stdout, &connector_id);
+}
+
+#[test]
+fn one_connections_connector_metadata_publish_info_live_real_object() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let (success, list_stdout, list_stderr) =
+        run_ayx_result(&["--output", "json", "one", "connections", "list"], &live);
+    if !success {
+        if live_auth_unavailable(&list_stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one connections list\nstdout:\n{list_stdout}\nstderr:\n{list_stderr}"
+        );
+    }
+    let Some(connector_id) =
+        first_list_item_field(&list_stdout, &["connectorId", "connector_id", "connector"])
+    else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "connections",
+            "connector-metadata",
+            "publish-info",
+            "--connector",
+            &connector_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one connections connector-metadata publish-info --connector {connector_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"connection\"");
+    assert_contains(
+        &stdout,
+        "\"operation\": \"connector-metadata-publish-info\"",
+    );
+    assert_contains(&stdout, &connector_id);
 }
 
 live_case!(
