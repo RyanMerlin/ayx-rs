@@ -107,6 +107,7 @@ The public One API surface exposed here does not provide a general-purpose workf
   - Notes:
     - Lifecycle, package, parameter, library, folder, and permission commands are wired.
     - The One surface does not expose arbitrary workflow authoring through this family.
+    - Destructive deletes on flows and folders prompt for TTY confirmation unless `--yes` is supplied.
 
 ## Partial Surfaces
 

@@ -192,9 +192,10 @@ pub(crate) fn execute(
                 if apply {
                     cmd::confirm::require_tty_confirmation(
                         yes,
-                        &format!(
-                            "About to DELETE folder id='{folder_id}' on profile '{}'. This cannot be undone.",
-                            config.profile_name
+                        &cmd::confirm::destructive_action_message(
+                            "delete",
+                            &format!("folder id='{folder_id}'"),
+                            &config.profile_name,
                         ),
                     )?;
                 }
@@ -301,14 +302,12 @@ pub(crate) fn execute(
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             if apply {
-                // Only gate on confirmation when actually applying.
-                // Without --apply the transport short-circuits to a
-                // dry-run envelope anyway; no need to prompt.
                 cmd::confirm::require_tty_confirmation(
                     yes,
-                    &format!(
-                        "About to DELETE flow id='{flow_id}' on profile '{}'. This cannot be undone.",
-                        config.profile_name
+                    &cmd::confirm::destructive_action_message(
+                        "delete",
+                        &format!("flow id='{flow_id}'"),
+                        &config.profile_name,
                     ),
                 )?;
             }

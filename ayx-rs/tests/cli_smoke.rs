@@ -247,6 +247,32 @@ fn one_connections_connector_metadata_overrides_create_help_renders_connector_ar
 }
 
 #[test]
+fn one_flows_delete_help_renders_flow_id() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "flows", "delete", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--flow-id"));
+    assert!(stdout.contains("--apply"));
+}
+
+#[test]
+fn one_flows_folders_delete_help_renders_folder_id() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "flows", "folders", "delete", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--folder-id"));
+    assert!(stdout.contains("--apply"));
+}
+
+#[test]
 fn one_platform_token_help_renders_access_token_actions() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(["one", "platform", "token", "--help"])
