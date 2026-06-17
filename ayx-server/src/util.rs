@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use ayx_core::audit::write_audit_artifact;
 use ayx_core::profile::Config;
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub fn capture_system_info() -> Result<Value> {
     let hostname = std::env::var("COMPUTERNAME").unwrap_or_default();
@@ -332,13 +332,12 @@ fn parse_systeminfo(stdout: &str) -> Value {
             };
             sysinfo.insert(key.clone(), parsed_value);
             prev_key = key;
-        } else if !prev_key.is_empty() {
-            if let Some(entry) = sysinfo.get_mut(&prev_key) {
-                if let Some(obj) = entry.as_object_mut() {
-                    let child_key = raw_key.trim().replace(['[', ']'], "");
-                    obj.insert(child_key, json!(value));
-                }
-            }
+        } else if !prev_key.is_empty()
+            && let Some(entry) = sysinfo.get_mut(&prev_key)
+            && let Some(obj) = entry.as_object_mut()
+        {
+            let child_key = raw_key.trim().replace(['[', ']'], "");
+            obj.insert(child_key, json!(value));
         }
     }
 

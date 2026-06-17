@@ -2,9 +2,9 @@ use anyhow::Result;
 use ayx_core::envelope::Envelope;
 
 use crate::{
-    cmd::RuntimeCtx, one_doctor_billing_envelope, one_doctor_discover_envelope,
+    OneDoctorCommand, cmd::RuntimeCtx, one_doctor_billing_envelope, one_doctor_discover_envelope,
     one_doctor_plans_envelope, one_doctor_platform_envelope, one_doctor_scheduling_envelope,
-    one_platform_auth_diagnose_envelope, OneDoctorCommand,
+    one_platform_auth_diagnose_envelope,
 };
 
 pub(crate) fn execute(

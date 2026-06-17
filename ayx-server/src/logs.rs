@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use ayx_core::profile::Config;
 use chrono::{DateTime, Utc};
 use csv::ReaderBuilder;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone)]
 pub struct LogSource {
@@ -286,12 +286,12 @@ pub fn parse_gallery_events(path: &Path) -> Result<Value> {
                 "logger": logger,
                 "message": message,
             });
-            if kind == "request" {
-                if let Some(parsed) = parse_gallery_request_message(
+            if kind == "request"
+                && let Some(parsed) = parse_gallery_request_message(
                     event.get("message").and_then(Value::as_str).unwrap_or(""),
-                ) {
-                    event["request"] = parsed;
-                }
+                )
+            {
+                event["request"] = parsed;
             }
             requests.push(event);
         }
@@ -364,23 +364,23 @@ pub fn recent_log_candidates(config: &Config, days: i64) -> Value {
     let cutoff = Utc::now() - chrono::Duration::days(days);
     let mut result = Vec::new();
     for src in sources {
-        if let Some(path) = src.path {
-            if path.exists() && path.is_dir() {
-                if let Ok(read_dir) = fs::read_dir(&path) {
-                    for entry in read_dir.flatten() {
-                        let p = entry.path();
-                        if let Ok(meta) = entry.metadata() {
-                            if let Ok(modified) = meta.modified() {
-                                let modified_dt: DateTime<Utc> = modified.into();
-                                if modified_dt >= cutoff {
-                                    result.push(json!({
-                                        "kind": src.kind,
-                                        "path": p.display().to_string(),
-                                        "modified_utc": modified_dt,
-                                    }));
-                                }
-                            }
-                        }
+        if let Some(path) = src.path
+            && path.exists()
+            && path.is_dir()
+            && let Ok(read_dir) = fs::read_dir(&path)
+        {
+            for entry in read_dir.flatten() {
+                let p = entry.path();
+                if let Ok(meta) = entry.metadata()
+                    && let Ok(modified) = meta.modified()
+                {
+                    let modified_dt: DateTime<Utc> = modified.into();
+                    if modified_dt >= cutoff {
+                        result.push(json!({
+                            "kind": src.kind,
+                            "path": p.display().to_string(),
+                            "modified_utc": modified_dt,
+                        }));
                     }
                 }
             }

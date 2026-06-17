@@ -3,7 +3,7 @@ use ayx_core::envelope::Envelope;
 use ayx_one::{api_diagnose_envelope, api_status_envelope};
 use ayx_one_api::one_api_live_request;
 
-use crate::{cmd::RuntimeCtx, OnePlatformApiCommand};
+use crate::{OnePlatformApiCommand, cmd::RuntimeCtx};
 
 pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,

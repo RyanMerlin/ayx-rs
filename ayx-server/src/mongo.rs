@@ -9,7 +9,7 @@ use ayx_core::profile::{Config, MongoMode};
 use chrono::Utc;
 use roxmltree::Document;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MongoQueryTemplate {

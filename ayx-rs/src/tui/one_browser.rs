@@ -6,7 +6,7 @@
 //! it's not part of `app.rs` because it has no shared state and growing
 //! it inside the App impl made navigation worse.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ayx_core::profile::Config;
 use serde_json::Value;
 

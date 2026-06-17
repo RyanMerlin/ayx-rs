@@ -4,14 +4,14 @@
 //! of commands and capabilities that complements `ayx discover` rather than
 //! replacing the live CLI tree.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use ayx_core::envelope::Envelope;
-use serde_json::json;
 use serde_json::Value;
+use serde_json::json;
 use std::fs;
 
 use crate::capability;
-use crate::{CatalogCommand, COMMAND_SPECS};
+use crate::{COMMAND_SPECS, CatalogCommand};
 
 pub fn execute(command: Option<CatalogCommand>) -> Result<Envelope> {
     Ok(match command {
@@ -257,9 +257,11 @@ mod tests {
         let capabilities = env.data["capabilities"]
             .as_array()
             .expect("capabilities array");
-        assert!(capabilities
-            .iter()
-            .any(|item| item["id"] == "designer.workflow.context"));
+        assert!(
+            capabilities
+                .iter()
+                .any(|item| item["id"] == "designer.workflow.context")
+        );
     }
 
     #[test]

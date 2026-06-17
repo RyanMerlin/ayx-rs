@@ -6,7 +6,7 @@
 use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 use super::aggregate::DurationStats;
@@ -14,7 +14,7 @@ use super::jobs::{duration_ms, fetch_job_groups, is_failure_status, pct, within_
 use super::server;
 use super::source::TelemetrySource;
 use super::window::Window;
-use super::{load_and_pick_source, TelemetryArgs};
+use super::{TelemetryArgs, load_and_pick_source};
 
 pub fn top(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelope> {
     aggregate_plans(environment, args, /*by_p95=*/ false)

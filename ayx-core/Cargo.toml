@@ -11,8 +11,8 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
-tempfile = "3"
-keyring-core = "1"
+tempfile.workspace = true
+keyring-core.workspace = true
 
 # keyring 4.x split the platform credential stores into separate crates that
 # are registered with keyring-core at runtime. Pick one store per OS:

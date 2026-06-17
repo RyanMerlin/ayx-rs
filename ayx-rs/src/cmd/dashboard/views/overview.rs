@@ -1,6 +1,6 @@
 //! Overview landing — summary cards + a small running-jobs preview.
 
-use maud::{html, Markup};
+use maud::{Markup, html};
 use serde_json::Value;
 
 use super::{error_card, esc_attr, fmt_f64, profile_href, s_at};

@@ -728,7 +728,9 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
                 command: "one platform token delete",
             },
         ],
-        notes: &["One API access-token CRUD is wired; additional token administration endpoints remain documented-only."],
+        notes: &[
+            "One API access-token CRUD is wired; additional token administration endpoints remain documented-only.",
+        ],
     },
     SurfaceSpec {
         name: "person",
@@ -790,7 +792,9 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
                 command: "one platform person password-reset-request",
             },
         ],
-        notes: &["Current lookup plus person list/count/detail/create/update/patch/delete/password workflows are wired; remaining person families stay documented-only."],
+        notes: &[
+            "Current lookup plus person list/count/detail/create/update/patch/delete/password workflows are wired; remaining person families stay documented-only.",
+        ],
     },
     SurfaceSpec {
         name: "workspace",
@@ -847,7 +851,9 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
                 command: "one platform workspace delete-configuration",
             },
         ],
-        notes: &["Workspace listing, configuration, transfer, and v4 configuration-by-id endpoints are wired; other workspace families remain documented-only."],
+        notes: &[
+            "Workspace listing, configuration, transfer, and v4 configuration-by-id endpoints are wired; other workspace families remain documented-only.",
+        ],
     },
 ];
 
@@ -874,7 +880,9 @@ const SURFACES: &[SurfaceSpec] = &[
         name: "plan",
         status: "implemented",
         endpoints: PLAN_ENDPOINTS,
-        notes: &["Indexed in the official Alteryx One API help pages; the repo now wires the plan surface."],
+        notes: &[
+            "Indexed in the official Alteryx One API help pages; the repo now wires the plan surface.",
+        ],
     },
     SurfaceSpec {
         name: "plans",
@@ -1057,36 +1065,50 @@ mod tests {
     fn inventory_includes_core_surfaces() {
         let env = one_surface_inventory_envelope(&config()).expect("inventory");
         let surfaces = env.data["surfaces"].as_array().expect("surfaces");
-        assert!(surfaces
-            .iter()
-            .any(|surface| surface["name"] == "platform.iam"));
+        assert!(
+            surfaces
+                .iter()
+                .any(|surface| surface["name"] == "platform.iam")
+        );
         assert!(surfaces.iter().any(|surface| surface["name"] == "plan"));
         assert!(surfaces.iter().any(|surface| surface["name"] == "plans"));
         assert!(surfaces.iter().any(|surface| surface["name"] == "flow"));
         assert!(surfaces.iter().any(|surface| surface["name"] == "misc"));
-        assert!(surfaces
-            .iter()
-            .any(|surface| surface["name"] == "scheduling"));
+        assert!(
+            surfaces
+                .iter()
+                .any(|surface| surface["name"] == "scheduling")
+        );
         assert!(surfaces.iter().any(|surface| surface["name"] == "billing"));
         let partial = env.data["partial_surfaces"]
             .as_array()
             .expect("partial_surfaces");
-        assert!(partial
-            .iter()
-            .any(|surface| surface["name"] == "connection"));
+        assert!(
+            partial
+                .iter()
+                .any(|surface| surface["name"] == "connection")
+        );
         assert!(partial.iter().any(|surface| surface["name"] == "jobGroup"));
-        assert!(partial
-            .iter()
-            .any(|surface| surface["name"] == "outputObject"));
-        assert!(partial
-            .iter()
-            .any(|surface| surface["name"] == "webhookFlowTask"));
-        assert!(partial
-            .iter()
-            .any(|surface| surface["name"] == "writeSetting"));
-        assert!(partial
-            .iter()
-            .any(|surface| surface["name"] == "apiAccessTokens"));
+        assert!(
+            partial
+                .iter()
+                .any(|surface| surface["name"] == "outputObject")
+        );
+        assert!(
+            partial
+                .iter()
+                .any(|surface| surface["name"] == "webhookFlowTask")
+        );
+        assert!(
+            partial
+                .iter()
+                .any(|surface| surface["name"] == "writeSetting")
+        );
+        assert!(
+            partial
+                .iter()
+                .any(|surface| surface["name"] == "apiAccessTokens")
+        );
         assert!(partial.iter().any(|surface| surface["name"] == "person"));
         assert!(partial.iter().any(|surface| surface["name"] == "workspace"));
         let documented = env.data["documented_only_surfaces"]

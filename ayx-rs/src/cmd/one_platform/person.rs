@@ -3,8 +3,9 @@ use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
 use crate::{
+    OnePlatformPersonCommand,
     cmd::{self, RuntimeCtx},
-    load_payload, OnePlatformPersonCommand,
+    load_payload,
 };
 
 pub(crate) fn execute(

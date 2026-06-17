@@ -164,6 +164,19 @@ fn one_doctor_help_renders() {
 }
 
 #[test]
+fn one_connection_permission_help_renders_subject_id() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "connections", "permissions", "detail", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--subject-id"));
+    assert!(stdout.contains("--connection-id"));
+}
+
+#[test]
 fn discover_help_renders() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(["discover", "--help"])

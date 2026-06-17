@@ -3,20 +3,20 @@ use std::fs;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use anyhow::{Context, Result, anyhow, bail};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use clap::{Parser, Subcommand};
 use reqwest::blocking::Client;
 use roxmltree::Document;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::envelope::{Envelope, ErrorCode};
 use ayx_core::observability::transport_error_summary;
 use ayx_core::profile::{
-    ayx_config_home, ayx_profiles_dir, ayx_state_path, ayx_workspaces_dir, list_central_profiles,
-    load_ayx_state, profile_resolution_detail, profile_shape_label, profile_storage_path,
-    resolve_runtime_profile, save_ayx_state, AyxState, Config, ServerProfile,
+    AyxState, Config, ServerProfile, ayx_config_home, ayx_profiles_dir, ayx_state_path,
+    ayx_workspaces_dir, list_central_profiles, load_ayx_state, profile_resolution_detail,
+    profile_shape_label, profile_storage_path, resolve_runtime_profile, save_ayx_state,
 };
 // Most ayx_one + ayx_one_api helpers used by the One dispatch are now imported
 // directly in cmd/one.rs. These re-exports stay so the License surface and the
@@ -30,8 +30,8 @@ use ayx_one_api::one_api_live_request;
 // mongo to cmd/mongo.rs. sqlserver to cmd/sqlserver.rs.
 use ayx_server::logs::discover_log_inventory;
 // workflow helpers + workflow_version_upload_envelope moved to cmd/workflow.rs.
-use self_update::backends::github::Update as GitHubUpdate;
 use self_update::Status;
+use self_update::backends::github::Update as GitHubUpdate;
 
 mod capability;
 mod cmd;
@@ -96,22 +96,22 @@ fn verification_record_matches_claims(
         "createdByUserEmail",
     ];
 
-    if let Some(expected_sub) = sub {
-        if subject_keys.iter().any(|key| {
+    if let Some(expected_sub) = sub
+        && subject_keys.iter().any(|key| {
             obj.get(*key)
                 .is_some_and(|value| matches_value(value, expected_sub, false))
-        }) {
-            return true;
-        }
+        })
+    {
+        return true;
     }
 
-    if let Some(expected_email) = email {
-        if email_keys.iter().any(|key| {
+    if let Some(expected_email) = email
+        && email_keys.iter().any(|key| {
             obj.get(*key)
                 .is_some_and(|value| matches_value(value, expected_email, true))
-        }) {
-            return true;
-        }
+        })
+    {
+        return true;
     }
 
     false
@@ -1827,16 +1827,16 @@ pub(crate) enum OneConnectionPermissionCommand {
         profile: Option<String>,
         #[arg(long)]
         connection_id: Option<String>,
-        #[arg(long)]
-        aid: String,
+        #[arg(long, alias = "aid")]
+        subject_id: String,
     },
     Delete {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long)]
         connection_id: Option<String>,
-        #[arg(long)]
-        aid: String,
+        #[arg(long, alias = "aid")]
+        subject_id: String,
     },
 }
 
@@ -2601,7 +2601,11 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx_one.access_token",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/people in the One API docs."],
     },
     CommandSpec {
@@ -2611,7 +2615,11 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person update envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx_one.access_token",
+            "payload json",
+        ],
         notes: &["Maps to PUT /v4/people/{id} in the One API docs."],
     },
     CommandSpec {
@@ -2621,7 +2629,11 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person patch envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx_one.access_token",
+            "payload json",
+        ],
         notes: &["Maps to PATCH /v4/people/{id} in the One API docs."],
     },
     CommandSpec {
@@ -2641,7 +2653,11 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person update-password envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx_one.access_token",
+            "payload json",
+        ],
         notes: &["Maps to PATCH /v4/people/current/updatePassword in the One API docs."],
     },
     CommandSpec {
@@ -2651,7 +2667,11 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform person password reset request envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx_one.access_token",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/passwordresetrequest in the One API docs."],
     },
     CommandSpec {
@@ -2691,7 +2711,11 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace save-current-configuration envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx_one.access_token",
+            "payload json",
+        ],
         notes: &["Maps to PATCH /v4/workspaces/current/configuration in the One API docs."],
     },
     CommandSpec {
@@ -2701,7 +2725,11 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace save-configuration-v4 envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx_one.access_token",
+            "payload json",
+        ],
         notes: &["Maps to PATCH /v4/workspaces/{id}/configuration in the One API docs."],
     },
     CommandSpec {
@@ -2792,7 +2820,9 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
-        notes: &["Confirms OAuth client ID, token endpoint, access token presence, refresh token presence, and whether the token can reach the token inventory surface."],
+        notes: &[
+            "Confirms OAuth client ID, token endpoint, access token presence, refresh token presence, and whether the token can reach the token inventory surface.",
+        ],
     },
     CommandSpec {
         name: "one platform token",
@@ -2811,7 +2841,11 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform token create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "alteryx_one.access_token", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx_one.access_token",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/apiAccessTokens in the One API docs."],
     },
     CommandSpec {
@@ -2842,7 +2876,9 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
-        notes: &["Uses the token inventory endpoint as the safe validation target, while mutating operations still preflight workspace identity separately."],
+        notes: &[
+            "Uses the token inventory endpoint as the safe validation target, while mutating operations still preflight workspace identity separately.",
+        ],
     },
     CommandSpec {
         name: "one doctor auth",
@@ -3416,7 +3452,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "one connections permissions detail",
         path: "one/connections/permissions/detail",
-        summary: "Inspect a One connection permission by aid.",
+        summary: "Inspect a One connection permission by subject id.",
         output: "one connections permissions detail envelope",
         safety: "read-only",
         mutating: false,
@@ -3426,7 +3462,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "one connections permissions delete",
         path: "one/connections/permissions/delete",
-        summary: "Delete a One connection permission by aid.",
+        summary: "Delete a One connection permission by subject id.",
         output: "one connections permissions delete envelope",
         safety: "mutating",
         mutating: true,
@@ -3929,7 +3965,11 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "startup diagnosis steps and evidence",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "optional startup error", "optional log file"],
+        prerequisites: &[
+            "central runtime profile",
+            "optional startup error",
+            "optional log file",
+        ],
         notes: &["Wraps logs, runtime settings, and recent log candidate checks."],
     },
     CommandSpec {
@@ -4007,7 +4047,10 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "saml diagnosis envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "metadata url or file when available"],
+        prerequisites: &[
+            "central runtime profile",
+            "metadata url or file when available",
+        ],
         notes: &["Focuses on Server-side SAML configuration and common mismatch checks."],
     },
     CommandSpec {
@@ -4077,7 +4120,11 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "startup doctor steps and evidence",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "optional startup error", "optional log file"],
+        prerequisites: &[
+            "central runtime profile",
+            "optional startup error",
+            "optional log file",
+        ],
         notes: &["Prescriptive version of server diagnose startup."],
     },
 ];
@@ -4690,11 +4737,11 @@ fn execute(cli: Cli) -> Result<Envelope> {
                             let mut c = 0u64;
                             let mut b = 0u64;
                             for e in entries.flatten() {
-                                if let Ok(meta) = e.metadata() {
-                                    if meta.is_file() {
-                                        c += 1;
-                                        b += meta.len();
-                                    }
+                                if let Ok(meta) = e.metadata()
+                                    && meta.is_file()
+                                {
+                                    c += 1;
+                                    b += meta.len();
                                 }
                             }
                             (c, b)
@@ -5651,11 +5698,7 @@ fn main() -> Result<()> {
 }
 
 fn exit_code_for_envelope(envelope: &Envelope) -> i32 {
-    if envelope.ok {
-        0
-    } else {
-        1
-    }
+    if envelope.ok { 0 } else { 1 }
 }
 
 /// Render an envelope according to the requested output format. Returns a
@@ -5758,16 +5801,36 @@ fn format_envelope(envelope: &Envelope, output: &str) -> Result<String> {
 fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static str> {
     use ayx_core::envelope::ErrorCode::*;
     match code {
-        ConfigMissing => Some("Run 'ayx onboard' to set up a profile, or 'ayx doctor config' to inspect the current one."),
-        AuthFailed => Some("Run 'ayx doctor auth' to inspect auth posture. Re-run 'ayx onboard' if tokens are stale."),
-        PermissionDenied => Some("Check that the active profile's token has the required role/scope for this resource."),
-        NotFound => Some("Verify the id is correct. Use 'ayx <surface> list' to enumerate available resources."),
-        Validation => Some("Inspect the failed flag or input; '--help' on the subcommand documents accepted values."),
-        Conflict => Some("Resource is in a conflicting state. Inspect the current state with the detail command, then retry."),
-        RateLimited => Some("Retry after the suggested delay; consider --max-pages to bound auto-pagination."),
-        Network => Some("Run 'ayx doctor network' to diagnose connectivity. Check VPN/proxy if applicable."),
-        Upstream => Some("Upstream returned a 5xx. Retry; if it persists, escalate to the Alteryx One status page."),
-        WorkspaceMismatch => Some("Re-authenticate against the expected workspace, or unset alteryx_one.expected_workspace_id."),
+        ConfigMissing => Some(
+            "Run 'ayx onboard' to set up a profile, or 'ayx doctor config' to inspect the current one.",
+        ),
+        AuthFailed => Some(
+            "Run 'ayx doctor auth' to inspect auth posture. Re-run 'ayx onboard' if tokens are stale.",
+        ),
+        PermissionDenied => Some(
+            "Check that the active profile's token has the required role/scope for this resource.",
+        ),
+        NotFound => Some(
+            "Verify the id is correct. Use 'ayx <surface> list' to enumerate available resources.",
+        ),
+        Validation => Some(
+            "Inspect the failed flag or input; '--help' on the subcommand documents accepted values.",
+        ),
+        Conflict => Some(
+            "Resource is in a conflicting state. Inspect the current state with the detail command, then retry.",
+        ),
+        RateLimited => {
+            Some("Retry after the suggested delay; consider --max-pages to bound auto-pagination.")
+        }
+        Network => Some(
+            "Run 'ayx doctor network' to diagnose connectivity. Check VPN/proxy if applicable.",
+        ),
+        Upstream => Some(
+            "Upstream returned a 5xx. Retry; if it persists, escalate to the Alteryx One status page.",
+        ),
+        WorkspaceMismatch => Some(
+            "Re-authenticate against the expected workspace, or unset alteryx_one.expected_workspace_id.",
+        ),
         Internal => None,
     }
 }

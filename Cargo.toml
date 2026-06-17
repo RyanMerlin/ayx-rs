@@ -14,22 +14,42 @@ members = [
 ]
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
 license = "Apache-2.0"
 version = "0.9.9"
 authors = ["AYX Team", "Ryan Merlin"]
 
 [workspace.dependencies]
 anyhow = "1"
+axum = "0.8"
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+crossterm = "0.29"
+csv = "1"
+fs_extra = "1.3"
+httpmock = "0.8"
+keyring-core = "1"
+lzf = "1"
+maud = "0.27"
+mime_guess = "2"
+ratatui = "0.30"
+regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "form", "json", "rustls", "multipart"] }
 roxmltree = "0.21"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+serial_test = "3"
+snap = "1"
+self_update = "0.44.0"
 tempfile = "3"
 thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
+tower = "0.5"
+tower-http = { version = "0.7", features = ["trace", "compression-gzip"] }
+rust-embed = "8"
 url = "2"
 walkdir = "2"
 zip = "8"

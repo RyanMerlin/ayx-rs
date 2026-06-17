@@ -4,21 +4,21 @@ use std::io::Seek;
 use std::io::Write;
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use roxmltree::Document;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use serde_yaml::Value as YamlValue;
 use snap::raw::Decoder as SnapDecoder;
 use walkdir::WalkDir;
+use zip::ZipWriter;
 use zip::read::ZipArchive;
 use zip::write::SimpleFileOptions;
-use zip::ZipWriter;
 
 pub mod cloud_convert;
 
 pub use cloud_convert::{
-    convert_desktop_to_cloud, CloudConversionOptions, CloudConversionReport, CloudConversionWarning,
+    CloudConversionOptions, CloudConversionReport, CloudConversionWarning, convert_desktop_to_cloud,
 };
 
 const DEFAULT_MAX_WORKFLOW_XML_BYTES: usize = 32 * 1024 * 1024;
@@ -808,14 +808,26 @@ fn parse_blob(
     }
     let block_start = start + (fixed_portion & 0x7fff_ffff) as usize;
     if block_start + 4 > record.len() {
-        bail!("yxdb var-data offset out of range for field '{}' at offset {} in record len {} (pointer {})", field_name, start, record.len(), fixed_portion);
+        bail!(
+            "yxdb var-data offset out of range for field '{}' at offset {} in record len {} (pointer {})",
+            field_name,
+            start,
+            record.len(),
+            fixed_portion
+        );
     }
     let first_byte = record[block_start];
     if first_byte & 1 == 1 {
         let len = (first_byte >> 1) as usize;
         let end = block_start + 1 + len;
         if end > record.len() {
-            bail!("yxdb var-data out of range for field '{}' at offset {} in record len {} (pointer {})", field_name, start, record.len(), fixed_portion);
+            bail!(
+                "yxdb var-data out of range for field '{}' at offset {} in record len {} (pointer {})",
+                field_name,
+                start,
+                record.len(),
+                fixed_portion
+            );
         }
         let bytes = record[block_start + 1..end].to_vec();
         return if wstring {
@@ -1039,14 +1051,14 @@ fn normalize_text(text: &str) -> String {
 }
 
 fn validate_xml_text(text: &str, limits: &WorkflowSafetyLimits) -> Result<()> {
-    if let Some(max_workflow_xml_bytes) = limits.max_workflow_xml_bytes {
-        if text.len() > max_workflow_xml_bytes {
-            bail!(
-                "workflow XML exceeds safety cap ({} bytes > {})",
-                text.len(),
-                max_workflow_xml_bytes
-            );
-        }
+    if let Some(max_workflow_xml_bytes) = limits.max_workflow_xml_bytes
+        && text.len() > max_workflow_xml_bytes
+    {
+        bail!(
+            "workflow XML exceeds safety cap ({} bytes > {})",
+            text.len(),
+            max_workflow_xml_bytes
+        );
     }
     let normalized = normalize_text(text);
     Document::parse(&normalized).context("failed to parse workflow xml")?;

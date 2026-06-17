@@ -2,7 +2,7 @@ use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use serde_json::json;
 
-use crate::{ui_command_envelope, UiSessionCommand};
+use crate::{UiSessionCommand, ui_command_envelope};
 
 pub(crate) fn execute(command: Option<UiSessionCommand>) -> Result<Envelope> {
     Ok(match command {

@@ -99,15 +99,15 @@ pub fn validate<C: CatalogLookup>(registry: &Registry, catalog: &C) -> Validatio
                             });
                         }
                     }
-                    if let Some(cap) = capability {
-                        if !catalog.has_capability(cap) {
-                            report.findings.push(ValidationFinding {
-                                tactic_id: tactic.id.clone(),
-                                step_index: index,
-                                kind: FindingKind::UnknownCapability,
-                                detail: format!("capability id '{cap}' is not in the catalog"),
-                            });
-                        }
+                    if let Some(cap) = capability
+                        && !catalog.has_capability(cap)
+                    {
+                        report.findings.push(ValidationFinding {
+                            tactic_id: tactic.id.clone(),
+                            step_index: index,
+                            kind: FindingKind::UnknownCapability,
+                            detail: format!("capability id '{cap}' is not in the catalog"),
+                        });
                     }
                     // Apply-missing lint: a mutating-or-destructive tactic
                     // step whose command looks like it would mutate state

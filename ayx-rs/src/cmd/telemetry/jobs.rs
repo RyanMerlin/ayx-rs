@@ -3,18 +3,18 @@
 //! Pages `/v4/jobLibrary`, normalizes via `JobGroupListPage`, then filters
 //! and aggregates in Rust. All read-only — no `--apply` gate.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ayx_core::envelope::Envelope;
 use ayx_one_api::types::{JobGroupListPage, JobGroupSummary};
-use ayx_one_api::{one_api_list_request, OneListParams};
+use ayx_one_api::{OneListParams, one_api_list_request};
 use chrono::{DateTime, Utc};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::aggregate::{DurationStats, WeeklyMatrix};
 use super::server;
 use super::source::TelemetrySource;
 use super::window::Window;
-use super::{load_and_pick_source, TelemetryArgs};
+use super::{TelemetryArgs, load_and_pick_source};
 
 pub fn running(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelope> {
     let (config, src) = load_and_pick_source(args, environment)?;
@@ -374,11 +374,7 @@ pub(super) fn duration_ms(j: &JobGroupSummary) -> Option<u64> {
     let start = DateTime::parse_from_rfc3339(j.started_at.as_deref()?).ok()?;
     let end = DateTime::parse_from_rfc3339(j.finished_at.as_deref()?).ok()?;
     let ms = (end - start).num_milliseconds();
-    if ms < 0 {
-        None
-    } else {
-        Some(ms as u64)
-    }
+    if ms < 0 { None } else { Some(ms as u64) }
 }
 
 pub(super) fn wait_ms(j: &JobGroupSummary) -> Option<u64> {
@@ -391,11 +387,7 @@ pub(super) fn wait_ms(j: &JobGroupSummary) -> Option<u64> {
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_else(Utc::now);
     let ms = (end_ts - created.with_timezone(&Utc)).num_milliseconds();
-    if ms < 0 {
-        None
-    } else {
-        Some(ms as u64)
-    }
+    if ms < 0 { None } else { Some(ms as u64) }
 }
 
 pub(super) fn pct(num: usize, denom: usize) -> f64 {

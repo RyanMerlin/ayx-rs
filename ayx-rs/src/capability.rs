@@ -3,9 +3,9 @@ use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use roxmltree::Document;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use ayx_core::envelope::Envelope;
 use ayx_workflow::{inspect as inspect_workflow, validate as validate_workflow};
@@ -319,7 +319,9 @@ fn designer_capabilities() -> Vec<CapabilityRegistration> {
                     "Future Designer IPC transport can map higher-level connection contracts onto the same capability id.",
                 ],
             },
-            executor: Box::new(FnCapabilityExecutor(execute_designer_tool_replace_connections)),
+            executor: Box::new(FnCapabilityExecutor(
+                execute_designer_tool_replace_connections,
+            )),
         },
     ]
 }
@@ -329,8 +331,7 @@ fn cloud_capabilities() -> Vec<CapabilityRegistration> {
         CapabilityRegistration {
             descriptor: CapabilityDescriptor {
                 id: "cloud.docs.search",
-                summary:
-                    "Search cloud-side documentation capabilities when remote support is available.",
+                summary: "Search cloud-side documentation capabilities when remote support is available.",
                 tags: &["cloud", "docs", "search", "remote"],
                 safety: SafetyMode::ReadOnly,
                 provider: CapabilityProvider::CloudRemote,
@@ -581,13 +582,12 @@ fn parse_tools_and_connections(xml: &str, selected_tool_ids: &[String]) -> Resul
         if let Some(plugin) = tool.get("plugin").and_then(Value::as_str) {
             plugins.push(plugin.to_string());
         }
-        if let Some(tool_id) = tool.get("tool_id").and_then(Value::as_str) {
-            if selected_tool_ids
+        if let Some(tool_id) = tool.get("tool_id").and_then(Value::as_str)
+            && selected_tool_ids
                 .iter()
                 .any(|selected_id| selected_id == tool_id)
-            {
-                selected.push(tool.clone());
-            }
+        {
+            selected.push(tool.clone());
         }
         tools.push(tool);
     }
@@ -829,9 +829,11 @@ mod tests {
                 .filter_map(Value::as_str)
                 .any(|tag| tag == "designer")
         }));
-        assert!(listed
-            .iter()
-            .any(|item| item["id"] == "designer.workflow.context"));
+        assert!(
+            listed
+                .iter()
+                .any(|item| item["id"] == "designer.workflow.context")
+        );
     }
 
     #[test]
@@ -873,10 +875,12 @@ mod tests {
         )
         .expect("add");
         assert_eq!(result["applied"], false);
-        assert!(result["updated_xml"]
-            .as_str()
-            .expect("updated xml")
-            .contains(r#"ToolID="3""#));
+        assert!(
+            result["updated_xml"]
+                .as_str()
+                .expect("updated xml")
+                .contains(r#"ToolID="3""#)
+        );
         let persisted = fs::read_to_string(&path).expect("read after dry-run");
         assert_eq!(persisted, original);
         let _ = fs::remove_file(path);
@@ -909,8 +913,10 @@ mod tests {
             false,
         )
         .expect_err("cloud capability should be gated");
-        assert!(error
-            .to_string()
-            .contains("is not available in the current environment"));
+        assert!(
+            error
+                .to_string()
+                .contains("is not available in the current environment")
+        );
     }
 }

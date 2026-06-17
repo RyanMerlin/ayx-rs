@@ -6,7 +6,7 @@
 //! to guess — the operator gets a Validation error and a hint instead of a
 //! surprise.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ayx_core::profile::Config;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

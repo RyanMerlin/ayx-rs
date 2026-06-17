@@ -7,8 +7,8 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use maud::Markup;
 
-use crate::cmd::dashboard::views;
 use crate::cmd::dashboard::DashboardProfileError;
+use crate::cmd::dashboard::views;
 
 /// Wrap a `Markup` into a 200 HTML response.
 pub fn html(m: Markup) -> Response {

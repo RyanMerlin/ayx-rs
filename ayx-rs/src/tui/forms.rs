@@ -9,7 +9,7 @@
 //! Every function here is `pub(super)` so the App can call into them
 //! without exposing them outside the tui module.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::profile::{
     ApiProfile, Config, MongoEmbedded, MongoManaged, MongoProfile, ServerApiProfile, ServerProfile,

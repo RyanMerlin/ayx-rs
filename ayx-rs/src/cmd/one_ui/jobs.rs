@@ -2,7 +2,7 @@ use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use serde_json::json;
 
-use crate::{ui_command_envelope, UiJobsCommand};
+use crate::{UiJobsCommand, ui_command_envelope};
 
 pub(crate) fn execute(command: Option<UiJobsCommand>) -> Result<Envelope> {
     Ok(match command {

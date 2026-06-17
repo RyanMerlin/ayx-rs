@@ -1,10 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
 use crate::{
-    cmd::RuntimeCtx, load_payload, OneConnectionPermissionCommand, OneConnectionsCommand,
-    OneConnectorMetadataCommand, OneConnectorMetadataOverridesCommand,
+    OneConnectionPermissionCommand, OneConnectionsCommand, OneConnectorMetadataCommand,
+    OneConnectorMetadataOverridesCommand, cmd::RuntimeCtx, load_payload,
 };
 
 pub(crate) fn execute(
@@ -279,7 +279,7 @@ pub(crate) fn execute(
             Some(OneConnectionPermissionCommand::Detail {
                 profile,
                 connection_id,
-                aid,
+                subject_id,
             }) => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 let connection_id =
@@ -291,13 +291,13 @@ pub(crate) fn execute(
                     "GET",
                     "/v4/connections/{id}/permissions/{aid}",
                     false,
-                    &[("id", connection_id.as_str()), ("aid", aid.as_str())],
+                    &[("id", connection_id.as_str()), ("aid", subject_id.as_str())],
                 )?
             }
             Some(OneConnectionPermissionCommand::Delete {
                 profile,
                 connection_id,
-                aid,
+                subject_id,
             }) => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 let connection_id =
@@ -309,7 +309,7 @@ pub(crate) fn execute(
                     "DELETE",
                     "/v4/connections/{id}/permissions/{aid}",
                     true,
-                    &[("id", connection_id.as_str()), ("aid", aid.as_str())],
+                    &[("id", connection_id.as_str()), ("aid", subject_id.as_str())],
                 )?
             }
         },

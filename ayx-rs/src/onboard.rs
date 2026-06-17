@@ -5,14 +5,14 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::profile::{
-    canonical_profile_value, canonical_workspace_value, default_profile_storage_path,
-    default_workspace_storage_path, normalize_alteryx_base_url, AlteryxOneProfile, Config,
-    MongoDatabases, MongoEmbedded, MongoManaged, MongoMode, MongoProfile, ServerProfile,
-    SqlServerConnectionProfile, SqlServerProfile, TlsConfig, WorkspaceConfig,
+    AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded, MongoManaged, MongoMode,
+    MongoProfile, ServerProfile, SqlServerConnectionProfile, SqlServerProfile, TlsConfig,
+    WorkspaceConfig, canonical_profile_value, canonical_workspace_value,
+    default_profile_storage_path, default_workspace_storage_path, normalize_alteryx_base_url,
 };
 use ayx_core::secrets::{keyring_account, store_secret_with_fallback};
 use ayx_core::sensitive::write_sensitive_file;
@@ -63,7 +63,9 @@ pub fn run_onboarding(
     }
 
     println!("AYX onboarding");
-    println!("Press Enter to accept a default. Existing values are reused unless you choose to change them.");
+    println!(
+        "Press Enter to accept a default. Existing values are reused unless you choose to change them."
+    );
 
     config.profile_name = prompt_text(
         "Profile name",
@@ -452,55 +454,55 @@ pub(crate) fn secretize_config(
         }
     }
 
-    if let Some(api) = config.api.as_mut() {
-        if let Some(value) = api.auth.client_secret.take() {
-            let account = secret_scope(scope, "server.api.client_secret");
-            let reference = store(
-                &account,
-                &value,
-                "server.api.client_secret",
-                policy,
-                &mut out,
-            )?;
-            api.auth.client_secret_ref = Some(reference.clone());
-            out.refs
-                .insert("server.api.client_secret".to_string(), reference);
-        }
+    if let Some(api) = config.api.as_mut()
+        && let Some(value) = api.auth.client_secret.take()
+    {
+        let account = secret_scope(scope, "server.api.client_secret");
+        let reference = store(
+            &account,
+            &value,
+            "server.api.client_secret",
+            policy,
+            &mut out,
+        )?;
+        api.auth.client_secret_ref = Some(reference.clone());
+        out.refs
+            .insert("server.api.client_secret".to_string(), reference);
     }
 
-    if let Some(server) = config.server.as_mut() {
-        if !server.curator_api_secret.trim().is_empty() {
-            let value = std::mem::take(&mut server.curator_api_secret);
-            let account = secret_scope(scope, "server.curator_api_secret");
-            let reference = store(
-                &account,
-                &value,
-                "server.curator_api_secret",
-                policy,
-                &mut out,
-            )?;
-            server.curator_api_secret_ref = Some(reference.clone());
-            out.refs
-                .insert("server.curator_api_secret".to_string(), reference);
-        }
+    if let Some(server) = config.server.as_mut()
+        && !server.curator_api_secret.trim().is_empty()
+    {
+        let value = std::mem::take(&mut server.curator_api_secret);
+        let account = secret_scope(scope, "server.curator_api_secret");
+        let reference = store(
+            &account,
+            &value,
+            "server.curator_api_secret",
+            policy,
+            &mut out,
+        )?;
+        server.curator_api_secret_ref = Some(reference.clone());
+        out.refs
+            .insert("server.curator_api_secret".to_string(), reference);
     }
 
-    if let Some(mongo) = config.mongo.managed.as_mut() {
-        if let Some(value) = mongo.password.take() {
-            let account = secret_scope(scope, "server.storage.mongo.managed.password");
-            let reference = store(
-                &account,
-                &value,
-                "server.storage.mongo.managed.password",
-                policy,
-                &mut out,
-            )?;
-            mongo.password_ref = Some(reference.clone());
-            out.refs.insert(
-                "server.storage.mongo.managed.password".to_string(),
-                reference,
-            );
-        }
+    if let Some(mongo) = config.mongo.managed.as_mut()
+        && let Some(value) = mongo.password.take()
+    {
+        let account = secret_scope(scope, "server.storage.mongo.managed.password");
+        let reference = store(
+            &account,
+            &value,
+            "server.storage.mongo.managed.password",
+            policy,
+            &mut out,
+        )?;
+        mongo.password_ref = Some(reference.clone());
+        out.refs.insert(
+            "server.storage.mongo.managed.password".to_string(),
+            reference,
+        );
     }
 
     if let Some(sql) = config.sqlserver.as_mut() {
@@ -514,13 +516,13 @@ pub(crate) fn secretize_config(
                 sql.server_ui.as_mut(),
             ),
         ] {
-            if let Some(conn) = conn {
-                if let Some(value) = conn.password.take() {
-                    let account = secret_scope(scope, label);
-                    let reference = store(&account, &value, label, policy, &mut out)?;
-                    conn.password_ref = Some(reference.clone());
-                    out.refs.insert(label.to_string(), reference);
-                }
+            if let Some(conn) = conn
+                && let Some(value) = conn.password.take()
+            {
+                let account = secret_scope(scope, label);
+                let reference = store(&account, &value, label, policy, &mut out)?;
+                conn.password_ref = Some(reference.clone());
+                out.refs.insert(label.to_string(), reference);
             }
         }
     }
@@ -1054,11 +1056,11 @@ fn collect_onboarding_warnings(config: &Config) -> Vec<String> {
 
 fn detect_alteryx_service_path(runtime_settings_path: Option<&Path>) -> Option<PathBuf> {
     let mut candidates = Vec::new();
-    if let Some(runtime_settings_path) = runtime_settings_path {
-        if let Some(root) = runtime_settings_path.parent() {
-            candidates.push(root.join("bin").join("AlteryxService.exe"));
-            candidates.push(root.join("AlteryxService.exe"));
-        }
+    if let Some(runtime_settings_path) = runtime_settings_path
+        && let Some(root) = runtime_settings_path.parent()
+    {
+        candidates.push(root.join("bin").join("AlteryxService.exe"));
+        candidates.push(root.join("AlteryxService.exe"));
     }
 
     if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
@@ -1081,8 +1083,8 @@ fn detect_alteryx_service_path(runtime_settings_path: Option<&Path>) -> Option<P
 mod tests {
     use super::*;
     use ayx_core::profile::{
-        load_workspace_config, Config, MongoDatabases, MongoEmbedded, MongoMode, MongoProfile,
-        SqlServerConnectionProfile, SqlServerProfile, WorkspaceConfig,
+        Config, MongoDatabases, MongoEmbedded, MongoMode, MongoProfile, SqlServerConnectionProfile,
+        SqlServerProfile, WorkspaceConfig, load_workspace_config,
     };
     use std::collections::HashMap;
 
@@ -1152,17 +1154,21 @@ mod tests {
             .as_mut()
             .unwrap()
             .password = Some(String::new());
-        assert!(!summarize_onboarding_validation(&cfg)["ok"]
-            .as_bool()
-            .unwrap());
+        assert!(
+            !summarize_onboarding_validation(&cfg)["ok"]
+                .as_bool()
+                .unwrap()
+        );
     }
 
     #[test]
     fn onboarding_validator_accepts_complete_sql_profile() {
         let cfg = base_config();
-        assert!(summarize_onboarding_validation(&cfg)["ok"]
-            .as_bool()
-            .unwrap());
+        assert!(
+            summarize_onboarding_validation(&cfg)["ok"]
+                .as_bool()
+                .unwrap()
+        );
     }
 
     #[test]

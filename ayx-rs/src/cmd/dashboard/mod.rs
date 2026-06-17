@@ -6,9 +6,9 @@
 //! non-loopback address (the dashboard has no auth — Alteryx tokens live in
 //! process memory).
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
 use ayx_core::envelope::Envelope;
-use ayx_core::profile::{list_central_profiles, resolve_runtime_profile, RuntimeProfileResolution};
+use ayx_core::profile::{RuntimeProfileResolution, list_central_profiles, resolve_runtime_profile};
 use clap::Args;
 use serde_json::json;
 use std::net::{IpAddr, SocketAddr};
@@ -96,7 +96,9 @@ pub fn execute(environment: Option<&str>, cmd: DashboardCommand) -> Result<Envel
     let runtime = crate::cmd::RuntimeCtx::new(environment);
     if let Err(e) = runtime.load_profile_lenient(cmd.profile.as_deref()) {
         eprintln!("dashboard: warning — profile failed to load: {e}");
-        eprintln!("dashboard: server will start; telemetry panels will report errors until the profile is fixed.");
+        eprintln!(
+            "dashboard: server will start; telemetry panels will report errors until the profile is fixed."
+        );
     }
 
     let runtime = tokio::runtime::Builder::new_multi_thread()

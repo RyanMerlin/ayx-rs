@@ -2,7 +2,7 @@ use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::one_api_live_request;
 
-use crate::{cmd::RuntimeCtx, OneRoleCommand};
+use crate::{OneRoleCommand, cmd::RuntimeCtx};
 
 pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneRoleCommand) -> Result<Envelope> {
     Ok(match command {

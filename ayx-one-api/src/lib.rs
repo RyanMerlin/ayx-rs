@@ -4,18 +4,18 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use ayx_core::envelope::Envelope;
 use ayx_core::observability::{
-    record_api_event, redact_text, response_shape, transport_error_summary, ApiEvent,
+    ApiEvent, record_api_event, redact_text, response_shape, transport_error_summary,
 };
 use ayx_core::profile::Config;
 use ayx_core::sensitive::write_sensitive_file;
-use reqwest::blocking::multipart::{Form, Part};
-use reqwest::blocking::Client;
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER};
 use reqwest::StatusCode;
-use serde_json::{json, Value};
+use reqwest::blocking::Client;
+use reqwest::blocking::multipart::{Form, Part};
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER};
+use serde_json::{Value, json};
 use url::form_urlencoded::Serializer;
 const ONE_API_BASE_URL: &str = "https://us1.alteryxcloud.com";
 
@@ -136,6 +136,7 @@ fn token_failure_prefix(status: StatusCode) -> &'static str {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn one_response_metadata(
     surface: &str,
     operation: &str,
@@ -257,6 +258,7 @@ fn parse_one_response(content_type: &str, text: &str) -> ParsedOneResponse {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn one_transport_failure_envelope(
     status: Option<StatusCode>,
     surface: &str,
@@ -590,10 +592,10 @@ fn extract_next_token(response: &Value) -> Option<String> {
         "next_token",
         "cursor",
     ] {
-        if let Some(s) = response.get(key).and_then(|v| v.as_str()) {
-            if !s.is_empty() {
-                return Some(s.to_string());
-            }
+        if let Some(s) = response.get(key).and_then(|v| v.as_str())
+            && !s.is_empty()
+        {
+            return Some(s.to_string());
         }
     }
     None
@@ -656,14 +658,13 @@ pub fn one_api_live_request_with_body(
     // Workspace identity preflight: when --apply is set and the profile pins
     // an expected workspace id, fail closed if the token's current workspace
     // doesn't match. Avoids "right command, wrong tenant" disasters.
-    if mutating {
-        if let Some(expected) = config
+    if mutating
+        && let Some(expected) = config
             .alteryx_one
             .as_ref()
             .and_then(|o| o.expected_workspace_id.as_deref())
-        {
-            verify_workspace_identity(config, surface, operation, &url, expected)?;
-        }
+    {
+        verify_workspace_identity(config, surface, operation, &url, expected)?;
     }
 
     let client = build_client()?;
@@ -1721,12 +1722,12 @@ fn apply_jitter(base_ms: u64, pct: u64) -> u64 {
 /// `https://us1.alteryxcloud.com`, `https://eu1.alteryxcloud.com`,
 /// `https://ap1.alteryxcloud.com`.
 pub fn resolve_one_base_url(config: &Config) -> String {
-    if let Some(one) = config.alteryx_one.as_ref() {
-        if let Some(url) = one.normalized_base_url() {
-            let trimmed = url.trim().trim_end_matches('/').to_string();
-            if !trimmed.is_empty() {
-                return trimmed;
-            }
+    if let Some(one) = config.alteryx_one.as_ref()
+        && let Some(url) = one.normalized_base_url()
+    {
+        let trimmed = url.trim().trim_end_matches('/').to_string();
+        if !trimmed.is_empty() {
+            return trimmed;
         }
     }
     if let Ok(env_url) = std::env::var("AYX_ONE_API_BASE_URL") {

@@ -4,13 +4,13 @@
 use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::jobs::{duration_ms, fetch_job_groups, is_failure_status, within_window};
 use super::server;
 use super::source::TelemetrySource;
 use super::window::Window;
-use super::{load_and_pick_source, TelemetryArgs};
+use super::{TelemetryArgs, load_and_pick_source};
 
 const MAX_ERROR_PREVIEW: usize = 160;
 

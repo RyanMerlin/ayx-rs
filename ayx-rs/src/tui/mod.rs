@@ -8,7 +8,7 @@ use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
     prelude::*,
@@ -58,12 +58,11 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
     loop {
         app.tick();
         terminal.draw(|frame| render(frame, app))?;
-        if event::poll(std::time::Duration::from_millis(200))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    app.handle_key(key);
-                }
-            }
+        if event::poll(std::time::Duration::from_millis(200))?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            app.handle_key(key);
         }
         if app.should_quit {
             break;
@@ -1631,8 +1630,12 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
                 "Type id · Enter run · Esc cancel"
             } else {
                 match app.one_browser.pane {
-                    app::OneBrowserPane::Resources => "Arrows browse resources · Enter refresh/prompt/drill · Tab items · b back · Esc back",
-                    app::OneBrowserPane::Items => "Arrows browse items · Enter drill down · Tab resources · b back · Esc back",
+                    app::OneBrowserPane::Resources => {
+                        "Arrows browse resources · Enter refresh/prompt/drill · Tab items · b back · Esc back"
+                    }
+                    app::OneBrowserPane::Items => {
+                        "Arrows browse items · Enter drill down · Tab resources · b back · Esc back"
+                    }
                 }
             }
         }

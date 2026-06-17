@@ -8,9 +8,9 @@ use anyhow::Result;
 use ayx_core::envelope::Envelope;
 
 use crate::{
-    tools_workspace_compare_envelope, tools_workspace_init_envelope,
-    tools_workspace_migrate_envelope, tools_workspace_resolve_envelope, ToolsCommand,
-    ToolsWorkspaceCommand,
+    ToolsCommand, ToolsWorkspaceCommand, tools_workspace_compare_envelope,
+    tools_workspace_init_envelope, tools_workspace_migrate_envelope,
+    tools_workspace_resolve_envelope,
 };
 
 pub fn execute(command: Option<ToolsCommand>) -> Result<Envelope> {

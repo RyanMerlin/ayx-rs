@@ -197,12 +197,12 @@ fn first_list_item_id(stdout: &str, id_keys: &[&str]) -> Option<String> {
     ];
 
     for candidate in candidates {
-        if let Some(items) = candidate.as_array() {
-            if let Some(first) = items.first() {
-                for key in id_keys {
-                    if let Some(id) = first.get(*key).and_then(|value| value.as_str()) {
-                        return Some(id.to_string());
-                    }
+        if let Some(items) = candidate.as_array()
+            && let Some(first) = items.first()
+        {
+            for key in id_keys {
+                if let Some(id) = first.get(*key).and_then(|value| value.as_str()) {
+                    return Some(id.to_string());
                 }
             }
         }
@@ -223,12 +223,12 @@ fn first_list_item_field(stdout: &str, field_keys: &[&str]) -> Option<String> {
     ];
 
     for candidate in candidates {
-        if let Some(items) = candidate.as_array() {
-            if let Some(first) = items.first() {
-                for key in field_keys {
-                    if let Some(value) = first.get(*key).and_then(|value| value.as_str()) {
-                        return Some(value.to_string());
-                    }
+        if let Some(items) = candidate.as_array()
+            && let Some(first) = items.first()
+        {
+            for key in field_keys {
+                if let Some(value) = first.get(*key).and_then(|value| value.as_str()) {
+                    return Some(value.to_string());
                 }
             }
         }
@@ -313,8 +313,7 @@ fn error_code_from_stderr(stderr: &str) -> Option<String> {
 fn assert_live_error_code(stderr: &str, allowed: &[&str]) {
     let code = error_code_from_stderr(stderr);
     assert!(
-        code.as_deref()
-            .is_some_and(|code| allowed.iter().any(|allowed| *allowed == code))
+        code.as_deref().is_some_and(|code| allowed.contains(&code))
             || allowed.iter().any(|needle| stderr.contains(needle)),
         "unexpected live failure\nstderr:\n{stderr}"
     );
@@ -686,7 +685,9 @@ live_case!(
 
 live_page_boundary_case!(
     one_flows_folders_list_page_boundary_live,
-    args = ["--output", "json", "one", "flows", "folders", "list", "--limit", "1"],
+    args = [
+        "--output", "json", "one", "flows", "folders", "list", "--limit", "1"
+    ],
     ok = ["\"surface\": \"flow\"", "\"operation\": \"folders-list\""]
 );
 
@@ -1483,7 +1484,7 @@ fn one_connections_permissions_detail_not_found_live() {
     ) else {
         return;
     };
-    let invalid_aid = "missing-aid";
+    let invalid_subject_id = "missing-subject-id";
 
     let (success, stdout, stderr) = run_ayx_result(
         &[
@@ -1495,8 +1496,8 @@ fn one_connections_permissions_detail_not_found_live() {
             "detail",
             "--connection-id",
             &connection_id,
-            "--aid",
-            invalid_aid,
+            "--subject-id",
+            invalid_subject_id,
         ],
         &live,
     );

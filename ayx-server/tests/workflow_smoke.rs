@@ -46,14 +46,18 @@ fn backup_plan_reports_expected_artifacts() {
     let dir = unique_temp_dir("ayx-server-backup");
     let plan = backup_plan(&dir).expect("backup plan should generate");
     assert_eq!(plan["backup_dir"], dir.display().to_string());
-    assert!(plan["commands"]
-        .as_array()
-        .map(|steps| !steps.is_empty())
-        .unwrap_or(false));
-    assert!(plan["settings_files"]
-        .as_array()
-        .map(|steps| !steps.is_empty())
-        .unwrap_or(false));
+    assert!(
+        plan["commands"]
+            .as_array()
+            .map(|steps| !steps.is_empty())
+            .unwrap_or(false)
+    );
+    assert!(
+        plan["settings_files"]
+            .as_array()
+            .map(|steps| !steps.is_empty())
+            .unwrap_or(false)
+    );
 }
 
 #[test]

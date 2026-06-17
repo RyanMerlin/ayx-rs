@@ -148,7 +148,7 @@ fn yxdb_fixture_reads_and_exports_csv() {
 /// previously round-tripped cleanly, this test fails.
 #[test]
 fn workflow_roundtrip_canary() {
-    use ayx_workflow::{convert_desktop_to_cloud, CloudConversionOptions};
+    use ayx_workflow::{CloudConversionOptions, convert_desktop_to_cloud};
 
     let fixture = fixture_dir().join("root.yxmd");
     let report = convert_desktop_to_cloud(&fixture, CloudConversionOptions::default())

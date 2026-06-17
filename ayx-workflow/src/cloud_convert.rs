@@ -2,10 +2,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use roxmltree::{Document, Node};
 use serde::Serialize;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1014,22 +1014,16 @@ fn infer_node_schemas(root: Node<'_, '_>, source: &str) -> HashMap<String, Vec<F
                             .cloned();
                         input.map(|schema| schema_rank(dom, &schema))
                     }
-                    "AlteryxBasePluginsGui.MultiFieldFormula.MultiFieldFormula" => {
-                        let input = incoming
-                            .get(&node.tool_id)
-                            .and_then(|items| items.first())
-                            .and_then(|conn| schemas.get(&conn.origin_tool_id))
-                            .cloned();
-                        input
-                    }
-                    "AlteryxBasePluginsGui.MultiRowFormula.MultiRowFormula" => {
-                        let input = incoming
-                            .get(&node.tool_id)
-                            .and_then(|items| items.first())
-                            .and_then(|conn| schemas.get(&conn.origin_tool_id))
-                            .cloned();
-                        input
-                    }
+                    "AlteryxBasePluginsGui.MultiFieldFormula.MultiFieldFormula" => incoming
+                        .get(&node.tool_id)
+                        .and_then(|items| items.first())
+                        .and_then(|conn| schemas.get(&conn.origin_tool_id))
+                        .cloned(),
+                    "AlteryxBasePluginsGui.MultiRowFormula.MultiRowFormula" => incoming
+                        .get(&node.tool_id)
+                        .and_then(|items| items.first())
+                        .and_then(|conn| schemas.get(&conn.origin_tool_id))
+                        .cloned(),
                     "AlteryxBasePluginsGui.RecordID.RecordID" => {
                         let input = incoming
                             .get(&node.tool_id)
@@ -1167,11 +1161,11 @@ fn infer_node_schemas(root: Node<'_, '_>, source: &str) -> HashMap<String, Vec<F
             } else {
                 None
             };
-            if let Some(schema) = schema {
-                if schemas.get(&node.tool_id) != Some(&schema) {
-                    schemas.insert(node.tool_id.clone(), schema);
-                    changed = true;
-                }
+            if let Some(schema) = schema
+                && schemas.get(&node.tool_id) != Some(&schema)
+            {
+                schemas.insert(node.tool_id.clone(), schema);
+                changed = true;
             }
         }
     }
@@ -1420,20 +1414,20 @@ fn normalize_repeated_structures(value: &mut Value) {
                 "Method",
                 "r",
             ] {
-                if let Some(value) = obj.get_mut(key) {
-                    if value.is_object() {
-                        let old = value.take();
-                        *value = Value::Array(vec![old]);
-                    }
+                if let Some(value) = obj.get_mut(key)
+                    && value.is_object()
+                {
+                    let old = value.take();
+                    *value = Value::Array(vec![old]);
                 }
             }
             if let Some(rows) = obj.get_mut("r").and_then(Value::as_array_mut) {
                 for row in rows {
-                    if let Some(cells) = row.as_object_mut().and_then(|obj| obj.get_mut("c")) {
-                        if cells.is_object() {
-                            let old = cells.take();
-                            *cells = Value::Array(vec![old]);
-                        }
+                    if let Some(cells) = row.as_object_mut().and_then(|obj| obj.get_mut("c"))
+                        && cells.is_object()
+                    {
+                        let old = cells.take();
+                        *cells = Value::Array(vec![old]);
                     }
                 }
             }
@@ -1485,48 +1479,44 @@ fn patch_connections(content: &mut Value, nodes: &HashMap<String, NodeSpec>) {
         let Some(obj) = connection.as_object_mut() else {
             continue;
         };
-        if let Some(origin) = obj.get_mut("Origin").and_then(Value::as_object_mut) {
-            if let Some(plugin) = origin
+        if let Some(origin) = obj.get_mut("Origin").and_then(Value::as_object_mut)
+            && let Some(plugin) = origin
                 .get("@ToolID")
                 .and_then(Value::as_str)
                 .and_then(|tool_id| nodes.get(tool_id))
                 .map(|node| node.plugin.as_str())
-            {
-                if let Some(new_conn) = lookup_connection_rewrite(
-                    plugin,
-                    "origin",
-                    origin
-                        .get("@Connection")
-                        .and_then(Value::as_str)
-                        .unwrap_or(""),
-                ) {
-                    origin.insert(
-                        "@Connection".to_string(),
-                        Value::String(new_conn.to_string()),
-                    );
-                }
-            }
+            && let Some(new_conn) = lookup_connection_rewrite(
+                plugin,
+                "origin",
+                origin
+                    .get("@Connection")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+            )
+        {
+            origin.insert(
+                "@Connection".to_string(),
+                Value::String(new_conn.to_string()),
+            );
         }
-        if let Some(dest) = obj.get_mut("Destination").and_then(Value::as_object_mut) {
-            if let Some(plugin) = dest
+        if let Some(dest) = obj.get_mut("Destination").and_then(Value::as_object_mut)
+            && let Some(plugin) = dest
                 .get("@ToolID")
                 .and_then(Value::as_str)
                 .and_then(|tool_id| nodes.get(tool_id))
                 .map(|node| node.plugin.as_str())
-            {
-                if let Some(new_conn) = lookup_connection_rewrite(
-                    plugin,
-                    "destination",
-                    dest.get("@Connection")
-                        .and_then(Value::as_str)
-                        .unwrap_or(""),
-                ) {
-                    dest.insert(
-                        "@Connection".to_string(),
-                        Value::String(new_conn.to_string()),
-                    );
-                }
-            }
+            && let Some(new_conn) = lookup_connection_rewrite(
+                plugin,
+                "destination",
+                dest.get("@Connection")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+            )
+        {
+            dest.insert(
+                "@Connection".to_string(),
+                Value::String(new_conn.to_string()),
+            );
         }
     }
 }
@@ -1725,17 +1715,14 @@ fn patch_filter_configuration(node: &mut Value, schema: Option<&[FieldSchema]>) 
         if let Some(simple) = configuration
             .get_mut("Simple")
             .and_then(Value::as_object_mut)
+            && !simple.contains_key("FieldType")
+            && let Some(schema) = schema
+            && let Some(field) = schema.iter().find(|item| item.name == field_name)
         {
-            if !simple.contains_key("FieldType") {
-                if let Some(schema) = schema {
-                    if let Some(field) = schema.iter().find(|item| item.name == field_name) {
-                        simple.insert(
-                            "FieldType".to_string(),
-                            Value::String(field.record_type.clone()),
-                        );
-                    }
-                }
-            }
+            simple.insert(
+                "FieldType".to_string(),
+                Value::String(field.record_type.clone()),
+            );
         }
         if !configuration.contains_key("Expression") && !field_name.is_empty() {
             let expression = match operator.as_str() {
@@ -1952,13 +1939,11 @@ fn patch_dynamic_replace_configuration(node: &mut Value) {
         .and_then(Value::as_object_mut)
         .and_then(|props| props.get_mut("Configuration"))
         .and_then(Value::as_object_mut)
-    {
-        if let Some(output_field_type) = configuration
+        && let Some(output_field_type) = configuration
             .get_mut("OutputFieldType")
             .and_then(Value::as_object_mut)
-        {
-            output_field_type.remove("@size");
-        }
+    {
+        output_field_type.remove("@size");
     }
 }
 
@@ -2040,31 +2025,28 @@ fn patch_arrange_configuration(node: &mut Value) {
     if let Some(output_fields) = configuration
         .get_mut("OutputFields")
         .and_then(Value::as_object_mut)
+        && let Some(data) = output_fields.get_mut("Data").and_then(Value::as_object_mut)
+        && let Some(rows) = data.get_mut("r").and_then(Value::as_array_mut)
     {
-        if let Some(data) = output_fields.get_mut("Data").and_then(Value::as_object_mut) {
-            if let Some(rows) = data.get_mut("r").and_then(Value::as_array_mut) {
-                let mut rewritten_rows = Vec::new();
-                for row in rows.iter() {
-                    let values = row
-                        .as_object()
-                        .and_then(|obj| obj.get("c"))
-                        .map(|value| match value {
-                            Value::Array(items) => items.clone(),
-                            Value::Object(_) => vec![value.clone()],
-                            _ => Vec::new(),
-                        })
-                        .unwrap_or_default();
-                    let non_empty: Vec<_> = values
-                        .into_iter()
-                        .filter(|value| !value.is_null() && value != "")
-                        .collect();
-                    rewritten_rows.push(
-                        json!({"c": non_empty, "__id": format!("{}", rewritten_rows.len() + 1)}),
-                    );
-                }
-                data.insert("r".to_string(), Value::Array(rewritten_rows));
-            }
+        let mut rewritten_rows = Vec::new();
+        for row in rows.iter() {
+            let values = row
+                .as_object()
+                .and_then(|obj| obj.get("c"))
+                .map(|value| match value {
+                    Value::Array(items) => items.clone(),
+                    Value::Object(_) => vec![value.clone()],
+                    _ => Vec::new(),
+                })
+                .unwrap_or_default();
+            let non_empty: Vec<_> = values
+                .into_iter()
+                .filter(|value| !value.is_null() && value != "")
+                .collect();
+            rewritten_rows
+                .push(json!({"c": non_empty, "__id": format!("{}", rewritten_rows.len() + 1)}));
         }
+        data.insert("r".to_string(), Value::Array(rewritten_rows));
     }
 }
 
@@ -2245,15 +2227,15 @@ fn patch_node(
                 ],
             );
         }
-    } else if let Some(schema) = schema {
-        if !matches!(
+    } else if let Some(schema) = schema
+        && !matches!(
             plugin,
             "AlteryxGuiToolkit.TextBox.TextBox"
                 | "AlteryxGuiToolkit.ToolContainer.ToolContainer"
                 | "AlteryxBasePluginsGui.DbFileOutput.DbFileOutput"
-        ) {
-            patch_record_info(node, schema);
-        }
+        )
+    {
+        patch_record_info(node, schema);
     }
 
     if plugin == "DateTimeNow" {
@@ -2268,38 +2250,34 @@ fn patch_node(
     if plugin == "AlteryxBasePluginsGui.FuzzyMatch.FuzzyMatch" {
         patch_fuzzy_match_configuration(node);
     }
-    if plugin == "AlteryxBasePluginsGui.TextToColumns.TextToColumns" {
-        if let Some(configuration) = node
+    if plugin == "AlteryxBasePluginsGui.TextToColumns.TextToColumns"
+        && let Some(configuration) = node
             .as_object_mut()
             .and_then(|obj| obj.get_mut("Properties"))
             .and_then(Value::as_object_mut)
             .and_then(|props| props.get_mut("Configuration"))
             .and_then(Value::as_object_mut)
-        {
-            if let Some(mode) = configuration.remove("Mode") {
-                let mode_value = mode.get("@value").and_then(Value::as_str).unwrap_or("");
-                if mode_value == "Rows" {
-                    configuration
-                        .insert("RootName".to_string(), Value::String("Column".to_string()));
-                    configuration.insert("NumFields".to_string(), json!({"@value": "1"}));
-                    configuration.insert(
-                        "ErrorHandling".to_string(),
-                        Value::String("Last".to_string()),
-                    );
-                }
-            }
+        && let Some(mode) = configuration.remove("Mode")
+    {
+        let mode_value = mode.get("@value").and_then(Value::as_str).unwrap_or("");
+        if mode_value == "Rows" {
+            configuration.insert("RootName".to_string(), Value::String("Column".to_string()));
+            configuration.insert("NumFields".to_string(), json!({"@value": "1"}));
+            configuration.insert(
+                "ErrorHandling".to_string(),
+                Value::String("Last".to_string()),
+            );
         }
     }
-    if plugin == "AlteryxBasePluginsGui.XMLParse.XMLParse" {
-        if let Some(configuration) = node
+    if plugin == "AlteryxBasePluginsGui.XMLParse.XMLParse"
+        && let Some(configuration) = node
             .as_object_mut()
             .and_then(|obj| obj.get_mut("Properties"))
             .and_then(Value::as_object_mut)
             .and_then(|props| props.get_mut("Configuration"))
             .and_then(Value::as_object_mut)
-        {
-            configuration.remove("IncludeInOutput");
-        }
+    {
+        configuration.remove("IncludeInOutput");
     }
     if plugin == "AlteryxBasePluginsGui.Arrange.Arrange" {
         patch_arrange_configuration(node);
@@ -2389,10 +2367,10 @@ fn patch_nodes(
                     .map(|s| s.to_string());
                 let keys: Vec<_> = obj.keys().cloned().collect();
                 let _ = obj;
-                if let Some(tool_id) = tool_id {
-                    if let Some(spec) = specs.get(&tool_id) {
-                        patch_node(value, spec, schemas, incoming);
-                    }
+                if let Some(tool_id) = tool_id
+                    && let Some(spec) = specs.get(&tool_id)
+                {
+                    patch_node(value, spec, schemas, incoming);
                 }
                 if let Some(obj) = value.as_object_mut() {
                     for key in keys {

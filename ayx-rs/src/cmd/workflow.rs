@@ -7,15 +7,15 @@
 
 use std::fs;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use ayx_core::envelope::Envelope;
 use ayx_server_api::workflow_version_upload_envelope;
 use ayx_workflow::{
-    convert_desktop_to_cloud, inspect as inspect_workflow, load_rules as load_workflow_rules,
-    migrate as migrate_workflow, read_yxdb as read_yxdb_workflow, recurse as recurse_workflow,
+    CloudConversionOptions, WorkflowReplacement, convert_desktop_to_cloud,
+    inspect as inspect_workflow, load_rules as load_workflow_rules, migrate as migrate_workflow,
+    read_yxdb as read_yxdb_workflow, recurse as recurse_workflow,
     repackage_dir as repackage_workflow, replace as replace_workflow, scan as scan_workflow,
-    unpack_package as unpack_workflow, validate as validate_workflow, CloudConversionOptions,
-    WorkflowReplacement,
+    unpack_package as unpack_workflow, validate as validate_workflow,
 };
 use chrono::Utc;
 use serde_json::json;
@@ -167,8 +167,11 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
                     fail_on_unsupported,
                 },
             )?;
-            fs::write(&output, serde_json::to_string_pretty(&report.content)? + "\n")
-                .with_context(|| format!("failed to write '{}'", output.display()))?;
+            fs::write(
+                &output,
+                serde_json::to_string_pretty(&report.content)? + "\n",
+            )
+            .with_context(|| format!("failed to write '{}'", output.display()))?;
             Ok(Envelope::ok_with_data(
                 "workflow cloud conversion completed",
                 json!({

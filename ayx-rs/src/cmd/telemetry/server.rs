@@ -5,15 +5,15 @@
 //! Heavy aggregation runs client-side (`aggregate.rs`) over capped `find()`
 //! result sets, matching the Phase-1 One-side pattern.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ayx_core::envelope::Envelope;
 use ayx_core::profile::Config;
-use ayx_server::mongo::{mongo_query_spec_from_name, query_envelope, MongoQuerySpec};
+use ayx_server::mongo::{MongoQuerySpec, mongo_query_spec_from_name, query_envelope};
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use super::window::Window;
 use super::TelemetryArgs;
+use super::window::Window;
 
 /// Build a Mongo spec for the named template and substitute the profile's
 /// gallery/service database into it. The bundled templates default to the

@@ -18,15 +18,15 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ayx_core::envelope::Envelope;
 use ayx_core::profile::Config;
-use ayx_one_api::{one_api_list_request, one_api_live_request, OneListParams};
+use ayx_one_api::{OneListParams, one_api_list_request, one_api_live_request};
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::source::TelemetrySource;
-use super::{load_and_pick_source, TelemetryArgs};
+use super::{TelemetryArgs, load_and_pick_source};
 
 pub fn connections(
     environment: Option<&str>,

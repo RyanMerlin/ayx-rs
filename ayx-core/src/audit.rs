@@ -131,10 +131,10 @@ pub fn sweep_audit_dir(
 /// `${AYX_CONFIG_HOME}/audits` so artifacts land in a stable host-local
 /// location. Any non-default path is honored verbatim.
 pub fn resolve_audit_dir(audit_dir: &Path) -> PathBuf {
-    if audit_dir == Path::new("audits") {
-        if let Ok(home) = crate::profile::ayx_config_home() {
-            return home.join("audits");
-        }
+    if audit_dir == Path::new("audits")
+        && let Ok(home) = crate::profile::ayx_config_home()
+    {
+        return home.join("audits");
     }
     audit_dir.to_path_buf()
 }

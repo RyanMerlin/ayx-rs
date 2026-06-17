@@ -6,16 +6,16 @@ use std::{
 
 use anyhow::{Context, Result};
 use ayx_core::profile::{Config, ServerProfile};
-use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::Utc;
 use reqwest::blocking::ClientBuilder;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use roxmltree::Document;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use walkdir::WalkDir;
-use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 use crate::upgrade::{io, manifest, rules};
 
@@ -161,20 +161,19 @@ pub fn run_precheck(
     let server = config.server.as_ref();
     let mut token_status = "skipped";
     let mut token_details = "no server credentials".to_string();
-    if let Some(server) = server {
-        if !server.webapi_url.is_empty()
-            && !server.curator_api_key.is_empty()
-            && !server.curator_api_secret.is_empty()
-        {
-            match validate_token_endpoint(server) {
-                Ok(status) => {
-                    token_status = "pass";
-                    token_details = status;
-                }
-                Err(err) => {
-                    token_status = "fail";
-                    token_details = err.to_string();
-                }
+    if let Some(server) = server
+        && !server.webapi_url.is_empty()
+        && !server.curator_api_key.is_empty()
+        && !server.curator_api_secret.is_empty()
+    {
+        match validate_token_endpoint(server) {
+            Ok(status) => {
+                token_status = "pass";
+                token_details = status;
+            }
+            Err(err) => {
+                token_status = "fail";
+                token_details = err.to_string();
             }
         }
     }

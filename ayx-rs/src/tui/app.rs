@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::ListState;
 use serde_json::Value;
@@ -28,11 +28,11 @@ use super::forms::{
 use super::render_helpers::{extract_one_browser_items, pretty_yaml_lines, render_envelope_panel};
 
 use ayx_core::profile::{
-    default_profile_storage_path, list_central_profiles, list_central_workspaces, load_ayx_state,
-    load_workspace_config, normalize_alteryx_base_url, normalize_alteryx_one_base_url,
-    profile_resolution_detail, profile_storage_path, resolve_runtime_profile, save_ayx_state,
-    workspace_storage_path, AlteryxOneProfile, ApiAuth, ApiAuthMode, ApiLoggingProfile, ApiProfile,
-    Config, MongoMode, ObservabilityProfile, WorkspaceConfig,
+    AlteryxOneProfile, ApiAuth, ApiAuthMode, ApiLoggingProfile, ApiProfile, Config, MongoMode,
+    ObservabilityProfile, WorkspaceConfig, default_profile_storage_path, list_central_profiles,
+    list_central_workspaces, load_ayx_state, load_workspace_config, normalize_alteryx_base_url,
+    normalize_alteryx_one_base_url, profile_resolution_detail, profile_storage_path,
+    resolve_runtime_profile, save_ayx_state, workspace_storage_path,
 };
 
 use crate::onboard::{
@@ -1031,10 +1031,10 @@ impl App {
     }
 
     pub fn credentials_storage_target_label(&self) -> String {
-        if matches!(self.target_kind, TargetKind::Workspace) {
-            if let Some(profile_name) = self.active_profile.as_deref() {
-                return format!("active profile {profile_name}");
-            }
+        if matches!(self.target_kind, TargetKind::Workspace)
+            && let Some(profile_name) = self.active_profile.as_deref()
+        {
+            return format!("active profile {profile_name}");
         }
         let target = self
             .target_path
@@ -2009,19 +2009,18 @@ impl App {
     }
 
     fn sync_selected_entries(&mut self) {
-        if let Some(active_profile) = self.active_profile.as_ref() {
-            if let Some(index) = self.profiles.iter().position(|name| name == active_profile) {
-                self.profiles_state.select(Some(index));
-            }
+        if let Some(active_profile) = self.active_profile.as_ref()
+            && let Some(index) = self.profiles.iter().position(|name| name == active_profile)
+        {
+            self.profiles_state.select(Some(index));
         }
-        if let Some(active_workspace) = self.active_workspace.as_ref() {
-            if let Some(index) = self
+        if let Some(active_workspace) = self.active_workspace.as_ref()
+            && let Some(index) = self
                 .workspaces
                 .iter()
                 .position(|workspace| &workspace.name == active_workspace)
-            {
-                self.workspaces_state.select(Some(index));
-            }
+        {
+            self.workspaces_state.select(Some(index));
         }
         self.sync_workspace_env_cursor();
     }

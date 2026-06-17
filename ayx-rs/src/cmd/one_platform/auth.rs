@@ -2,8 +2,8 @@ use anyhow::Result;
 use ayx_core::envelope::Envelope;
 
 use crate::{
-    cmd::RuntimeCtx, one_platform_auth_diagnose_envelope, one_platform_auth_status_envelope,
-    OnePlatformAuthCommand,
+    OnePlatformAuthCommand, cmd::RuntimeCtx, one_platform_auth_diagnose_envelope,
+    one_platform_auth_status_envelope,
 };
 
 pub(crate) fn execute(

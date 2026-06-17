@@ -6,14 +6,14 @@ pub mod util;
 
 use std::{collections::HashMap, fs, path::Path, time::Duration};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use ayx_core::envelope::Envelope;
-use ayx_core::observability::{record_api_event, response_shape, ApiEvent};
+use ayx_core::observability::{ApiEvent, record_api_event, response_shape};
 use ayx_core::profile::{ObservabilityProfile, ServerProfile};
+use reqwest::Method;
 use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use reqwest::Method;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use url::form_urlencoded;
 
 pub fn import_swagger(

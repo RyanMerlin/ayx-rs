@@ -317,7 +317,7 @@ fn body_post_dry_run_envelope_includes_would_send() {
 // emit, and typed parsing of the result.
 
 use ayx_one_api::types::JobGroupListPage;
-use ayx_one_api::{one_api_list_request, OneListParams};
+use ayx_one_api::{OneListParams, one_api_list_request};
 use serde_json::Value;
 
 fn extract_list_items(env_data: &Value) -> &Vec<Value> {

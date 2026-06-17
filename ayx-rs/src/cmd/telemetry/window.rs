@@ -3,7 +3,7 @@
 //! Accepts `<N><unit>` where unit ∈ {h, d, w}. Returns the cutoff as a
 //! UTC `DateTime` along with the canonical string for echo in envelopes.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, Duration, Utc};
 
 #[derive(Debug, Clone)]
@@ -40,7 +40,7 @@ impl Window {
             other => {
                 return Err(anyhow!(
                     "validation: unknown --since unit '{other}'; expected one of h, d, w"
-                ))
+                ));
             }
         };
         let now = Utc::now();

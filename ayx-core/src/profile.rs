@@ -282,13 +282,12 @@ impl AlteryxOneProfile {
     }
 
     pub fn active_workspace_id(&self) -> Option<&str> {
-        if let Some(expected_workspace_id) = self.expected_workspace_id.as_deref() {
-            if self
+        if let Some(expected_workspace_id) = self.expected_workspace_id.as_deref()
+            && self
                 .workspace_credentials
                 .contains_key(expected_workspace_id)
-            {
-                return Some(expected_workspace_id);
-            }
+        {
+            return Some(expected_workspace_id);
         }
         if self.workspace_credentials.len() == 1 {
             return self.workspace_credentials.keys().next().map(String::as_str);
@@ -349,15 +348,14 @@ impl AlteryxOneProfile {
         &self,
         workspace_id: Option<&str>,
     ) -> Option<String> {
-        if let Some(credential) = self.workspace_credential_for(workspace_id) {
-            if let Some(url) = credential
+        if let Some(credential) = self.workspace_credential_for(workspace_id)
+            && let Some(url) = credential
                 .token_endpoint_url
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-            {
-                return Some(normalize_alteryx_one_token_endpoint(url));
-            }
+        {
+            return Some(normalize_alteryx_one_token_endpoint(url));
         }
         self.effective_token_endpoint_url()
     }
@@ -623,57 +621,54 @@ impl Config {
 
     fn resolve_secret_refs(mut self) -> Result<Self, ProfileError> {
         if let Some(one) = self.alteryx_one.as_mut() {
-            if one.access_token.is_none() {
-                if let Some(reference) = one.access_token_ref.as_deref() {
-                    one.access_token = resolve_secret_ref(reference)?;
-                }
+            if one.access_token.is_none()
+                && let Some(reference) = one.access_token_ref.as_deref()
+            {
+                one.access_token = resolve_secret_ref(reference)?;
             }
-            if one.refresh_token.is_none() {
-                if let Some(reference) = one.refresh_token_ref.as_deref() {
-                    one.refresh_token = resolve_secret_ref(reference)?;
-                }
+            if one.refresh_token.is_none()
+                && let Some(reference) = one.refresh_token_ref.as_deref()
+            {
+                one.refresh_token = resolve_secret_ref(reference)?;
             }
-            if one.client_secret.is_none() {
-                if let Some(reference) = one.client_secret_ref.as_deref() {
-                    one.client_secret = resolve_secret_ref(reference)?;
-                }
+            if one.client_secret.is_none()
+                && let Some(reference) = one.client_secret_ref.as_deref()
+            {
+                one.client_secret = resolve_secret_ref(reference)?;
             }
             for credential in one.workspace_credentials.values_mut() {
-                if credential.access_token.is_none() {
-                    if let Some(reference) = credential.access_token_ref.as_deref() {
-                        credential.access_token = resolve_secret_ref(reference)?;
-                    }
+                if credential.access_token.is_none()
+                    && let Some(reference) = credential.access_token_ref.as_deref()
+                {
+                    credential.access_token = resolve_secret_ref(reference)?;
                 }
-                if credential.refresh_token.is_none() {
-                    if let Some(reference) = credential.refresh_token_ref.as_deref() {
-                        credential.refresh_token = resolve_secret_ref(reference)?;
-                    }
+                if credential.refresh_token.is_none()
+                    && let Some(reference) = credential.refresh_token_ref.as_deref()
+                {
+                    credential.refresh_token = resolve_secret_ref(reference)?;
                 }
-                if credential.client_secret.is_none() {
-                    if let Some(reference) = credential.client_secret_ref.as_deref() {
-                        credential.client_secret = resolve_secret_ref(reference)?;
-                    }
+                if credential.client_secret.is_none()
+                    && let Some(reference) = credential.client_secret_ref.as_deref()
+                {
+                    credential.client_secret = resolve_secret_ref(reference)?;
                 }
             }
             one.canonicalize();
         }
 
-        if let Some(api) = self.api.as_mut() {
-            if api.auth.client_secret.is_none() {
-                if let Some(reference) = api.auth.client_secret_ref.as_deref() {
-                    api.auth.client_secret = resolve_secret_ref(reference)?;
-                }
-            }
+        if let Some(api) = self.api.as_mut()
+            && api.auth.client_secret.is_none()
+            && let Some(reference) = api.auth.client_secret_ref.as_deref()
+        {
+            api.auth.client_secret = resolve_secret_ref(reference)?;
         }
 
-        if let Some(server) = self.server.as_mut() {
-            if server.curator_api_secret.is_empty() {
-                if let Some(reference) = server.curator_api_secret_ref.as_deref() {
-                    if let Some(secret) = resolve_secret_ref(reference)? {
-                        server.curator_api_secret = secret;
-                    }
-                }
-            }
+        if let Some(server) = self.server.as_mut()
+            && server.curator_api_secret.is_empty()
+            && let Some(reference) = server.curator_api_secret_ref.as_deref()
+            && let Some(secret) = resolve_secret_ref(reference)?
+        {
+            server.curator_api_secret = secret;
         }
 
         if let Some(sqlserver) = self.sqlserver.as_mut() {
@@ -681,20 +676,19 @@ impl Config {
                 .into_iter()
                 .flatten()
             {
-                if conn.password.is_none() {
-                    if let Some(reference) = conn.password_ref.as_deref() {
-                        conn.password = resolve_secret_ref(reference)?;
-                    }
+                if conn.password.is_none()
+                    && let Some(reference) = conn.password_ref.as_deref()
+                {
+                    conn.password = resolve_secret_ref(reference)?;
                 }
             }
         }
 
-        if let Some(mongo) = self.mongo.managed.as_mut() {
-            if mongo.password.is_none() {
-                if let Some(reference) = mongo.password_ref.as_deref() {
-                    mongo.password = resolve_secret_ref(reference)?;
-                }
-            }
+        if let Some(mongo) = self.mongo.managed.as_mut()
+            && mongo.password.is_none()
+            && let Some(reference) = mongo.password_ref.as_deref()
+        {
+            mongo.password = resolve_secret_ref(reference)?;
         }
 
         Ok(self)
@@ -795,12 +789,12 @@ impl Config {
                     "alteryx_one.base_url is required".to_string(),
                 ));
             }
-            if let Some(client_id) = &one.oauth_client_id {
-                if client_id.trim().is_empty() {
-                    return Err(ProfileError::Invalid(
-                        "alteryx_one.oauth_client_id cannot be empty when set".to_string(),
-                    ));
-                }
+            if let Some(client_id) = &one.oauth_client_id
+                && client_id.trim().is_empty()
+            {
+                return Err(ProfileError::Invalid(
+                    "alteryx_one.oauth_client_id cannot be empty when set".to_string(),
+                ));
             }
             if let Some(client_secret) = &one.client_secret {
                 if client_secret.trim().is_empty() {
@@ -819,26 +813,26 @@ impl Config {
                     ));
                 }
             }
-            if let Some(url) = &one.base_url {
-                if url.trim().is_empty() {
-                    return Err(ProfileError::Invalid(
-                        "alteryx_one.base_url cannot be empty when set".to_string(),
-                    ));
-                }
+            if let Some(url) = &one.base_url
+                && url.trim().is_empty()
+            {
+                return Err(ProfileError::Invalid(
+                    "alteryx_one.base_url cannot be empty when set".to_string(),
+                ));
             }
-            if let Some(url) = &one.token_endpoint_url {
-                if url.trim().is_empty() {
-                    return Err(ProfileError::Invalid(
-                        "alteryx_one.token_endpoint_url cannot be empty when set".to_string(),
-                    ));
-                }
+            if let Some(url) = &one.token_endpoint_url
+                && url.trim().is_empty()
+            {
+                return Err(ProfileError::Invalid(
+                    "alteryx_one.token_endpoint_url cannot be empty when set".to_string(),
+                ));
             }
-            if let Some(token) = &one.access_token {
-                if token.trim().is_empty() {
-                    return Err(ProfileError::Invalid(
-                        "alteryx_one.access_token cannot be empty when set".to_string(),
-                    ));
-                }
+            if let Some(token) = &one.access_token
+                && token.trim().is_empty()
+            {
+                return Err(ProfileError::Invalid(
+                    "alteryx_one.access_token cannot be empty when set".to_string(),
+                ));
             }
             if let Some(token) = &one.refresh_token {
                 if token.trim().is_empty() {
@@ -896,19 +890,17 @@ impl Config {
             }
         }
 
-        if let Some(observability) = &self.observability {
-            if let Some(api_logging) = &observability.api_logging {
-                if api_logging.enabled
-                    && api_logging
-                        .path
-                        .as_ref()
-                        .is_some_and(|path| path.trim().is_empty())
-                {
-                    return Err(ProfileError::Invalid(
-                        "observability.api_logging.path cannot be empty when enabled".to_string(),
-                    ));
-                }
-            }
+        if let Some(observability) = &self.observability
+            && let Some(api_logging) = &observability.api_logging
+            && api_logging.enabled
+            && api_logging
+                .path
+                .as_ref()
+                .is_some_and(|path| path.trim().is_empty())
+        {
+            return Err(ProfileError::Invalid(
+                "observability.api_logging.path cannot be empty when enabled".to_string(),
+            ));
         }
 
         if let Some(server) = &self.server {
@@ -1307,10 +1299,10 @@ fn merge_one_profiles(
 fn normalize_profile_value(value: serde_yaml::Value) -> Result<serde_yaml::Value, ProfileError> {
     let value = normalize_canonical_server_block(value)?;
     let value = flatten_alteryx_server_block(value);
-    if let Some(workspace_value) = value.as_mapping() {
-        if workspace_value.contains_key(serde_yaml::Value::String("environments".to_string())) {
-            return normalize_workspace_environments(value);
-        }
+    if let Some(workspace_value) = value.as_mapping()
+        && workspace_value.contains_key(serde_yaml::Value::String("environments".to_string()))
+    {
+        return normalize_workspace_environments(value);
     }
     Ok(value)
 }
@@ -1323,14 +1315,13 @@ pub fn profile_shape_label(value: &serde_yaml::Value) -> &'static str {
         if let Some(environments) = root
             .get(serde_yaml::Value::String("environments".to_string()))
             .and_then(|value| value.as_mapping())
-        {
-            if environments.values().any(|env| {
+            && environments.values().any(|env| {
                 env.as_mapping().is_some_and(|map| {
                     map.contains_key(serde_yaml::Value::String("server".to_string()))
                 })
-            }) {
-                return "workspace-canonical";
-            }
+            })
+        {
+            return "workspace-canonical";
         }
         return "workspace-legacy";
     }
@@ -1618,24 +1609,24 @@ pub fn ayx_config_home() -> Result<PathBuf, ProfileError> {
     if let Some(path) = env::var_os("XDG_CONFIG_HOME") {
         return Ok(PathBuf::from(path).join("ayx"));
     }
-    if cfg!(windows) {
-        if let Some(path) = env::var_os("APPDATA") {
-            return Ok(PathBuf::from(path).join("ayx"));
-        }
+    if cfg!(windows)
+        && let Some(path) = env::var_os("APPDATA")
+    {
+        return Ok(PathBuf::from(path).join("ayx"));
     }
     if let Some(path) = env::var_os("HOME") {
         return Ok(PathBuf::from(path).join(".config").join("ayx"));
     }
-    if cfg!(windows) {
-        if let (Some(drive), Some(path)) = (env::var_os("HOMEDRIVE"), env::var_os("HOMEPATH")) {
-            return Ok(PathBuf::from(format!(
-                "{}{}",
-                PathBuf::from(drive).display(),
-                PathBuf::from(path).display()
-            ))
-            .join(".config")
-            .join("ayx"));
-        }
+    if cfg!(windows)
+        && let (Some(drive), Some(path)) = (env::var_os("HOMEDRIVE"), env::var_os("HOMEPATH"))
+    {
+        return Ok(PathBuf::from(format!(
+            "{}{}",
+            PathBuf::from(drive).display(),
+            PathBuf::from(path).display()
+        ))
+        .join(".config")
+        .join("ayx"));
     }
     Err(ProfileError::Invalid(
         "unable to resolve ayx config home; set AYX_CONFIG_HOME".to_string(),
@@ -1959,7 +1950,10 @@ mod tests {
     impl EnvGuard {
         fn set(key: &'static str, value: &str) -> Self {
             let old = std::env::var(key).ok();
-            std::env::set_var(key, value);
+            // Tests serialize env access with TEST_ENV_LOCK.
+            unsafe {
+                std::env::set_var(key, value);
+            }
             Self { key, old }
         }
     }
@@ -1967,9 +1961,15 @@ mod tests {
     impl Drop for EnvGuard {
         fn drop(&mut self) {
             if let Some(old) = &self.old {
-                std::env::set_var(self.key, old);
+                // Tests serialize env access with TEST_ENV_LOCK.
+                unsafe {
+                    std::env::set_var(self.key, old);
+                }
             } else {
-                std::env::remove_var(self.key);
+                // Tests serialize env access with TEST_ENV_LOCK.
+                unsafe {
+                    std::env::remove_var(self.key);
+                }
             }
         }
     }

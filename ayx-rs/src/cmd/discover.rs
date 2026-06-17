@@ -5,7 +5,7 @@
 //! enumerate top-level capabilities quickly; `--deep` expands the full
 //! subtree, and a path drill-down narrows to one branch.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ayx_core::envelope::Envelope;
 use clap::{ArgAction, CommandFactory};
 use serde::Serialize;

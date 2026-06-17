@@ -1,6 +1,6 @@
 //! Failures-first dashboard surface.
 
-use maud::{html, Markup};
+use maud::{Markup, html};
 use serde_json::Value;
 
 use super::{esc_attr, s_at};

@@ -78,20 +78,20 @@ impl UpgradeRules {
         queue.push_back(vec![source.to_string()]);
         seen.insert(source.to_string());
         while let Some(path) = queue.pop_front() {
-            if let Some(last) = path.last() {
-                if let Some(neighbors) = adjacency.get(last) {
-                    for neighbor in neighbors {
-                        if seen.contains(neighbor) {
-                            continue;
-                        }
-                        let mut candidate = path.clone();
-                        candidate.push(neighbor.clone());
-                        if neighbor == target {
-                            return candidate;
-                        }
-                        seen.insert(neighbor.clone());
-                        queue.push_back(candidate);
+            if let Some(last) = path.last()
+                && let Some(neighbors) = adjacency.get(last)
+            {
+                for neighbor in neighbors {
+                    if seen.contains(neighbor) {
+                        continue;
                     }
+                    let mut candidate = path.clone();
+                    candidate.push(neighbor.clone());
+                    if neighbor == target {
+                        return candidate;
+                    }
+                    seen.insert(neighbor.clone());
+                    queue.push_back(candidate);
                 }
             }
         }
@@ -162,15 +162,15 @@ fn read_optional_yaml<T: for<'de> Deserialize<'de>>(path: PathBuf) -> Option<T> 
 }
 
 fn version_in_range(version: &str, min: Option<&str>, max: Option<&str>) -> bool {
-    if let Some(minimum) = min {
-        if compare_version(version, minimum) < 0 {
-            return false;
-        }
+    if let Some(minimum) = min
+        && compare_version(version, minimum) < 0
+    {
+        return false;
     }
-    if let Some(maximum) = max {
-        if compare_version(version, maximum) > 0 {
-            return false;
-        }
+    if let Some(maximum) = max
+        && compare_version(version, maximum) > 0
+    {
+        return false;
     }
     true
 }

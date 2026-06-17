@@ -5,14 +5,14 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use ayx_core::audit::write_audit_artifact;
 use ayx_core::envelope::Envelope;
 use ayx_core::profile::{ApiAuthMode, ApiProfile, Config};
 use chrono::Utc;
-use reqwest::blocking::multipart::{Form, Part};
 use reqwest::blocking::Client;
-use serde_json::{json, Value};
+use reqwest::blocking::multipart::{Form, Part};
+use serde_json::{Value, json};
 use url::form_urlencoded;
 
 const MAX_RETRIES: usize = 3;
@@ -1578,10 +1578,9 @@ fn resolve_bearer_token(api: &ApiProfile, client: &Client) -> Result<String> {
                 .map_err(|_| anyhow::anyhow!("token cache lock poisoned"))?
                 .get(&key)
                 .cloned()
+                && tok.expires_at > Instant::now() + Duration::from_secs(10)
             {
-                if tok.expires_at > Instant::now() + Duration::from_secs(10) {
-                    return Ok(tok.token);
-                }
+                return Ok(tok.token);
             }
 
             let client_id = api

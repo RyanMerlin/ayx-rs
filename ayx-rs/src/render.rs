@@ -36,12 +36,9 @@ pub fn render_text(envelope: &Envelope) -> String {
         .data
         .get("next_page_token")
         .and_then(|v| v.as_str())
+        && !token.is_empty()
     {
-        if !token.is_empty() {
-            out.push_str(
-                "\n(more results available — use --all to fetch all, --max-pages N to cap)",
-            );
-        }
+        out.push_str("\n(more results available — use --all to fetch all, --max-pages N to cap)");
     }
     out
 }

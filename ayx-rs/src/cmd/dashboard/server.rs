@@ -3,12 +3,12 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::Router;
 use axum::extract::{Path as AxumPath, State};
-use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
-use axum::middleware::{from_fn_with_state, Next};
+use axum::http::{HeaderMap, HeaderValue, Request, StatusCode, header};
+use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
 use base64::Engine as _;
 use rust_embed::Embed;
 use tokio::net::TcpListener;
@@ -165,16 +165,15 @@ async fn auth_middleware(
     if path == "/healthz" || path.starts_with("/static/") {
         return next.run(request).await;
     }
-    if let Some(expected_password) = state.auth_password.as_deref() {
-        if !authorization_is_valid(request.headers(), expected_password) {
-            let mut response =
-                (StatusCode::UNAUTHORIZED, "authentication required").into_response();
-            response.headers_mut().insert(
-                header::WWW_AUTHENTICATE,
-                HeaderValue::from_static(r#"Basic realm="ayx dashboard""#),
-            );
-            return response;
-        }
+    if let Some(expected_password) = state.auth_password.as_deref()
+        && !authorization_is_valid(request.headers(), expected_password)
+    {
+        let mut response = (StatusCode::UNAUTHORIZED, "authentication required").into_response();
+        response.headers_mut().insert(
+            header::WWW_AUTHENTICATE,
+            HeaderValue::from_static(r#"Basic realm="ayx dashboard""#),
+        );
+        return response;
     }
     next.run(request).await
 }

@@ -31,7 +31,7 @@ use std::path::PathBuf;
 use std::process::{Command, Output};
 
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::{Registry, Safety, Step, Tactic};
@@ -40,7 +40,9 @@ use crate::{Registry, Safety, Step, Tactic};
 pub enum ExecutorError {
     #[error("tactic '{id}' is {safety:?}; --apply required to execute")]
     ApplyRequired { id: String, safety: Safety },
-    #[error("unknown parameter(s) referenced by tactic '{id}': {missing:?}. Provide via --param key=value.")]
+    #[error(
+        "unknown parameter(s) referenced by tactic '{id}': {missing:?}. Provide via --param key=value."
+    )]
     MissingParams { id: String, missing: Vec<String> },
     #[error("tactic '{id}' referenced by composition step does not exist")]
     InnerTacticNotFound { id: String },
@@ -634,7 +636,7 @@ mod tests {
         match run_tactic(&reg, "mongo.doctor", &cfg) {
             Ok(run) => {
                 assert_eq!(run.mode, "plan"); // apply=false
-                                              // Read-only tactics actually execute steps; status must not be "planned".
+                // Read-only tactics actually execute steps; status must not be "planned".
                 let first = &run.steps[0];
                 assert_ne!(first.status, "planned");
             }

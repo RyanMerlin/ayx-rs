@@ -3,7 +3,7 @@ use axum::response::Response;
 
 use crate::cmd::dashboard::resolve_dashboard_profile;
 use crate::cmd::dashboard::server::SharedState;
-use crate::cmd::dashboard::telemetry_bridge::{build_args, run_envelope, PanelQ};
+use crate::cmd::dashboard::telemetry_bridge::{PanelQ, build_args, run_envelope};
 use crate::cmd::dashboard::views;
 use crate::cmd::telemetry::{errors, jobs, workflows};
 

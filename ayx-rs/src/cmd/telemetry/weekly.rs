@@ -4,7 +4,7 @@
 //! Per user direction the rendering of the heatmap itself is the next phase;
 //! this command's job is to lock in a stable data contract.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ayx_core::envelope::Envelope;
 use chrono::Utc;
 use serde_json::json;
@@ -12,7 +12,7 @@ use serde_json::json;
 use super::jobs::weekly_matrix;
 use super::source::TelemetrySource;
 use super::window::Window;
-use super::{load_and_pick_source, TelemetryArgs};
+use super::{TelemetryArgs, load_and_pick_source};
 
 pub fn run_counts(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelope> {
     let (config, src) = load_and_pick_source(args, environment)?;

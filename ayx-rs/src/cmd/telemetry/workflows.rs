@@ -4,11 +4,11 @@
 //! All flavors pull job groups via `jobs::fetch_job_groups` and group by
 //! `flow_id` client-side.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ayx_core::envelope::Envelope;
 use ayx_one_api::types::JobGroupSummary;
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::aggregate::DurationStats;
 use super::jobs::{
@@ -17,7 +17,7 @@ use super::jobs::{
 };
 use super::source::TelemetrySource;
 use super::window::Window;
-use super::{load_and_pick_source, TelemetryArgs};
+use super::{TelemetryArgs, load_and_pick_source};
 
 pub fn top(environment: Option<&str>, args: &TelemetryArgs, by: &str) -> Result<Envelope> {
     let (config, src) = load_and_pick_source(args, environment)?;

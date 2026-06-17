@@ -3,15 +3,15 @@
 //! Useful as a first call for an operator or agent that wants the headline
 //! shape of cluster activity in a single hop.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ayx_core::envelope::Envelope;
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::jobs::{fetch_job_groups, is_failure_status, is_running_status, within_window};
 use super::source::TelemetrySource;
 use super::window::Window;
-use super::{load_and_pick_source, TelemetryArgs};
+use super::{TelemetryArgs, load_and_pick_source};
 
 pub fn summary(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelope> {
     let (config, src) = load_and_pick_source(args, environment)?;

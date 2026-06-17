@@ -9,14 +9,14 @@ authors.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
-clap_complete = "4"
+clap_complete.workspace = true
 reqwest.workspace = true
 roxmltree.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
 serde_json.workspace = true
-ratatui = "0.30"
-crossterm = "0.29"
+crossterm.workspace = true
+ratatui.workspace = true
 url.workspace = true
 ayx_server_api = { package = "ayx-server-api", path = "../ayx-server-api" }
 ayx-core = { path = "../ayx-core" }
@@ -25,19 +25,19 @@ ayx-one = { path = "../ayx-one" }
 ayx_one_api = { package = "ayx-one-api", path = "../ayx-one-api" }
 ayx-server = { path = "../ayx-server" }
 ayx-registry = { path = "../ayx-registry" }
-self_update = "0.44.0"
-axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["trace", "compression-gzip"] }
-maud = "0.27"
-rust-embed = "8"
-mime_guess = "2"
-base64 = "0.22"
+self_update.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+maud.workspace = true
+rust-embed.workspace = true
+mime_guess.workspace = true
+base64.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-regex = "1"
+regex.workspace = true
 reqwest = { workspace = true }
 
 [[bin]]

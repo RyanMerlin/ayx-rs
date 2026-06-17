@@ -1,6 +1,6 @@
 use std::fs;
 
-use ayx_core::observability::{record_api_event, ApiEvent};
+use ayx_core::observability::{ApiEvent, record_api_event};
 use ayx_core::profile::{ApiLoggingProfile, ObservabilityProfile};
 use serde_json::Value;
 

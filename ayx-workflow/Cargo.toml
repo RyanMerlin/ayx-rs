@@ -13,7 +13,7 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 walkdir.workspace = true
 zip = { workspace = true }
-lzf = "1"
-snap = "1"
-tempfile = "3"
+lzf.workspace = true
+snap.workspace = true
+tempfile.workspace = true
 sha2.workspace = true

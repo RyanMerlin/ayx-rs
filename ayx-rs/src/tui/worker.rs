@@ -17,7 +17,7 @@
 //! "the last network call before you navigated away wins" bugs.
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread;
 
 use anyhow::Result;

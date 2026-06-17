@@ -84,9 +84,5 @@ pub fn field_placeholder() -> Style {
 }
 
 pub fn status_line(error: bool) -> Style {
-    if error {
-        danger()
-    } else {
-        ok()
-    }
+    if error { danger() } else { ok() }
 }

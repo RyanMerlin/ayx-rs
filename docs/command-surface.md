@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-06-16 23:33:05 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-06-17 02:30:41 UTC._
 
 This file is generated. Refresh it with:
 
@@ -75,8 +75,8 @@ cargo run -q -p xtask -- refresh-command-surface
 | one connections list | `one/connections/list` | read-only | no | List One connections. |
 | one connections permissions | `one/connections/permissions` | read-only | no | List permissions for a One connection. |
 | one connections permissions create | `one/connections/permissions/create` | mutating | yes | Create permissions for a One connection. |
-| one connections permissions delete | `one/connections/permissions/delete` | mutating | yes | Delete a One connection permission by aid. |
-| one connections permissions detail | `one/connections/permissions/detail` | read-only | no | Inspect a One connection permission by aid. |
+| one connections permissions delete | `one/connections/permissions/delete` | mutating | yes | Delete a One connection permission by subject id. |
+| one connections permissions detail | `one/connections/permissions/detail` | read-only | no | Inspect a One connection permission by subject id. |
 | one connections status | `one/connections/status` | read-only | no | Inspect connection status. |
 | one connections update | `one/connections/update` | mutating | yes | Update a One connection from JSON payload. |
 | one desktop-exec status | `one/desktop-exec/status` | read-only | no | Summarize the Alteryx One desktop execution posture. |

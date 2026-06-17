@@ -11,7 +11,7 @@
 //!   passed, refuse otherwise. Automation must pass `--yes` explicitly
 //!   via the global CLI flag.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::io::{self, IsTerminal, Write};
 
 /// Prompt the operator on a TTY; refuse non-TTY callers that haven't

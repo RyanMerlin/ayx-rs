@@ -1,6 +1,6 @@
 //! Jobs page + partials.
 
-use maud::{html, Markup};
+use maud::{Markup, html};
 use serde_json::Value;
 
 use super::{esc_attr, s_at, status_class};

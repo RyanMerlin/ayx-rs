@@ -5,7 +5,7 @@
 //! field is missing the renderer prints "—" rather than failing.
 
 use ayx_core::profile::RuntimeProfileResolution;
-use maud::{html, Markup, DOCTYPE};
+use maud::{DOCTYPE, Markup, html};
 use serde_json::Value;
 
 pub mod failures;

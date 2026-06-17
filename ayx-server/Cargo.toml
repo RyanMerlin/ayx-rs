@@ -8,10 +8,10 @@ authors.workspace = true
 [dependencies]
 anyhow.workspace = true
 ayx-core = { path = "../ayx-core" }
-base64 = "0.22"
+base64.workspace = true
 chrono.workspace = true
-csv = "1"
-fs_extra = "1.3"
+csv.workspace = true
+fs_extra.workspace = true
 reqwest.workspace = true
 roxmltree.workspace = true
 serde.workspace = true
@@ -19,6 +19,6 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 sha2.workspace = true
 url.workspace = true
-walkdir = "2"
+walkdir.workspace = true
 tempfile.workspace = true
 zip = { workspace = true }

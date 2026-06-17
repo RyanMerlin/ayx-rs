@@ -10,13 +10,13 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use ayx_core::envelope::Envelope;
-use serde_json::json;
 use serde_json::Value;
+use serde_json::json;
 
 use crate::capability;
-use crate::{TacticsCommand, WorkflowsCommand, COMMAND_SPECS};
+use crate::{COMMAND_SPECS, TacticsCommand, WorkflowsCommand};
 
 /// Catalog adapter — let the registry's validator query the CLI's
 /// `COMMAND_SPECS` and capability registry without depending on either.
@@ -42,10 +42,14 @@ pub fn execute_tactics(apply: bool, command: TacticsCommand) -> Result<Envelope>
                 .map(|s| s.to_ascii_lowercase())
             {
                 None => None,
-                Some(s) if s == "read_only" || s == "readonly" => Some(ayx_registry::Safety::ReadOnly),
+                Some(s) if s == "read_only" || s == "readonly" => {
+                    Some(ayx_registry::Safety::ReadOnly)
+                }
                 Some(s) if s == "mutating" => Some(ayx_registry::Safety::Mutating),
                 Some(s) if s == "destructive" => Some(ayx_registry::Safety::Destructive),
-                Some(s) => bail!("unknown --safety value '{s}'; expected one of: read_only, mutating, destructive"),
+                Some(s) => bail!(
+                    "unknown --safety value '{s}'; expected one of: read_only, mutating, destructive"
+                ),
             };
             let mut tactics: Vec<_> = reg
                 .tactics

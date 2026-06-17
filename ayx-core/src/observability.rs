@@ -2,7 +2,7 @@ use std::error::Error as StdError;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::profile::ObservabilityProfile;

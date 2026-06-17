@@ -36,56 +36,52 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
         };
     }
     Ok(match command {
-            None => Envelope::ok(
-                "one commands available: platform, plans, scheduling, billing, auto-insights, desktop-exec",
-            ),
-            Some(OneCommand::Doctor { command }) => super::one_doctor::execute(&runtime, command)?,
-            Some(OneCommand::Platform { command }) => {
-                super::one_platform::execute(&runtime, cli.apply, cli.yes, command)?
-            }
-            Some(OneCommand::JobGroups { command }) => {
-                super::one_job_groups::execute(&runtime, command)?
-            }
-            Some(OneCommand::OutputObjects { command }) => {
-                super::one_output_objects::execute(&runtime, command)?
-            }
-            Some(OneCommand::WebhookFlowTasks { command }) => {
-                super::one_webhook_flow_tasks::execute(&runtime, command)?
-            }
-            Some(OneCommand::WriteSettings { command }) => {
-                super::one_write_settings::execute(&runtime, command)?
-            }
-            Some(OneCommand::Status { profile }) => {
-                let config = load_profile!(profile.as_deref(), environment)?;
-                api_status_envelope(&config, "one")?
-            }
-            Some(OneCommand::Inventory { profile }) => {
-                let config = load_profile!(profile.as_deref(), environment)?;
-                api_inventory_envelope(&config, "one")?
-            }
-            Some(OneCommand::Connections { command }) => {
-                super::one_connections::execute(&runtime, command)?
-            },
-            Some(OneCommand::Flows { command }) => {
-                super::one_flows::execute(&runtime, cli.apply, cli.yes, command)?
-            },
-            Some(OneCommand::Plans { command }) => {
-                super::one_plans::execute(&runtime, cli.apply, cli.yes, command)?
-            },
-            Some(OneCommand::Scheduling { command }) => {
-                super::one_scheduling::execute(&runtime, command)?
-            }
-            Some(OneCommand::Billing { command }) => {
-                super::one_billing::execute(&runtime, command)?
-            }
-            Some(OneCommand::Ui { command }) => {
-                super::one_ui::execute(&runtime, command)?
-            }
-            Some(OneCommand::AutoInsights { profile }) => {
-                super::one_auto_insights::execute(&runtime, profile)?
-            }
-            Some(OneCommand::DesktopExec { profile }) => {
-                super::one_desktop_exec::execute(&runtime, profile)?
-            }
+        None => Envelope::ok(
+            "one commands available: platform, plans, scheduling, billing, auto-insights, desktop-exec",
+        ),
+        Some(OneCommand::Doctor { command }) => super::one_doctor::execute(&runtime, command)?,
+        Some(OneCommand::Platform { command }) => {
+            super::one_platform::execute(&runtime, cli.apply, cli.yes, command)?
+        }
+        Some(OneCommand::JobGroups { command }) => {
+            super::one_job_groups::execute(&runtime, command)?
+        }
+        Some(OneCommand::OutputObjects { command }) => {
+            super::one_output_objects::execute(&runtime, command)?
+        }
+        Some(OneCommand::WebhookFlowTasks { command }) => {
+            super::one_webhook_flow_tasks::execute(&runtime, command)?
+        }
+        Some(OneCommand::WriteSettings { command }) => {
+            super::one_write_settings::execute(&runtime, command)?
+        }
+        Some(OneCommand::Status { profile }) => {
+            let config = load_profile!(profile.as_deref(), environment)?;
+            api_status_envelope(&config, "one")?
+        }
+        Some(OneCommand::Inventory { profile }) => {
+            let config = load_profile!(profile.as_deref(), environment)?;
+            api_inventory_envelope(&config, "one")?
+        }
+        Some(OneCommand::Connections { command }) => {
+            super::one_connections::execute(&runtime, command)?
+        }
+        Some(OneCommand::Flows { command }) => {
+            super::one_flows::execute(&runtime, cli.apply, cli.yes, command)?
+        }
+        Some(OneCommand::Plans { command }) => {
+            super::one_plans::execute(&runtime, cli.apply, cli.yes, command)?
+        }
+        Some(OneCommand::Scheduling { command }) => {
+            super::one_scheduling::execute(&runtime, command)?
+        }
+        Some(OneCommand::Billing { command }) => super::one_billing::execute(&runtime, command)?,
+        Some(OneCommand::Ui { command }) => super::one_ui::execute(&runtime, command)?,
+        Some(OneCommand::AutoInsights { profile }) => {
+            super::one_auto_insights::execute(&runtime, profile)?
+        }
+        Some(OneCommand::DesktopExec { profile }) => {
+            super::one_desktop_exec::execute(&runtime, profile)?
+        }
     })
 }
