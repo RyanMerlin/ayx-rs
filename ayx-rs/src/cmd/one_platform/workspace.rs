@@ -90,7 +90,13 @@ pub(crate) fn execute(
             )?
         }
         Some(OneWorkspaceCommand::Current) => {
+            if ayx_one_api::debug_trace() {
+                eprintln!("[one-debug] workspace current: loading profile");
+            }
             let config = runtime.load_profile_lenient(None)?;
+            if ayx_one_api::debug_trace() {
+                eprintln!("[one-debug] workspace current: calling live request");
+            }
             one_api_live_request(
                 &config,
                 "platform",

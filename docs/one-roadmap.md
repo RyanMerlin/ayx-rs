@@ -13,7 +13,7 @@ surface reliable for humans and agents while we widen coverage in measured steps
 
 ## Validation Gates
 
-- `cargo-fmt.exe --all --check`
+- `cargo fmt --all --check`
 - `cargo nextest run -p ayx-rs --test one_live_smoke`
 - `AYX_ONE_LIVE_SMOKE=1 cargo nextest run -p ayx-rs --test one_live_smoke`
 - `cargo nextest run --workspace`
@@ -24,4 +24,6 @@ surface reliable for humans and agents while we widen coverage in measured steps
 1. Run the live smoke suite with `AYX_ONE_LIVE_SMOKE=1` after any One transport or auth change.
 2. Keep `docs/command-surface.md`, `docs/cli-spec.md`, and the catalog tests synchronized with any new One command leaves.
 3. Finish the progressive discovery surface so `ayx discover`-style workflows can move from command discovery to capability and tactic discovery without guesswork.
-4. Focus the next round on transport hardening and documented-only inventory gaps, not further dispatcher reshaping.
+4. Decide whether `catalog` remains a long-term registry helper or becomes a compatibility alias once discovery exposes the same stable concepts directly.
+5. Focus the next round on transport hardening and documented-only inventory gaps, not further dispatcher reshaping.
+6. Use `docs/one-backend-inventory.md` as the source of truth for remaining One backend wiring work.

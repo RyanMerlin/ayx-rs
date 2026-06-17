@@ -225,6 +225,10 @@ pub struct WorkspaceCredential {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_client_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    #[serde(default)]
+    pub client_secret_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_endpoint_url: Option<String>,
 }
 
@@ -235,6 +239,10 @@ pub struct AlteryxOneProfile {
     pub base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_client_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    #[serde(default)]
+    pub client_secret_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_endpoint_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -321,6 +329,17 @@ impl AlteryxOneProfile {
             .filter(|value| !value.trim().is_empty())
             .or_else(|| {
                 self.oauth_client_id
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+            })
+    }
+
+    pub fn resolved_client_secret(&self) -> Option<&str> {
+        self.active_workspace_credential()
+            .and_then(|credential| credential.client_secret.as_deref())
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                self.client_secret
                     .as_deref()
                     .filter(|value| !value.trim().is_empty())
             })
@@ -614,6 +633,11 @@ impl Config {
                     one.refresh_token = resolve_secret_ref(reference)?;
                 }
             }
+            if one.client_secret.is_none() {
+                if let Some(reference) = one.client_secret_ref.as_deref() {
+                    one.client_secret = resolve_secret_ref(reference)?;
+                }
+            }
             for credential in one.workspace_credentials.values_mut() {
                 if credential.access_token.is_none() {
                     if let Some(reference) = credential.access_token_ref.as_deref() {
@@ -623,6 +647,11 @@ impl Config {
                 if credential.refresh_token.is_none() {
                     if let Some(reference) = credential.refresh_token_ref.as_deref() {
                         credential.refresh_token = resolve_secret_ref(reference)?;
+                    }
+                }
+                if credential.client_secret.is_none() {
+                    if let Some(reference) = credential.client_secret_ref.as_deref() {
+                        credential.client_secret = resolve_secret_ref(reference)?;
                     }
                 }
             }
@@ -773,6 +802,23 @@ impl Config {
                     ));
                 }
             }
+            if let Some(client_secret) = &one.client_secret {
+                if client_secret.trim().is_empty() {
+                    return Err(ProfileError::Invalid(
+                        "alteryx_one.client_secret cannot be empty when set".to_string(),
+                    ));
+                }
+                if one
+                    .oauth_client_id
+                    .as_ref()
+                    .is_none_or(|value| value.trim().is_empty())
+                {
+                    return Err(ProfileError::Invalid(
+                        "alteryx_one.oauth_client_id is required when client_secret is set"
+                            .to_string(),
+                    ));
+                }
+            }
             if let Some(url) = &one.base_url {
                 if url.trim().is_empty() {
                     return Err(ProfileError::Invalid(
@@ -832,6 +878,19 @@ impl Config {
                 {
                     return Err(ProfileError::Invalid(format!(
                         "alteryx_one.workspace_credentials['{workspace_id}'].oauth_client_id is required when refresh_token is set"
+                    )));
+                }
+                if credential
+                    .client_secret
+                    .as_ref()
+                    .is_some_and(|token| !token.trim().is_empty())
+                    && credential
+                        .oauth_client_id
+                        .as_ref()
+                        .is_none_or(|value| value.trim().is_empty())
+                {
+                    return Err(ProfileError::Invalid(format!(
+                        "alteryx_one.workspace_credentials['{workspace_id}'].oauth_client_id is required when client_secret is set"
                     )));
                 }
             }
@@ -1065,10 +1124,12 @@ fn env_value(env_values: &HashMap<String, String>, name: &str) -> Option<String>
 fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>) -> Config {
     let account_email = env_value(env_values, "AYX_ACCOUNT_EMAIL");
     let base_url = env_value(env_values, "AYX_ONE_BASE_URL");
-    let oauth_client_id = env_value(env_values, "AYX_ONE_OAUTH_CLIENT_ID");
+    let oauth_client_id = env_value(env_values, "AYX_ONE_OAUTH_CLIENT_ID")
+        .or_else(|| env_value(env_values, "AYX_ONE_CLIENT_ID"));
     let token_endpoint_url = env_value(env_values, "AYX_ONE_TOKEN_ENDPOINT_URL");
     let access_token = env_value(env_values, "AYX_ONE_API_ACCESS_TOKEN");
     let refresh_token = env_value(env_values, "AYX_ONE_API_REFRESH_TOKEN");
+    let client_secret = env_value(env_values, "AYX_ONE_CLIENT_SECRET");
 
     if account_email.is_some()
         || base_url.is_some()
@@ -1076,11 +1137,14 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         || token_endpoint_url.is_some()
         || access_token.is_some()
         || refresh_token.is_some()
+        || client_secret.is_some()
     {
         let mut one = config.alteryx_one.unwrap_or(AlteryxOneProfile {
             account_email: account_email.clone().unwrap_or_default(),
             base_url: None,
             oauth_client_id: None,
+            client_secret: None,
+            client_secret_ref: None,
             token_endpoint_url: None,
             access_token: None,
             access_token_ref: None,
@@ -1105,6 +1169,13 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
             .is_none_or(|value| value.trim().is_empty())
         {
             one.oauth_client_id = oauth_client_id;
+        }
+        if one
+            .client_secret
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            one.client_secret = client_secret;
         }
         if one
             .token_endpoint_url
@@ -1185,6 +1256,16 @@ fn merge_one_profiles(
         .is_none_or(|value| value.trim().is_empty())
     {
         current.oauth_client_id = fallback.oauth_client_id.clone();
+    }
+    if current
+        .client_secret
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        current.client_secret = fallback.client_secret.clone();
+    }
+    if current.client_secret_ref.is_none() {
+        current.client_secret_ref = fallback.client_secret_ref.clone();
     }
     if current
         .token_endpoint_url
@@ -1917,6 +1998,8 @@ mod tests {
                 account_email: "user@example.com".to_string(),
                 base_url: Some("https://us1.alteryxcloud.com".to_string()),
                 oauth_client_id: None,
+                client_secret: None,
+                client_secret_ref: None,
                 token_endpoint_url: None,
                 access_token: None,
                 access_token_ref: None,
@@ -2152,6 +2235,8 @@ mod tests {
             account_email: "user@example.com".to_string(),
             base_url: Some("https://pingauth.alteryxcloud.com".to_string()),
             oauth_client_id: None,
+            client_secret: None,
+            client_secret_ref: None,
             token_endpoint_url: Some("https://pingauth.alteryxcloud.com/as".to_string()),
             access_token: None,
             access_token_ref: None,
@@ -2177,6 +2262,8 @@ mod tests {
             account_email: "user@example.com".to_string(),
             base_url: None,
             oauth_client_id: None,
+            client_secret: None,
+            client_secret_ref: None,
             token_endpoint_url: Some("https://pingauth.alteryxcloud.com/as".to_string()),
             access_token: None,
             access_token_ref: None,
@@ -2204,6 +2291,8 @@ mod tests {
                 refresh_token: Some("workspace-refresh".to_string()),
                 refresh_token_ref: None,
                 oauth_client_id: Some("workspace-client".to_string()),
+                client_secret: None,
+                client_secret_ref: None,
                 token_endpoint_url: Some("https://pingauth.alteryxcloud.com/as".to_string()),
             },
         );
@@ -2212,6 +2301,8 @@ mod tests {
             account_email: "user@example.com".to_string(),
             base_url: Some("https://us1.alteryxcloud.com".to_string()),
             oauth_client_id: Some("legacy-client".to_string()),
+            client_secret: None,
+            client_secret_ref: None,
             token_endpoint_url: Some("https://legacy.example/as".to_string()),
             access_token: Some("legacy-access".to_string()),
             access_token_ref: None,
@@ -2244,6 +2335,8 @@ mod tests {
                 refresh_token: Some("single-refresh".to_string()),
                 refresh_token_ref: None,
                 oauth_client_id: Some("single-client".to_string()),
+                client_secret: None,
+                client_secret_ref: None,
                 token_endpoint_url: Some("https://tenant.example/as".to_string()),
             },
         );
@@ -2252,6 +2345,8 @@ mod tests {
             account_email: "user@example.com".to_string(),
             base_url: Some("https://us1.alteryxcloud.com".to_string()),
             oauth_client_id: Some("legacy-client".to_string()),
+            client_secret: None,
+            client_secret_ref: None,
             token_endpoint_url: None,
             access_token: Some("legacy-access".to_string()),
             access_token_ref: None,

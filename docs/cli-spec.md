@@ -1,4 +1,4 @@
-# AYX-RS CLI Spec (v0.9.7)
+# AYX-RS CLI Spec (v0.9.9)
 
 This document is the stable contract for how `ayx` behaves. It is intentionally
 shorter than a full command inventory so it does not drift every time a command
@@ -18,7 +18,7 @@ For the live command tree, use:
 - Binary name: `ayx`
 - Primary source of truth: `RyanMerlin/ayx-rs` on GitHub
 - Supported operator surfaces: local CLI, local dashboard, structured catalog
-- Supported release targets: Windows, Linux, macOS
+- Supported release targets: Linux, macOS
 
 ## Runtime Model
 
@@ -132,6 +132,7 @@ The exact leaf inventory can expand, but the design rules are stable:
 - `ayx catalog list` enumerates commands and capabilities.
 - `ayx catalog describe <id>` resolves either a command path or capability id.
 - `catalog` remains the registry view for commands and capabilities.
+- If `catalog` is ever deprecated, it should get a clear compatibility window or alias path rather than vanishing before discovery exposes an equivalent stable registry surface.
 - The discovery ladder grows from commands to capabilities to tactics and
   workflows without changing the public ids.
 

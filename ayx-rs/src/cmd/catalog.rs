@@ -1,8 +1,8 @@
 //! Dispatch for `ayx catalog ...`.
 //!
-//! The catalog surface is self-contained and only needs the CLI command
-//! metadata plus the capability registry, so it can live outside `main.rs`
-//! without any profile/environment plumbing.
+//! The catalog surface is the machine-readable registry view: a stable index
+//! of commands and capabilities that complements `ayx discover` rather than
+//! replacing the live CLI tree.
 
 use anyhow::{anyhow, bail, Context, Result};
 use ayx_core::envelope::Envelope;
@@ -29,7 +29,7 @@ pub fn execute(command: Option<CatalogCommand>) -> Result<Envelope> {
             json_input,
             dry_run,
         }) => catalog_run_envelope(&capability, &json_input, dry_run)?,
-        None => Envelope::ok("catalog commands available: list, describe, run"),
+        None => Envelope::ok("catalog registry commands available: list, describe, run"),
     })
 }
 
@@ -179,6 +179,16 @@ mod tests {
         assert!(names.contains(&"one plans share"));
         assert!(names.contains(&"one flows list"));
         assert!(names.contains(&"one flows count"));
+        assert!(names.contains(&"one flows library list"));
+        assert!(names.contains(&"one flows library count"));
+        assert!(names.contains(&"one flows folders list"));
+        assert!(names.contains(&"one flows folders count"));
+        assert!(names.contains(&"one flows folders detail"));
+        assert!(names.contains(&"one flows folders create"));
+        assert!(names.contains(&"one flows folders update"));
+        assert!(names.contains(&"one flows folders delete"));
+        assert!(names.contains(&"one flows folders flows list"));
+        assert!(names.contains(&"one flows folders flows count"));
         assert!(names.contains(&"one flows detail"));
         assert!(names.contains(&"one flows create"));
         assert!(names.contains(&"one flows update"));
@@ -189,6 +199,9 @@ mod tests {
         assert!(names.contains(&"one flows parameters"));
         assert!(names.contains(&"one flows inputs"));
         assert!(names.contains(&"one flows outputs"));
+        assert!(names.contains(&"one flows permissions"));
+        assert!(names.contains(&"one flows move"));
+        assert!(names.contains(&"one flows replace-dataset"));
         assert!(names.contains(&"one flows import"));
         assert!(names.contains(&"one flows import-dry-run"));
         assert!(names.contains(&"one flows export"));

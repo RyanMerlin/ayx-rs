@@ -265,6 +265,56 @@ const FLOW_ENDPOINTS: &[EndpointSpec] = &[
     },
     EndpointSpec {
         method: "GET",
+        path: "/v4/flowsLibrary",
+        command: "one flows library list",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/flowsLibrary/count",
+        command: "one flows library count",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/folders",
+        command: "one flows folders list",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/folders/count",
+        command: "one flows folders count",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/folders/{id}",
+        command: "one flows folders detail",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/folders",
+        command: "one flows folders create",
+    },
+    EndpointSpec {
+        method: "PATCH",
+        path: "/v4/folders/{id}",
+        command: "one flows folders update",
+    },
+    EndpointSpec {
+        method: "DELETE",
+        path: "/v4/folders/{id}",
+        command: "one flows folders delete",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/folders/{id}/flows",
+        command: "one flows folders flows list",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/folders/{id}/flows/count",
+        command: "one flows folders flows count",
+    },
+    EndpointSpec {
+        method: "GET",
         path: "/v4/flows/{id}",
         command: "one flows detail",
     },
@@ -307,6 +357,21 @@ const FLOW_ENDPOINTS: &[EndpointSpec] = &[
         method: "GET",
         path: "/v4/flows/{id}/outputs",
         command: "one flows outputs",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/flows/{id}/permissions",
+        command: "one flows permissions",
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/flows/{id}/move",
+        command: "one flows move",
+    },
+    EndpointSpec {
+        method: "PATCH",
+        path: "/v4/flows/{id}/replaceDataset",
+        command: "one flows replace-dataset",
     },
     EndpointSpec {
         method: "POST",
@@ -609,15 +674,6 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
         ],
     },
     SurfaceSpec {
-        name: "flow",
-        status: "partial",
-        endpoints: FLOW_ENDPOINTS,
-        notes: &[
-            "Flow lifecycle, package, parameters, and run-inspection commands are wired.",
-            "Flow library, folder-scoped, and permission-specific endpoints remain documented-only.",
-        ],
-    },
-    SurfaceSpec {
         name: "jobGroup",
         status: "partial",
         endpoints: JOB_GROUP_ENDPOINTS,
@@ -827,6 +883,15 @@ const SURFACES: &[SurfaceSpec] = &[
         notes: &["Managed plans surface."],
     },
     SurfaceSpec {
+        name: "flow",
+        status: "implemented",
+        endpoints: FLOW_ENDPOINTS,
+        notes: &[
+            "Flow lifecycle, package, parameters, library, folder, and permission commands are wired.",
+            "The One surface does not expose arbitrary workflow authoring through this family.",
+        ],
+    },
+    SurfaceSpec {
         name: "scheduling",
         status: "implemented",
         endpoints: SCHEDULING_ENDPOINTS,
@@ -969,6 +1034,8 @@ mod tests {
                 account_email: "test@example.com".to_string(),
                 base_url: Some("https://us1.alteryxcloud.com".to_string()),
                 oauth_client_id: Some("client-123".to_string()),
+                client_secret: None,
+                client_secret_ref: None,
                 token_endpoint_url: Some("https://example.invalid/token".to_string()),
                 access_token: Some("token".to_string()),
                 access_token_ref: None,
@@ -995,6 +1062,7 @@ mod tests {
             .any(|surface| surface["name"] == "platform.iam"));
         assert!(surfaces.iter().any(|surface| surface["name"] == "plan"));
         assert!(surfaces.iter().any(|surface| surface["name"] == "plans"));
+        assert!(surfaces.iter().any(|surface| surface["name"] == "flow"));
         assert!(surfaces.iter().any(|surface| surface["name"] == "misc"));
         assert!(surfaces
             .iter()
@@ -1006,7 +1074,6 @@ mod tests {
         assert!(partial
             .iter()
             .any(|surface| surface["name"] == "connection"));
-        assert!(partial.iter().any(|surface| surface["name"] == "flow"));
         assert!(partial.iter().any(|surface| surface["name"] == "jobGroup"));
         assert!(partial
             .iter()

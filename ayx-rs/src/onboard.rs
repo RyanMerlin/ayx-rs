@@ -427,6 +427,29 @@ pub(crate) fn secretize_config(
             out.refs
                 .insert("alteryx_one.refresh_token".to_string(), reference);
         }
+        if let Some(value) = one.client_secret.take() {
+            let account = secret_scope(scope, "alteryx_one.client_secret");
+            let reference = store(
+                &account,
+                &value,
+                "alteryx_one.client_secret",
+                policy,
+                &mut out,
+            )?;
+            one.client_secret_ref = Some(reference.clone());
+            out.refs
+                .insert("alteryx_one.client_secret".to_string(), reference);
+        }
+        for (workspace_id, credential) in one.workspace_credentials.iter_mut() {
+            if let Some(value) = credential.client_secret.take() {
+                let field =
+                    format!("alteryx_one.workspace_credentials['{workspace_id}'].client_secret");
+                let account = secret_scope(scope, &field);
+                let reference = store(&account, &value, &field, policy, &mut out)?;
+                credential.client_secret_ref = Some(reference.clone());
+                out.refs.insert(field, reference);
+            }
+        }
     }
 
     if let Some(api) = config.api.as_mut() {
@@ -616,6 +639,8 @@ fn update_or_create_one(
         account_email: account_email.clone(),
         base_url: None,
         oauth_client_id: None,
+        client_secret: None,
+        client_secret_ref: None,
         token_endpoint_url: None,
         access_token: None,
         access_token_ref: None,

@@ -6,6 +6,7 @@ Thank you for your interest. This document covers how to build, test, and submit
 
 - Rust stable toolchain via [rustup](https://rustup.rs/)
 - `cargo fmt` and `cargo clippy` are included with the stable toolchain
+- Install `cargo-nextest` once with `cargo install --locked cargo-nextest`
 
 ## Building locally
 
@@ -15,7 +16,7 @@ Thank you for your interest. This document covers how to build, test, and submit
 
 ## Running tests
 
-    cargo test --workspace --locked
+    cargo nextest run --workspace --locked
 
 ## Before opening a PR
 
@@ -23,7 +24,7 @@ Run these locally before pushing — CI enforces all three:
 
     cargo fmt --all
     cargo clippy --workspace --all-targets -- -D warnings
-    cargo test --workspace --locked
+    cargo nextest run --workspace --locked
 
 ## Commit style
 
