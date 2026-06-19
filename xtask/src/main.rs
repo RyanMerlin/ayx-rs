@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -200,7 +200,7 @@ fn render_command_surface(catalog: &Value) -> Result<String> {
                     .filter_map(Value::as_str)
                     .map(md_text)
                     .collect::<Vec<_>>()
-                    .join("<br>")
+                    .join("<br />")
             })
             .unwrap_or_default();
         let summary = md_cell(capability.get("summary").and_then(Value::as_str));

@@ -247,6 +247,20 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo nextest run --workspace --locked
 ```
 
+## Documentation
+
+The published docs surface lives in `docs-site/` and is built with Docusaurus.
+It is designed to ship with versioned docs so the current command surface,
+release notes, and configuration references stay aligned with tagged releases.
+
+Build it locally with:
+
+```powershell
+cd docs-site
+npm ci
+npm run build
+```
+
 For the One surface specifically, the live validation plan is documented in `docs/one-live-validation.md`.
 
 ## Fixtures

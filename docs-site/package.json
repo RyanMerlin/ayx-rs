@@ -1,0 +1,21 @@
+{
+  "name": "ayx-rs-docs",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "start": "npm run sync:docs && docusaurus start",
+    "build": "npm run sync:docs && docusaurus build",
+    "swizzle": "docusaurus swizzle",
+    "clear": "docusaurus clear",
+    "serve": "docusaurus serve",
+    "sync:docs": "node ./scripts/sync-docs.mjs"
+  },
+  "dependencies": {
+    "@docusaurus/core": "^3.8.1",
+    "@docusaurus/preset-classic": "^3.8.1",
+    "clsx": "^2.1.1",
+    "prism-react-renderer": "^2.4.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  }
+}
