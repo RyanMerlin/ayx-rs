@@ -249,17 +249,18 @@ cargo nextest run --workspace --locked
 
 ## Documentation
 
-The published docs surface lives in `docs-site/` and is built with Docusaurus.
-It is designed to ship with versioned docs so the current command surface,
-release notes, and configuration references stay aligned with tagged releases.
+The published docs site lives at **<https://ayx-rs.pages.dev>** and is built from `docs-site/` with Docusaurus.
+It includes the generated command surface, configuration reference, Alteryx Server API (rendered from `docs/swagger-v3.json`), and versioned release notes.
 
 Build it locally with:
 
-```powershell
+```bash
 cd docs-site
 npm ci
-npm run build
+npm run build  # or: npm start  (for live reload)
 ```
+
+On push to `main` the site is automatically deployed to Cloudflare Pages via `.github/workflows/docs-deploy.yml`.
 
 For the One surface specifically, the live validation plan is documented in `docs/one-live-validation.md`.
 

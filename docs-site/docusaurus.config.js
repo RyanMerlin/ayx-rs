@@ -3,7 +3,7 @@ const { themes } = require('prism-react-renderer');
 /** @type {import('@docusaurus/types').Config} */
 const config = {
   title: 'AYX-RS Docs',
-  tagline: 'Versioned docs for the ayx CLI and its release surface.',
+  tagline: 'CLI toolset for Alteryx administrators — automation, agentic workflows, and structured output.',
   favicon: 'img/logo.svg',
   url: 'https://ayx-rs.pages.dev',
   baseUrl: '/',
@@ -13,11 +13,6 @@ const config = {
   i18n: {
     defaultLocale: 'en',
     locales: ['en'],
-  },
-  markdown: {
-    hooks: {
-      onBrokenMarkdownLinks: 'warn',
-    },
   },
   presets: [
     [
@@ -36,6 +31,21 @@ const config = {
         },
       },
     ],
+    [
+      'redocusaurus',
+      {
+        specs: [
+          {
+            id: 'alteryx-server-api-v3',
+            spec: 'static/swagger-v3.json',
+            route: '/reference/api/',
+          },
+        ],
+        theme: {
+          primaryColor: '#0066cc',
+        },
+      },
+    ],
   ],
   themeConfig: {
     navbar: {
@@ -46,6 +56,8 @@ const config = {
       },
       items: [
         { to: '/', label: 'Start', position: 'left' },
+        { to: '/reference/command-surface', label: 'Commands', position: 'left' },
+        { to: '/reference/api/', label: 'API', position: 'left' },
         { to: '/releases', label: 'Releases', position: 'left' },
         { href: 'https://github.com/RyanMerlin/ayx-rs', label: 'GitHub', position: 'right' },
       ],
@@ -57,15 +69,24 @@ const config = {
           title: 'Docs',
           items: [
             { label: 'Getting started', to: '/getting-started' },
+            { label: 'Safety model', to: '/safety-model' },
             { label: 'Command surface', to: '/reference/command-surface' },
             { label: 'Release notes', to: '/releases' },
+          ],
+        },
+        {
+          title: 'Reference',
+          items: [
+            { label: 'CLI spec', to: '/reference/cli-spec' },
+            { label: 'Runtime config', to: '/reference/runtime-config-contract' },
+            { label: 'API Reference', to: '/reference/api/' },
           ],
         },
         {
           title: 'Source',
           items: [
             { label: 'GitHub repo', href: 'https://github.com/RyanMerlin/ayx-rs' },
-            { label: 'README', href: 'https://github.com/RyanMerlin/ayx-rs/blob/main/README.md' },
+            { label: 'Releases', href: 'https://github.com/RyanMerlin/ayx-rs/releases' },
           ],
         },
       ],
@@ -74,6 +95,7 @@ const config = {
     prism: {
       theme: themes.github,
       darkTheme: themes.dracula,
+      additionalLanguages: ['bash', 'powershell', 'yaml'],
     },
     colorMode: {
       defaultMode: 'light',
@@ -81,7 +103,7 @@ const config = {
       respectPrefersColorScheme: true,
     },
     metadata: [
-      { name: 'description', content: 'Versioned documentation for ayx-rs, the Alteryx operator CLI.' },
+      { name: 'description', content: 'Documentation for ayx-rs, the Alteryx operator CLI — command reference, configuration, and release notes.' },
     ],
   },
 };
