@@ -17,7 +17,7 @@ For the live command tree, use:
 
 - Binary name: `ayx`
 - Primary source of truth: `RyanMerlin/ayx-rs` on GitHub
-- Supported operator surfaces: local CLI, local dashboard, structured catalog
+- Supported operator surfaces: local CLI, structured catalog
 - Supported release targets: Linux, macOS
 
 ## Runtime Model
@@ -157,17 +157,6 @@ layouts.
   browser context or copied URLs.
 - Structured API and auth diagnostics should remain available even when a
   product surface is only partially implemented.
-
-## Dashboard Contract
-
-`ayx dashboard` is a local operator surface served from the CLI binary.
-
-- It binds loopback by default.
-- Non-loopback binding requires `--allow-remote`.
-- Non-loopback binding also requires auth via `AYX_DASHBOARD_PASSWORD` or
-  `--auth-password`.
-- Profile failures should surface in-page instead of crashing the dashboard
-  shell.
 
 ## Update and Release Contract
 

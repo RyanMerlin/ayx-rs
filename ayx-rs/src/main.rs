@@ -349,10 +349,6 @@ enum Command {
         #[command(subcommand)]
         command: cmd::telemetry::TelemetryCommand,
     },
-    #[command(
-        about = "Serve a local read-only operational web dashboard (overview, jobs, workflows)"
-    )]
-    Dashboard(cmd::dashboard::DashboardCommand),
 }
 
 #[derive(Subcommand, Debug)]
@@ -4802,7 +4798,6 @@ fn execute(cli: Cli) -> Result<Envelope> {
         Command::Telemetry { command } => {
             cmd::telemetry::execute(cli.environment.as_deref(), command)?
         }
-        Command::Dashboard(dash) => cmd::dashboard::execute(cli.environment.as_deref(), dash)?,
     };
     Ok(envelope)
 }

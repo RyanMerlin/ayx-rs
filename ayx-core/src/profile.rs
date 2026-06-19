@@ -36,6 +36,7 @@ pub enum ProfileError {
 pub const DEFAULT_PROFILE_FILE: &str = "config.yaml";
 pub const DEFAULT_ENVIRONMENTS_FILE: &str = "environments.yaml";
 const LEGACY_WORKSPACE_FILE: &str = "workspace.yaml";
+const LEGACY_DEFAULT_PROFILE_FILE: &str = "default.yaml";
 const DEFAULT_ACTIVE_PROFILE_NAME: &str = "default";
 const DEFAULT_ACTIVE_WORKSPACE_NAME: &str = "default";
 
@@ -68,6 +69,7 @@ pub struct RuntimeProfileResolution {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub profile_name: String,
+    #[serde(default = "default_mongo_profile")]
     pub mongo: MongoProfile,
     pub alteryx_one: Option<AlteryxOneProfile>,
     #[serde(default)]
@@ -114,38 +116,42 @@ pub enum ServerStorageKind {
     SqlServer,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct MongoProfile {
+    #[serde(default)]
     pub mode: MongoMode,
     pub databases: MongoDatabases,
     pub embedded: Option<MongoEmbedded>,
     pub managed: Option<MongoManaged>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct MongoDatabases {
     pub gallery_name: String,
     pub service_name: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum MongoMode {
+    #[default]
     Embedded,
     Managed,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct MongoEmbedded {
+    #[serde(default = "default_runtime_settings_path")]
     pub runtime_settings_path: Option<String>,
     pub alteryx_service_path: Option<String>,
     pub restore_target_path: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct MongoManaged {
     pub url: Option<String>,
     pub host: Option<String>,
+    #[serde(default = "default_mongo_port")]
     pub port: u16,
     pub auth_database: Option<String>,
     pub username: Option<String>,
@@ -158,8 +164,9 @@ pub struct MongoManaged {
     pub max_pool_size: Option<u32>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct TlsConfig {
+    #[serde(default)]
     pub enabled: bool,
     pub ca_path: Option<String>,
     pub cert_path: Option<String>,
@@ -1307,6 +1314,30 @@ fn normalize_profile_value(value: serde_yaml::Value) -> Result<serde_yaml::Value
     Ok(value)
 }
 
+fn default_mongo_profile() -> MongoProfile {
+    MongoProfile {
+        mode: MongoMode::Embedded,
+        databases: MongoDatabases {
+            gallery_name: "AlteryxGallery".to_string(),
+            service_name: "AlteryxService".to_string(),
+        },
+        embedded: Some(MongoEmbedded {
+            runtime_settings_path: Some("RuntimeSettings.xml".to_string()),
+            alteryx_service_path: None,
+            restore_target_path: None,
+        }),
+        managed: None,
+    }
+}
+
+fn default_runtime_settings_path() -> Option<String> {
+    Some("RuntimeSettings.xml".to_string())
+}
+
+fn default_mongo_port() -> u16 {
+    27017
+}
+
 pub fn profile_shape_label(value: &serde_yaml::Value) -> &'static str {
     let Some(root) = value.as_mapping() else {
         return "unknown";
@@ -1419,7 +1450,7 @@ fn normalize_canonical_server_block(
             legacy_sqlserver = Some(sql_value.clone());
         }
         match kind {
-            "embedded-mongo" | "managed-mongo" | "sqlserver" => {}
+            "embedded-mongo" | "managed-mongo" | "sqlserver" | "sql-server" => {}
             other => {
                 return Err(ProfileError::Invalid(format!(
                     "server.storage.kind '{}' is not supported",
@@ -1654,10 +1685,13 @@ pub fn load_ayx_state() -> Result<AyxState, ProfileError> {
         path: path.display().to_string(),
         source,
     })?;
-    serde_yaml::from_str(&content).map_err(|source| ProfileError::Parse {
+    let mut state: AyxState = serde_yaml::from_str(&content).map_err(|source| ProfileError::Parse {
         path: path.display().to_string(),
         source,
-    })
+    })?;
+    state.active_profile = state.active_profile.map(|name| normalize_storage_name(&name));
+    state.active_workspace = state.active_workspace.map(|name| normalize_storage_name(&name));
+    Ok(state)
 }
 
 pub fn save_ayx_state(state: &AyxState) -> Result<(), ProfileError> {
@@ -1676,7 +1710,7 @@ pub fn save_ayx_state(state: &AyxState) -> Result<(), ProfileError> {
 }
 
 pub fn profile_storage_path(name: &str) -> Result<PathBuf, ProfileError> {
-    Ok(ayx_profiles_dir()?.join(format!("{name}.yaml")))
+    Ok(ayx_profiles_dir()?.join(format!("{}.yaml", normalize_storage_name(name))))
 }
 
 pub fn workspace_storage_path(name: &str) -> Result<PathBuf, ProfileError> {
@@ -1685,7 +1719,7 @@ pub fn workspace_storage_path(name: &str) -> Result<PathBuf, ProfileError> {
 
 pub fn default_profile_storage_path() -> Result<PathBuf, ProfileError> {
     let state = load_ayx_state()?;
-    profile_storage_path(
+    profile_path_for_name(
         state
             .active_profile
             .as_deref()
@@ -1767,7 +1801,7 @@ pub fn resolve_runtime_profile(
                 }
             }
         };
-    let resolved_profile_path = profile_storage_path(&selected_profile)?
+    let resolved_profile_path = profile_path_for_name(&selected_profile)?
         .display()
         .to_string();
     Ok(RuntimeProfileResolution {
@@ -1780,7 +1814,14 @@ pub fn resolve_runtime_profile(
 }
 
 pub fn list_central_profiles() -> Result<Vec<String>, ProfileError> {
-    list_named_yaml_entries(&ayx_profiles_dir()?)
+    let mut names = list_named_yaml_entries(&ayx_profiles_dir()?)?;
+    if ayx_config_home()?.join(LEGACY_DEFAULT_PROFILE_FILE).exists()
+        && !names.iter().any(|name| name == DEFAULT_ACTIVE_PROFILE_NAME)
+    {
+        names.push(DEFAULT_ACTIVE_PROFILE_NAME.to_string());
+        names.sort();
+    }
+    Ok(names)
 }
 
 pub fn list_central_workspaces() -> Result<Vec<String>, ProfileError> {
@@ -1837,38 +1878,62 @@ fn resolve_path_internal(path: &Path, allow_workspace: bool) -> Result<PathBuf, 
         }
         let state = load_ayx_state()?;
         if let Some(name) = state.active_profile {
-            return profile_storage_path(&name);
+            return profile_path_for_name(&name);
         }
         if path.exists() {
             return Ok(path.to_path_buf());
         }
-        return profile_storage_path(DEFAULT_ACTIVE_PROFILE_NAME);
+        return profile_path_for_name(DEFAULT_ACTIVE_PROFILE_NAME);
     }
 
     Ok(path.to_path_buf())
 }
 
 fn normalize_runtime_profile_name(name: &str) -> Result<String, ProfileError> {
-    let trimmed = name.trim();
+    let trimmed = normalize_storage_name(name);
     if trimmed.is_empty() {
         return Err(ProfileError::Invalid(
             "runtime profile name must not be empty".to_string(),
         ));
     }
-    let candidate = Path::new(trimmed);
+    let candidate = Path::new(&trimmed);
     if candidate.is_absolute()
         || candidate.components().count() > 1
         || trimmed == DEFAULT_PROFILE_FILE
         || trimmed == DEFAULT_ENVIRONMENTS_FILE
         || trimmed == LEGACY_WORKSPACE_FILE
-        || trimmed.ends_with(".yaml")
-        || trimmed.ends_with(".yml")
     {
         return Err(ProfileError::Invalid(format!(
             "runtime profile '{trimmed}' must be a central profile name, not a path or config file"
         )));
     }
-    Ok(trimmed.to_string())
+    Ok(trimmed)
+}
+
+fn normalize_storage_name(name: &str) -> String {
+    let trimmed = name.trim();
+    if let Some(stripped) = trimmed.strip_suffix(".yaml") {
+        return stripped.to_string();
+    }
+    if let Some(stripped) = trimmed.strip_suffix(".yml") {
+        return stripped.to_string();
+    }
+    trimmed.to_string()
+}
+
+fn profile_path_for_name(name: &str) -> Result<PathBuf, ProfileError> {
+    let normalized = normalize_storage_name(name);
+    let canonical = profile_storage_path(&normalized)?;
+    if canonical.exists() {
+        return Ok(canonical);
+    }
+    if normalized == DEFAULT_ACTIVE_PROFILE_NAME {
+        let legacy = ayx_config_home()?.join(LEGACY_DEFAULT_PROFILE_FILE);
+        if legacy.exists() {
+            return Ok(legacy);
+        }
+    }
+    Ok(canonical)
 }
 
 fn is_default_profile_request(path: &Path) -> bool {
@@ -2399,6 +2464,142 @@ mod tests {
     }
 
     #[test]
+    fn runtime_profile_loader_supports_legacy_profile_shape_without_top_level_mongo() {
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let config_home = temp.path().join("ayx-home");
+        let profiles_dir = config_home.join("profiles");
+        fs::create_dir_all(&profiles_dir).unwrap();
+
+        let _guard = EnvGuard::set("AYX_CONFIG_HOME", config_home.to_str().unwrap());
+        save_ayx_state(&AyxState {
+            active_profile: Some("default".to_string()),
+            active_workspace: None,
+        })
+        .unwrap();
+
+        let legacy_profile = r#"
+profile_name: local-dev
+alteryx_one:
+  account_email: ryan.merlin@alteryx.com
+  base_url: https://us1.alteryxcloud.com
+  oauth_client_id: client-id
+  token_endpoint_url: https://pingauth.alteryxcloud.com/as
+  access_token_ref: keyring:default/alteryx_one.access_token
+  refresh_token_ref: keyring:default/alteryx_one.refresh_token
+observability:
+  api_logging:
+    enabled: false
+    path: logs/api-events.jsonl
+    redact_bodies: true
+    log_requests: false
+    log_responses: false
+upgrade:
+  target_version: "2025.2"
+  deployment: embedded-mongo
+server:
+  api:
+    base_url: http://localhost/webapi/
+    client_id: client-id
+    client_secret: secret
+  storage:
+    kind: sql-server
+    mongo:
+      mode: embedded
+      databases:
+        gallery_name: AlteryxGallery
+        service_name: AlteryxService
+      embedded:
+        runtime_settings_path: null
+        alteryx_service_path: null
+        restore_target_path: null
+      managed:
+        url: null
+        host: localhost
+        port: 27017
+        auth_database: admin
+        username: user
+        password: null
+        password_ref: keyring:default/server.storage.mongo.managed.password
+        tls:
+          enabled: false
+          ca_path: null
+          cert_path: null
+          key_path: null
+          allow_invalid_hostnames: false
+        timeout_ms: 15000
+        retry_count: 2
+        max_pool_size: 20
+    sqlserver:
+      controller:
+        connection_string: null
+        host: localhost
+        port: 1433
+        database: AlteryxService
+        username: sa
+        password: null
+        password_ref: keyring:default/server.storage.sqlserver.controller.password
+        password_env: AYX_SQL_CONTROLLER_PASSWORD
+        integrated_security: false
+        encrypt: true
+        trust_server_certificate: false
+        multi_subnet_failover: false
+      server_ui:
+        connection_string: null
+        host: localhost
+        port: 1433
+        database: AlteryxServerUI
+        username: sa
+        password: null
+        password_ref: keyring:default/server.storage.sqlserver.server_ui.password
+        password_env: AYX_SQL_SERVER_UI_PASSWORD
+        integrated_security: false
+        encrypt: true
+        trust_server_certificate: false
+        multi_subnet_failover: false
+      legacy_connection_string: null
+sqlserver:
+  controller:
+    connection_string: null
+    host: localhost
+    port: 1433
+    database: AlteryxService
+    username: sa
+    password: null
+    password_ref: keyring:default/server.storage.sqlserver.controller.password
+    password_env: AYX_SQL_CONTROLLER_PASSWORD
+    integrated_security: false
+    encrypt: true
+    trust_server_certificate: false
+    multi_subnet_failover: false
+  server_ui:
+    connection_string: null
+    host: localhost
+    port: 1433
+    database: AlteryxServerUI
+    username: sa
+    password: null
+    password_ref: keyring:default/server.storage.sqlserver.server_ui.password
+    password_env: AYX_SQL_SERVER_UI_PASSWORD
+    integrated_security: false
+    encrypt: true
+    trust_server_certificate: false
+    multi_subnet_failover: false
+  legacy_connection_string: null
+"#;
+        fs::write(profiles_dir.join("default.yaml"), legacy_profile).unwrap();
+
+        let loaded = Config::load_runtime_profile_with_environment_lenient(None, None).unwrap();
+        assert_eq!(
+            loaded
+                .alteryx_one
+                .as_ref()
+                .map(|one| one.account_email.as_str()),
+            Some("ryan.merlin@alteryx.com")
+        );
+    }
+
+    #[test]
     fn normalizes_alteryx_base_urls() {
         assert_eq!(
             normalize_alteryx_base_url("http://host/webapi/"),
@@ -2462,5 +2663,24 @@ server:
 
         let cfg = Config::load_from_path(Path::new("config.yaml")).unwrap();
         assert_eq!(cfg.profile_name, "central");
+    }
+
+    #[test]
+    fn resolves_legacy_root_default_profile() {
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = EnvGuard::set("AYX_CONFIG_HOME", &temp.path().display().to_string());
+        std::fs::write(
+            temp.path().join("default.yaml"),
+            serde_yaml::to_string(&base_config("legacy", "LegacyDb")).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(temp.path().join("state.yaml"), "active_profile: default.yaml\n").unwrap();
+
+        let path = default_profile_storage_path().unwrap();
+        assert_eq!(path, temp.path().join("default.yaml"));
+
+        let cfg = Config::load_from_path(Path::new("config.yaml")).unwrap();
+        assert_eq!(cfg.profile_name, "legacy");
     }
 }

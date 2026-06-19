@@ -30,7 +30,7 @@ In scope:
 
 - The `ayx` CLI and TUI.
 - All workspace crates: `ayx-core`, `ayx-server`, `ayx-server-api`,
-  `ayx-one-api`, `ayx-one`, `ayx-workflow`, `ayx-docs-schema`.
+  `ayx-one-api`, `ayx-one`, `ayx-workflow`.
 - The install scripts (`scripts/install.sh`, `scripts/install.ps1`).
 - The release pipeline (`.github/workflows/`).
 
@@ -67,6 +67,6 @@ security issue and report it.
   logs as sensitive local artifacts; they are written with restrictive
   permissions on supported platforms, but Windows ACL review remains an
   operator responsibility.
-- If you expose `ayx dashboard` beyond loopback, require dashboard auth
-  (`AYX_DASHBOARD_PASSWORD` or `--auth-password`) and keep it on a trusted
-  network only.
+- If you expose any standalone dashboard rewrite beyond loopback, require
+  dashboard auth (`AYX_DASHBOARD_PASSWORD` or `--auth-password`) and keep it
+  on a trusted network only.

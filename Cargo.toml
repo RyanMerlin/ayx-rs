@@ -8,7 +8,6 @@ members = [
   "ayx-one-api",
   "ayx-workflow",
   "ayx-one",
-  "ayx-docs-schema",
   "ayx-registry",
   "xtask",
 ]

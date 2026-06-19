@@ -1,24 +1,19 @@
-# `ayx dashboard` Notes
+# Dashboard Rewrite Notes
 
-Implementation notes for the local `ayx dashboard` surface.
+Historical notes for the dashboard surface and its rewrite direction.
 
-The dashboard is a read-only operational web UI served from the `ayx` binary. It is intended for local use by operators who want a quick browser view over telemetry without introducing a separate web service.
+The dashboard was once implemented in Rust and launched from the `ayx` CLI.
+That implementation has been removed. The next phase, if we revisit it, is to
+rebuild the surface in a true web language and keep the CLI out of the
+delivery path.
 
 ## Current Scope
 
 - overview, jobs, and workflows pages are shipped
 - HTML is server-rendered
-- static assets are embedded in the binary
+- static assets were embedded in the implementation
 - the dashboard binds loopback by default
 - non-loopback binding requires `--allow-remote`
-
-## Command Shape
-
-```text
-ayx dashboard [--profile <name>] [--bind 127.0.0.1] [--port 8765]
-              [--source one|server|auto] [--poll 10]
-              [--no-open] [--allow-remote] [--auth-password <value>]
-```
 
 ## Important Constraints
 
@@ -26,7 +21,8 @@ ayx dashboard [--profile <name>] [--bind 127.0.0.1] [--port 8765]
 - Non-loopback binding requires `--allow-remote`.
 - Remote mode also requires HTTP Basic auth via `AYX_DASHBOARD_PASSWORD` or `--auth-password`.
 - Profile-load failures are surfaced in-page instead of crashing the server.
-- Telemetry panels reuse the existing CLI telemetry layer so the browser surface stays consistent with the CLI data model.
+- Telemetry panels currently reuse the existing Rust telemetry layer so the
+  browser surface stays consistent with the CLI data model.
 
 ## Follow-Up Ideas
 
@@ -38,12 +34,10 @@ ayx dashboard [--profile <name>] [--bind 127.0.0.1] [--port 8765]
 ## Code Map
 
 ```text
-ayx-rs/src/cmd/dashboard/
-├── mod.rs
-├── server.rs
-├── telemetry_bridge.rs
-├── handlers/
-├── views/
+dashboard/
+├── app/
+├── server/
+├── ui/
 └── assets/
 ```
 

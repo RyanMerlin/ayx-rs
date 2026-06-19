@@ -19,12 +19,14 @@ use serde_json::Value;
 use ayx_core::envelope::Envelope;
 use ayx_core::profile::derive_alteryx_one_token_endpoint;
 
-use self::app::{App, ConfigSection, Focus, OneBrowserResource, ProfilesPane, Screen};
+use self::app::{App, ConfigSection, CrudPrompt, Focus, OneBrowserResource, ProfilesPane, Screen};
+use self::store::ProfileScope;
 
 mod app;
 mod forms;
 mod one_browser;
 mod render_helpers;
+mod store;
 mod theme;
 mod worker;
 
@@ -100,6 +102,9 @@ fn render(frame: &mut Frame, app: &App) {
 
     if let Some(toast) = app.toast.as_ref() {
         render_toast(frame, toast.message.as_str(), toast.is_error);
+    }
+    if let Some(prompt) = app.crud_prompt.as_ref() {
+        render_crud_prompt(frame, prompt);
     }
 }
 
@@ -209,10 +214,10 @@ fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
         app.focus == Focus::Content && app.profiles_pane == ProfilesPane::Environments;
 
     let profiles = app
-        .profiles
+        .visible_profiles()
         .iter()
-        .map(|name| {
-            let active = app.active_profile.as_deref() == Some(name.as_str());
+        .map(|record| {
+            let active = app.active_profile.as_deref() == Some(record.name.as_str());
             let style = if active {
                 theme::accent()
             } else {
@@ -221,9 +226,20 @@ fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
             let marker = if active { "●" } else { "○" };
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{marker} "), style),
-                Span::styled(name.clone(), style),
-            ]))
-        })
+                Span::styled(record.name.clone(), style),
+                    Span::styled(
+                        format!(
+                            " [{}]",
+                            match record.scope {
+                                ProfileScope::One => "one",
+                                ProfileScope::Server => "server",
+                                ProfileScope::Combined => "combined",
+                            }
+                        ),
+                        theme::muted(),
+                    ),
+                ]))
+            })
         .collect::<Vec<_>>();
     let mut profile_state = app.profiles_state.clone();
     frame.render_stateful_widget(
@@ -232,7 +248,7 @@ fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
             .highlight_style(theme::selected())
             .block(
                 Block::default()
-                    .title(" Profiles · shared One ")
+                    .title(format!(" {} ", app.profile_view.label()))
                     .borders(Borders::ALL)
                     .border_style(theme::border(profile_focused))
                     .style(theme::panel()),
@@ -294,22 +310,18 @@ fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
     detail_lines.push(Line::from(""));
     detail_lines.push(Line::from(Span::styled("Ownership", theme::accent())));
     detail_lines.push(Line::from(vec![
-        Span::styled("One owner: ", theme::field_label()),
-        Span::styled(
-            format!(
-                "{} · shared credentials",
-                app.credentials_storage_target_label()
-            ),
-            theme::status_line(false),
-        ),
+        Span::styled("Profile view: ", theme::field_label()),
+        Span::styled(app.profile_view.label(), theme::status_line(false)),
     ]));
     detail_lines.push(Line::from(vec![
-        Span::styled("Server owner: ", theme::field_label()),
+        Span::styled("Target kind: ", theme::field_label()),
         Span::styled(
-            format!(
-                "{} · environment-specific",
-                app.config_storage_target_label()
-            ),
+            match app.selected_profile_scope() {
+                Some(crate::tui::store::ProfileScope::One) => "One",
+                Some(crate::tui::store::ProfileScope::Server) => "Server",
+                Some(crate::tui::store::ProfileScope::Combined) => "Combined",
+                None => "Unknown",
+            },
             theme::status_line(false),
         ),
     ]));
@@ -384,6 +396,9 @@ fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
     detail_lines.push(Line::from(Span::styled("Actions", theme::accent())));
     detail_lines.push(Line::from(
         "Enter activates the selected profile, workspace, or environment.",
+    ));
+    detail_lines.push(Line::from(
+        "n creates a profile, d duplicates, R renames, x deletes.",
     ));
     detail_lines.push(Line::from(
         "e edits the selected config or credentials field.",
@@ -1537,7 +1552,16 @@ fn render_help(frame: &mut Frame, area: Rect) {
             Span::styled("Profiles", theme::accent_bold()),
             Span::raw("    "),
             Span::styled("Enter", theme::accent()),
-            Span::raw(" activate selected central profile, workspace, or environment"),
+            Span::raw(" activate selected profile, workspace, or environment"),
+            Span::raw(", "),
+            Span::styled("n/d/R/x", theme::accent()),
+            Span::raw(" create, duplicate, rename, delete profile"),
+        ]),
+        Line::from(vec![
+            Span::styled("Profile view", theme::accent_bold()),
+            Span::raw(" "),
+            Span::styled("o/s/a", theme::accent()),
+            Span::raw(" filter One, Server, or All profiles"),
         ]),
         Line::from(vec![
             Span::styled("Inspect", theme::accent_bold()),
@@ -1585,7 +1609,7 @@ fn render_help(frame: &mut Frame, area: Rect) {
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "Runtime selection is central-only. The TUI can inspect and edit explicit profile/workspace files, but those files are editor targets rather than the normal runtime source.",
+            "Profile selection is now view-scoped. One and Server profiles can be managed independently, while the current runtime target still composes from the selected file(s).",
             theme::muted(),
         )),
     ];
@@ -1605,41 +1629,48 @@ fn render_help(frame: &mut Frame, area: Rect) {
 }
 
 fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
-    let help = match app.screen {
-        Screen::Profiles => {
-            "Arrows move · Enter activate central profile · Tab cycle panes · i inspect · Esc back"
+    let help = if let Some(prompt) = app.crud_prompt.as_ref() {
+        match prompt {
+            CrudPrompt::Text { .. } => "Type name · Enter confirm · Esc cancel · Backspace delete",
+            CrudPrompt::Confirm { .. } => "Enter/Y confirm · N/Esc cancel",
         }
-        Screen::Config => {
-            if app.config_form.editing {
-                "Enter save buffer · Esc cancel · Backspace delete"
-            } else {
-                "Arrows move · Tab/Shift-Tab cycle sections · e edit · s save · c clear · r reload"
+    } else {
+        match app.screen {
+            Screen::Profiles => {
+                "Arrows move · Enter activate · n new · d duplicate · R rename · x delete · Tab cycle panes · i inspect"
             }
-        }
-        Screen::Credentials => {
-            if app.credentials.editing {
-                "Enter save buffer · Esc cancel · Backspace delete"
-            } else {
-                "Arrows move · e edit · s save to active profile · c clear · r reload · Esc back"
+            Screen::Config => {
+                if app.config_form.editing {
+                    "Enter save buffer · Esc cancel · Backspace delete"
+                } else {
+                    "Arrows move · Tab/Shift-Tab cycle sections · e edit · s save · c clear · r reload"
+                }
             }
-        }
-        Screen::Connectivity => "r/t rerun checks · Esc back",
-        Screen::Inspect => "Esc close popup · Enter close · r reload indexes",
-        Screen::One => {
-            if app.one_browser.prompt.is_some() {
-                "Type id · Enter run · Esc cancel"
-            } else {
-                match app.one_browser.pane {
-                    app::OneBrowserPane::Resources => {
-                        "Arrows browse resources · Enter refresh/prompt/drill · Tab items · b back · Esc back"
-                    }
-                    app::OneBrowserPane::Items => {
-                        "Arrows browse items · Enter drill down · Tab resources · b back · Esc back"
+            Screen::Credentials => {
+                if app.credentials.editing {
+                    "Enter save buffer · Esc cancel · Backspace delete"
+                } else {
+                    "Arrows move · e edit · s save to active profile · c clear · r reload · Esc back"
+                }
+            }
+            Screen::Connectivity => "r/t rerun checks · Esc back",
+            Screen::Inspect => "Esc close popup · Enter close · r reload indexes",
+            Screen::One => {
+                if app.one_browser.prompt.is_some() {
+                    "Type id · Enter run · Esc cancel"
+                } else {
+                    match app.one_browser.pane {
+                        app::OneBrowserPane::Resources => {
+                            "Arrows browse resources · Enter refresh/prompt/drill · Tab items · b back · Esc back"
+                        }
+                        app::OneBrowserPane::Items => {
+                            "Arrows browse items · Enter drill down · Tab resources · b back · Esc back"
+                        }
                     }
                 }
             }
+            Screen::Help => "q quit · Esc back",
         }
-        Screen::Help => "q quit · Esc back",
     };
     let line = Line::from(vec![
         Span::styled("status ", theme::field_label()),
@@ -1649,6 +1680,41 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(help, theme::muted()),
     ]);
     frame.render_widget(Paragraph::new(line), area);
+}
+
+fn render_crud_prompt(frame: &mut Frame, prompt: &CrudPrompt) {
+    let area = centered_rect(72, 14, frame.area());
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Block::default()
+            .title(format!(" {} ", prompt.title()))
+            .borders(Borders::ALL)
+            .border_style(theme::accent_bold())
+            .style(theme::panel()),
+        area,
+    );
+    let inner = area.inner(Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
+    let mut lines = vec![
+        Line::from(Span::styled(prompt.message(), theme::accent())),
+        Line::from(""),
+    ];
+    if let Some(buffer) = prompt.buffer() {
+        lines.push(Line::from(Span::styled(buffer, theme::field_value())));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Enter confirm · Esc cancel · Backspace delete",
+            theme::muted(),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "Enter/Y confirm · N/Esc cancel",
+            theme::muted(),
+        )));
+    }
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
 fn render_toast(frame: &mut Frame, message: &str, is_error: bool) {

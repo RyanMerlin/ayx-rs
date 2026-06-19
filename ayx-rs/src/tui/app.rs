@@ -10,6 +10,7 @@
 )]
 
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -29,7 +30,7 @@ use super::render_helpers::{extract_one_browser_items, pretty_yaml_lines, render
 
 use ayx_core::profile::{
     AlteryxOneProfile, ApiAuth, ApiAuthMode, ApiLoggingProfile, ApiProfile, Config, MongoMode,
-    ObservabilityProfile, WorkspaceConfig, default_profile_storage_path, list_central_profiles,
+    ObservabilityProfile, WorkspaceConfig, ayx_config_home, default_profile_storage_path,
     list_central_workspaces, load_ayx_state, load_workspace_config, normalize_alteryx_base_url,
     normalize_alteryx_one_base_url, profile_resolution_detail, profile_storage_path,
     resolve_runtime_profile, save_ayx_state, workspace_storage_path,
@@ -38,6 +39,11 @@ use ayx_core::profile::{
 use crate::onboard::{
     default_config, summarize_config, summarize_onboarding_validation, write_config,
     write_workspace_config,
+};
+
+use super::store::{
+    create_profile_from_default_scope_at, delete_profile_at, duplicate_profile_at,
+    list_profile_records_at, rename_profile_at, ProfileRecord, ProfileScope,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,9 +132,78 @@ impl ProfilesPane {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileView {
+    All,
+    One,
+    Server,
+}
+
+impl ProfileView {
+    pub fn label(self) -> &'static str {
+        match self {
+            ProfileView::All => "All Profiles",
+            ProfileView::One => "One Profiles",
+            ProfileView::Server => "Server Profiles",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            ProfileView::All => ProfileView::One,
+            ProfileView::One => ProfileView::Server,
+            ProfileView::Server => ProfileView::All,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetKind {
     Profile,
     Workspace,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileCrudAction {
+    CreateDefault,
+    DuplicateSelected,
+    RenameSelected,
+    DeleteSelected,
+}
+
+#[derive(Debug, Clone)]
+pub enum CrudPrompt {
+    Text {
+        title: String,
+        message: String,
+        buffer: String,
+        action: ProfileCrudAction,
+    },
+    Confirm {
+        title: String,
+        message: String,
+        action: ProfileCrudAction,
+    },
+}
+
+impl CrudPrompt {
+    pub fn title(&self) -> &str {
+        match self {
+            CrudPrompt::Text { title, .. } | CrudPrompt::Confirm { title, .. } => title,
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        match self {
+            CrudPrompt::Text { message, .. } | CrudPrompt::Confirm { message, .. } => message,
+        }
+    }
+
+    pub fn buffer(&self) -> Option<&str> {
+        match self {
+            CrudPrompt::Text { buffer, .. } => Some(buffer.as_str()),
+            CrudPrompt::Confirm { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -821,6 +896,7 @@ pub struct ToastState {
 }
 
 pub struct App {
+    pub config_home: PathBuf,
     pub screen: Screen,
     pub focus: Focus,
     pub should_quit: bool,
@@ -829,7 +905,8 @@ pub struct App {
     pub workspaces_state: ListState,
     pub environments_state: ListState,
     pub profiles_pane: ProfilesPane,
-    pub profiles: Vec<String>,
+    pub profiles: Vec<ProfileRecord>,
+    pub profile_view: ProfileView,
     pub workspaces: Vec<WorkspaceEntry>,
     pub active_profile: Option<String>,
     pub active_workspace: Option<String>,
@@ -848,6 +925,7 @@ pub struct App {
     pub one_browser: OneBrowserState,
     pub status_message: String,
     pub toast: Option<ToastState>,
+    pub crud_prompt: Option<CrudPrompt>,
     // Background worker for off-UI-thread network/disk work. Held in an
     // Option so headless smoke tests (if any) can construct an App without
     // spawning a real thread.
@@ -857,9 +935,57 @@ pub struct App {
 }
 
 impl App {
+    pub(crate) fn visible_profiles(&self) -> Vec<&ProfileRecord> {
+        self.profiles
+            .iter()
+            .filter(|record| match self.profile_view {
+                ProfileView::All => true,
+                ProfileView::One => {
+                    matches!(record.scope, ProfileScope::One | ProfileScope::Combined)
+                }
+                ProfileView::Server => {
+                    matches!(record.scope, ProfileScope::Server | ProfileScope::Combined)
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn visible_profiles_len(&self) -> usize {
+        self.visible_profiles().len()
+    }
+
+    fn selected_profile_record(&self) -> Option<&ProfileRecord> {
+        let target_index = self.profiles_state.selected().unwrap_or(0);
+        let mut visible_index = 0usize;
+        for record in &self.profiles {
+            let matches_view = match self.profile_view {
+                ProfileView::All => true,
+                ProfileView::One => {
+                    matches!(record.scope, ProfileScope::One | ProfileScope::Combined)
+                }
+                ProfileView::Server => {
+                    matches!(record.scope, ProfileScope::Server | ProfileScope::Combined)
+                }
+            };
+            if !matches_view {
+                continue;
+            }
+            if visible_index == target_index {
+                return Some(record);
+            }
+            visible_index += 1;
+        }
+        None
+    }
+
+    pub(crate) fn selected_profile_scope(&self) -> Option<ProfileScope> {
+        self.selected_profile_record().map(|record| record.scope)
+    }
+
     pub fn new() -> Result<Self> {
         let state = load_ayx_state().map_err(anyhow::Error::from)?;
-        let profiles = list_central_profiles().map_err(anyhow::Error::from)?;
+        let config_home = ayx_config_home().map_err(anyhow::Error::from)?;
+        let profiles = list_profile_records_at(&config_home).map_err(anyhow::Error::from)?;
         let workspaces = load_workspace_entries()?;
         let target_path = default_profile_storage_path().map_err(anyhow::Error::from)?;
         let current_config = Config::load_from_path_with_environment_lenient(&target_path, None)
@@ -879,6 +1005,7 @@ impl App {
         environments_state.select(Some(0));
 
         let mut app = Self {
+            config_home,
             screen: Screen::Profiles,
             focus: Focus::Sidebar,
             should_quit: false,
@@ -887,6 +1014,7 @@ impl App {
             workspaces_state,
             environments_state,
             profiles_pane: ProfilesPane::Profiles,
+            profile_view: ProfileView::All,
             profiles,
             workspaces,
             active_profile: state.active_profile,
@@ -906,6 +1034,7 @@ impl App {
             one_browser: OneBrowserState::default(),
             status_message: "Ready".to_string(),
             toast: None,
+            crud_prompt: None,
             worker: Some(super::worker::BackgroundWorker::spawn()),
             latest_connectivity_request: None,
             latest_one_browser_request: None,
@@ -1045,6 +1174,11 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
+        if self.crud_prompt.is_some() {
+            self.handle_crud_prompt_key(key);
+            return;
+        }
+
         if self.config_form.editing {
             self.handle_config_edit_key(key);
             return;
@@ -1119,6 +1253,180 @@ impl App {
         }
     }
 
+    fn handle_crud_prompt_key(&mut self, key: KeyEvent) {
+        let Some(prompt) = self.crud_prompt.clone() else {
+            return;
+        };
+        match prompt {
+            CrudPrompt::Text {
+                title,
+                message,
+                mut buffer,
+                action,
+            } => match key.code {
+                KeyCode::Esc => self.crud_prompt = None,
+                KeyCode::Enter | KeyCode::Char('\r') | KeyCode::Char('\n') => {
+                    let value = buffer.trim().to_string();
+                    if value.is_empty() {
+                        self.push_toast("name must not be empty".to_string(), true);
+                        return;
+                    }
+                    self.crud_prompt = None;
+                    if let Err(err) = self.apply_profile_crud_action(action, Some(value)) {
+                        self.push_toast(err.to_string(), true);
+                    }
+                }
+                KeyCode::Backspace => {
+                    buffer.pop();
+                    self.crud_prompt = Some(CrudPrompt::Text {
+                        title,
+                        message,
+                        buffer,
+                        action,
+                    });
+                }
+                KeyCode::Delete => {
+                    buffer.clear();
+                    self.crud_prompt = Some(CrudPrompt::Text {
+                        title,
+                        message,
+                        buffer,
+                        action,
+                    });
+                }
+                KeyCode::Char(ch) => {
+                    if !key.modifiers.contains(KeyModifiers::CONTROL) {
+                        buffer.push(ch);
+                        self.crud_prompt = Some(CrudPrompt::Text {
+                            title,
+                            message,
+                            buffer,
+                            action,
+                        });
+                    }
+                }
+                _ => {}
+            },
+            CrudPrompt::Confirm {
+                title: _,
+                message: _,
+                action,
+            } => match key.code {
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                    self.crud_prompt = None;
+                }
+                KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.crud_prompt = None;
+                    if let Err(err) = self.apply_profile_crud_action(action, None) {
+                        self.push_toast(err.to_string(), true);
+                    }
+                }
+                _ => {}
+            },
+        }
+    }
+
+    fn apply_profile_crud_action(
+        &mut self,
+        action: ProfileCrudAction,
+        value: Option<String>,
+    ) -> Result<()> {
+        let config_home = self.config_home.clone();
+        match action {
+            ProfileCrudAction::CreateDefault => {
+                let name = value.ok_or_else(|| anyhow!("profile name is required"))?;
+                let path = create_profile_from_default_scope_at(
+                    &config_home,
+                    &name,
+                    self.selected_profile_scope().unwrap_or(ProfileScope::One),
+                )?;
+                let mut state = load_ayx_state().map_err(anyhow::Error::from)?;
+                state.active_profile = Some(name.clone());
+                save_ayx_state(&state).map_err(anyhow::Error::from)?;
+                self.active_profile = Some(name.clone());
+                let _ = self.reload_indexes();
+                self.load_target(path, None, TargetKind::Profile)?;
+                self.status_message = format!("Created profile {name}");
+            }
+            ProfileCrudAction::DuplicateSelected => {
+                let Some(source_name) = self.selected_profile_name().cloned() else {
+                    return Err(anyhow!("no profile selected"));
+                };
+                let new_name = value.ok_or_else(|| anyhow!("profile name is required"))?;
+                let path = duplicate_profile_at(&config_home, &source_name, &new_name)?;
+                let mut state = load_ayx_state().map_err(anyhow::Error::from)?;
+                state.active_profile = Some(new_name.clone());
+                save_ayx_state(&state).map_err(anyhow::Error::from)?;
+                self.active_profile = Some(new_name.clone());
+                let _ = self.reload_indexes();
+                self.load_target(path, None, TargetKind::Profile)?;
+                self.status_message = format!("Duplicated profile {source_name} to {new_name}");
+            }
+            ProfileCrudAction::RenameSelected => {
+                let Some(source_name) = self.selected_profile_name().cloned() else {
+                    return Err(anyhow!("no profile selected"));
+                };
+                let new_name = value.ok_or_else(|| anyhow!("profile name is required"))?;
+                let path = rename_profile_at(&config_home, &source_name, &new_name)?;
+                let mut state = load_ayx_state().map_err(anyhow::Error::from)?;
+                if state.active_profile.as_deref() == Some(source_name.as_str()) {
+                    state.active_profile = Some(new_name.clone());
+                    save_ayx_state(&state).map_err(anyhow::Error::from)?;
+                    self.active_profile = Some(new_name.clone());
+                    self.load_target(path, None, TargetKind::Profile)?;
+                } else {
+                    save_ayx_state(&state).map_err(anyhow::Error::from)?;
+                    let _ = self.reload_indexes();
+                }
+                let _ = self.reload_indexes();
+                self.status_message = format!("Renamed profile {source_name} to {new_name}");
+            }
+            ProfileCrudAction::DeleteSelected => {
+                let Some(source_name) = self.selected_profile_name().cloned() else {
+                    return Err(anyhow!("no profile selected"));
+                };
+                let was_active = self.active_profile.as_deref() == Some(source_name.as_str());
+                let _deleted = delete_profile_at(&config_home, &source_name)?;
+                let remaining = list_profile_records_at(&config_home)?
+                    .into_iter()
+                    .filter(|record| match self.profile_view {
+                        ProfileView::All => true,
+                        ProfileView::One => {
+                            matches!(record.scope, ProfileScope::One | ProfileScope::Combined)
+                        }
+                        ProfileView::Server => {
+                            matches!(record.scope, ProfileScope::Server | ProfileScope::Combined)
+                        }
+                    })
+                    .map(|record| record.name)
+                    .collect::<Vec<_>>();
+                let mut state = load_ayx_state().map_err(anyhow::Error::from)?;
+                if was_active {
+                    state.active_profile = remaining.first().cloned();
+                    save_ayx_state(&state).map_err(anyhow::Error::from)?;
+                    self.active_profile = state.active_profile.clone();
+                    if let Some(next_name) = self.active_profile.as_deref() {
+                        let path = profile_storage_path(next_name).map_err(anyhow::Error::from)?;
+                        self.load_target(path, None, TargetKind::Profile)?;
+                    } else {
+                        self.current_config = default_config();
+                        self.target_kind = TargetKind::Profile;
+                        self.target_environment = None;
+                        self.target_path =
+                            default_profile_storage_path().map_err(anyhow::Error::from)?;
+                        self.config_form = ConfigForm::from_config(&self.current_config);
+                        self.credentials = CredentialsForm::from_config(&self.current_config);
+                    }
+                } else {
+                    save_ayx_state(&state).map_err(anyhow::Error::from)?;
+                }
+                let _ = self.reload_indexes();
+                self.status_message = format!("Deleted profile {source_name}");
+            }
+        }
+        Ok(())
+    }
+
     fn handle_tab(&mut self) {
         match self.focus {
             Focus::Sidebar => self.focus = Focus::Content,
@@ -1189,9 +1497,65 @@ impl App {
     fn handle_profiles_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Left | KeyCode::Char('h') => self.focus = Focus::Sidebar,
+            KeyCode::Char('o') => {
+                self.profile_view = ProfileView::One;
+                self.profiles_state.select(Some(0));
+                self.sync_selected_entries();
+            }
+            KeyCode::Char('s') => {
+                self.profile_view = ProfileView::Server;
+                self.profiles_state.select(Some(0));
+                self.sync_selected_entries();
+            }
+            KeyCode::Char('a') => {
+                self.profile_view = ProfileView::All;
+                self.profiles_state.select(Some(0));
+                self.sync_selected_entries();
+            }
             KeyCode::Char('r') => {
                 if let Err(err) = self.reload_indexes() {
                     self.push_toast(err.to_string(), true);
+                }
+            }
+            KeyCode::Char('n') if self.profiles_pane == ProfilesPane::Profiles => {
+                let default_name = "new-profile".to_string();
+                self.crud_prompt = Some(CrudPrompt::Text {
+                    title: "Create Profile".to_string(),
+                    message: format!(
+                        "Create a new {} profile from defaults:",
+                        self.profile_view.label().to_lowercase()
+                    ),
+                    buffer: default_name,
+                    action: ProfileCrudAction::CreateDefault,
+                });
+            }
+            KeyCode::Char('d') if self.profiles_pane == ProfilesPane::Profiles => {
+                if let Some(name) = self.selected_profile_name().cloned() {
+                    self.crud_prompt = Some(CrudPrompt::Text {
+                        title: "Duplicate Profile".to_string(),
+                        message: format!("Duplicate '{name}' as:"),
+                        buffer: format!("{name}-copy"),
+                        action: ProfileCrudAction::DuplicateSelected,
+                    });
+                }
+            }
+            KeyCode::Char('R') if self.profiles_pane == ProfilesPane::Profiles => {
+                if let Some(name) = self.selected_profile_name().cloned() {
+                    self.crud_prompt = Some(CrudPrompt::Text {
+                        title: "Rename Profile".to_string(),
+                        message: format!("Rename '{name}' to:"),
+                        buffer: name,
+                        action: ProfileCrudAction::RenameSelected,
+                    });
+                }
+            }
+            KeyCode::Char('x') if self.profiles_pane == ProfilesPane::Profiles => {
+                if let Some(name) = self.selected_profile_name().cloned() {
+                    self.crud_prompt = Some(CrudPrompt::Confirm {
+                        title: "Delete Profile".to_string(),
+                        message: format!("Delete profile '{name}'?"),
+                        action: ProfileCrudAction::DeleteSelected,
+                    });
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => self.move_profiles_cursor(-1),
@@ -1460,7 +1824,8 @@ impl App {
     fn move_profiles_cursor(&mut self, delta: isize) {
         match self.profiles_pane {
             ProfilesPane::Profiles => {
-                move_list_state(&mut self.profiles_state, self.profiles.len(), delta)
+                let len = self.visible_profiles_len();
+                move_list_state(&mut self.profiles_state, len, delta)
             }
             ProfilesPane::Workspaces => {
                 move_list_state(&mut self.workspaces_state, self.workspaces.len(), delta);
@@ -1962,6 +2327,34 @@ impl App {
     fn persist_current_config(&mut self, config: Config) -> Result<()> {
         match self.target_kind {
             TargetKind::Profile => {
+                let desired_name = config.profile_name.trim();
+                if desired_name.is_empty() {
+                    return Err(anyhow!("Profile Name must not be empty"));
+                }
+                let current_name = self
+                    .target_path
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if desired_name != current_name {
+                    let new_path =
+                        profile_storage_path(desired_name).map_err(anyhow::Error::from)?;
+                    if new_path.exists() {
+                        return Err(anyhow!("profile '{desired_name}' already exists"));
+                    }
+                    if let Some(parent) = new_path.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::rename(&self.target_path, &new_path)?;
+                    self.target_path = new_path;
+                    let mut state = load_ayx_state().map_err(anyhow::Error::from)?;
+                    if state.active_profile.as_deref() == Some(current_name.as_str()) {
+                        state.active_profile = Some(desired_name.to_string());
+                        save_ayx_state(&state).map_err(anyhow::Error::from)?;
+                        self.active_profile = state.active_profile.clone();
+                    }
+                }
                 let secret_refs: BTreeMap<String, String> = BTreeMap::new();
                 write_config(&self.target_path, &config, &secret_refs)?;
             }
@@ -2001,7 +2394,7 @@ impl App {
     }
 
     fn reload_indexes(&mut self) -> Result<()> {
-        self.profiles = list_central_profiles().map_err(anyhow::Error::from)?;
+        self.profiles = list_profile_records_at(&self.config_home).map_err(anyhow::Error::from)?;
         self.workspaces = load_workspace_entries()?;
         self.sync_selected_entries();
         self.status_message = "Indexes reloaded".to_string();
@@ -2010,7 +2403,10 @@ impl App {
 
     fn sync_selected_entries(&mut self) {
         if let Some(active_profile) = self.active_profile.as_ref()
-            && let Some(index) = self.profiles.iter().position(|name| name == active_profile)
+            && let Some(index) = self
+                .visible_profiles()
+                .iter()
+                .position(|record| &record.name == active_profile)
         {
             self.profiles_state.select(Some(index));
         }
@@ -2039,8 +2435,7 @@ impl App {
     }
 
     pub fn selected_profile_name(&self) -> Option<&String> {
-        self.profiles
-            .get(self.profiles_state.selected().unwrap_or(0))
+        self.selected_profile_record().map(|record| &record.name)
     }
 
     pub fn selected_workspace(&self) -> Option<&WorkspaceEntry> {
@@ -2154,7 +2549,7 @@ impl App {
             },
             Err(err) => PanelState {
                 title: title.to_string(),
-                lines: vec![err.to_string()],
+                lines: one_browser_error_lines(resource, &err),
                 is_error: true,
                 raw: None,
             },
@@ -2193,6 +2588,32 @@ fn option_string(value: &str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn one_browser_error_lines(resource: OneBrowserResource, err: &anyhow::Error) -> Vec<String> {
+    let mut lines = vec![err.to_string()];
+    let err_text = err.to_string();
+    if err_text.contains("refresh token request") {
+        lines.push(String::new());
+        lines.push("Auth hint: the refresh token could not mint an access token.".to_string());
+        lines.push(
+            "Re-authenticate the active One profile, or switch to a profile with valid client credentials."
+                .to_string(),
+        );
+    } else if err_text.contains("access_token is required") {
+        lines.push(String::new());
+        lines.push(
+            "Auth hint: configure access_token, or set oauth_client_id + client_secret."
+                .to_string(),
+        );
+    } else if matches!(resource, OneBrowserResource::WorkspaceList) {
+        lines.push(String::new());
+        lines.push(
+            "Auth hint: workspace list requires a valid One bearer token for the active profile."
+                .to_string(),
+        );
+    }
+    lines
 }
 
 impl OneBrowserResource {
