@@ -60,14 +60,14 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
         }
         Some(WorkflowCommand::Replace {
             input,
-            output,
+            output_path,
             find,
             replace,
             validate,
         }) => {
             let detail = replace_workflow(
                 &input,
-                &output,
+                &output_path,
                 &[WorkflowReplacement { find, replace }],
                 validate,
             )?;
@@ -75,51 +75,51 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
                 "workflow replacement completed",
                 json!({
                     "input": input.display().to_string(),
-                    "output": output.display().to_string(),
+                    "output": output_path.display().to_string(),
                     "data": detail,
                 }),
             ))
         }
-        Some(WorkflowCommand::Repackage { input_dir, output }) => {
-            let detail = repackage_workflow(&input_dir, &output)?;
+        Some(WorkflowCommand::Repackage { input_dir, output_path }) => {
+            let detail = repackage_workflow(&input_dir, &output_path)?;
             Ok(Envelope::ok_with_data(
                 "workflow package rebuilt",
                 json!({
                     "input_dir": input_dir.display().to_string(),
-                    "output": output.display().to_string(),
+                    "output": output_path.display().to_string(),
                     "data": detail,
                 }),
             ))
         }
         Some(WorkflowCommand::Recurse {
             input,
-            output,
+            output_path,
             rules,
             find,
             replace,
             validate,
         }) => {
             let replacements = build_replacements(rules.as_ref(), find, replace, "recurse")?;
-            let detail = recurse_workflow(&input, &output, &replacements, validate)?;
+            let detail = recurse_workflow(&input, &output_path, &replacements, validate)?;
             Ok(Envelope::ok_with_data(
                 "workflow recursion completed",
                 json!({
                     "input": input.display().to_string(),
-                    "output": output.display().to_string(),
+                    "output": output_path.display().to_string(),
                     "data": detail,
                 }),
             ))
         }
         Some(WorkflowCommand::Migrate {
             input,
-            output,
+            output_path,
             find,
             replace,
             validate,
         }) => {
             let detail = migrate_workflow(
                 &input,
-                &output,
+                &output_path,
                 &[WorkflowReplacement { find, replace }],
                 validate,
             )?;
@@ -127,7 +127,7 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
                 "workflow migration completed",
                 json!({
                     "input": input.display().to_string(),
-                    "output": output.display().to_string(),
+                    "output": output_path.display().to_string(),
                     "data": detail,
                 }),
             ))
@@ -158,7 +158,7 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
         }
         Some(WorkflowCommand::ConvertCloud {
             input,
-            output,
+            output_path,
             fail_on_unsupported,
         }) => {
             let report = convert_desktop_to_cloud(
@@ -168,15 +168,15 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
                 },
             )?;
             fs::write(
-                &output,
+                &output_path,
                 serde_json::to_string_pretty(&report.content)? + "\n",
             )
-            .with_context(|| format!("failed to write '{}'", output.display()))?;
+            .with_context(|| format!("failed to write '{}'", output_path.display()))?;
             Ok(Envelope::ok_with_data(
                 "workflow cloud conversion completed",
                 json!({
                     "input": input.display().to_string(),
-                    "output": output.display().to_string(),
+                    "output": output_path.display().to_string(),
                     "content_checksum": report.content_checksum,
                     "warning_count": report.warnings.len(),
                     "warnings": report.warnings,
