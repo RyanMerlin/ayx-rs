@@ -11,7 +11,8 @@ already moved:
 
 - `catalog` dispatch is no longer root-only; the binary now has
   `ayx-rs/src/cmd/catalog.rs`.
-- `ayx dashboard` also lives under `ayx-rs/src/cmd/dashboard/`.
+- `ayx dashboard` has been removed from the CLI. If it returns later, it
+  should come back as a separate web surface.
 - `ayx-rs/src/main.rs` is still large, but it is now **5,389 lines** rather
   than the original 5,815 cited below.
 

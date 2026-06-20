@@ -18,18 +18,6 @@ Thank you for your interest. This document covers how to build, test, and submit
 
     cargo nextest run --workspace --locked
 
-## Documentation site
-
-The published docs live in `docs-site/` and are built with Docusaurus.
-The site syncs checked-in docs from `docs/` at build time, so the root docs
-remain the source of truth.
-
-To validate the docs site locally:
-
-    cd docs-site
-    npm ci
-    npm run build
-
 ## Before opening a PR
 
 Run these locally before pushing — CI enforces all three:

@@ -1419,7 +1419,17 @@ fn resolve_one_access_token(config: &Config, client: &Client) -> Result<String> 
         .and_then(|one| one.resolved_refresh_token())
         .is_some()
     {
-        return refresh_one_access_token(config, client);
+        match refresh_one_access_token(config, client) {
+            Ok(token) => return Ok(token),
+            Err(refresh_err) => {
+                if service_principal_credentials(config).is_some()
+                    && let Ok(token) = service_principal_access_token(config, client)
+                {
+                    return Ok(token);
+                }
+                return Err(refresh_err);
+            }
+        }
     }
 
     service_principal_access_token(config, client)
