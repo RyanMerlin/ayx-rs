@@ -1965,7 +1965,7 @@ mod tests {
                     service_name: "AlteryxService".to_string(),
                 },
                 embedded: Some(MongoEmbedded {
-                    runtime_settings_path: Some("examples/RuntimeSettings.xml".to_string()),
+                    runtime_settings_path: Some("docs/fixtures/RuntimeSettings.xml".to_string()),
                     alteryx_service_path: None,
                     restore_target_path: None,
                 }),

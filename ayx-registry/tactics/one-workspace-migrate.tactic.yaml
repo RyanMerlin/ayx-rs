@@ -35,7 +35,7 @@ steps:
     text: |
       Whole-workspace migration today is a per-resource loop: invoke `one.flow.promote`
       once per flow id from the list above. A dedicated `ayx tools workspace migrate`
-      orchestrator is on the roadmap (see docs/TODO.md §3) — once it ships, the loop
+      orchestrator is on the roadmap (see docs/roadmap/workspace-and-registry-tooling.md) — once it ships, the loop
       collapses to a single `tools workspace migrate --source <source> --target <target>`
       invocation with the same safety/audit guarantees.
   - kind: tactic
