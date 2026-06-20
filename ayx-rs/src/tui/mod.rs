@@ -227,19 +227,19 @@ fn render_profiles(frame: &mut Frame, app: &App, area: Rect) {
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{marker} "), style),
                 Span::styled(record.name.clone(), style),
-                    Span::styled(
-                        format!(
-                            " [{}]",
-                            match record.scope {
-                                ProfileScope::One => "one",
-                                ProfileScope::Server => "server",
-                                ProfileScope::Combined => "combined",
-                            }
-                        ),
-                        theme::muted(),
+                Span::styled(
+                    format!(
+                        " [{}]",
+                        match record.scope {
+                            ProfileScope::One => "one",
+                            ProfileScope::Server => "server",
+                            ProfileScope::Combined => "combined",
+                        }
                     ),
-                ]))
-            })
+                    theme::muted(),
+                ),
+            ]))
+        })
         .collect::<Vec<_>>();
     let mut profile_state = app.profiles_state.clone();
     frame.render_stateful_widget(

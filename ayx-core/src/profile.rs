@@ -472,6 +472,13 @@ impl Config {
         Self::load_from_resolved_path_lenient(&resolved)
     }
 
+    pub fn load_from_path_lenient_without_active_overlay(
+        path: &Path,
+    ) -> Result<Self, ProfileError> {
+        let resolved = resolve_profile_path(path)?;
+        Self::load_from_resolved_path_lenient_without_active_overlay(&resolved)
+    }
+
     pub fn load_from_path_with_environment_lenient(
         path: &Path,
         environment: Option<&str>,
@@ -511,6 +518,13 @@ impl Config {
     fn load_from_resolved_path_lenient(path: &Path) -> Result<Self, ProfileError> {
         let (path_str, env_values, value) = Self::read_profile_value(path)?;
         Self::load_config_from_value(path, path_str, value, env_values, None)
+    }
+
+    fn load_from_resolved_path_lenient_without_active_overlay(
+        path: &Path,
+    ) -> Result<Self, ProfileError> {
+        let (path_str, env_values, value) = Self::read_profile_value(path)?;
+        Self::load_config_without_active_overlay(path, path_str, value, env_values, None)
     }
 
     fn load_from_resolved_path_with_environment(
@@ -585,6 +599,36 @@ impl Config {
         Self::finalize_loaded_config(config, env_values, path)
     }
 
+    fn load_config_without_active_overlay(
+        path: &Path,
+        path_str: String,
+        value: serde_yaml::Value,
+        env_values: HashMap<String, String>,
+        environment: Option<&str>,
+    ) -> Result<Self, ProfileError> {
+        let config = if is_workspace_value(&value) {
+            let workspace: WorkspaceConfig =
+                serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+                    path: path_str.clone(),
+                    source,
+                })?;
+            let active = environment.unwrap_or(&workspace.active_environment);
+            workspace.environments.get(active).cloned().ok_or_else(|| {
+                ProfileError::Invalid(format!(
+                    "workspace '{}' does not contain environment '{}'",
+                    workspace.workspace_name, active
+                ))
+            })?
+        } else {
+            serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+                path: path_str,
+                source,
+            })?
+        };
+
+        Self::finalize_loaded_config_without_overlay(config, env_values, path)
+    }
+
     fn finalize_loaded_config(
         config: Self,
         env_values: HashMap<String, String>,
@@ -593,6 +637,16 @@ impl Config {
         let config = apply_env_fallbacks(config, &env_values);
         let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
         Ok(overlay_active_profile_one_from_state(config, current_path))
+    }
+
+    fn finalize_loaded_config_without_overlay(
+        config: Self,
+        env_values: HashMap<String, String>,
+        _current_path: &Path,
+    ) -> Result<Self, ProfileError> {
+        let config = apply_env_fallbacks(config, &env_values);
+        let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
+        Ok(config)
     }
 
     fn with_server_api_overrides(mut self) -> Result<Self, ProfileError> {
@@ -1685,12 +1739,17 @@ pub fn load_ayx_state() -> Result<AyxState, ProfileError> {
         path: path.display().to_string(),
         source,
     })?;
-    let mut state: AyxState = serde_yaml::from_str(&content).map_err(|source| ProfileError::Parse {
-        path: path.display().to_string(),
-        source,
-    })?;
-    state.active_profile = state.active_profile.map(|name| normalize_storage_name(&name));
-    state.active_workspace = state.active_workspace.map(|name| normalize_storage_name(&name));
+    let mut state: AyxState =
+        serde_yaml::from_str(&content).map_err(|source| ProfileError::Parse {
+            path: path.display().to_string(),
+            source,
+        })?;
+    state.active_profile = state
+        .active_profile
+        .map(|name| normalize_storage_name(&name));
+    state.active_workspace = state
+        .active_workspace
+        .map(|name| normalize_storage_name(&name));
     Ok(state)
 }
 
@@ -1815,7 +1874,9 @@ pub fn resolve_runtime_profile(
 
 pub fn list_central_profiles() -> Result<Vec<String>, ProfileError> {
     let mut names = list_named_yaml_entries(&ayx_profiles_dir()?)?;
-    if ayx_config_home()?.join(LEGACY_DEFAULT_PROFILE_FILE).exists()
+    if ayx_config_home()?
+        .join(LEGACY_DEFAULT_PROFILE_FILE)
+        .exists()
         && !names.iter().any(|name| name == DEFAULT_ACTIVE_PROFILE_NAME)
     {
         names.push(DEFAULT_ACTIVE_PROFILE_NAME.to_string());
@@ -2295,6 +2356,40 @@ mod tests {
     }
 
     #[test]
+    fn load_from_path_lenient_without_active_overlay_keeps_source_profile() {
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let config_home = temp.path().join("ayx-home");
+        fs::create_dir_all(config_home.join("profiles")).unwrap();
+
+        let _guard = EnvGuard::set("AYX_CONFIG_HOME", config_home.to_str().unwrap());
+        save_ayx_state(&AyxState {
+            active_profile: Some("shared".to_string()),
+            active_workspace: None,
+        })
+        .unwrap();
+
+        let mut shared = base_config("shared", "SharedService");
+        shared.alteryx_one.as_mut().unwrap().account_email = "shared@example.com".to_string();
+        let shared_path = profile_storage_path("shared").unwrap();
+        fs::write(&shared_path, serde_yaml::to_string(&shared).unwrap()).unwrap();
+
+        let mut local = base_config("local", "LocalService");
+        local.alteryx_one.as_mut().unwrap().account_email = "local@example.com".to_string();
+        let local_path = profile_storage_path("local").unwrap();
+        fs::write(&local_path, serde_yaml::to_string(&local).unwrap()).unwrap();
+
+        let loaded = Config::load_from_path_lenient_without_active_overlay(&local_path).unwrap();
+        assert_eq!(
+            loaded
+                .alteryx_one
+                .as_ref()
+                .map(|one| one.account_email.as_str()),
+            Some("local@example.com")
+        );
+    }
+
+    #[test]
     fn one_token_endpoint_normalizes_issuer_root() {
         let profile = AlteryxOneProfile {
             account_email: "user@example.com".to_string(),
@@ -2675,7 +2770,11 @@ server:
             serde_yaml::to_string(&base_config("legacy", "LegacyDb")).unwrap(),
         )
         .unwrap();
-        std::fs::write(temp.path().join("state.yaml"), "active_profile: default.yaml\n").unwrap();
+        std::fs::write(
+            temp.path().join("state.yaml"),
+            "active_profile: default.yaml\n",
+        )
+        .unwrap();
 
         let path = default_profile_storage_path().unwrap();
         assert_eq!(path, temp.path().join("default.yaml"));

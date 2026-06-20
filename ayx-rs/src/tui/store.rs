@@ -120,35 +120,39 @@ pub(crate) fn list_profile_names_at(config_home: &Path) -> Result<Vec<String>> {
 
 pub(crate) fn list_profile_records_at(config_home: &Path) -> Result<Vec<ProfileRecord>> {
     let dir = profiles_dir_at(config_home);
-    if !dir.exists() {
-        return Ok(Vec::new());
-    }
     let mut records = Vec::new();
-    for entry in fs::read_dir(&dir)
-        .with_context(|| format!("failed to read profile directory '{}'", dir.display()))?
+    if dir.exists() {
+        for entry in fs::read_dir(&dir)
+            .with_context(|| format!("failed to read profile directory '{}'", dir.display()))?
+        {
+            let entry = entry
+                .with_context(|| format!("failed to read profile directory '{}'", dir.display()))?;
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("yaml") {
+                continue;
+            }
+            if let Some(stem) = path.file_stem().and_then(|value| value.to_str()) {
+                if let Some(scope) = classify_profile_file(&path)? {
+                    records.push(ProfileRecord {
+                        name: stem.to_string(),
+                        path: path.clone(),
+                        scope,
+                    });
+                }
+            }
+        }
+    }
+
+    let legacy_default = config_home.join("default.yaml");
+    if legacy_default.exists()
+        && !records.iter().any(|record| record.name == "default")
+        && let Some(scope) = classify_profile_file(&legacy_default)?
     {
-        let entry = entry
-            .with_context(|| format!("failed to read profile directory '{}'", dir.display()))?;
-        let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("yaml") {
-            continue;
-        }
-        if let Some(stem) = path.file_stem().and_then(|value| value.to_str()) {
-            let scope = match fs::read_to_string(&path).with_context(|| {
-                format!("failed to read profile file '{}'", path.display())
-            }) {
-                Ok(contents) => match serde_yaml::from_str::<Value>(&contents) {
-                    Ok(value) => classify_profile_scope_value(&value),
-                    Err(_) => continue,
-                },
-                Err(_) => continue,
-            };
-            records.push(ProfileRecord {
-                name: stem.to_string(),
-                path: path.clone(),
-                scope,
-            });
-        }
+        records.push(ProfileRecord {
+            name: "default".to_string(),
+            path: legacy_default,
+            scope,
+        });
     }
     records.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(records)
@@ -156,7 +160,7 @@ pub(crate) fn list_profile_records_at(config_home: &Path) -> Result<Vec<ProfileR
 
 pub(crate) fn load_profile_at(config_home: &Path, name: &str) -> Result<Config> {
     let path = profile_path_at(config_home, name)?;
-    Config::load_from_path_lenient(&path).map_err(anyhow::Error::from)
+    Config::load_from_path_lenient_without_active_overlay(&path).map_err(anyhow::Error::from)
 }
 
 pub(crate) fn create_profile_from_default_at(config_home: &Path, name: &str) -> Result<PathBuf> {
@@ -197,17 +201,32 @@ fn classify_profile_scope_value(value: &Value) -> ProfileScope {
     let Some(root) = value.as_mapping() else {
         return ProfileScope::Combined;
     };
-    let has_one = root.contains_key(Value::String("alteryx_one".to_string()));
-    let has_server = root.contains_key(Value::String("server".to_string()))
-        || root.contains_key(Value::String("server_api".to_string()))
-        || root.contains_key(Value::String("sqlserver".to_string()))
-        || root.contains_key(Value::String("api".to_string()));
+    let has_one = contains_non_null_key(root, "alteryx_one");
+    let has_server = contains_non_null_key(root, "server")
+        || contains_non_null_key(root, "server_api")
+        || contains_non_null_key(root, "sqlserver")
+        || contains_non_null_key(root, "api");
     match (has_one, has_server) {
         (true, true) => ProfileScope::Combined,
         (true, false) => ProfileScope::One,
         (false, true) => ProfileScope::Server,
         (false, false) => ProfileScope::Combined,
     }
+}
+
+fn contains_non_null_key(root: &serde_yaml::Mapping, key: &str) -> bool {
+    root.get(Value::String(key.to_string()))
+        .is_some_and(|value| !value.is_null())
+}
+
+fn classify_profile_file(path: &Path) -> Result<Option<ProfileScope>> {
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("failed to read profile file '{}'", path.display()))?;
+    let value = match serde_yaml::from_str::<Value>(&contents) {
+        Ok(value) => value,
+        Err(_) => return Ok(None),
+    };
+    Ok(Some(classify_profile_scope_value(&value)))
 }
 
 fn default_config_with_profile(profile_name: &str) -> Config {
@@ -321,6 +340,56 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_profile_does_not_overlay_active_profile_state() {
+        let home = temp_home();
+        let config_home = home.path().join("ayx-home");
+        fs::create_dir_all(config_home.join("profiles")).unwrap();
+
+        let mut source = default_config_with_profile("server-source");
+        source.alteryx_one = None;
+        source.server = Some(ServerProfile {
+            webapi_url: "http://example.invalid/".to_string(),
+            curator_api_key: "k".to_string(),
+            curator_api_secret: "s".to_string(),
+            curator_api_secret_ref: None,
+            verify_tls: Some(true),
+        });
+        create_profile_from_config_at(config_home.as_path(), "server-source", &source).unwrap();
+
+        let mut shared = default_one_profile_template("shared");
+        shared.alteryx_one.as_mut().unwrap().account_email = "shared@example.com".to_string();
+        create_profile_from_config_at(config_home.as_path(), "shared", &shared).unwrap();
+
+        let duplicated =
+            duplicate_profile_at(config_home.as_path(), "server-source", "server-copy").unwrap();
+        let duplicated_config = Config::load_from_path_lenient_without_active_overlay(&duplicated)
+            .expect("load duplicated profile");
+        assert!(duplicated_config.alteryx_one.is_none());
+        assert!(duplicated_config.server.is_some());
+    }
+
+    #[test]
+    fn lists_legacy_default_profile_in_root_directory() {
+        let home = temp_home();
+        let config_home = home.path();
+
+        let mut default_profile = default_one_profile_template("default");
+        default_profile.alteryx_one.as_mut().unwrap().account_email =
+            "default@example.com".to_string();
+        fs::write(
+            config_home.join("default.yaml"),
+            serde_yaml::to_string(&default_profile).unwrap(),
+        )
+        .unwrap();
+
+        let records = list_profile_records_at(config_home).expect("records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "default");
+        assert_eq!(records[0].path, config_home.join("default.yaml"));
+        assert!(matches!(records[0].scope, ProfileScope::One));
+    }
+
+    #[test]
     fn classifies_one_and_server_profiles() {
         let home = temp_home();
         let config_home = home.path();
@@ -332,11 +401,16 @@ mod tests {
 
         let records = list_profile_records_at(config_home).expect("records");
         assert_eq!(records.len(), 2);
-        assert!(records
-            .iter()
-            .any(|record| record.name == "one" && matches!(record.scope, ProfileScope::One)));
-        assert!(records
-            .iter()
-            .any(|record| record.name == "server" && matches!(record.scope, ProfileScope::Server)));
+        assert!(
+            records
+                .iter()
+                .any(|record| record.name == "one" && matches!(record.scope, ProfileScope::One))
+        );
+        assert!(
+            records
+                .iter()
+                .any(|record| record.name == "server"
+                    && matches!(record.scope, ProfileScope::Server))
+        );
     }
 }
