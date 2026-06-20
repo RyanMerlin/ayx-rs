@@ -4,14 +4,12 @@ on:
   push:
     branches: [main]
     paths:
-      - 'docs-site/**'
+      - 'site/**'
       - 'docs/**'
-      - 'CONTRIBUTING.md'
   pull_request:
     paths:
-      - 'docs-site/**'
+      - 'site/**'
       - 'docs/**'
-      - 'CONTRIBUTING.md'
   workflow_dispatch:
 
 permissions:
@@ -35,17 +33,17 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: docs-site/package-lock.json
+          cache-dependency-path: site/package-lock.json
 
       - name: Install dependencies
         run: npm ci
-        working-directory: docs-site
+        working-directory: site
 
-      # Builds on every PR too (onBrokenLinks: throw) so docs breakage is caught
-      # before merge, not as a failed production deploy after merge.
+      # Builds on every PR too (syncs the generated reference docs, then astro
+      # build) so doc breakage is caught before merge, not as a failed deploy.
       - name: Build site
         run: npm run build
-        working-directory: docs-site
+        working-directory: site
 
       # Deploy only on push to main / manual dispatch. PRs build but never see
       # the Cloudflare secret (fork-safe on a public repo).
@@ -55,5 +53,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy build --project-name=ayx-rs
-          workingDirectory: docs-site
+          command: pages deploy dist --project-name=ayx-rs
+          workingDirectory: site

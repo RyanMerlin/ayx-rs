@@ -1,0 +1,643 @@
+---
+const title = 'ayx-rs — a precision operator CLI for Alteryx';
+const description =
+  'ayx is a command-line operator for Alteryx Server and Alteryx One: a generated command surface, an explicit safety model, structured output, and versioned release notes.';
+const install = 'curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash';
+
+// An accurate ayx session — every command and flag here is real (verified
+// against the CLI's command tree and config code).
+const session = [
+  { cmd: 'ayx onboard', out: ['profile "default" created at ~/.config/ayx'], kind: 'ok' },
+  {
+    cmd: 'ayx --output json one platform workspace current',
+    out: ['{ "workspace": "acme-prod", "role": "admin" }'],
+    kind: 'json',
+  },
+  {
+    cmd: 'ayx one flows delete --flow-id 4821',
+    out: ['dry-run · 1 flow would be deleted · re-run with --apply'],
+    kind: 'note',
+  },
+  { cmd: 'ayx doctor', out: ['config   ✓ auth   ✓ connectivity'], kind: 'ok' },
+];
+
+const capabilities = [
+  {
+    name: 'Generated command surface',
+    body: '180 commands, generated from the CLI’s own command tree and checked for staleness in CI — the docs follow the binary, not the other way around.',
+  },
+  {
+    name: 'Explicit safety model',
+    body: 'Every command is annotated read-only or mutating. Read-only needs no flags; mutating remote calls are gated behind --apply.',
+  },
+  {
+    name: 'Dry-run by default',
+    body: 'Run a mutating command without --apply and it prints exactly what would happen, then exits cleanly — safe to wire into automation.',
+  },
+  {
+    name: 'Structured output',
+    body: 'Pass --output json for machine-readable envelopes — built for pipelines, agents, and scripts, not just humans at a terminal.',
+  },
+  {
+    name: 'Profiles & environments',
+    body: 'A central profile store with per-run overrides and a multi-environment file shape, resolved through a documented precedence order.',
+  },
+  {
+    name: 'Server & Alteryx One',
+    body: 'One operator surface across Alteryx Server and the Alteryx One control plane — administration, automation, and agentic workflows.',
+  },
+];
+
+const steps = [
+  { n: '1', label: 'Install', code: install },
+  { n: '2', label: 'Onboard', code: 'ayx onboard' },
+  { n: '3', label: 'Check', code: 'ayx doctor' },
+];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="grid-bg" aria-hidden="true"></div>
+
+    <nav class="nav">
+      <div class="wrap nav-inner">
+        <a href="/" class="brand"><span class="prompt">&gt;_</span> ayx-rs <span class="ver">v0.9.10</span></a>
+        <div class="nav-links">
+          <a href="/getting-started/">Docs</a>
+          <a href="/reference/command-surface/">Commands</a>
+          <a href="https://github.com/RyanMerlin/ayx-rs">GitHub</a>
+        </div>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <span class="kicker">Operator CLI · Alteryx Server &amp; Alteryx One</span>
+          <h1>Drive Alteryx<br />from the command line.</h1>
+          <p class="lede">
+            <code>ayx</code> is a single, precise operator for Alteryx administration — a generated
+            command surface, an explicit safety model, and structured output built for pipelines and agents.
+          </p>
+          <div class="cta">
+            <a class="btn primary" href="/getting-started/">Get started</a>
+            <a class="btn ghost" href="/reference/command-surface/">Browse 180 commands</a>
+          </div>
+          <div class="install">
+            <span class="install-prompt">$</span>
+            <code>{install}</code>
+          </div>
+        </div>
+
+        <div class="term" role="img" aria-label="Example ayx session">
+          <div class="term-bar">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="term-title">ayx — session</span>
+          </div>
+          <div class="term-body">
+            {
+              session.map((line) => (
+                <div class="term-block">
+                  <div class="term-cmd">
+                    <span class="term-sigil">$</span>
+                    <span>{line.cmd}</span>
+                  </div>
+                  {line.out.map((o) => (
+                    <div class={`term-out ${line.kind}`}>
+                      {line.kind === 'ok' && <span class="check">✓</span>}
+                      {o}
+                    </div>
+                  ))}
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <section class="band">
+      <div class="wrap band-inner">
+        <div class="band-mark">--apply</div>
+        <div>
+          <h2>Read-only by default. Mutations are a deliberate act.</h2>
+          <p>
+            Run any mutating command and, without <code>--apply</code>, it prints a dry-run of exactly
+            what would change and exits with status&nbsp;0. Nothing touches remote state until you opt in.
+            That is the whole point: safe to explore, safe to automate.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="features">
+      <div class="wrap">
+        <h2 class="section-title">What ayx gives an operator</h2>
+        <div class="cards">
+          {
+            capabilities.map((c) => (
+              <article class="card">
+                <h3>{c.name}</h3>
+                <p>{c.body}</p>
+              </article>
+            ))
+          }
+        </div>
+      </div>
+    </section>
+
+    <section class="quickstart">
+      <div class="wrap">
+        <h2 class="section-title">Three commands to first signal</h2>
+        <div class="steps">
+          {
+            steps.map((s) => (
+              <div class="step">
+                <span class="step-n">{s.n}</span>
+                <div class="step-body">
+                  <strong>{s.label}</strong>
+                  <code>{s.code}</code>
+                </div>
+              </div>
+            ))
+          }
+        </div>
+        <p class="qs-note">
+          Install drops the verified release binary on your <code>PATH</code> (you may need a new shell),
+          then <code>ayx onboard</code> writes your first profile.
+        </p>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <div class="footer-brand">
+          <a href="/" class="brand"><span class="prompt">&gt;_</span> ayx-rs</a>
+          <span>A personal project by Ryan Merlin.</span>
+        </div>
+        <div class="footer-links">
+          <a href="/getting-started/">Documentation</a>
+          <a href="https://github.com/RyanMerlin/ayx-rs">GitHub</a>
+          <a href="https://github.com/RyanMerlin/ayx-rs/releases">Releases</a>
+        </div>
+      </div>
+      <div class="wrap copyright">© 2026 Ryan Merlin · Apache-2.0</div>
+    </footer>
+
+    <style>
+      :root {
+        --bg: #091321;
+        --bg-2: #0e1c2f;
+        --surface: #102234;
+        --border: #1d3047;
+        --text: #e7eef7;
+        --muted: #90a6c2;
+        --blue: #2f93d8;
+        --ayx: #0067b9;
+        --cyan: #00a9e0;
+        --ok: #43d0a0;
+        --font: 'IBM Plex Sans', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+        --mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+      }
+
+      .grid-bg {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        background-image:
+          radial-gradient(60rem 40rem at 78% -10%, rgba(0, 169, 224, 0.16), transparent 60%),
+          radial-gradient(50rem 36rem at 8% 4%, rgba(0, 103, 185, 0.18), transparent 55%),
+          linear-gradient(transparent 95%, rgba(120, 160, 200, 0.05) 95%),
+          linear-gradient(90deg, transparent 95%, rgba(120, 160, 200, 0.05) 95%);
+        background-size: 100% 100%, 100% 100%, 2.6rem 2.6rem, 2.6rem 2.6rem;
+        pointer-events: none;
+      }
+
+      .wrap {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        position: relative;
+        z-index: 1;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      code {
+        font-family: var(--mono);
+      }
+
+      /* nav */
+      .nav {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        backdrop-filter: blur(12px);
+        background: rgba(9, 19, 33, 0.72);
+        border-bottom: 1px solid var(--border);
+      }
+      .nav-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 4rem;
+      }
+      .brand {
+        font-family: var(--mono);
+        font-weight: 600;
+        font-size: 1.05rem;
+        text-decoration: none;
+        color: var(--text);
+        letter-spacing: -0.01em;
+      }
+      .prompt {
+        color: var(--cyan);
+      }
+      .ver {
+        font-size: 0.62rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        padding: 0.12em 0.5em;
+        border-radius: 0.3em;
+        background: rgba(0, 169, 224, 0.12);
+        color: #9fd9f3;
+        border: 1px solid rgba(0, 169, 224, 0.4);
+        vertical-align: 0.12em;
+        margin-left: 0.15rem;
+      }
+      .nav-links {
+        display: flex;
+        gap: 1.75rem;
+      }
+      .nav-links a {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 0.9rem;
+        transition: color 0.18s;
+      }
+      .nav-links a:hover {
+        color: var(--text);
+      }
+
+      /* hero */
+      .hero {
+        padding: 5.5rem 0 4rem;
+      }
+      .hero-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+        gap: 3rem;
+        align-items: center;
+      }
+      .kicker {
+        font-family: var(--mono);
+        font-size: 0.74rem;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--cyan);
+      }
+      .hero h1 {
+        margin: 1rem 0 1.25rem;
+        font-size: clamp(2.3rem, 5vw, 3.6rem);
+        line-height: 1.04;
+        letter-spacing: -0.03em;
+        font-weight: 700;
+      }
+      .lede {
+        color: var(--muted);
+        font-size: 1.1rem;
+        max-width: 34rem;
+      }
+      .lede code {
+        color: var(--text);
+        background: rgba(0, 169, 224, 0.1);
+        padding: 0.05em 0.35em;
+        border-radius: 0.3em;
+      }
+      .cta {
+        margin-top: 1.9rem;
+        display: flex;
+        gap: 0.85rem;
+        flex-wrap: wrap;
+      }
+      .btn {
+        display: inline-block;
+        padding: 0.7rem 1.4rem;
+        border-radius: 0.5rem;
+        font-size: 0.94rem;
+        font-weight: 600;
+        text-decoration: none;
+        transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+      }
+      .btn.primary {
+        color: #fff;
+        background: linear-gradient(135deg, var(--ayx), var(--cyan));
+        box-shadow: 0 8px 24px rgba(0, 120, 200, 0.3);
+      }
+      .btn.primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 12px 30px rgba(0, 120, 200, 0.42);
+      }
+      .btn.ghost {
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .btn.ghost:hover {
+        border-color: var(--blue);
+      }
+      .install {
+        margin-top: 1.6rem;
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        background: var(--bg-2);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        padding: 0.7rem 0.95rem;
+        max-width: 100%;
+        overflow-x: auto;
+      }
+      .install-prompt {
+        color: var(--cyan);
+        font-family: var(--mono);
+        font-weight: 600;
+      }
+      .install code {
+        font-size: 0.82rem;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      /* terminal */
+      .term {
+        background: var(--bg-2);
+        border: 1px solid var(--border);
+        border-radius: 0.8rem;
+        box-shadow: 0 30px 60px rgba(2, 10, 20, 0.55), 0 0 0 1px rgba(0, 169, 224, 0.05);
+        overflow: hidden;
+      }
+      .term-bar {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.7rem 0.95rem;
+        background: #0b1828;
+        border-bottom: 1px solid var(--border);
+      }
+      .dot {
+        width: 0.7rem;
+        height: 0.7rem;
+        border-radius: 50%;
+        background: #2a3f57;
+      }
+      .term-title {
+        margin-left: 0.6rem;
+        font-family: var(--mono);
+        font-size: 0.74rem;
+        color: var(--muted);
+      }
+      .term-body {
+        padding: 1.1rem 1.15rem 1.25rem;
+        font-family: var(--mono);
+        font-size: 0.82rem;
+        line-height: 1.5;
+      }
+      .term-block + .term-block {
+        margin-top: 0.95rem;
+      }
+      .term-cmd {
+        display: flex;
+        gap: 0.55rem;
+        color: var(--text);
+      }
+      .term-sigil {
+        color: var(--cyan);
+      }
+      .term-out {
+        margin-top: 0.2rem;
+        padding-left: 1.1rem;
+        color: var(--muted);
+      }
+      .term-out .check {
+        color: var(--ok);
+        margin-right: 0.4rem;
+      }
+      .term-out.json {
+        color: #8fd0f2;
+      }
+      .term-out.note {
+        color: #f0b866;
+      }
+
+      /* band */
+      .band {
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        background: linear-gradient(180deg, rgba(0, 103, 185, 0.06), transparent);
+        padding: 3.5rem 0;
+      }
+      .band-inner {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 2rem;
+        align-items: center;
+      }
+      .band-mark {
+        font-family: var(--mono);
+        font-size: clamp(1.4rem, 3vw, 2.1rem);
+        font-weight: 600;
+        color: var(--cyan);
+        padding: 0.6rem 1rem;
+        border: 1px dashed rgba(0, 169, 224, 0.45);
+        border-radius: 0.6rem;
+        white-space: nowrap;
+      }
+      .band h2 {
+        font-size: clamp(1.35rem, 2.6vw, 1.9rem);
+        letter-spacing: -0.02em;
+        margin-bottom: 0.6rem;
+      }
+      .band p {
+        color: var(--muted);
+        max-width: 50rem;
+      }
+      .band code {
+        color: var(--text);
+        background: rgba(0, 169, 224, 0.1);
+        padding: 0.05em 0.35em;
+        border-radius: 0.3em;
+      }
+
+      /* features */
+      .features {
+        padding: 4.5rem 0;
+      }
+      .section-title {
+        font-size: clamp(1.4rem, 3vw, 2rem);
+        letter-spacing: -0.02em;
+        margin-bottom: 2.2rem;
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+        gap: 1.1rem;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 0.7rem;
+        padding: 1.4rem 1.4rem 1.5rem;
+        transition: transform 0.16s, border-color 0.16s;
+      }
+      .card:hover {
+        transform: translateY(-3px);
+        border-color: rgba(0, 169, 224, 0.5);
+      }
+      .card h3 {
+        font-size: 1.02rem;
+        margin-bottom: 0.5rem;
+      }
+      .card p {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      /* quickstart */
+      .quickstart {
+        padding: 1rem 0 5rem;
+      }
+      .steps {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+        gap: 1.1rem;
+      }
+      .step {
+        display: flex;
+        gap: 0.9rem;
+        align-items: flex-start;
+        background: var(--bg-2);
+        border: 1px solid var(--border);
+        border-radius: 0.7rem;
+        padding: 1.2rem;
+      }
+      .step-n {
+        flex-shrink: 0;
+        width: 1.9rem;
+        height: 1.9rem;
+        border-radius: 0.45rem;
+        display: grid;
+        place-items: center;
+        font-family: var(--mono);
+        font-weight: 600;
+        color: #fff;
+        background: linear-gradient(135deg, var(--ayx), var(--cyan));
+      }
+      .step-body strong {
+        display: block;
+        margin-bottom: 0.3rem;
+      }
+      .step-body code {
+        font-size: 0.78rem;
+        color: var(--muted);
+        word-break: break-all;
+      }
+      .qs-note {
+        margin-top: 1.4rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      .qs-note code {
+        color: var(--text);
+      }
+
+      /* footer */
+      .footer {
+        border-top: 1px solid var(--border);
+        padding: 2.5rem 0 3rem;
+      }
+      .footer-inner {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+      }
+      .footer-brand .brand {
+        text-decoration: none;
+      }
+      .footer-brand span {
+        color: var(--muted);
+        font-size: 0.88rem;
+        margin-left: 0.75rem;
+      }
+      .footer-links {
+        display: flex;
+        gap: 1.4rem;
+      }
+      .footer-links a {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 0.88rem;
+      }
+      .footer-links a:hover {
+        color: var(--text);
+      }
+      .copyright {
+        margin-top: 1.4rem;
+        color: #5d748f;
+        font-size: 0.8rem;
+        font-family: var(--mono);
+      }
+
+      @media (max-width: 860px) {
+        .hero-grid {
+          grid-template-columns: 1fr;
+          gap: 2.25rem;
+        }
+        .band-inner {
+          grid-template-columns: 1fr;
+          gap: 1.1rem;
+        }
+        .nav-links {
+          gap: 1.1rem;
+        }
+      }
+    </style>
+  </body>
+</html>

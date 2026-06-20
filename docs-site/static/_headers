@@ -1,9 +1,0 @@
-# Cloudflare Pages serves this from the build root (Docusaurus copies static/* there).
-# Conservative hardening for a static docs site. CSP is intentionally omitted for
-# now (Docusaurus ships inline bootstrap scripts; a strict policy needs testing).
-/*
-  X-Content-Type-Options: nosniff
-  X-Frame-Options: DENY
-  Referrer-Policy: strict-origin-when-cross-origin
-  Strict-Transport-Security: max-age=31536000; includeSubDomains
-  Permissions-Policy: geolocation=(), microphone=(), camera=()

@@ -1,0 +1,40 @@
+/* ayx-rs docs theme — Alteryx-blue accent over Starlight's chrome.
+   The landing page (src/pages/index.astro) carries its own styles; this file
+   themes the documentation pages. */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --sl-font: 'IBM Plex Sans', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+  --sl-font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  /* Alteryx-blue accent ramp — dark theme (Starlight's default). */
+  --sl-color-accent-low: #16314d;
+  --sl-color-accent: #1f8fd4;
+  --sl-color-accent-high: #c2e2f8;
+
+  /* Brand tokens shared with the landing page. */
+  --ayx-blue: #0067b9;
+  --ayx-cyan: #00a9e0;
+}
+
+:root[data-theme='light'] {
+  /* Alteryx-blue accent ramp — light theme. */
+  --sl-color-accent-low: #d8e9f8;
+  --sl-color-accent: #0061ad;
+  --sl-color-accent-high: #073a66;
+}
+
+/* Precise, technical headings. */
+:is(h1, h2, h3),
+.sl-markdown-content :is(h1, h2, h3) {
+  letter-spacing: -0.012em;
+}
+
+/* Command names and inline code read as a CLI, not prose. */
+.sl-markdown-content code:not(:where(.expressive-code *)) {
+  font-variant-ligatures: none;
+}
+
+.sidebar a[aria-current='page'] {
+  font-weight: 600;
+}
