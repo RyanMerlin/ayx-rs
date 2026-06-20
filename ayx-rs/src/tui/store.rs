@@ -22,6 +22,9 @@ pub(crate) enum ProfileScope {
 #[derive(Debug, Clone)]
 pub(crate) struct ProfileRecord {
     pub name: String,
+    // Resolved profile-file path; surfaced for the eventual load-by-path flow,
+    // currently only asserted in tests.
+    #[allow(dead_code)]
     pub path: PathBuf,
     pub scope: ProfileScope,
 }
@@ -107,10 +110,9 @@ fn write_profile_at(config_home: &Path, name: &str, config: &Config) -> Result<P
     Ok(path)
 }
 
-fn default_profile_template(profile_name: &str) -> Config {
-    default_one_profile_template(profile_name)
-}
-
+// Name-only listing helper (sibling of list_profile_records_at); tested but not
+// yet wired into the TUI/CLI surface.
+#[allow(dead_code)]
 pub(crate) fn list_profile_names_at(config_home: &Path) -> Result<Vec<String>> {
     Ok(list_profile_records_at(config_home)?
         .into_iter()
@@ -131,14 +133,14 @@ pub(crate) fn list_profile_records_at(config_home: &Path) -> Result<Vec<ProfileR
             if path.extension().and_then(|value| value.to_str()) != Some("yaml") {
                 continue;
             }
-            if let Some(stem) = path.file_stem().and_then(|value| value.to_str()) {
-                if let Some(scope) = classify_profile_file(&path)? {
-                    records.push(ProfileRecord {
-                        name: stem.to_string(),
-                        path: path.clone(),
-                        scope,
-                    });
-                }
+            if let Some(stem) = path.file_stem().and_then(|value| value.to_str())
+                && let Some(scope) = classify_profile_file(&path)?
+            {
+                records.push(ProfileRecord {
+                    name: stem.to_string(),
+                    path: path.clone(),
+                    scope,
+                });
             }
         }
     }
@@ -163,6 +165,9 @@ pub(crate) fn load_profile_at(config_home: &Path, name: &str) -> Result<Config> 
     Config::load_from_path_lenient_without_active_overlay(&path).map_err(anyhow::Error::from)
 }
 
+// One-scope convenience over create_profile_from_default_scope_at; tested but not
+// yet wired into the TUI/CLI surface.
+#[allow(dead_code)]
 pub(crate) fn create_profile_from_default_at(config_home: &Path, name: &str) -> Result<PathBuf> {
     create_profile_from_default_scope_at(config_home, name, ProfileScope::One)
 }
@@ -297,7 +302,7 @@ mod tests {
     }
 
     fn write_source_profile(config_home: &Path, name: &str, profile_name: &str) {
-        let config = default_profile_template(profile_name);
+        let config = default_one_profile_template(profile_name);
         create_profile_from_config_at(config_home, name, &config).expect("write profile");
     }
 

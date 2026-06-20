@@ -147,6 +147,9 @@ impl ProfileView {
         }
     }
 
+    // Cycles All → One → Server. Views currently switch via direct assignment, so
+    // this is unused for now; kept for a future "cycle profile views" keybinding.
+    #[allow(dead_code)]
     pub fn next(self) -> Self {
         match self {
             ProfileView::All => ProfileView::One,
@@ -994,7 +997,7 @@ impl App {
     fn new_with_runtime(spawn_worker: bool, prime_refreshes: bool) -> Result<Self> {
         let state = load_ayx_state().map_err(anyhow::Error::from)?;
         let config_home = ayx_config_home().map_err(anyhow::Error::from)?;
-        let profiles = list_profile_records_at(&config_home).map_err(anyhow::Error::from)?;
+        let profiles = list_profile_records_at(&config_home)?;
         let workspaces = load_workspace_entries()?;
         let target_path = default_profile_storage_path().map_err(anyhow::Error::from)?;
         let current_config = Config::load_from_path_lenient_without_active_overlay(&target_path)
@@ -2422,7 +2425,7 @@ impl App {
     }
 
     fn reload_indexes(&mut self) -> Result<()> {
-        self.profiles = list_profile_records_at(&self.config_home).map_err(anyhow::Error::from)?;
+        self.profiles = list_profile_records_at(&self.config_home)?;
         self.workspaces = load_workspace_entries()?;
         self.sync_selected_entries();
         self.status_message = "Indexes reloaded".to_string();
