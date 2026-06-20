@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.10 — 2026-06-20
+
+### Docs and release cleanup
+
+- Move the public docs site to Astro/Starlight under `site/`.
+- Remove stale dashboard and legacy docs references from the public docs surface.
+- Rehome the runtime fixture under `docs/fixtures/RuntimeSettings.xml`.
+- Keep the CLI spec and command-surface docs aligned with the live 0.9.10 binary.
+
+### Verification
+
+- `cargo fmt --all --check`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `cargo test --workspace --locked`
+- `cargo run -q -p xtask -- refresh-command-surface --check`
+
 ## 0.9.8 — 2026-06-16
 
 ### One hardening and release prep
