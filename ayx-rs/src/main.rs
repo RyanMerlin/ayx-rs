@@ -210,7 +210,7 @@ fn access_token_claim_summary(access_token: Option<&str>) -> Option<Value> {
     disable_help_subcommand = true
 )]
 struct Cli {
-    #[arg(long, default_value = "text")]
+    #[arg(long, default_value = "text", global = true)]
     output: String,
     #[arg(long = "env", alias = "environment", global = true)]
     environment_flag: Option<String>,
