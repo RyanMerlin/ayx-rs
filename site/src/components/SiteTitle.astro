@@ -1,0 +1,50 @@
+---
+// Text-only site title with a version badge. Mono type carries the CLI identity.
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
+---
+
+<a href={siteTitleHref} class="site-title sl-flex" translate="no">
+  <span class="prompt" aria-hidden="true">&gt;_</span>
+  <span class="title-text">{siteTitle}</span>
+  <span class="version-badge">v0.9.10</span>
+</a>
+
+<style>
+  @layer starlight.core {
+    .site-title {
+      align-items: center;
+      gap: 0.5rem;
+      font-family: var(--sl-font-mono);
+      font-weight: 600;
+      font-size: var(--sl-text-h5);
+      color: var(--sl-color-white);
+      text-decoration: none;
+      white-space: nowrap;
+      min-width: 0;
+    }
+  }
+
+  .prompt {
+    color: var(--sl-color-accent);
+    font-weight: 600;
+  }
+
+  .title-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .version-badge {
+    flex-shrink: 0;
+    font-family: var(--sl-font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+    padding: 0.1em 0.5em;
+    border-radius: 0.3em;
+    background-color: var(--sl-color-accent-low);
+    color: var(--sl-color-accent-high);
+    border: 1px solid var(--sl-color-accent);
+  }
+</style>
