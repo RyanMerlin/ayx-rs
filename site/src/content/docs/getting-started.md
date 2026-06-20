@@ -1,51 +1,66 @@
 ---
-title: Getting Started
-description: Install ayx, create your first profile, and verify connectivity.
+title: Getting started
+description: Install ayx, connect it to your Alteryx One workspace, and run your first command in a couple of minutes.
 sidebar:
   order: 1
 ---
 
+`ayx` is a single binary. Install it, point it at your Alteryx One workspace, and you're running commands in a couple of minutes.
+
 ## Install
 
-macOS / Linux:
+**macOS / Linux**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash
 ```
 
-Windows (PowerShell):
+**Windows (PowerShell)**
 
 ```powershell
 iwr https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.ps1 | iex
 ```
 
-The install script downloads the latest release binary and verifies its SHA-256 checksum. On macOS/Linux it installs `ayx` to a user bin directory and appends that directory to `~/.profile`, so you may need to open a new shell (or add the directory to `PATH` for the current session) before `ayx` resolves. The Windows installer updates your user `PATH` directly.
+The installer downloads the latest release, verifies its SHA-256 checksum, and puts the `ayx` binary on your PATH. On macOS and Linux it adds the install directory to `~/.profile`, so open a new terminal (or run the `export PATH=…` line it prints) before your first command.
 
-## Onboard
+Confirm it's installed:
 
-Create a central profile with the onboarding wizard:
+```bash
+ayx --version
+```
+
+## Connect
+
+Run the setup wizard. It creates a **profile** — your saved connection to an Alteryx One workspace — and validates each piece as you enter it.
 
 ```bash
 ayx onboard
 ```
 
-Confirm the active profile and check connectivity:
+You'll need your workspace URL and an OAuth client and token. [Profiles & configuration](/configuration/) covers exactly which fields go where.
+
+Then check the whole path — config, auth, and connectivity — without changing anything on the server:
 
 ```bash
-ayx profile current
 ayx doctor
 ```
 
-`ayx doctor` validates configuration, authentication, and connectivity without touching remote state.
+## Your first command
 
-To inspect the Alteryx One workspace the active profile points at, ask for JSON. `--output` is a global flag, so it comes **before** the subcommand:
+Confirm who you are and which workspace you're pointed at:
+
+```bash
+ayx whoami
+```
+
+Want machine-readable output? Ask for JSON. One thing to know up front: `--output` is a top-level flag, so it goes **before** the command, not after.
 
 ```bash
 ayx --output json one platform workspace current
 ```
 
-## Next steps
+## Where to go next
 
-- [Configuration](/configuration/) — profile shape, environment files, and environment-variable overrides
-- [Command surface](/reference/command-surface/) — the full command inventory with safety annotations
-- [Safety model](/safety-model/) — how read-only and mutating commands differ
+- **[Common tasks](/common-tasks/)** — copy-paste recipes for the things you'll do most
+- **[The safety model](/safety-model/)** — why nothing destructive runs without `--apply`
+- **[Profiles & configuration](/configuration/)** — multiple environments, tokens, and per-run overrides

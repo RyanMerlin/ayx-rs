@@ -21,7 +21,15 @@ export default defineConfig({
       sidebar: [
         {
           label: 'Guides',
-          items: ['getting-started', 'configuration', 'safety-model', 'troubleshooting'],
+          items: [
+            'getting-started',
+            'connecting',
+            'configuration',
+            'safety-model',
+            'output-automation',
+            'common-tasks',
+            'troubleshooting',
+          ],
         },
         { label: 'Reference', autogenerate: { directory: 'reference' } },
         { label: 'Releases', autogenerate: { directory: 'releases' } },

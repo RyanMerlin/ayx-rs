@@ -113,7 +113,6 @@ The CLI is product-first. The stable top-level families are:
 - `server`
 - `workflow`
 - `tools`
-- `dashboard`
 - `update`
 - `tui`
 

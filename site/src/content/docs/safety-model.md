@@ -1,42 +1,52 @@
 ---
-title: Safety Model
-description: Read-only by default; mutating commands are gated behind --apply.
+title: Safety model
+description: Read-only by default; anything that changes your server stays a dry-run until you add --apply.
 sidebar:
-  order: 3
+  order: 4
 ---
 
-ayx has an explicit safety contract across the whole command surface.
+ayx is built so you can explore and automate without fear of breaking something. The rule is simple: **read-only commands just run; commands that change remote state do nothing until you add `--apply`.**
 
-- **Read-only commands** run without extra flags and never modify remote state.
-- **Mutating commands** require `--apply`. Without it they print a dry-run of what would change and exit with status&nbsp;0.
-- **Unsupported surfaces** fail explicitly rather than silently succeeding.
+## Read-only vs mutating
 
-## Command annotations
+Every command carries an annotation:
 
-Every command in the [command surface](/reference/command-surface/) is annotated:
+| Annotation | Meaning |
+|------------|---------|
+| `read-only` | Never changes remote state. No flags needed. |
+| `mutating` | Changes remote state. Needs `--apply` to take effect. |
 
-| Field | Values |
-|-------|--------|
-| `Safety` | `read-only`, `mutating`, and finer-grained variants such as `mutating-local` and `mutating-or-read-only` |
-| `Mutating` | `yes` when the command requires `--apply`, otherwise `no` |
+You'll also see finer-grained variants like `mutating-local` (writes a local file) and `mutating-or-read-only` (depends on the arguments). The [command surface](/reference/command-surface/) lists the annotation for every command.
 
 ## The `--apply` gate
 
-Mutating remote operations (delete, import, transfer, migrate) require `--apply`. Without it they print what *would* happen and exit cleanly, so automation can run against production without committing changes:
+Run a mutating command without `--apply` and ayx prints a structured **dry-run** of exactly what it would send, then exits cleanly. Nothing leaves your machine.
 
 ```bash
-# dry-run — nothing is deleted
+# Dry-run — shows the request, deletes nothing
 ayx one flows delete --flow-id <id>
 
-# commit the delete
+# Commit it
 ayx one flows delete --flow-id <id> --apply
 ```
 
-## Doctor
+That's what makes ayx safe to wire into scripts: a pipeline can run the dry-run form against production and never change anything by accident.
 
-`ayx doctor` validates config, auth, and connectivity without touching remote state:
+For non-interactive automation, add `--yes` to skip the confirmation prompt destructive commands show in a terminal:
 
 ```bash
-ayx doctor
-ayx one doctor discover
+ayx one flows delete --flow-id <id> --apply --yes
+```
+
+## Audit artifacts
+
+Destructive operations can record an audit artifact — a file describing what ran — under `${AYX_CONFIG_HOME}/audits/`. List or clean them up with `ayx audit`.
+
+## Check before you act
+
+`ayx doctor` validates config, auth, and connectivity without touching anything:
+
+```bash
+ayx doctor          # config, auth, and connectivity
+ayx doctor auth     # just the auth path
 ```
