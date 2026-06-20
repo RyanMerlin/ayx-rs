@@ -212,8 +212,10 @@ fn access_token_claim_summary(access_token: Option<&str>) -> Option<Value> {
 struct Cli {
     #[arg(long, default_value = "text")]
     output: String,
-    #[arg(long)]
-    environment: Option<String>,
+    #[arg(long = "env", alias = "environment", global = true)]
+    environment_flag: Option<String>,
+    #[arg(value_name = "ENV", hide = true, last = true, global = true)]
+    environment_tail: Option<String>,
     /// Global apply flag for mutating One API commands.
     ///
     /// Without `--apply`, mutating One requests (POST/PUT/PATCH/DELETE) return
@@ -244,6 +246,14 @@ struct Cli {
 
     #[command(subcommand)]
     command: Command,
+}
+
+impl Cli {
+    fn resolved_environment(&self) -> Option<&str> {
+        self.environment_flag
+            .as_deref()
+            .or(self.environment_tail.as_deref())
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -500,6 +510,18 @@ fn parse_param_kv(s: &str) -> Result<(String, String), String> {
         return Err(format!("empty key in '{s}'"));
     }
     Ok((k.to_string(), v.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_env_after_nested_subcommand() {
+        let cli = Cli::try_parse_from(["ayx", "one", "flows", "list", "--env", "prod"])
+            .expect("parser should accept trailing --env");
+        assert_eq!(cli.resolved_environment(), Some("prod"));
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -4586,27 +4608,29 @@ fn execute(cli: Cli) -> Result<Envelope> {
         ayx_server_api::set_debug_trace(true);
         eprintln!(
             "[debug] apply={} environment={:?} no_verify_tls={} verbose={}",
-            cli.apply, cli.environment, cli.no_verify_tls, cli.verbose
+            cli.apply,
+            cli.resolved_environment(),
+            cli.no_verify_tls,
+            cli.verbose
         );
     }
 
     // `load_profile` is intentionally a tiny shim around the environment-aware
-    // central runtime loader. Capturing `cli.environment` here keeps the
+    // central runtime loader. Capturing the resolved environment here keeps the
     // runtime-only call-sites concise while the explicit path loaders below
     // remain available for onboarding/editor flows.
-    let environment = cli.environment.clone();
+    let environment = cli
+        .environment_flag
+        .clone()
+        .or(cli.environment_tail.clone());
     let load_profile = |profile: Option<&str>| -> Result<Config> {
         load_profile_with_env(profile, environment.as_deref())
     };
     let envelope = match cli.command {
-        Command::Mongo { command } => cmd::mongo::execute(cli.environment.as_deref(), command)?,
-        Command::Server { command } => cmd::server::execute(cli.environment.as_deref(), command)?,
-        Command::Sqlserver { command } => {
-            cmd::sqlserver::execute(cli.environment.as_deref(), command)?
-        }
-        Command::Workflow { command } => {
-            cmd::workflow::execute(cli.environment.as_deref(), command)?
-        }
+        Command::Mongo { command } => cmd::mongo::execute(environment.as_deref(), command)?,
+        Command::Server { command } => cmd::server::execute(environment.as_deref(), command)?,
+        Command::Sqlserver { command } => cmd::sqlserver::execute(environment.as_deref(), command)?,
+        Command::Workflow { command } => cmd::workflow::execute(environment.as_deref(), command)?,
         Command::Tools { command } => cmd::tools::execute(command)?,
         Command::Onboard {
             profile,
@@ -4615,7 +4639,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
         } => {
             let detail = onboard::run_onboarding(
                 &profile,
-                cli.environment.as_deref(),
+                environment.as_deref(),
                 non_interactive,
                 environments,
             )?;
@@ -4640,14 +4664,14 @@ fn execute(cli: Cli) -> Result<Envelope> {
             command.as_ref(),
             profile.as_deref(),
             fix,
-            cli.environment.as_deref(),
+            environment.as_deref(),
         )?,
         Command::Discover { deep, path } => cmd::discover::execute(path, deep)?,
         Command::One { command } => cmd::one::execute(
             cmd::one::Ctx {
                 apply: cli.apply,
                 yes: cli.yes,
-                environment: cli.environment.as_deref(),
+                environment: environment.as_deref(),
             },
             command,
         )?,
@@ -4745,7 +4769,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     "selected_profile": resolution.as_ref().map(|r| r.selected_profile.clone()),
                     "selection_source": resolution.as_ref().map(|r| r.selection_source.clone()),
                     "resolved_profile_path": resolution.as_ref().map(|r| r.resolved_profile_path.clone()),
-                    "environment": cli.environment.clone(),
+                    "environment": environment.clone(),
                     "account_email": account_email,
                     "one_base_url": one_base_url,
                     "expected_workspace_id": expected_workspace_id,
@@ -4824,9 +4848,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
         },
         Command::Tactics { command } => cmd::registry::execute_tactics(cli.apply, command)?,
         Command::Workflows { command } => cmd::registry::execute_workflows(cli.apply, command)?,
-        Command::Telemetry { command } => {
-            cmd::telemetry::execute(cli.environment.as_deref(), command)?
-        }
+        Command::Telemetry { command } => cmd::telemetry::execute(environment.as_deref(), command)?,
     };
     Ok(envelope)
 }

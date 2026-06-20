@@ -8,6 +8,7 @@ authors.workspace = true
 [dependencies]
 anyhow.workspace = true
 ayx-core = { path = "../ayx-core" }
+base64.workspace = true
 chrono.workspace = true
 reqwest.workspace = true
 serde.workspace = true

@@ -1183,6 +1183,9 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
     let access_token = env_value(env_values, "AYX_ONE_API_ACCESS_TOKEN");
     let refresh_token = env_value(env_values, "AYX_ONE_API_REFRESH_TOKEN");
     let client_secret = env_value(env_values, "AYX_ONE_CLIENT_SECRET");
+    let fde_oauth_client_id = env_value(env_values, "AYX_ONE_ALTERYX_FDE_SP007_CLIENT_ID");
+    let fde_client_secret = env_value(env_values, "AYX_ONE_ALTERYX_FDE_SA007_SECRET");
+    let fde_token_endpoint_url = env_value(env_values, "AYX_ONE_ALTERYX_FDE_TOKEN_ENDPOINT");
 
     if account_email.is_some()
         || base_url.is_some()
@@ -1209,47 +1212,32 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         if let Some(value) = account_email {
             one.account_email = value;
         }
-        if one
-            .base_url
-            .as_ref()
-            .is_none_or(|value| value.trim().is_empty())
-        {
+        if base_url.is_some() {
             one.base_url = base_url;
         }
-        if one
-            .oauth_client_id
-            .as_ref()
-            .is_none_or(|value| value.trim().is_empty())
-        {
+        if oauth_client_id.is_some() {
             one.oauth_client_id = oauth_client_id;
         }
-        if one
-            .client_secret
-            .as_ref()
-            .is_none_or(|value| value.trim().is_empty())
-        {
+        if client_secret.is_some() {
             one.client_secret = client_secret;
         }
-        if one
-            .token_endpoint_url
-            .as_ref()
-            .is_none_or(|value| value.trim().is_empty())
-        {
+        if token_endpoint_url.is_some() {
             one.token_endpoint_url = token_endpoint_url;
         }
-        if one
-            .access_token
-            .as_ref()
-            .is_none_or(|value| value.trim().is_empty())
-        {
+        if access_token.is_some() {
             one.access_token = access_token;
         }
-        if one
-            .refresh_token
-            .as_ref()
-            .is_none_or(|value| value.trim().is_empty())
-        {
+        if refresh_token.is_some() {
             one.refresh_token = refresh_token;
+        }
+        if fde_token_endpoint_url.is_some() {
+            if let Some(value) = fde_oauth_client_id {
+                one.oauth_client_id = Some(value);
+            }
+            if let Some(value) = fde_client_secret {
+                one.client_secret = Some(value);
+            }
+            one.token_endpoint_url = fde_token_endpoint_url;
         }
         one.canonicalize();
         config.alteryx_one = Some(one);
@@ -2100,6 +2088,24 @@ mod tests {
         }
     }
 
+    struct CurrentDirGuard {
+        old: PathBuf,
+    }
+
+    impl CurrentDirGuard {
+        fn set(dir: &Path) -> Self {
+            let old = std::env::current_dir().unwrap();
+            std::env::set_current_dir(dir).unwrap();
+            Self { old }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.old);
+        }
+    }
+
     fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
         TEST_ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
     }
@@ -2691,6 +2697,34 @@ sqlserver:
                 .as_ref()
                 .map(|one| one.account_email.as_str()),
             Some("ryan.merlin@alteryx.com")
+        );
+    }
+
+    #[test]
+    fn env_file_overrides_stale_profile_auth_fields() {
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _cwd = CurrentDirGuard::set(temp.path());
+
+        let env_file = temp.path().join(".env");
+        fs::write(
+            &env_file,
+            "AYX_ACCOUNT_EMAIL=fresh@example.com\nAYX_ONE_API_ACCESS_TOKEN=fresh-access\nAYX_ONE_API_REFRESH_TOKEN=fresh-refresh\nAYX_ONE_TOKEN_ENDPOINT_URL=https://pingauth.example.com/as\n",
+        )
+        .unwrap();
+
+        let profile_path = temp.path().join("config.yaml");
+        let profile = base_config("default", "ServiceDb");
+        fs::write(&profile_path, serde_yaml::to_string(&profile).unwrap()).unwrap();
+
+        let loaded = Config::load_from_path_lenient(&profile_path).unwrap();
+        let one = loaded.alteryx_one.as_ref().unwrap();
+        assert_eq!(one.account_email, "fresh@example.com");
+        assert_eq!(one.access_token.as_deref(), Some("fresh-access"));
+        assert_eq!(one.refresh_token.as_deref(), Some("fresh-refresh"));
+        assert_eq!(
+            one.token_endpoint_url.as_deref(),
+            Some("https://pingauth.example.com/as")
         );
     }
 

@@ -356,6 +356,7 @@ version = "0.9.10"
 dependencies = [
  "anyhow",
  "ayx-core",
+ "base64",
  "chrono",
  "httpmock",
  "reqwest",

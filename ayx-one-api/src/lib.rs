@@ -11,6 +11,7 @@ use ayx_core::observability::{
 };
 use ayx_core::profile::Config;
 use ayx_core::sensitive::write_sensitive_file;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use reqwest::blocking::multipart::{Form, Part};
@@ -51,6 +52,100 @@ fn trace_one(message: impl AsRef<str>) {
     if debug_trace() {
         eprintln!("[one-debug] {}", redact_text(message.as_ref()));
     }
+}
+
+fn decode_jwt_claims(token: &str) -> Option<Value> {
+    let token = token
+        .trim()
+        .strip_prefix("Bearer ")
+        .or_else(|| token.trim().strip_prefix("bearer "))
+        .unwrap_or(token.trim());
+    let mut parts = token.split('.');
+    let _header = parts.next()?;
+    let payload = parts.next()?;
+    let decoded = URL_SAFE_NO_PAD.decode(payload.as_bytes()).ok()?;
+    serde_json::from_slice::<Value>(&decoded)
+        .ok()
+        .filter(|value| value.is_object())
+}
+
+fn workspace_context_from_claims(claims: &Value) -> Option<String> {
+    let scope = claims.get("scope")?;
+    let candidates: Vec<&str> = match scope {
+        Value::String(value) => value.split_whitespace().collect(),
+        Value::Array(values) => values.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    };
+    candidates
+        .into_iter()
+        .find(|value| value.starts_with("w:"))
+        .map(|value| value.to_string())
+}
+
+fn workspace_context_from_token(token: Option<&str>) -> Option<String> {
+    let claims = decode_jwt_claims(token?)?;
+    workspace_context_from_claims(&claims)
+}
+
+fn workspace_context_header_value(config: &Config) -> Option<String> {
+    let one = config.alteryx_one.as_ref()?;
+
+    if let Some(workspace_id) = one
+        .active_workspace_id()
+        .filter(|value| value.starts_with("w:"))
+    {
+        return Some(workspace_id.to_string());
+    }
+
+    if let Some(workspace_id) = one
+        .expected_workspace_id
+        .as_deref()
+        .filter(|value| value.starts_with("w:"))
+    {
+        return Some(workspace_id.to_string());
+    }
+
+    workspace_context_from_token(one.resolved_access_token())
+        .or_else(|| workspace_context_from_token(one.resolved_refresh_token()))
+}
+
+fn env_file_value(name: &str) -> Option<String> {
+    if let Ok(value) = std::env::var(name) {
+        let value = value.trim().to_string();
+        if !value.is_empty() {
+            return Some(value);
+        }
+    }
+
+    let cwd = std::env::current_dir().ok()?;
+    let mut candidates = vec![cwd.join(".env")];
+    if let Some(parent) = cwd.parent() {
+        candidates.push(parent.join(".env"));
+    }
+    for candidate in candidates {
+        let content = std::fs::read_to_string(&candidate).ok()?;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || !trimmed.contains('=') {
+                continue;
+            }
+            let mut parts = trimmed.splitn(2, '=');
+            let key = parts.next().unwrap_or("").trim();
+            let value = parts.next().unwrap_or("").trim();
+            if key == name {
+                let value = value
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .trim()
+                    .to_string();
+                if !value.is_empty() {
+                    return Some(value);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Set the One API apply gate for the current thread.
@@ -673,6 +768,16 @@ pub fn one_api_live_request_with_body(
     ));
     let mut access_token = resolve_one_access_token(config, &client)?;
     trace_one(format!("{surface} {operation}: access token resolved"));
+    let workspace_context = workspace_context_header_value(config);
+    if let Some(ref workspace_context) = workspace_context {
+        trace_one(format!(
+            "{surface} {operation}: workspace context {workspace_context}"
+        ));
+    } else {
+        trace_one(format!(
+            "{surface} {operation}: no workspace context derived for request"
+        ));
+    }
     let method_name = method.to_string();
     let method = reqwest::Method::from_bytes(method_name.as_bytes())
         .map_err(|_| anyhow::anyhow!("unsupported one api method '{}'", method))?;
@@ -689,6 +794,9 @@ pub fn one_api_live_request_with_body(
             .request(method.clone(), &url)
             .header(AUTHORIZATION, format!("Bearer {}", access_token))
             .header(reqwest::header::ACCEPT, "application/json");
+        if let Some(ref workspace_context) = workspace_context {
+            request = request.header("x-trifacta-person-workspace-id", workspace_context.as_str());
+        }
         if let Some(ref payload) = body {
             request = request
                 .header(CONTENT_TYPE, "application/json")
@@ -707,9 +815,26 @@ pub fn one_api_live_request_with_body(
                 last_status = Some(status);
                 retry_after_seconds = parse_retry_after(response.headers().get(RETRY_AFTER));
                 if status == StatusCode::UNAUTHORIZED && !refreshed_once {
-                    access_token = refresh_one_access_token(config, &client)?;
-                    refreshed_once = true;
-                    continue;
+                    match refresh_one_access_token(config, &client) {
+                        Ok(token) => {
+                            access_token = token;
+                            refreshed_once = true;
+                            continue;
+                        }
+                        Err(refresh_err) => {
+                            trace_one(
+                                "401 refresh failed; trying service principal fallback for live request",
+                            );
+                            match service_principal_access_token(config, &client) {
+                                Ok(token) => {
+                                    access_token = token;
+                                    refreshed_once = true;
+                                    continue;
+                                }
+                                Err(_) => return Err(refresh_err),
+                            }
+                        }
+                    }
                 }
                 if status.is_success()
                     || !should_retry_status(status, mutating)
@@ -1422,9 +1547,8 @@ fn resolve_one_access_token(config: &Config, client: &Client) -> Result<String> 
         match refresh_one_access_token(config, client) {
             Ok(token) => return Ok(token),
             Err(refresh_err) => {
-                if service_principal_credentials(config).is_some()
-                    && let Ok(token) = service_principal_access_token(config, client)
-                {
+                trace_one("refresh token flow failed; trying service principal fallback");
+                if let Ok(token) = service_principal_access_token(config, client) {
                     return Ok(token);
                 }
                 return Err(refresh_err);
@@ -1520,10 +1644,21 @@ pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<Stri
                 "alteryx_one.base_url or token_endpoint_url is required to refresh access tokens"
             )
         })?;
+    let workspace_context = workspace_context_header_value(config);
+    if let Some(ref workspace_context) = workspace_context {
+        trace_one(format!(
+            "refresh token request to {} using workspace context {}",
+            token_endpoint_url, workspace_context
+        ));
+    }
 
-    let response = client
+    let mut request = client
         .post(&token_endpoint_url)
-        .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(CONTENT_TYPE, "application/x-www-form-urlencoded");
+    if let Some(ref workspace_context) = workspace_context {
+        request = request.header("x-trifacta-person-workspace-id", workspace_context.as_str());
+    }
+    let response = request
         .form(&[
             ("grant_type", "refresh_token"),
             ("client_id", client_id),
@@ -1567,9 +1702,12 @@ pub fn client_credentials_one_access_token(
 ) -> Result<String> {
     let response = client
         .post(token_endpoint_url)
-        .basic_auth(client_id, Some(client_secret))
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .form(&[("grant_type", "client_credentials")])
+        .form(&[
+            ("grant_type", "client_credentials"),
+            ("client_id", client_id),
+            ("client_secret", client_secret),
+        ])
         .send()
         .with_context(|| {
             format!(
@@ -1606,12 +1744,24 @@ pub fn client_credentials_one_access_token(
 }
 
 fn service_principal_credentials(config: &Config) -> Option<(String, String, String)> {
+    let fde_client_id = env_file_value("AYX_ONE_ALTERYX_FDE_SP007_CLIENT_ID");
+    let fde_client_secret = env_file_value("AYX_ONE_ALTERYX_FDE_SA007_SECRET");
+    let fde_token_endpoint = env_file_value("AYX_ONE_ALTERYX_FDE_TOKEN_ENDPOINT");
+
+    if let (Some(client_id), Some(client_secret), Some(token_endpoint_url)) =
+        (fde_client_id, fde_client_secret, fde_token_endpoint)
+    {
+        trace_one("service principal credentials resolved from process env");
+        return Some((client_id, client_secret, token_endpoint_url));
+    }
+
     let one = config.alteryx_one.as_ref()?;
 
     let client_id = one.resolved_oauth_client_id()?.to_string();
     let client_secret = one.resolved_client_secret()?.to_string();
     let token_endpoint_url =
         one.effective_token_endpoint_url_for_workspace(one.active_workspace_id())?;
+    trace_one("service principal credentials resolved from config");
 
     Some((client_id, client_secret, token_endpoint_url))
 }
@@ -1623,6 +1773,10 @@ fn service_principal_access_token(config: &Config, client: &Client) -> Result<St
                 "alteryx_one.access_token is required unless client credentials are configured via alteryx_one.oauth_client_id and alteryx_one.client_secret, or the matching workspace_credentials entry"
             )
         })?;
+    trace_one(format!(
+        "service principal token request using endpoint {} and client_id present",
+        token_endpoint_url
+    ));
 
     client_credentials_one_access_token(&token_endpoint_url, &client_id, &client_secret, client)
 }
@@ -1846,6 +2000,17 @@ mongo:
     }
 
     #[test]
+    fn workspace_context_is_derived_from_jwt_scope_claim() {
+        let payload = URL_SAFE_NO_PAD.encode(r#"{"scope":"w:01KMGF85WTTEJWZ397MW1RBD9ZB"}"#);
+        let token = format!("eyJhbGciOiJub25lIn0.{}.", payload);
+
+        assert_eq!(
+            workspace_context_from_token(Some(&token)),
+            Some("w:01KMGF85WTTEJWZ397MW1RBD9ZB".to_string())
+        );
+    }
+
+    #[test]
     #[ignore = "httpmock hangs in this environment; live smoke covers live transport"]
     fn refresh_token_prefers_workspace_credential_fields() {
         let server = MockServer::start();
@@ -1915,7 +2080,7 @@ mongo:
             when.method(POST)
                 .path("/as/token")
                 .header("content-type", "application/x-www-form-urlencoded")
-                .body("grant_type=client_credentials");
+                .body("grant_type=client_credentials&client_id=sp-client&client_secret=sp-secret");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"token_type":"Bearer","access_token":"fresh-sp"}"#);
