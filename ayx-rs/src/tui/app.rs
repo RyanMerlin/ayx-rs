@@ -983,6 +983,15 @@ impl App {
     }
 
     pub fn new() -> Result<Self> {
+        Self::new_with_runtime(true, true)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_without_worker() -> Result<Self> {
+        Self::new_with_runtime(false, false)
+    }
+
+    fn new_with_runtime(spawn_worker: bool, prime_refreshes: bool) -> Result<Self> {
         let state = load_ayx_state().map_err(anyhow::Error::from)?;
         let config_home = ayx_config_home().map_err(anyhow::Error::from)?;
         let profiles = list_profile_records_at(&config_home).map_err(anyhow::Error::from)?;
@@ -1035,13 +1044,19 @@ impl App {
             status_message: "Ready".to_string(),
             toast: None,
             crud_prompt: None,
-            worker: Some(super::worker::BackgroundWorker::spawn()),
+            worker: if spawn_worker {
+                Some(super::worker::BackgroundWorker::spawn())
+            } else {
+                None
+            },
             latest_connectivity_request: None,
             latest_one_browser_request: None,
         };
         app.sync_selected_entries();
-        app.refresh_connectivity();
-        app.refresh_one_browser();
+        if prime_refreshes {
+            app.refresh_connectivity();
+            app.refresh_one_browser();
+        }
         Ok(app)
     }
 
@@ -2664,4 +2679,49 @@ fn load_workspace_entries() -> Result<Vec<WorkspaceEntry>> {
     }
     entries.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn live_smoke_enabled() -> bool {
+        matches!(
+            std::env::var("AYX_ONE_LIVE_SMOKE").ok().as_deref(),
+            Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+        )
+    }
+
+    #[test]
+    fn one_browser_workspace_list_shows_live_items() {
+        if !live_smoke_enabled() {
+            return;
+        }
+
+        let mut app = App::new_without_worker().expect("app should load the active config");
+        app.select_screen(Screen::One);
+        app.open_one_browser_resource(OneBrowserResource::WorkspaceList, None, false)
+            .expect("workspace list should load");
+
+        let panel = app
+            .one_browser
+            .panels
+            .first()
+            .expect("workspace list panel should exist");
+        if panel.is_error {
+            panic!(
+                "workspace list failed in live TUI smoke:\n{}",
+                panel.lines.join("\n")
+            );
+        }
+
+        let items = app.active_one_browser_items();
+        assert!(
+            !items.is_empty(),
+            "expected live workspace items in One Browser panel\npanel: {:?}\nlines: {:?}",
+            panel.title,
+            panel.lines
+        );
+        assert_eq!(panel.title, "Workspace List");
+    }
 }

@@ -166,6 +166,35 @@ fn sanitize_live_probe_for_user(probe_data: &Value, access_token: &str) -> Value
     Value::Object(sanitized)
 }
 
+fn access_token_claim_summary(access_token: Option<&str>) -> Option<Value> {
+    let claims = decode_token_claims(access_token?)?;
+    let exp = claims.get("exp").and_then(Value::as_i64)?;
+    let iat = claims.get("iat").and_then(Value::as_i64);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs() as i64)?;
+    let mut summary = serde_json::Map::new();
+    summary.insert("expired".to_string(), Value::Bool(now >= exp));
+    summary.insert("exp".to_string(), Value::from(exp));
+    summary.insert(
+        "seconds_remaining".to_string(),
+        Value::from((exp - now).max(0)),
+    );
+    if let Some(iat) = iat {
+        summary.insert("iat".to_string(), Value::from(iat));
+    }
+    for key in ["iss", "sub", "email"] {
+        if let Some(value) = claims.get(key).cloned() {
+            summary.insert(key.to_string(), value);
+        }
+    }
+    if let Some(aud) = claims.get("aud").cloned() {
+        summary.insert("aud".to_string(), aud);
+    }
+    Some(Value::Object(summary))
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "ayx",
@@ -5474,6 +5503,7 @@ pub(crate) fn one_platform_auth_status_envelope(config: &Config) -> Result<Envel
             } else {
                 "missing"
             },
+            "access_token_claims": access_token_claim_summary(access_token),
             "validation_target": "/v4/apiAccessTokens",
             "workspace_probe": workspace_probe.as_ref().map(|probe| {
                 sanitize_live_probe_for_user(
@@ -5497,18 +5527,8 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
     let oauth_client_id = one.resolved_oauth_client_id();
     let has_token = access_token.is_some();
     let has_refresh_token = refresh_token.is_some();
-    let workspace_probe = if has_token {
-        one_api_live_request(
-            config,
-            "platform",
-            "auth-diagnose",
-            "GET",
-            "/v4/apiAccessTokens",
-            false,
-            &[],
-        )?
-    } else {
-        Envelope::ok_with_data(
+    if !has_token {
+        return Ok(Envelope::ok_with_data(
             "one platform auth diagnose",
             json!({
                 "product": "one",
@@ -5528,36 +5548,69 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                     "Populate alteryx_one.access_token in the active central profile if you prefer config-based storage"
                 ],
             }),
-        )
+        ));
+    }
+
+    let workspace_probe = match one_api_live_request(
+        config,
+        "platform",
+        "auth-diagnose",
+        "GET",
+        "/v4/apiAccessTokens",
+        false,
+        &[],
+    ) {
+        Ok(probe) => Some(probe),
+        Err(err) => {
+            return Ok(Envelope::ok_with_data(
+                "one platform auth diagnose",
+                json!({
+                    "product": "one",
+                    "surface": "platform",
+                    "profile": config.profile_name,
+                    "workspace_id": workspace_id,
+                    "oauth_client_id_present": oauth_client_id.is_some(),
+                    "base_url": one.normalized_base_url(),
+                    "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
+                    "access_token_present": true,
+                    "refresh_token_present": has_refresh_token,
+                    "access_token_claims": access_token_claim_summary(access_token),
+                    "diagnosis": "token present but workspace probe failed",
+                    "workspace_probe_error": err.to_string(),
+                    "recommendations": [
+                        "If the access token is expired, mint a fresh one or repair refresh-token auth",
+                        "Confirm the active profile is pointing at the intended workspace and auth issuer",
+                        "Use one platform auth status for posture and one platform workspace current for live reachability",
+                    ],
+                }),
+            ));
+        }
     };
 
-    if has_token {
-        Ok(Envelope::ok_with_data(
-            "one platform auth diagnose",
-            json!({
-                "product": "one",
-                "surface": "platform",
-                "profile": config.profile_name,
-                "workspace_id": workspace_id,
-                "oauth_client_id_present": oauth_client_id.is_some(),
-                "base_url": one.normalized_base_url(),
-                "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
-                "access_token_present": true,
-                "refresh_token_present": has_refresh_token,
-                "diagnosis": "token present and workspace probe executed",
-                "workspace_probe": sanitize_live_probe_for_user(
-                    &workspace_probe.data,
-                    access_token.unwrap_or(""),
-                ),
-                "recommendations": [
-                    "Use one platform token or auth status for evidence",
-                    "Route any failing symptoms into the workflow guidance layer",
-                ],
-            }),
-        ))
-    } else {
-        Ok(workspace_probe)
-    }
+    Ok(Envelope::ok_with_data(
+        "one platform auth diagnose",
+        json!({
+            "product": "one",
+            "surface": "platform",
+            "profile": config.profile_name,
+            "workspace_id": workspace_id,
+            "oauth_client_id_present": oauth_client_id.is_some(),
+            "base_url": one.normalized_base_url(),
+            "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
+            "access_token_present": true,
+            "refresh_token_present": has_refresh_token,
+            "access_token_claims": access_token_claim_summary(access_token),
+            "diagnosis": "token present and workspace probe executed",
+            "workspace_probe": sanitize_live_probe_for_user(
+                &workspace_probe.as_ref().unwrap().data,
+                access_token.unwrap_or(""),
+            ),
+            "recommendations": [
+                "Use one platform token or auth status for evidence",
+                "Route any failing symptoms into the workflow guidance layer",
+            ],
+        }),
+    ))
 }
 
 fn perform_self_update(
