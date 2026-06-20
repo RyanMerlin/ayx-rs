@@ -9,7 +9,7 @@ export default defineConfig({
       title: 'ayx-rs',
       tagline: 'A precision operator CLI for Alteryx administrators.',
       description:
-        'Documentation for ayx — a command-line operator for Alteryx Server and Alteryx One: generated command reference, configuration contracts, the safety model, and versioned release notes.',
+        'Documentation for ayx — a command-line operator for Alteryx One and Alteryx Server: generated command reference, configuration contracts, the safety model, and versioned release notes.',
       customCss: ['./src/styles/custom.css'],
       components: {
         SiteTitle: './src/components/SiteTitle.astro',
