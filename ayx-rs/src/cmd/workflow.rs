@@ -80,7 +80,10 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
                 }),
             ))
         }
-        Some(WorkflowCommand::Repackage { input_dir, output_path }) => {
+        Some(WorkflowCommand::Repackage {
+            input_dir,
+            output_path,
+        }) => {
             let detail = repackage_workflow(&input_dir, &output_path)?;
             Ok(Envelope::ok_with_data(
                 "workflow package rebuilt",
