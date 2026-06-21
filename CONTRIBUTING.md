@@ -20,13 +20,13 @@ Thank you for your interest. This document covers how to build, test, and submit
 
 ## Documentation site
 
-The published docs live in `docs-site/` and are built with Docusaurus.
+The published docs live in `site/` and are built with Astro/Starlight.
 The site syncs checked-in docs from `docs/` at build time, so the root docs
 remain the source of truth.
 
 To validate the docs site locally:
 
-    cd docs-site
+    cd site
     npm ci
     npm run build
 

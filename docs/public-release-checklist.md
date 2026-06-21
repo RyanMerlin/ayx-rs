@@ -31,11 +31,14 @@ Manually review:
 
 - `README.md`
 - `docs/cli-spec.md`
+- `docs/command-surface.md`
+- `docs/roadmap/*`
+- `docs/adr/*`
+- `docs/fixtures/*`
 - `config.yaml`
-- `.env.example`
 - `.github/workflows/*`
 - `scripts/install.*`
-- `docs/swagger-v3.json`
+- `site/scripts/sync-content.mjs`
 - `audits/*`
 
 ## GitHub Protections

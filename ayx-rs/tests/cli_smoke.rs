@@ -454,7 +454,7 @@ fn workflow_convert_cloud_smoke() {
             "convert-cloud",
             "--input",
             input.to_str().unwrap(),
-            "--output",
+            "--output-path",
             output.to_str().unwrap(),
         ])
         .output()

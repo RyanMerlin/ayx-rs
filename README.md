@@ -249,14 +249,14 @@ cargo nextest run --workspace --locked
 
 ## Documentation
 
-The published docs surface lives in `docs-site/` and is built with Docusaurus.
+The published docs surface lives in `site/` and is built with Astro/Starlight.
 It is designed to ship with versioned docs so the current command surface,
 release notes, and configuration references stay aligned with tagged releases.
 
 Build it locally with:
 
 ```powershell
-cd docs-site
+cd site
 npm ci
 npm run build
 ```
@@ -265,7 +265,7 @@ For the One surface specifically, the live validation plan is documented in `doc
 
 ## Fixtures
 
-The repository includes a `RuntimeSettings.xml` fixture for offline validation of embedded discovery paths.
+The repository includes a `docs/fixtures/RuntimeSettings.xml` fixture for offline validation of embedded discovery paths.
 
 ## Full Command Tree
 

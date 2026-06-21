@@ -765,8 +765,8 @@ pub(crate) enum WorkflowCommand {
     Replace {
         #[arg(long)]
         input: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
+        #[arg(long = "output-path")]
+        output_path: PathBuf,
         #[arg(long)]
         find: String,
         #[arg(long)]
@@ -777,14 +777,14 @@ pub(crate) enum WorkflowCommand {
     Repackage {
         #[arg(long)]
         input_dir: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
+        #[arg(long = "output-path")]
+        output_path: PathBuf,
     },
     Recurse {
         #[arg(long)]
         input: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
+        #[arg(long = "output-path")]
+        output_path: PathBuf,
         #[arg(long)]
         rules: Option<PathBuf>,
         #[arg(long = "find")]
@@ -807,8 +807,8 @@ pub(crate) enum WorkflowCommand {
     ConvertCloud {
         #[arg(long)]
         input: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
+        #[arg(long = "output-path")]
+        output_path: PathBuf,
         #[arg(long, default_value_t = false)]
         fail_on_unsupported: bool,
     },
@@ -845,8 +845,8 @@ pub(crate) enum WorkflowCommand {
     Migrate {
         #[arg(long)]
         input: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
+        #[arg(long = "output-path")]
+        output_path: PathBuf,
         #[arg(long)]
         find: String,
         #[arg(long)]
