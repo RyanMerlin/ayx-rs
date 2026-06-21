@@ -1340,6 +1340,50 @@ pub(crate) enum OnePlatformAuthCommand {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Authenticate with Alteryx One and store credentials.
+    ///
+    /// Default (no flags): email OTP flow — sends a one-time passcode to your
+    /// account email address, then completes the Alteryx One OIDC workspace
+    /// handshake via a headless Chromium browser (python3 + playwright required:
+    /// pip install playwright && playwright install chromium).
+    ///
+    /// With --device: device-code flow — prints a short URL and code; open
+    /// the URL on any device, enter the code, and the CLI stores your tokens
+    /// automatically.
+    ///
+    /// With --browser: PKCE authorization-code flow — opens your default
+    /// browser and captures tokens via a local redirect.
+    ///
+    /// With --refresh-token / --access-token: store tokens you already have
+    /// (for scripted / CI use).
+    Login {
+        #[arg(long)]
+        profile: Option<String>,
+        /// OAuth client ID (defaults to the profile's oauth_client_id).
+        #[arg(long)]
+        client_id: Option<String>,
+        /// Use the browser-redirect PKCE flow instead of email OTP.
+        #[arg(long)]
+        browser: bool,
+        /// Use device-code grant instead of email OTP.
+        #[arg(long)]
+        device: bool,
+        /// Refresh token to store and exchange (bypasses interactive flow).
+        #[arg(long)]
+        refresh_token: Option<String>,
+        /// Access token to store directly (no exchange; bypasses interactive flow).
+        #[arg(long)]
+        access_token: Option<String>,
+        /// Token endpoint URL (defaults to the profile's configured endpoint).
+        #[arg(long)]
+        token_endpoint: Option<String>,
+        /// Workspace id to bind these credentials to (key in workspace_credentials).
+        #[arg(long)]
+        workspace_id: Option<String>,
+        /// Workspace ULID (gid) — stored as workspace_gid for SP scope.
+        #[arg(long)]
+        workspace_gid: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

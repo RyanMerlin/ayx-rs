@@ -69,6 +69,10 @@ fn default_one_profile_template(profile_name: &str) -> Config {
         refresh_token_ref: None,
         workspace_credentials: Default::default(),
         expected_workspace_id: None,
+        sp_client_id: None,
+        sp_token_endpoint_url: None,
+        workspace_gid: None,
+        auth_mode: Default::default(),
     });
     config.server_api = None;
     config.api = None;

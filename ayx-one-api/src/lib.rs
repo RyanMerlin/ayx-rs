@@ -19,8 +19,11 @@ use serde_json::{Value, json};
 use url::form_urlencoded::Serializer;
 const ONE_API_BASE_URL: &str = "https://us1.alteryxcloud.com";
 
+pub mod email_otp;
 mod inventory;
 pub mod types;
+
+pub use email_otp::{OtpAuthResult, email_otp_login};
 
 thread_local! {
     static ONE_APPLY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -683,12 +686,21 @@ pub fn one_api_live_request_with_body(
     let mut retry_after_seconds: Option<u64> = None;
     let mut refreshed_once = false;
 
+    let workspace_gid = config
+        .alteryx_one
+        .as_ref()
+        .and_then(|o| o.resolved_workspace_gid())
+        .map(str::to_string);
+
     loop {
         attempt += 1;
         let mut request = client
             .request(method.clone(), &url)
             .header(AUTHORIZATION, format!("Bearer {}", access_token))
             .header(reqwest::header::ACCEPT, "application/json");
+        if let Some(ref gid) = workspace_gid {
+            request = request.header("x-alteryx-workspace-gid", gid);
+        }
         if let Some(ref payload) = body {
             request = request
                 .header(CONTENT_TYPE, "application/json")
@@ -1405,6 +1417,21 @@ fn build_client() -> Result<Client> {
 }
 
 fn resolve_one_access_token(config: &Config, client: &Client) -> Result<String> {
+    use ayx_core::profile::AuthMode;
+
+    let auth_mode = config
+        .alteryx_one
+        .as_ref()
+        .map(|one| &one.auth_mode)
+        .cloned()
+        .unwrap_or_default();
+
+    // Service-principal mode: skip user/refresh flow entirely.
+    if auth_mode == AuthMode::ServicePrincipal {
+        return service_principal_access_token(config, client);
+    }
+
+    // User mode (default): access_token → refresh → no SP fallthrough.
     if let Some(access_token) = config
         .alteryx_one
         .as_ref()
@@ -1419,20 +1446,12 @@ fn resolve_one_access_token(config: &Config, client: &Client) -> Result<String> 
         .and_then(|one| one.resolved_refresh_token())
         .is_some()
     {
-        match refresh_one_access_token(config, client) {
-            Ok(token) => return Ok(token),
-            Err(refresh_err) => {
-                if service_principal_credentials(config).is_some()
-                    && let Ok(token) = service_principal_access_token(config, client)
-                {
-                    return Ok(token);
-                }
-                return Err(refresh_err);
-            }
-        }
+        return refresh_one_access_token(config, client);
     }
 
-    service_principal_access_token(config, client)
+    Err(anyhow::anyhow!(
+        "no Alteryx One credentials configured — set alteryx_one.access_token / refresh_token for user auth, or set alteryx_one.auth_mode: service-principal with sp_client_id + client_secret + sp_token_endpoint_url for SP auth"
+    ))
 }
 
 /// Confirm the token's current workspace matches `expected_workspace_id`.
@@ -1563,13 +1582,27 @@ pub fn client_credentials_one_access_token(
     token_endpoint_url: &str,
     client_id: &str,
     client_secret: &str,
+    workspace_gid: Option<&str>,
     client: &Client,
 ) -> Result<String> {
+    // Ping Identity requires client_secret_post (creds in the form body).
+    // Basic auth returns 401 "Unsupported authentication method".
+    // scope=w:<gid> is required; without it the token carries only "sp:auth"
+    // which the API rejects.
+    let mut params: Vec<(&str, &str)> = vec![
+        ("grant_type", "client_credentials"),
+        ("client_id", client_id),
+        ("client_secret", client_secret),
+    ];
+    let scope_value;
+    if let Some(gid) = workspace_gid {
+        scope_value = format!("w:{}", gid);
+        params.push(("scope", scope_value.as_str()));
+    }
     let response = client
         .post(token_endpoint_url)
-        .basic_auth(client_id, Some(client_secret))
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .form(&[("grant_type", "client_credentials")])
+        .form(&params)
         .send()
         .with_context(|| {
             format!(
@@ -1605,26 +1638,36 @@ pub fn client_credentials_one_access_token(
     format_refresh_token_response(&token_json)
 }
 
-fn service_principal_credentials(config: &Config) -> Option<(String, String, String)> {
+/// Returns `(sp_client_id, client_secret, sp_token_endpoint_url, workspace_gid)`.
+fn service_principal_credentials(
+    config: &Config,
+) -> Option<(String, String, String, Option<String>)> {
     let one = config.alteryx_one.as_ref()?;
-
-    let client_id = one.resolved_oauth_client_id()?.to_string();
+    // Use the SP-specific client_id, NOT the user oauth_client_id.
+    let client_id = one.resolved_sp_client_id()?.to_string();
     let client_secret = one.resolved_client_secret()?.to_string();
-    let token_endpoint_url =
-        one.effective_token_endpoint_url_for_workspace(one.active_workspace_id())?;
-
-    Some((client_id, client_secret, token_endpoint_url))
+    // SP has its own regional token endpoint (pingauth-us1-4), separate from
+    // the user flow endpoint.
+    let token_endpoint_url = one.effective_sp_token_endpoint_url()?;
+    let workspace_gid = one.resolved_workspace_gid().map(str::to_string);
+    Some((client_id, client_secret, token_endpoint_url, workspace_gid))
 }
 
 fn service_principal_access_token(config: &Config, client: &Client) -> Result<String> {
-    let (client_id, client_secret, token_endpoint_url) =
+    let (client_id, client_secret, token_endpoint_url, workspace_gid) =
         service_principal_credentials(config).ok_or_else(|| {
             anyhow::anyhow!(
-                "alteryx_one.access_token is required unless client credentials are configured via alteryx_one.oauth_client_id and alteryx_one.client_secret, or the matching workspace_credentials entry"
+                "service-principal auth requires alteryx_one.sp_client_id (or AYX_ONE_SP_CLIENT_ID / AYX_ONE_ALTERYX_FDE_SP007_CLIENT_ID), client_secret, and sp_token_endpoint_url"
             )
         })?;
 
-    client_credentials_one_access_token(&token_endpoint_url, &client_id, &client_secret, client)
+    client_credentials_one_access_token(
+        &token_endpoint_url,
+        &client_id,
+        &client_secret,
+        workspace_gid.as_deref(),
+        client,
+    )
 }
 
 pub fn format_refresh_token_response(token_json: &Value) -> Result<String> {
@@ -1638,6 +1681,197 @@ pub fn format_refresh_token_response(token_json: &Value) -> Result<String> {
         .ok_or_else(|| anyhow::anyhow!("refresh token response missing access_token"))?;
 
     Ok(format!("{token_type} {access_token}"))
+}
+
+// ---------------------------------------------------------------------------
+// Device Authorization Grant (RFC 8628) — no browser redirect required.
+// User visits a short URL on any device and enters a code.
+// ---------------------------------------------------------------------------
+
+/// Response from the device authorization endpoint.
+#[derive(Debug)]
+pub struct DeviceAuthResponse {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    /// Full URI with the code embedded — open this in a browser to skip typing.
+    pub verification_uri_complete: Option<String>,
+    pub expires_in: u64,
+    /// Minimum poll interval in seconds.
+    pub interval: u64,
+}
+
+/// Initiate a device authorization request.  Returns the codes and URI to show
+/// the user.  Uses `scope=openid` which gives a workspace-scoped token.
+pub fn initiate_device_auth(
+    device_auth_endpoint: &str,
+    client_id: &str,
+    client: &Client,
+) -> Result<DeviceAuthResponse> {
+    let resp = client
+        .post(device_auth_endpoint)
+        .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .form(&[("client_id", client_id), ("scope", "openid")])
+        .send()
+        .with_context(|| {
+            format!("device authorization request to '{device_auth_endpoint}' failed")
+        })?;
+    let status = resp.status();
+    let text = resp.text().context("failed to read device auth response")?;
+    if !status.is_success() {
+        bail!(
+            "device authorization request returned {}: {}",
+            status.as_u16(),
+            response_body_preview(&text)
+        );
+    }
+    let j: Value = serde_json::from_str(&text)
+        .with_context(|| format!("device auth response was not JSON: {}", response_body_preview(&text)))?;
+    Ok(DeviceAuthResponse {
+        device_code: j["device_code"]
+            .as_str()
+            .context("device auth response missing device_code")?
+            .to_string(),
+        user_code: j["user_code"]
+            .as_str()
+            .context("device auth response missing user_code")?
+            .to_string(),
+        verification_uri: j["verification_uri"]
+            .as_str()
+            .context("device auth response missing verification_uri")?
+            .to_string(),
+        verification_uri_complete: j["verification_uri_complete"]
+            .as_str()
+            .map(str::to_string),
+        expires_in: j["expires_in"].as_u64().unwrap_or(300),
+        interval: j["interval"].as_u64().unwrap_or(5),
+    })
+}
+
+/// Single poll attempt.  Returns `Ok(Some((access_token, refresh_token)))` on
+/// success, `Ok(None)` when the user hasn't approved yet (authorization_pending
+/// / slow_down), or `Err` on a terminal failure.
+pub fn poll_device_token(
+    token_endpoint: &str,
+    client_id: &str,
+    device_code: &str,
+    client: &Client,
+) -> Result<Option<(String, Option<String>)>> {
+    let resp = client
+        .post(token_endpoint)
+        .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .form(&[
+            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+            ("device_code", device_code),
+            ("client_id", client_id),
+        ])
+        .send()
+        .context("device token poll request failed")?;
+    let status = resp.status();
+    let text = resp.text().context("failed to read device token poll response")?;
+    if status.is_success() {
+        let j: Value = serde_json::from_str(&text)
+            .with_context(|| format!("device token response was not JSON: {}", response_body_preview(&text)))?;
+        let access_token = j["access_token"]
+            .as_str()
+            .context("device token response missing access_token")?
+            .to_string();
+        let refresh_token = j["refresh_token"].as_str().map(str::to_string);
+        return Ok(Some((access_token, refresh_token)));
+    }
+    // 4xx errors from the token endpoint carry an `error` field.
+    let j: Value = serde_json::from_str(&text).unwrap_or_default();
+    let error = j["error"].as_str().unwrap_or("");
+    match error {
+        "authorization_pending" | "slow_down" => Ok(None),
+        "expired_token" => bail!("device code expired — run `ayx one platform auth login` again"),
+        "access_denied" => bail!("access denied — the user rejected the authorization request"),
+        _ => bail!(
+            "device token poll returned {}: {}",
+            status.as_u16(),
+            response_body_preview(&text)
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Authorization Code + PKCE (RFC 7636) — browser redirect flow.
+// ---------------------------------------------------------------------------
+
+/// PKCE code_verifier + code_challenge pair (S256).
+pub struct PkceChallenge {
+    pub code_verifier: String,
+    pub code_challenge: String,
+}
+
+/// Generate a fresh PKCE challenge using 32 cryptographically random bytes (256-bit verifier).
+///
+/// Panics if the OS entropy source is unavailable — a weak verifier is worse than failing.
+pub fn generate_pkce_challenge() -> PkceChallenge {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use sha2::{Digest, Sha256};
+
+    let mut verifier_bytes = [0u8; 32];
+    getrandom::getrandom(&mut verifier_bytes)
+        .expect("OS entropy source unavailable — cannot generate PKCE verifier");
+    let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
+    let digest = Sha256::digest(code_verifier.as_bytes());
+    let code_challenge = URL_SAFE_NO_PAD.encode(digest);
+    PkceChallenge { code_verifier, code_challenge }
+}
+
+/// Generate `n` cryptographically random bytes as a base64url string.
+///
+/// Panics if the OS entropy source is unavailable.
+pub fn generate_random_state(n: usize) -> String {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let mut bytes = vec![0u8; n];
+    getrandom::getrandom(&mut bytes)
+        .expect("OS entropy source unavailable — cannot generate OAuth state");
+    URL_SAFE_NO_PAD.encode(&bytes)
+}
+
+/// Exchange an authorization code for tokens.
+pub fn exchange_auth_code(
+    token_endpoint: &str,
+    client_id: &str,
+    code: &str,
+    code_verifier: &str,
+    redirect_uri: &str,
+    client: &Client,
+) -> Result<(String, Option<String>)> {
+    let resp = client
+        .post(token_endpoint)
+        .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("client_id", client_id),
+            ("code_verifier", code_verifier),
+            ("redirect_uri", redirect_uri),
+        ])
+        .send()
+        .context("authorization code exchange request failed")?;
+    let status = resp.status();
+    let text = resp.text().context("failed to read token exchange response")?;
+    if !status.is_success() {
+        bail!(
+            "authorization code exchange returned {}: {}",
+            status.as_u16(),
+            response_body_preview(&text)
+        );
+    }
+    let j: Value = serde_json::from_str(&text)
+        .with_context(|| format!("token exchange response was not JSON: {}", response_body_preview(&text)))?;
+    let access_token = j["access_token"]
+        .as_str()
+        .context("token exchange response missing access_token")?
+        .to_string();
+    let refresh_token = j["refresh_token"].as_str().map(str::to_string);
+    Ok((access_token, refresh_token))
 }
 
 #[allow(dead_code)]
@@ -1727,11 +1961,30 @@ fn apply_jitter(base_ms: u64, pct: u64) -> u64 {
 
 /// Resolve the One API base URL for this profile.
 ///
-/// Precedence: `alteryx_one.base_url` in the profile, then the `AYX_ONE_API_BASE_URL`
-/// environment variable, then the `us1` default. Region-specific examples:
-/// `https://us1.alteryxcloud.com`, `https://eu1.alteryxcloud.com`,
-/// `https://ap1.alteryxcloud.com`.
+/// Precedence for SP mode: active workspace credential's `api_base_url`, then
+/// the profile `base_url`, then env var, then the `us1` default.
+/// For user mode (and as the SP fallback): profile `base_url` → env var →
+/// `https://us1.alteryxcloud.com`.
 pub fn resolve_one_base_url(config: &Config) -> String {
+    use ayx_core::profile::AuthMode;
+    // In SP mode, honour the per-credential api_base_url if set (allows
+    // routing to the regional cell that trusts the SP issuer's signing key).
+    if config
+        .alteryx_one
+        .as_ref()
+        .is_some_and(|one| one.auth_mode == AuthMode::ServicePrincipal)
+    {
+        if let Some(url) = config
+            .alteryx_one
+            .as_ref()
+            .and_then(|one| one.resolved_sp_api_base_url())
+        {
+            let trimmed = url.trim().trim_end_matches('/').to_string();
+            if !trimmed.is_empty() {
+                return trimmed;
+            }
+        }
+    }
     if let Some(one) = config.alteryx_one.as_ref()
         && let Some(url) = one.normalized_base_url()
     {
@@ -1752,7 +2005,7 @@ pub fn resolve_one_base_url(config: &Config) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ayx_core::profile::{AlteryxOneProfile, Config, WorkspaceCredential};
+    use ayx_core::profile::{AlteryxOneProfile, AuthMode, Config, WorkspaceCredential};
     use httpmock::prelude::*;
     use serde_yaml::from_str;
     use std::collections::BTreeMap;
@@ -1783,6 +2036,10 @@ mongo:
             refresh_token_ref: None,
             workspace_credentials: Default::default(),
             expected_workspace_id: None,
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
         });
         config
     }
@@ -1836,6 +2093,10 @@ mongo:
             refresh_token_ref: None,
             workspace_credentials: Default::default(),
             expected_workspace_id: None,
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
         });
 
         let client = reqwest::blocking::Client::new();
@@ -1883,6 +2144,9 @@ mongo:
                 client_secret: None,
                 client_secret_ref: None,
                 token_endpoint_url: Some(format!("{}/workspace-token", server.base_url())),
+                sp_client_id: None,
+                workspace_gid: None,
+                api_base_url: None,
             },
         );
         config.alteryx_one = Some(AlteryxOneProfile {
@@ -1898,6 +2162,10 @@ mongo:
             refresh_token_ref: None,
             workspace_credentials,
             expected_workspace_id: Some("ws-123".to_string()),
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
         });
 
         let client = reqwest::blocking::Client::new();
@@ -1915,7 +2183,7 @@ mongo:
             when.method(POST)
                 .path("/as/token")
                 .header("content-type", "application/x-www-form-urlencoded")
-                .body("grant_type=client_credentials");
+                .body("grant_type=client_credentials&client_id=sp-client&client_secret=sp-secret");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"token_type":"Bearer","access_token":"fresh-sp"}"#);
@@ -1926,6 +2194,7 @@ mongo:
             &format!("{}/as/token", server.base_url()),
             "sp-client",
             "sp-secret",
+            None,
             &client,
         )
         .expect("client credentials succeeds");
@@ -1980,6 +2249,7 @@ mongo:
             &format!("{}/as/token", server.base_url()),
             "client-id",
             "client-secret",
+            None,
             &client,
         )
         .expect_err("client credentials should fail");
@@ -2194,7 +2464,7 @@ mongo:
             when.method(POST)
                 .path("/as/token")
                 .header("content-type", "application/x-www-form-urlencoded")
-                .body("grant_type=client_credentials");
+                .body("grant_type=client_credentials&client_id=sp-client&client_secret=sp-secret");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(r#"{"token_type":"Bearer","access_token":"fresh-sp"}"#);
@@ -2215,16 +2485,20 @@ mongo:
         config.alteryx_one = Some(AlteryxOneProfile {
             account_email: "tester@example.com".to_string(),
             base_url: Some(server.base_url()),
-            oauth_client_id: Some("sp-client".to_string()),
+            oauth_client_id: None,
             client_secret: Some("sp-secret".to_string()),
             client_secret_ref: None,
-            token_endpoint_url: Some(format!("{}/as", server.base_url())),
+            token_endpoint_url: None,
             access_token: None,
             access_token_ref: None,
             refresh_token: None,
             refresh_token_ref: None,
             workspace_credentials: Default::default(),
             expected_workspace_id: None,
+            sp_client_id: Some("sp-client".to_string()),
+            sp_token_endpoint_url: Some(format!("{}/as", server.base_url())),
+            workspace_gid: None,
+            auth_mode: AuthMode::ServicePrincipal,
         });
 
         let client = reqwest::blocking::Client::new();
