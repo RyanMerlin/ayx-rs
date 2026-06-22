@@ -291,7 +291,7 @@ pub(crate) fn execute(
                 &config,
                 "flow",
                 "update",
-                "PUT",
+                "PATCH",
                 "/v4/flows/{id}",
                 true,
                 &[("id", flow_id.as_str())],

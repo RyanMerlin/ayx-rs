@@ -163,7 +163,9 @@ pub(crate) fn execute(
         }
         Some(OneConnectionsCommand::ConnectorMetadata { command }) => match command {
             None => Envelope::ok(
-                "one connections connector-metadata commands available: defaults, detail, publish-info, overrides",
+                "one connections connector-metadata commands available: defaults, detail, publish-info, overrides. \
+                 Note: connector enumeration (list) is not available via the Alteryx One v4 API — use a known connector slug \
+                 (e.g. 'gsheetsuser', 'remotefile') with 'detail' to discover the schema.",
             ),
             Some(OneConnectorMetadataCommand::Defaults { profile, connector }) => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;

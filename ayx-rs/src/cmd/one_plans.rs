@@ -16,7 +16,8 @@ pub(crate) fn execute(
 ) -> Result<Envelope> {
     Ok(match command {
         None => Envelope::ok(
-            "one plans commands available: list, create, detail, full, run, count, run-parameters, schedules, export, update, delete, share, import, permissions",
+            "one plans commands available: list, create, detail, full, run, count, run-parameters, schedules, export, update, delete, share, import, permissions. \
+             Note: Plans API requires an enterprise-tier workspace — returns 404 on platform_packaging workspaces.",
         ),
         Some(OnePlansCommand::List {
             profile,

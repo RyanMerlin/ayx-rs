@@ -57,11 +57,23 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
         }
         Some(OneCommand::Status { profile }) => {
             let config = load_profile!(profile.as_deref(), environment)?;
-            api_status_envelope(&config, "one")?
+            if config.alteryx_one.is_some() && config.api.is_none() {
+                Envelope::ok(
+                    "ayx one status shows Server API status. For Alteryx One profiles, use `ayx one doctor platform` to check auth and connectivity.",
+                )
+            } else {
+                api_status_envelope(&config, "one")?
+            }
         }
         Some(OneCommand::Inventory { profile }) => {
             let config = load_profile!(profile.as_deref(), environment)?;
-            api_inventory_envelope(&config, "one")?
+            if config.alteryx_one.is_some() && config.api.is_none() {
+                Envelope::ok(
+                    "ayx one inventory shows Server API inventory. For Alteryx One profiles, use `ayx one doctor platform` to check auth and connectivity.",
+                )
+            } else {
+                api_inventory_envelope(&config, "one")?
+            }
         }
         Some(OneCommand::Connections { command }) => {
             super::one_connections::execute(&runtime, cli.apply, cli.yes, command)?

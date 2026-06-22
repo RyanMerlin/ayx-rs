@@ -9,9 +9,10 @@ pub(crate) fn execute(
     command: Option<OneSchedulingCommand>,
 ) -> Result<Envelope> {
     Ok(match command {
-        None => {
-            Envelope::ok("one scheduling commands available: list, detail, enable, disable, count")
-        }
+        None => Envelope::ok(
+            "one scheduling commands available: list, detail, enable, disable, count. \
+             Note: Scheduling API requires an enterprise-tier workspace — returns 404 on platform_packaging workspaces.",
+        ),
         Some(OneSchedulingCommand::List {
             profile,
             limit,

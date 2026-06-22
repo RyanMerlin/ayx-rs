@@ -11,18 +11,18 @@ Full test notes in `docs/HANDOFF-pure-http-auth.md`.
 
 These are all in ayx-rs Rust code only. Fast, low-risk.
 
-- [ ] **`--body` flag: clarify it takes a file path**  
-  Help text says `--body <BODY>` with no explanation. Passing inline JSON (`--body '{"name":"..."}`) silently fails with "No such file or directory". Fix: change the help string to `--body <FILE>` / "path to JSON body file" and/or accept `-` for stdin piping.  
+- [x] **`--body` flag: clarify it takes a file path** — DONE v0.9.12  
+  All 32 `body: PathBuf` fields now show `--body <FILE>` with "path to JSON body file" in help.  
   Affected commands: `flows create/update/run/copy`, `connections create/update`, `output-objects create/update`, `write-settings create/update`, `webhook-flow-tasks create`, `plans create/update`.
 
-- [ ] **`ayx one status` and `ayx one inventory` wrong surface routing**  
-  On an Alteryx One-only profile, both commands error: "config missing api/server_api section". They are routing to the Server API transport. Fix: detect that the profile has only `alteryx_one` configured, show a One-specific status summary (auth posture, workspace info), or emit a clean "not applicable for One profile — use `ayx one doctor platform`" message instead of an internal config error.
+- [x] **`ayx one status` and `ayx one inventory` wrong surface routing** — DONE v0.9.12  
+  Both commands now detect One-only profiles and return a clean message pointing to `ayx one doctor platform` instead of erroring with "config missing api/server_api section".
 
-- [ ] **`platform workspace invite-users` should default `--workspace-id` to current workspace**  
-  The flag is required but the profile already knows the workspace (via `workspace_gid`). Default it from profile config so single-workspace users don't need to pass it explicitly. Same applies to `remove-user`, `suspend-users`, `unsuspend-users`, `transfer`, `transfer-assets`.
+- [x] **`platform workspace invite-users` should default `--workspace-id` to current workspace** — DONE v0.9.12  
+  `--workspace-id` is now `Option<String>` on `invite-users`, `remove-user`, `suspend-users`, `unsuspend-users`, `transfer`, `transfer-assets`. Defaults to `workspace_gid` from the active profile when not supplied.
 
-- [ ] **`ayx one doctor` — surface tier information in output**  
-  `doctor billing` and `doctor scheduling` silently show 404s that aren't explained. Add a note to the doctor output when a surface returns 404 across all endpoints: "This surface may not be available at your subscription tier (platform_packaging). Billing and Plans APIs are observed as enterprise-tier only."
+- [x] **`ayx one doctor` / dead-route help text** — DONE v0.9.12 (partial)  
+  Billing, plans, and scheduling `None` help arms now include "Note: requires enterprise tier — returns 404 on platform_packaging workspaces." Full runtime 404 detection deferred to Phase 4.
 
 ---
 
@@ -30,18 +30,15 @@ These are all in ayx-rs Rust code only. Fast, low-risk.
 
 These require new subcommands or corrected endpoint targets.
 
-- [ ] **`connections connector-metadata list` — discover available connector slugs**  
-  `connector-metadata defaults --connector <name>` works, but there is no way to list valid connector names. `jdbc`, `remotefile`, `google_bigquery`, `bigquery` were all tried; only specific known slugs succeed. Need to find the correct API endpoint for connector enumeration and add a `connector-metadata list` subcommand.  
-  Acceptance: `ayx one connections connector-metadata list` returns all available connector type names/slugs that can be passed to `--connector`.
+- [x] **`connections connector-metadata list` — gap documented** — DONE v0.9.12  
+  `/v4/connectors` returns 404 — no enumeration endpoint exists in the Alteryx One v4 API. The `connector-metadata` help text now documents this gap and lists known working slugs (`gsheetsuser`, `remotefile`, etc.). A `list` subcommand is deferred until the API adds enumeration support.
 
 - [ ] **`flows permissions` — add a read command**  
   Currently `flows permissions --body <FILE>` is a POST (write permissions). There is no read surface. Add `flows permissions get --flow-id <ID>` that hits `GET /v4/flows/{id}/permissions` (or equivalent) and returns the current permission set.
 
-- [ ] **`platform workspace people/admins` — find and fix correct endpoint**  
-  Both `--workspace-id 01KMGF85...` variants return 404:  
-  `GET /v4/workspaces/{id}/people` → `RouteNotFoundException`  
-  `GET /v4/workspaces/{id}/admins` → `RouteNotFoundException`  
-  Action: find the actual v4 endpoint for workspace member listing (possibly `/v4/people` with a workspace filter, or a different path) and update the endpoint template. Until found, document the gap.
+- [x] **`platform workspace people/admins` — fixed correct endpoints** — DONE v0.9.12  
+  `people` → `GET /v4/people` (workspace context via `x-alteryx-workspace-gid` header — live-verified 200, 9 members returned).  
+  `admins` → `GET /v4/people?role=admin`. Both `/v4/workspaces/{id}/people` and `/v4/workspaces/{id}/admins` are confirmed non-existent routes.
 
 - [ ] **`job-groups` — `name=None` on all 25 entries**  
   Job-groups created from flow runs have no explicit name. The `flowRun.flowId` field is the only association back to the originating flow. `job-groups list` output is currently unintelligible for users (25 rows, all `name=None`). Fix: in the text output formatter, synthesize a display name like `flow-{flowId} run at {createdAt}` when `name` is null. Or surface `flowRun.id` and `ranfrom` fields as default columns.
@@ -60,12 +57,8 @@ Connection create is broken in practice because the required body schema is undi
 - [ ] **`connections create` — end-to-end test with full body**  
   Complete a working `connections create --apply` with all required fields (`vendor`, `vendorName`, `params`) using a known-good connector type (BigQuery or Google Sheets from existing connections as reference). Add this as a fixture/example in `docs/`.
 
-- [ ] **`flows update` — investigate 403 on PUT `/v4/flows/{id}`**  
-  `flows create` (POST) and `flows delete` (DELETE) both succeed with the current PAT. `flows update` (PUT) returns 403 "User is not authorised to access this API." This is a token scope gap or permission model difference. Actions:
-  - [ ] Check what OAuth scopes the UI-minted token carries vs the `local-auth-workspace` accessToken we mint.
-  - [ ] Check if `PUT /v4/flows/{id}` requires the flow to be in a specific state (e.g. draft vs published).
-  - [ ] Check if `PATCH /v4/flows/{id}` is the correct method instead of PUT.
-  - [ ] If it's a scope gap: update `email_otp_login_pure_http` to request broader scopes at the PAT mint step (`POST /v4/apiAccessTokens`).
+- [x] **`flows update` — FIXED: PUT → PATCH** — DONE v0.9.12  
+  Root cause: CLI was using `PUT /v4/flows/{id}` (403) instead of `PATCH /v4/flows/{id}` (200). Live-verified: PATCH returns 200, PUT returns 403. One-line fix in `one_flows.rs`. `flows create`/`update`/`delete` all now work end-to-end.
 
 ---
 

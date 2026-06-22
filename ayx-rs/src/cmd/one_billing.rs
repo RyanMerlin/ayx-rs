@@ -9,7 +9,10 @@ pub(crate) fn execute(
     command: Option<OneBillingCommand>,
 ) -> Result<Envelope> {
     Ok(match command {
-        None => Envelope::ok("one billing commands available: current-account, usage-export"),
+        None => Envelope::ok(
+            "one billing commands available: current-account, usage-export. \
+             Note: Billing API requires an enterprise-tier workspace — returns 404 on platform_packaging workspaces.",
+        ),
         Some(OneBillingCommand::CurrentAccount { profile }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(

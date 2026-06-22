@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
@@ -7,6 +7,28 @@ use crate::{
     cmd::{self, RuntimeCtx},
     load_payload,
 };
+
+/// Resolve a workspace id from the explicit arg or fall back to the profile's
+/// configured `workspace_gid`. Returns an error if neither is available.
+fn resolve_workspace_id(
+    explicit: Option<String>,
+    config: &ayx_core::profile::Config,
+) -> Result<String> {
+    explicit
+        .or_else(|| {
+            config
+                .alteryx_one
+                .as_ref()
+                .and_then(|o| o.resolved_workspace_gid())
+                .map(str::to_string)
+        })
+        .ok_or_else(|| {
+            anyhow!(
+                "workspace-id not specified and could not be inferred from profile; \
+                 pass --workspace-id explicitly"
+            )
+        })
+}
 
 pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
@@ -173,32 +195,38 @@ pub(crate) fn execute(
                 &[("id", &workspace_id)],
             )?
         }
-        Some(OneWorkspaceCommand::People { workspace_id }) => {
+        Some(OneWorkspaceCommand::People { workspace_id: _ }) => {
             let config = runtime.load_profile_lenient(None)?;
+            // The workspace context is conveyed via the x-alteryx-workspace-gid
+            // header (set by the transport layer); /v4/people is the correct
+            // live-verified endpoint. /v4/workspaces/{id}/people returns 404.
             one_api_live_request(
                 &config,
                 "platform",
                 "workspace-people",
                 "GET",
-                "/v4/workspaces/{id}/people",
+                "/v4/people",
                 false,
-                &[("id", &workspace_id)],
+                &[],
             )?
         }
-        Some(OneWorkspaceCommand::Admins { workspace_id }) => {
+        Some(OneWorkspaceCommand::Admins { workspace_id: _ }) => {
             let config = runtime.load_profile_lenient(None)?;
+            // Same: workspace context via header; filter admins with role query
+            // param. /v4/workspaces/{id}/admins returns 404.
             one_api_live_request(
                 &config,
                 "platform",
                 "workspace-admins",
                 "GET",
-                "/v4/workspaces/{workspaceId}/admins",
+                "/v4/people?role=admin",
                 false,
-                &[("workspaceId", &workspace_id)],
+                &[],
             )?
         }
         Some(OneWorkspaceCommand::InviteUsers { workspace_id }) => {
             let config = runtime.load_profile_lenient(None)?;
+            let ws_id = resolve_workspace_id(workspace_id, &config)?;
             one_api_live_request(
                 &config,
                 "platform",
@@ -206,7 +234,7 @@ pub(crate) fn execute(
                 "POST",
                 "/v4/workspaces/{id}/people/batch",
                 true,
-                &[("id", &workspace_id)],
+                &[("id", &ws_id)],
             )?
         }
         Some(OneWorkspaceCommand::RemoveUser {
@@ -214,12 +242,13 @@ pub(crate) fn execute(
             person_id,
         }) => {
             let config = runtime.load_profile_lenient(None)?;
+            let ws_id = resolve_workspace_id(workspace_id, &config)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
                     &cmd::confirm::access_change_message(
                         "remove",
-                        &format!("user person id='{person_id}' from workspace id='{workspace_id}'"),
+                        &format!("user person id='{person_id}' from workspace id='{ws_id}'"),
                         &config.profile_name,
                     ),
                 )?;
@@ -231,17 +260,18 @@ pub(crate) fn execute(
                 "DELETE",
                 "/v4/workspaces/{workspaceId}/people/{id}",
                 true,
-                &[("workspaceId", &workspace_id), ("id", &person_id)],
+                &[("workspaceId", &ws_id), ("id", &person_id)],
             )?
         }
         Some(OneWorkspaceCommand::SuspendUsers { workspace_id }) => {
             let config = runtime.load_profile_lenient(None)?;
+            let ws_id = resolve_workspace_id(workspace_id, &config)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
                     &cmd::confirm::access_change_message(
                         "suspend",
-                        &format!("users in workspace id='{workspace_id}'"),
+                        &format!("users in workspace id='{ws_id}'"),
                         &config.profile_name,
                     ),
                 )?;
@@ -253,17 +283,18 @@ pub(crate) fn execute(
                 "POST",
                 "/iam/v1/workspaces/{id}/people/suspend",
                 true,
-                &[("id", &workspace_id)],
+                &[("id", &ws_id)],
             )?
         }
         Some(OneWorkspaceCommand::UnsuspendUsers { workspace_id }) => {
             let config = runtime.load_profile_lenient(None)?;
+            let ws_id = resolve_workspace_id(workspace_id, &config)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
                     &cmd::confirm::access_change_message(
                         "unsuspend",
-                        &format!("users in workspace id='{workspace_id}'"),
+                        &format!("users in workspace id='{ws_id}'"),
                         &config.profile_name,
                     ),
                 )?;
@@ -275,17 +306,18 @@ pub(crate) fn execute(
                 "POST",
                 "/iam/v1/workspaces/{id}/people/unsuspend",
                 true,
-                &[("id", &workspace_id)],
+                &[("id", &ws_id)],
             )?
         }
         Some(OneWorkspaceCommand::Transfer { workspace_id }) => {
             let config = runtime.load_profile_lenient(None)?;
+            let ws_id = resolve_workspace_id(workspace_id, &config)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
                     &cmd::confirm::access_change_message(
                         "transfer",
-                        &format!("workspace id='{workspace_id}'"),
+                        &format!("workspace id='{ws_id}'"),
                         &config.profile_name,
                     ),
                 )?;
@@ -297,7 +329,7 @@ pub(crate) fn execute(
                 "POST",
                 "/v4/workspaces/{id}/transfer",
                 true,
-                &[("id", &workspace_id)],
+                &[("id", &ws_id)],
             )?
         }
         Some(OneWorkspaceCommand::TransferAssets { profile, body }) => {
