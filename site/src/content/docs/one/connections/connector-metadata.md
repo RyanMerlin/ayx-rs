@@ -17,6 +17,7 @@ Connector metadata describes how Alteryx One handles a specific connector type: 
 | `ayx one connections connector-metadata overrides list` | List active overrides for a connector |
 | `ayx one connections connector-metadata overrides create` | Create overrides from a JSON payload |
 | `ayx one connections connector-metadata overrides delete` | Delete overrides for a connector |
+| `ayx one connections connector-metadata template` | Generate a fillable JSON create-body template for a connector |
 
 All commands require `--connector <connector-type>`.
 
@@ -78,6 +79,34 @@ ayx one connections connector-metadata overrides delete --connector <connector> 
 ```
 
 Deleting overrides reverts the connector to its platform defaults.
+
+## Generating a create-body template
+
+`template` derives a fillable JSON skeleton for `connections create` directly from the connector's metadata. This is the recommended starting point for building a new connection body — it removes the guesswork about required fields and correct values.
+
+```bash
+# Generate the template and write it to a file
+ayx one connections connector-metadata template --connector bigquery --output json > body.json
+
+# Edit body.json to fill in your values, then create the connection
+ayx one connections create --body "$(cat body.json)" --apply
+```
+
+The command derives each field from the connector metadata:
+
+- `type` — `jdbc` for relational connectors, `remotefile` for others
+- `vendor` / `vendorName` — taken from the connector slug
+- `credentialType` — taken from the metadata (e.g. `apiKey`, `oauth2`)
+- `params` — a skeleton of the connector-specific parameter fields
+
+Example derivations:
+
+| Connector | type | credentialType | params skeleton |
+|---|---|---|---|
+| `bigquery` | `jdbc` | `apiKey` | `{ "projectId": "" }` |
+| `gsheetsuser` | `remotefile` | `oauth2` | connector-specific fields |
+
+Pipe the output to a file and pass it to `connections create --body <file>`. Use `connector-metadata defaults` alongside `template` to verify expected field values before submitting.
 
 ## Automation patterns
 

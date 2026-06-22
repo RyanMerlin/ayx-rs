@@ -41,6 +41,8 @@ ayx one job-groups list --limit 50
 ayx --output json one job-groups list --all
 ```
 
+When the API returns a null `name` for a job group, `list` synthesizes a display name: `flow-{flowId}` if a `flowId` is present, otherwise `job-{id}`. The synthesized name appears in both text and JSON output.
+
 ## Inspecting a job group
 
 ```bash

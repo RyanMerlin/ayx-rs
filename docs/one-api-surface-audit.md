@@ -49,13 +49,11 @@ These require new subcommands or corrected endpoint targets.
 
 Connection create is broken in practice because the required body schema is undiscoverable.
 
-- [ ] **`connections create` — document and validate body schema**  
-  The API requires at minimum: `name`, `type`, `credentialType`, `vendor`, `vendorName`, `params` (connector-specific). Passing only `name/type/credentialType` gives sequential 400s revealing each missing field one at a time. Options (pick one or both):
-  - [ ] Add `connections dry-run --connector <slug>` that calls `connector-metadata defaults` and emits a filled-in JSON template the user can edit and pass to `create --body`.
-  - [ ] Add body schema validation in the CLI before sending: check that `vendor`, `vendorName`, `params` are present and emit a helpful error with the template if not.
+- [x] **`connections create` — template generator** — DONE v0.9.14  
+  Added `ayx one connections connector-metadata template --connector <slug>`. It calls `GET /v4/connectorMetadata/{slug}/defaults` and emits a fillable JSON create-body: `name`, `description`, `type` (derived from category: `relational`→`jdbc`, else `remotefile`), `vendor`, `vendorName`, `credentialType` (first of metadata `credentialTypes`), `isGlobal`, `ssl`, and a `params` object built from `connectionParameters` (defaults or `<type>` placeholders). Live-verified: `bigquery`→jdbc/apiKey/`params.projectId`; `gsheetsuser`→remotefile/oauth2.
 
-- [ ] **`connections create` — end-to-end test with full body**  
-  Complete a working `connections create --apply` with all required fields (`vendor`, `vendorName`, `params`) using a known-good connector type (BigQuery or Google Sheets from existing connections as reference). Add this as a fixture/example in `docs/`.
+- [~] **`connections create` — end-to-end test** — PARTIAL  
+  `POST /v4/connections/dryRun` returns `AccessControlException` (403) via the current PAT — same scope wall as flows permissions/recipeParameters/roles. A full `create --apply` needs valid connector credentials (OAuth token for gsheets, service-account key for bigquery) that aren't available in this environment. The template generator unblocks the body-construction half; the credential half is environment-gated.
 
 - [x] **`flows update` — FIXED: PUT → PATCH** — DONE v0.9.12  
   Root cause: CLI was using `PUT /v4/flows/{id}` (403) instead of `PATCH /v4/flows/{id}` (200). Live-verified: PATCH returns 200, PUT returns 403. One-line fix in `one_flows.rs`. `flows create`/`update`/`delete` all now work end-to-end.
@@ -83,29 +81,46 @@ All of these return `RouteNotFoundException` on `platform_packaging` tier. Valid
 
 ## Phase 5 — Untested (Needs Fixtures or Real Content)
 
-These require either a .yxmd workflow file or more complex setup to test fully.
+Probed live against `alteryx-fde` 2026-06-22. Full per-endpoint status in `docs/one-live-validation.md`.
 
-- [ ] **`flows import`** — needs a `.yxmd` or `.yxzp` file. Test with a minimal valid workflow.
-- [ ] **`flows validate`** — same; tests flow XML validity before run.
-- [ ] **`flows library`** — unclear what this surface exposes; needs investigation.
-- [ ] **`flows copy --flow-id`** — copy an existing flow to a new name; test end-to-end.
-- [ ] **`job-groups run`** — needs a flow with actual content and output destinations.
-- [ ] **`job-groups outputs/inputs/jobs`** — needs a completed flow run to have data.
-- [ ] **`connections update/delete/status/permissions`** — test against the test connection once create is working.
-- [ ] **`output-objects create`** — needs a valid flow with output.
-- [ ] **`write-settings create`** — needs a writable destination configured.
-- [ ] **`webhook-flow-tasks create/test`** — needs a webhook-enabled flow.
-- [ ] **`platform workspace invite-users --apply`** — send a real invite to a test address.
-- [ ] **`platform role list-assignments --role-id <id>`** — need to know valid role IDs from the workspace.
+**Biggest finding — 4 commands panicked (FIXED v0.9.14):** `flows export`, `server system-info`,
+`server runtime-settings`, and `tools workspace init` each defined a local `--output <PathBuf>` arg
+that collided with the global `--output <text|json>` format flag (same clap id, different type) and
+panicked at runtime on every call. All four renamed their file arg to `--output-file`.
+
+- [x] **`flows export`** — FIXED v0.9.14. Was panicking; now exports a real `.yxzp` package (743 bytes for an empty flow, live-verified).
+- [x] **`flows copy --flow-id`** — VERIFIED working. `POST /v4/flows/{id}/copy` returns 201.
+- [x] **`flows library`** — VERIFIED working. `GET /v4/flowsLibrary` returns 200 (0 items in this workspace).
+- [x] **`flows inputs` / `flows outputs`** — VERIFIED working on an empty flow (200).
+- [x] **`output-objects list` / `write-settings list`** — VERIFIED working (200, 0 items).
+- [~] **`flows import`** — endpoint wired; needs a valid `.yxzp` package and credentials. Export now produces a package, so an export→import round-trip is the natural next test (deferred — import of an empty-flow package returned a backend validation error, not a CLI bug).
+- [x] **`flows validate`** — `GET /v4/flows/{id}/validate` returns 404. No validate route exists in this API version. Documented as unsupported.
+- [~] **`job-groups run` / `outputs` / `inputs` / `jobs`** — need a flow with real content + a completed run. The workspace has 0 job-groups; can't exercise without authoring a non-empty flow (requires Designer/UI, not the API).
+- [~] **`connections update/delete/status`** — need a test connection, which needs valid credentials (see Phase 3 partial).
+- [x] **`connections dry-run`** — `POST /v4/connections/dryRun` returns `AccessControlException` (403) via PAT. Endpoint exists but PAT lacks scope.
+- [~] **`output-objects create` / `write-settings create`** — need a valid flow with output and a writable destination.
+- [x] **`webhook-flow-tasks create/test`** — `/v4/webhookFlowTasks` returns 404. Not present on `platform_packaging` tier. Documented as unavailable.
+- [ ] **`platform workspace invite-users --apply`** — would send a real invite; intentionally not exercised.
+- [x] **`platform role list`** — `GET /v4/roles` returns `AccessControlException` (403) via PAT. Scope-gated.
+
+### The PAT scope wall
+
+A consistent cluster of surfaces returns `AccessControlException` ("User is not authorised to
+access this API.", HTTP 403) under the PAT minted by the workspace-bearer OIDC flow:
+`flows permissions-get`, `flows parameters` (recipeParameters), `platform role list`,
+`connections dry-run`. The PAT has create/read/delete on flows and connections but lacks scope for
+these read/validation surfaces. Resolving requires either a UI-minted token or requesting broader
+OAuth scopes at the `POST /v4/apiAccessTokens` mint step. This is an API/token-scope limitation, not
+a CLI bug — the commands exist and surface clean `permission_denied` errors.
 
 ---
 
 ## Summary Table
 
-| Phase | Items | Effort | Risk |
-|-------|-------|--------|------|
-| 1 — UX papercuts | 4 | Low | None |
-| 2 — Missing reads | 5 | Medium | Low |
-| 3 — Mutation schemas + `flows update` 403 | 5 | Medium–High | Medium |
-| 4 — Dead routes (tier validation) | 3 | Low (investigation) | Low |
-| 5 — Untested (fixtures needed) | 11 | High | Low |
+| Phase | Items | Status |
+|-------|-------|--------|
+| 1 — UX papercuts | 4 | All done (v0.9.12) |
+| 2 — Missing reads | 5 | All done (v0.9.12–13) |
+| 3 — Mutation schemas + `flows update` 403 | 5 | update fixed (v0.9.12); template added (v0.9.14); create-apply env-gated |
+| 4 — Dead routes (tier validation) | 3 | Documented as enterprise-tier-gated (v0.9.12) |
+| 5 — Untested (fixtures needed) | 11 | 4 panics fixed + 7 verified working + rest classified (scope/tier/fixture-gated) (v0.9.14) |

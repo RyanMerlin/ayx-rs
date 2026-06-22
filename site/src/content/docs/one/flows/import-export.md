@@ -27,10 +27,12 @@ Mutating commands are dry-run by default — add `--apply` to commit.
 ayx one flows export-dry-run --flow-id <flow-id>
 
 # Write the package to disk
-ayx one flows export --flow-id <flow-id> --output <path/to/file> --apply
+ayx one flows export --flow-id <flow-id> --output-file <path/to/file> --apply
 ```
 
-`--output` is required for `export` and specifies the local file path to write. The resulting file can be committed to version control or passed directly to `import` on a target environment.
+`--output-file` is required for `export` and specifies the local file path to write. The resulting file can be committed to version control or passed directly to `import` on a target environment.
+
+> **Note:** The file path flag is `--output-file`, not `--output`. The global `--output` flag (placed before the subcommand, e.g. `ayx --output json`) is reserved for selecting the text/json output format and is a separate argument.
 
 ## Import
 
@@ -70,7 +72,7 @@ This pattern exports from one environment and imports into another using `--prof
 ayx one flows export \
   --profile dev \
   --flow-id <flow-id> \
-  --output /tmp/my-flow.yxzp \
+  --output-file /tmp/my-flow.yxzp \
   --apply
 
 # 2. Preview the import on prod
@@ -93,7 +95,7 @@ ayx one flows import \
 
 ```bash
 while IFS= read -r id; do
-  ayx one flows export --flow-id "$id" --output "./exports/${id}.yxzp" --apply
+  ayx one flows export --flow-id "$id" --output-file "./exports/${id}.yxzp" --apply
 done < flow-ids.txt
 ```
 

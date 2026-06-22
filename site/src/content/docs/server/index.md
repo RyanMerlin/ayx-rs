@@ -43,7 +43,7 @@ Capture a system snapshot before opening a support case or starting an upgrade.
 ayx server system-info
 ```
 
-This writes `system_info.json` to the current directory by default. Supply `--output <path>` to redirect.
+This writes `system_info.json` to the current directory by default. Supply `--output-file <path>` to redirect.
 
 ## Checking runtime settings
 

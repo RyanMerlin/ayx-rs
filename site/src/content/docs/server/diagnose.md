@@ -149,7 +149,7 @@ Capture a full system info bundle, typically before a support case or upgrade:
 ayx server system-info
 ```
 
-Output goes to `system_info.json` by default. Override with `--output <path>`.
+Output goes to `system_info.json` by default. Override with `--output-file <path>`.
 
 ## JSON output
 

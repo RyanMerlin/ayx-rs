@@ -133,25 +133,25 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                 )?
             }
         },
-        Some(ServerCommand::SystemInfo { output }) => {
+        Some(ServerCommand::SystemInfo { output_file }) => {
             let system_info = capture_system_info()?;
-            fs::write(&output, serde_json::to_string_pretty(&system_info)?)
-                .with_context(|| format!("failed to write '{}'", output.display()))?;
+            fs::write(&output_file, serde_json::to_string_pretty(&system_info)?)
+                .with_context(|| format!("failed to write '{}'", output_file.display()))?;
             Envelope::ok_with_data(
                 "system info captured",
-                json!({ "output": output.display().to_string(), "data": system_info }),
+                json!({ "output": output_file.display().to_string(), "data": system_info }),
             )
         }
-        Some(ServerCommand::RuntimeSettings { path, output }) => {
+        Some(ServerCommand::RuntimeSettings { path, output_file }) => {
             let summary = runtime_settings_summary(&path)?;
-            if let Some(ref output_path) = output {
+            if let Some(ref output_path) = output_file {
                 write_runtime_settings_json(&path, output_path)?;
             }
             Envelope::ok_with_data(
                 "runtime settings summarized",
                 json!({
                     "path": path.display().to_string(),
-                    "output": output.as_ref().map(|p| p.display().to_string()),
+                    "output": output_file.as_ref().map(|p| p.display().to_string()),
                     "data": summary
                 }),
             )

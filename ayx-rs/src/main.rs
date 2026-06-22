@@ -642,14 +642,18 @@ pub(crate) enum ServerCommand {
         command: ServerApiCommand,
     },
     SystemInfo {
-        #[arg(long, default_value = "system_info.json")]
-        output: PathBuf,
+        #[arg(
+            long = "output-file",
+            value_name = "FILE",
+            default_value = "system_info.json"
+        )]
+        output_file: PathBuf,
     },
     RuntimeSettings {
         #[arg(long, default_value = DEFAULT_RUNTIME_SETTINGS_PATH)]
         path: PathBuf,
-        #[arg(long)]
-        output: Option<PathBuf>,
+        #[arg(long = "output-file", value_name = "FILE")]
+        output_file: Option<PathBuf>,
     },
     AyxPaths,
     ServerLogs {
@@ -1020,8 +1024,12 @@ pub(crate) enum ToolsCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum ToolsWorkspaceCommand {
     Init {
-        #[arg(long, default_value = "environments.yaml")]
-        output: PathBuf,
+        #[arg(
+            long = "output-file",
+            value_name = "FILE",
+            default_value = "environments.yaml"
+        )]
+        output_file: PathBuf,
         #[arg(long, default_value = "dev")]
         active_environment: String,
         #[arg(long, default_value = "dev")]
@@ -1694,8 +1702,12 @@ pub(crate) enum OneFlowsCommand {
         profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
-        #[arg(long)]
-        output: PathBuf,
+        #[arg(
+            long = "output-file",
+            value_name = "FILE",
+            help = "path to write the exported .yxzp package"
+        )]
+        output_file: PathBuf,
     },
     ExportDryRun {
         #[arg(long)]
@@ -1876,6 +1888,17 @@ pub(crate) enum OneConnectorMetadataCommand {
     Overrides {
         #[command(subcommand)]
         command: Option<OneConnectorMetadataOverridesCommand>,
+    },
+    /// Fetch connector metadata defaults and emit a fillable JSON template
+    /// for use with `connections create --body <file>`.
+    ///
+    /// The `type` field is derived from the connector category:
+    /// `relational` -> `jdbc`, everything else -> `remotefile`.
+    Template {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        connector: String,
     },
 }
 

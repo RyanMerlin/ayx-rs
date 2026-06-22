@@ -20,12 +20,12 @@ pub fn execute(command: Option<ToolsCommand>) -> Result<Envelope> {
         Some(ToolsCommand::Workspace { command }) => match command {
             None => Ok(Envelope::ok(help)),
             Some(ToolsWorkspaceCommand::Init {
-                output,
+                output_file,
                 active_environment,
                 source_environment,
                 target_environment,
             }) => tools_workspace_init_envelope(
-                &output,
+                &output_file,
                 &active_environment,
                 &source_environment,
                 &target_environment,

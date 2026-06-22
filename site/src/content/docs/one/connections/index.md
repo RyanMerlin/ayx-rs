@@ -77,6 +77,16 @@ The `--body` value is a JSON string. For larger payloads use a file and process 
 ayx one connections create --body "$(cat connection.json)" --apply
 ```
 
+To generate a starting body for a connector type, use `connector-metadata template`:
+
+```bash
+ayx one connections connector-metadata template --connector <slug> --output json > body.json
+# edit body.json, then:
+ayx one connections create --body "$(cat body.json)" --apply
+```
+
+See [Connector metadata](/one/connections/connector-metadata/) for details.
+
 ## Updating a connection
 
 ```bash

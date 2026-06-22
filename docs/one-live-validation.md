@@ -72,18 +72,70 @@ The current smoke harness lives in `ayx-rs/tests/one_live_smoke.rs` and already:
 - validates the most important read paths across the One surface
 - reports the surface and operation names in the envelope assertions
 
-## Known Endpoint Status (as of v0.9.12)
+## Known Endpoint Status (as of v0.9.14)
 
-| Endpoint | Status | Notes |
+Live-verified against the `alteryx-fde` workspace (tier `platform_packaging`) on 2026-06-22.
+
+### Working surfaces (validated_live)
+
+| Endpoint | Command | Notes |
 |---|---|---|
-| `PATCH /v4/flows/{id}` | validated_live | Fixed in v0.9.12; was PUT (returned 403) |
-| `GET /v4/people` | validated_live | Fixed in v0.9.12; replaces broken `/v4/workspaces/{id}/people` |
-| `GET /v4/people?role=admin` | validated_live | Fixed in v0.9.12; replaces broken `/v4/workspaces/{id}/admins` |
-| `GET /v4/flows/{id}/permissions` | blocked_by_scope | Returns 403 via PAT; not accessible through the CLI |
-| `GET /v4/connectors` | blocked_by_scope | Returns 404; no connector enumeration endpoint in v4 |
-| `/v4/billing/*` | blocked_by_scope | Returns 404 on platform_packaging tier; enterprise-only |
-| `/v4/plans/*` | blocked_by_scope | Returns 404 on platform_packaging tier; enterprise-only |
-| `/v4/scheduling/*` | blocked_by_scope | Returns 404 on platform_packaging tier; enterprise-only |
+| `POST /v4/flows` | `flows create` | Create flow |
+| `PATCH /v4/flows/{id}` | `flows update` | Fixed in v0.9.12; was PUT (returned 403) |
+| `DELETE /v4/flows/{id}` | `flows delete` | Returns 204 |
+| `POST /v4/flows/{id}/copy` | `flows copy` | Returns 201; copies a flow to a new name |
+| `GET /v4/flows/{id}/inputs` | `flows inputs` | Works on empty flow |
+| `GET /v4/flows/{id}/outputs` | `flows outputs` | Works on empty flow |
+| `GET /v4/flowsLibrary` | `flows library list` | Works (0 items) |
+| `GET /v4/folders` | `flows folders list` | Works (0 items) |
+| `GET /v4/people` | `platform workspace people` | Fixed v0.9.12; replaces broken `/v4/workspaces/{id}/people` |
+| `GET /v4/people?role=admin` | `platform workspace admins` | Fixed v0.9.12; replaces broken `/v4/workspaces/{id}/admins` |
+| `GET /v4/outputObjects` | `output-objects list` | Works (0 items) |
+| `GET /v4/writeSettings` | `write-settings list` | Works (0 items) |
+| `GET /v4/connections` | `connections list` | Works |
+| `GET /v4/connectorMetadata/{slug}/defaults` | `connections connector-metadata defaults` | Source of the create-body schema; backs `connections template` |
+
+### Blocked by PAT scope (blocked_by_scope)
+
+The PAT minted via the workspace-bearer OIDC flow has create/read/delete on flows
+and connections but lacks scope for these — all return `AccessControlException`
+("User is not authorised to access this API.", HTTP 403). A UI-minted token or a
+broader OAuth scope at the `POST /v4/apiAccessTokens` mint step would be required.
+
+| Endpoint | Command | Notes |
+|---|---|---|
+| `GET /v4/flows/{id}/permissions` | `flows permissions-get` | 403 — command exists, surfaces `permission_denied` |
+| `GET /v4/flows/{id}/recipeParameters` | `flows parameters` | 403 |
+| `GET /v4/roles` | `platform role list` | 403 |
+| `POST /v4/connections/dryRun` | `connections dry-run` | 403 — endpoint exists but PAT cannot exercise it |
+
+### Absent / wrong-route (blocked: route not found)
+
+| Endpoint | Command | Notes |
+|---|---|---|
+| `GET /v4/flows/{id}/validate` | `flows validate` | 404 — no validate route in this API version |
+| `GET /v4/connectors` | (none) | 404 — no connector enumeration endpoint in v4 |
+| `/v4/webhookFlowTasks` | `webhook-flow-tasks *` | 404 — not present on this workspace tier |
+
+### Tier-gated (enterprise-only)
+
+| Endpoint | Command | Notes |
+|---|---|---|
+| `/v4/billing/*` | `billing *` | 404 on platform_packaging tier |
+| `/v4/plans/*` | `plans *` | 404 on platform_packaging tier |
+| `/v4/scheduling/*` | `scheduling *` | 404 on platform_packaging tier |
+
+## Fixed panics (v0.9.14)
+
+Four commands defined a local `--output <PathBuf>` arg that collided with the
+global `--output <text|json>` format flag (same clap arg id, different type),
+panicking at runtime on every invocation. All four renamed their file arg to
+`--output-file`:
+
+- `flows export`
+- `server system-info`
+- `server runtime-settings`
+- `tools workspace init`
 
 ## Follow-Up
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.9.14 — 2026-06-22
+
+### Bug fixes
+
+- Fixed runtime panics in `flows export`, `server system-info`, `server runtime-settings`, and `tools workspace init`. Each defined a local `--output` (file path) arg that collided with the global `--output <text|json>` format flag, panicking on every invocation. The file arg is now `--output-file` on all four. `flows export` now exports a `.yxzp` package end-to-end.
+
+### One API additions
+
+- `connections connector-metadata template --connector <slug>`: generates a fillable JSON create-body template from connector metadata (derives `type`, `vendor`, `credentialType`, and a `params` skeleton). Unblocks `connections create` body construction.
+
+### Documentation
+
+- `docs/one-live-validation.md`: full per-endpoint live-verified status table — working surfaces, PAT-scope-blocked surfaces, absent routes, and tier-gated surfaces.
+
+## 0.9.13 — 2026-06-22
+
+### One API additions
+
+- `flows permissions-get --flow-id <ID>`: read command for `GET /v4/flows/{id}/permissions`. Returns a clean `permission_denied` error (the endpoint is 403 under the current PAT scope) rather than a missing-command error. The existing `flows permissions` (POST, set permissions) is unchanged.
+- `job-groups list`: synthesizes a display name (`flow-{flowId}`, falling back to `job-{id}`) when the API returns a null name, so flow-run job-groups are intelligible in text output.
+
 ## 0.9.12 — 2026-06-22
 
 ### One API endpoint fixes

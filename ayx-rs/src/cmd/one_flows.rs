@@ -544,11 +544,11 @@ pub(crate) fn execute(
         Some(OneFlowsCommand::Export {
             profile,
             flow_id,
-            output,
+            output_file,
         }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
-            flow_export_package_envelope(&config, &flow_id, &output, false)?
+            flow_export_package_envelope(&config, &flow_id, &output_file, false)?
         }
         Some(OneFlowsCommand::ExportDryRun { profile, flow_id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;

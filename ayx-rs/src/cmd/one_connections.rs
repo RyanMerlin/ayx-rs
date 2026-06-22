@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
+use serde_json::json;
 
 use crate::{
     OneConnectionPermissionCommand, OneConnectionsCommand, OneConnectorMetadataCommand,
@@ -163,7 +164,7 @@ pub(crate) fn execute(
         }
         Some(OneConnectionsCommand::ConnectorMetadata { command }) => match command {
             None => Envelope::ok(
-                "one connections connector-metadata commands available: defaults, detail, publish-info, overrides. \
+                "one connections connector-metadata commands available: defaults, detail, publish-info, overrides, template. \
                  Note: connector enumeration (list) is not available via the Alteryx One v4 API — use a known connector slug \
                  (e.g. 'gsheetsuser', 'remotefile') with 'detail' to discover the schema.",
             ),
@@ -202,6 +203,89 @@ pub(crate) fn execute(
                     false,
                     &[("connector", connector.as_str())],
                 )?
+            }
+            Some(OneConnectorMetadataCommand::Template { profile, connector }) => {
+                let config = runtime.load_profile_lenient(profile.as_deref())?;
+                let envelope = one_api_live_request(
+                    &config,
+                    "connection",
+                    "connector-metadata-defaults",
+                    "GET",
+                    "/v4/connectorMetadata/{connector}/defaults",
+                    false,
+                    &[("connector", connector.as_str())],
+                )?;
+
+                // If the live request itself failed (auth, network, etc.) propagate
+                // it as-is so the caller sees the error envelope.
+                if !envelope.ok {
+                    return Ok(envelope);
+                }
+
+                let metadata = envelope
+                    .data
+                    .get("response")
+                    .and_then(|r| r.get("connectionMetadata"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+
+                let category = metadata
+                    .get("category")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let conn_type = if category == "relational" {
+                    "jdbc"
+                } else {
+                    "remotefile"
+                };
+
+                let credential_type = metadata
+                    .get("credentialTypes")
+                    .and_then(|v| v.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("apiKey");
+
+                let params: serde_json::Map<String, serde_json::Value> = metadata
+                    .get("connectionParameters")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|p| {
+                                let name = p.get("name")?.as_str()?;
+                                let type_hint =
+                                    p.get("type").and_then(|t| t.as_str()).unwrap_or("string");
+                                let default_raw =
+                                    p.get("defaultValue").and_then(|d| d.as_str()).unwrap_or("");
+                                let value = if default_raw.is_empty() {
+                                    serde_json::Value::String(format!("<{type_hint}>"))
+                                } else {
+                                    serde_json::Value::String(default_raw.to_string())
+                                };
+                                Some((name.to_string(), value))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let template = json!({
+                    "name": "<your connection name>",
+                    "description": "",
+                    "type": conn_type,
+                    "vendor": connector,
+                    "vendorName": connector,
+                    "credentialType": credential_type,
+                    "isGlobal": false,
+                    "ssl": false,
+                    "params": serde_json::Value::Object(params),
+                });
+
+                Envelope::ok_with_data(
+                    format!(
+                        "connection create template for '{connector}' — fill in placeholders and pass to 'connections create --body <file>'"
+                    ),
+                    template,
+                )
             }
             Some(OneConnectorMetadataCommand::Overrides { command }) => match command {
                 None => Envelope::ok(
