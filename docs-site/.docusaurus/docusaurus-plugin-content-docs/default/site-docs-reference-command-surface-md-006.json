@@ -1,0 +1,23 @@
+{
+  "id": "reference/command-surface",
+  "title": "AYX Command Surface",
+  "description": "Generated from cargo run -q -p ayx-rs -- --output json catalog list --format full on 2026-06-19 1924 UTC.",
+  "source": "@site/docs/reference/command-surface.md",
+  "sourceDirName": "reference",
+  "slug": "/reference/command-surface",
+  "permalink": "/reference/command-surface",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {},
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Safety Model",
+    "permalink": "/safety-model"
+  },
+  "next": {
+    "title": "AYX-RS CLI Spec (v0.9.10)",
+    "permalink": "/reference/cli-spec"
+  }
+}

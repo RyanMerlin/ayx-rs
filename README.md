@@ -258,8 +258,10 @@ Build it locally with:
 ```powershell
 cd site
 npm ci
-npm run build
+npm run build  # or: npm start  (for live reload)
 ```
+
+On push to `main` the site is automatically deployed to Cloudflare Pages via `.github/workflows/docs-deploy.yml`.
 
 For the One surface specifically, the live validation plan is documented in `docs/one-live-validation.md`.
 

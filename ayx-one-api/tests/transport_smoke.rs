@@ -45,6 +45,10 @@ mongo:
         refresh_token_ref: None,
         workspace_credentials: Default::default(),
         expected_workspace_id: expected_workspace.map(|s| s.to_string()),
+        sp_client_id: None,
+        sp_token_endpoint_url: None,
+        workspace_gid: None,
+        auth_mode: Default::default(),
     });
     config
 }

@@ -15,8 +15,8 @@ members = [
 [workspace.package]
 edition = "2024"
 license = "Apache-2.0"
-version = "0.9.10"
-authors = ["AYX Team", "Ryan Merlin"]
+version = "0.9.11"
+authors = ["Ryan Merlin"]
 
 [workspace.dependencies]
 anyhow = "1"
@@ -35,7 +35,7 @@ maud = "0.27"
 mime_guess = "2"
 ratatui = "0.30"
 regex = "1"
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "form", "json", "rustls", "multipart"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "cookies", "form", "json", "rustls", "multipart"] }
 roxmltree = "0.21"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

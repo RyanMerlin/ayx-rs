@@ -62,12 +62,18 @@ pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileErro
     }
     if let Some(account) = reference.strip_prefix("keyring:") {
         ensure_keyring_store();
-        let entry = Entry::new(SECRET_SERVICE, account).map_err(|source| {
-            ProfileError::Invalid(format!(
-                "unable to open keyring entry '{}': {}",
-                account, source
-            ))
-        })?;
+        let entry = match Entry::new(SECRET_SERVICE, account) {
+            Ok(e) => e,
+            // No store was registered (headless host, no D-Bus / Secret Service).
+            // Treat as "keyring unavailable" per the documented contract.
+            Err(Error::NoDefaultStore) => return Ok(None),
+            Err(source) => {
+                return Err(ProfileError::Invalid(format!(
+                    "unable to open keyring entry '{}': {}",
+                    account, source
+                )));
+            }
+        };
         return match entry.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(Error::NoEntry) => Ok(None),
@@ -141,12 +147,11 @@ mod tests {
 
     #[test]
     fn keyring_ref_never_panics_or_fabricates() {
-        // Exercises the keyring-core runtime store registration. The host may or
-        // may not have a Secret Service backend (CI runners are headless), so
-        // both outcomes are valid: `Ok(None)` when the backend is present but the
-        // entry is absent, or `Err` when no store could be registered. The
-        // contract under test is that we never panic and never fabricate a secret
-        // for a missing entry.
+        // Exercises the keyring-core runtime store registration. Whether the host
+        // has a Secret Service backend or not, the result must be `Ok(None)` for a
+        // missing entry — headless hosts (CI) now return `Ok(None)` via the
+        // `NoDefaultStore` path rather than hard-erroring. `Err(_)` is still
+        // accepted as a safety valve for unexpected backend failures.
         match resolve_secret_ref("keyring:ayx-core-nonexistent-test-account") {
             Ok(None) => {}
             Ok(Some(_)) => panic!("must not fabricate a secret for a missing keyring entry"),

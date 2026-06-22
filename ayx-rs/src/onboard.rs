@@ -650,6 +650,10 @@ fn update_or_create_one(
         refresh_token_ref: None,
         workspace_credentials: Default::default(),
         expected_workspace_id: None,
+        sp_client_id: None,
+        sp_token_endpoint_url: None,
+        workspace_gid: None,
+        auth_mode: Default::default(),
     });
     one.account_email = account_email;
     one

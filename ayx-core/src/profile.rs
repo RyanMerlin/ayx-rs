@@ -219,6 +219,19 @@ pub struct ApiLoggingProfile {
     pub log_responses: Option<bool>,
 }
 
+/// Whether to acquire tokens via the interactive user/refresh flow or the
+/// non-interactive service-principal `client_credentials` flow.  The user
+/// flow is the verified default and matches the official `ayx-cli` behaviour;
+/// `service-principal` is experimental until the regional-JWKS trust boundary
+/// is resolved (see docs/auth-model.md).
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AuthMode {
+    #[default]
+    User,
+    ServicePrincipal,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct WorkspaceCredential {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -237,6 +250,19 @@ pub struct WorkspaceCredential {
     pub client_secret_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_endpoint_url: Option<String>,
+    /// Service-principal client ID — distinct from the user `oauth_client_id`.
+    /// When set, this credential uses `client_credentials` grant with
+    /// `client_secret_post` against `token_endpoint_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sp_client_id: Option<String>,
+    /// ULID of the workspace — used as the `scope=w:<gid>` value in SP token
+    /// requests.  For user flow this is informational only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_gid: Option<String>,
+    /// Override the API base URL for this credential (e.g. a regional cell
+    /// host for SP tokens).  Falls back to the profile `base_url` default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -271,6 +297,45 @@ pub struct AlteryxOneProfile {
     /// shared or stale.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_workspace_id: Option<String>,
+    /// Account-level service-principal client ID.  Resolved workspace-first
+    /// via `resolved_sp_client_id()`.  Set `auth_mode: service-principal` to
+    /// activate the SP flow (see docs/auth-model.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sp_client_id: Option<String>,
+    /// SP token endpoint URL at the account level (e.g. the regional Ping
+    /// issuer `https://pingauth-us1-4.alteryxcloud.com/as/token`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sp_token_endpoint_url: Option<String>,
+    /// Workspace ULID used as `scope=w:<gid>` in SP token requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_gid: Option<String>,
+    /// Token acquisition strategy.  Defaults to `user` (refresh_token flow).
+    /// Set to `service-principal` to use the `client_credentials` SP flow.
+    #[serde(default, skip_serializing_if = "is_default_auth_mode")]
+    pub auth_mode: AuthMode,
+}
+
+impl Default for AlteryxOneProfile {
+    fn default() -> Self {
+        Self {
+            account_email: String::new(),
+            base_url: None,
+            oauth_client_id: None,
+            client_secret: None,
+            client_secret_ref: None,
+            token_endpoint_url: None,
+            access_token: None,
+            access_token_ref: None,
+            refresh_token: None,
+            refresh_token_ref: None,
+            workspace_credentials: Default::default(),
+            expected_workspace_id: None,
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::User,
+        }
+    }
 }
 
 impl AlteryxOneProfile {
@@ -349,6 +414,58 @@ impl AlteryxOneProfile {
                     .as_deref()
                     .filter(|value| !value.trim().is_empty())
             })
+    }
+
+    /// Service-principal client ID — workspace-first, then account-level.
+    pub fn resolved_sp_client_id(&self) -> Option<&str> {
+        self.active_workspace_credential()
+            .and_then(|c| c.sp_client_id.as_deref())
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| {
+                self.sp_client_id
+                    .as_deref()
+                    .filter(|v| !v.trim().is_empty())
+            })
+    }
+
+    /// Workspace ULID for SP `scope=w:<gid>` — workspace credential first,
+    /// then account-level.
+    pub fn resolved_workspace_gid(&self) -> Option<&str> {
+        self.active_workspace_credential()
+            .and_then(|c| c.workspace_gid.as_deref())
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| {
+                self.workspace_gid
+                    .as_deref()
+                    .filter(|v| !v.trim().is_empty())
+            })
+    }
+
+    /// SP token endpoint URL — workspace credential's `token_endpoint_url`
+    /// first, then account-level `sp_token_endpoint_url`, both normalized.
+    pub fn effective_sp_token_endpoint_url(&self) -> Option<String> {
+        if let Some(credential) = self.active_workspace_credential()
+            && let Some(url) = credential
+                .token_endpoint_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+        {
+            return Some(normalize_alteryx_one_token_endpoint(url));
+        }
+        self.sp_token_endpoint_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(normalize_alteryx_one_token_endpoint)
+    }
+
+    /// Per-credential API base URL override for SP — used when the SP token
+    /// is scoped to a regional cell that differs from the global API base.
+    pub fn resolved_sp_api_base_url(&self) -> Option<&str> {
+        self.active_workspace_credential()
+            .and_then(|c| c.api_base_url.as_deref())
+            .filter(|v| !v.trim().is_empty())
     }
 
     pub fn effective_token_endpoint_url_for_workspace(
@@ -996,6 +1113,10 @@ pub fn load_workspace_config(path: &Path) -> Result<WorkspaceConfig, ProfileErro
     load_workspace_config_from_resolved(&resolved)
 }
 
+fn is_default_auth_mode(mode: &AuthMode) -> bool {
+    *mode == AuthMode::default()
+}
+
 pub fn normalize_alteryx_base_url(raw: &str) -> String {
     let trimmed = raw.trim().trim_end_matches('/');
     let stripped = trimmed
@@ -1183,9 +1304,15 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
     let access_token = env_value(env_values, "AYX_ONE_API_ACCESS_TOKEN");
     let refresh_token = env_value(env_values, "AYX_ONE_API_REFRESH_TOKEN");
     let client_secret = env_value(env_values, "AYX_ONE_CLIENT_SECRET");
-    let fde_oauth_client_id = env_value(env_values, "AYX_ONE_ALTERYX_FDE_SP007_CLIENT_ID");
-    let fde_client_secret = env_value(env_values, "AYX_ONE_ALTERYX_FDE_SA007_SECRET");
-    let fde_token_endpoint_url = env_value(env_values, "AYX_ONE_ALTERYX_FDE_TOKEN_ENDPOINT");
+    // SP creds: canonical names first, then the workspace-namespaced variants
+    // already present in the user's .env (AYX_ONE_ALTERYX_FDE_*).
+    let sp_client_id = env_value(env_values, "AYX_ONE_SP_CLIENT_ID")
+        .or_else(|| env_value(env_values, "AYX_ONE_ALTERYX_FDE_SP007_CLIENT_ID"));
+    let sp_client_secret = env_value(env_values, "AYX_ONE_SP_CLIENT_SECRET")
+        .or_else(|| env_value(env_values, "AYX_ONE_ALTERYX_FDE_SA007_SECRET"));
+    let sp_token_endpoint_url = env_value(env_values, "AYX_ONE_SP_TOKEN_ENDPOINT_URL")
+        .or_else(|| env_value(env_values, "AYX_ONE_ALTERYX_FDE_TOKEN_ENDPOINT"));
+    let workspace_gid = env_value(env_values, "AYX_ONE_WORKSPACE_GID");
 
     if account_email.is_some()
         || base_url.is_some()
@@ -1194,6 +1321,10 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         || access_token.is_some()
         || refresh_token.is_some()
         || client_secret.is_some()
+        || sp_client_id.is_some()
+        || sp_client_secret.is_some()
+        || sp_token_endpoint_url.is_some()
+        || workspace_gid.is_some()
     {
         let mut one = config.alteryx_one.unwrap_or(AlteryxOneProfile {
             account_email: account_email.clone().unwrap_or_default(),
@@ -1208,6 +1339,10 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
             refresh_token_ref: None,
             workspace_credentials: BTreeMap::new(),
             expected_workspace_id: None,
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
         });
         if let Some(value) = account_email {
             one.account_email = value;
@@ -1224,20 +1359,61 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         if token_endpoint_url.is_some() {
             one.token_endpoint_url = token_endpoint_url;
         }
-        if access_token.is_some() {
+        // Only apply env-fallback tokens when there is no _ref already in the
+        // profile.  A _ref (inline or keyring) is the authoritative stored
+        // credential; the env var is a last-resort fallback.
+        if one
+            .access_token
+            .as_ref()
+            .is_none_or(|v| v.trim().is_empty())
+            && one
+                .access_token_ref
+                .as_ref()
+                .is_none_or(|v| v.trim().is_empty())
+        {
             one.access_token = access_token;
         }
-        if refresh_token.is_some() {
+        if one
+            .refresh_token
+            .as_ref()
+            .is_none_or(|v| v.trim().is_empty())
+            && one
+                .refresh_token_ref
+                .as_ref()
+                .is_none_or(|v| v.trim().is_empty())
+        {
             one.refresh_token = refresh_token;
         }
-        if fde_token_endpoint_url.is_some() {
-            if let Some(value) = fde_oauth_client_id {
-                one.oauth_client_id = Some(value);
-            }
-            if let Some(value) = fde_client_secret {
-                one.client_secret = Some(value);
-            }
-            one.token_endpoint_url = fde_token_endpoint_url;
+        if one
+            .sp_client_id
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            one.sp_client_id = sp_client_id;
+        }
+        // SP client secret reuses the shared client_secret field when no
+        // dedicated sp_client_secret is available.
+        if let Some(secret) = sp_client_secret
+            && one
+                .client_secret
+                .as_ref()
+                .is_none_or(|value| value.trim().is_empty())
+        {
+            one.client_secret = Some(secret);
+        }
+        if one
+            .sp_token_endpoint_url
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            one.sp_token_endpoint_url = sp_token_endpoint_url;
+        }
+        if one
+            .workspace_gid
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            one.workspace_gid = workspace_gid;
         }
         one.canonicalize();
         config.alteryx_one = Some(one);
@@ -1340,6 +1516,27 @@ fn merge_one_profiles(
             .workspace_credentials
             .entry(workspace_id.clone())
             .or_insert_with(|| credential.clone());
+    }
+    if current
+        .sp_client_id
+        .as_ref()
+        .is_none_or(|v| v.trim().is_empty())
+    {
+        current.sp_client_id = fallback.sp_client_id.clone();
+    }
+    if current
+        .sp_token_endpoint_url
+        .as_ref()
+        .is_none_or(|v| v.trim().is_empty())
+    {
+        current.sp_token_endpoint_url = fallback.sp_token_endpoint_url.clone();
+    }
+    if current
+        .workspace_gid
+        .as_ref()
+        .is_none_or(|v| v.trim().is_empty())
+    {
+        current.workspace_gid = fallback.workspace_gid.clone();
     }
     current.canonicalize();
     current
@@ -2139,6 +2336,10 @@ mod tests {
                 refresh_token_ref: None,
                 workspace_credentials: Default::default(),
                 expected_workspace_id: None,
+                sp_client_id: None,
+                sp_token_endpoint_url: None,
+                workspace_gid: None,
+                auth_mode: AuthMode::default(),
             }),
             observability: None,
             server_api: Some(ServerApiProfile {
@@ -2410,6 +2611,10 @@ mod tests {
             refresh_token_ref: None,
             workspace_credentials: Default::default(),
             expected_workspace_id: None,
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
         };
 
         assert_eq!(
@@ -2437,6 +2642,10 @@ mod tests {
             refresh_token_ref: None,
             workspace_credentials: Default::default(),
             expected_workspace_id: None,
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
         };
 
         assert_eq!(profile.normalized_base_url(), None);
@@ -2460,6 +2669,9 @@ mod tests {
                 client_secret: None,
                 client_secret_ref: None,
                 token_endpoint_url: Some("https://pingauth.alteryxcloud.com/as".to_string()),
+                sp_client_id: None,
+                workspace_gid: None,
+                api_base_url: None,
             },
         );
 
@@ -2476,6 +2688,10 @@ mod tests {
             refresh_token_ref: None,
             workspace_credentials,
             expected_workspace_id: Some("ws-1".to_string()),
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
         };
 
         assert_eq!(profile.active_workspace_id(), Some("ws-1"));
@@ -2504,6 +2720,9 @@ mod tests {
                 client_secret: None,
                 client_secret_ref: None,
                 token_endpoint_url: Some("https://tenant.example/as".to_string()),
+                sp_client_id: None,
+                workspace_gid: None,
+                api_base_url: None,
             },
         );
 
@@ -2520,6 +2739,10 @@ mod tests {
             refresh_token_ref: None,
             workspace_credentials,
             expected_workspace_id: None,
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
         };
 
         assert_eq!(profile.active_workspace_id(), Some("ws-2"));
