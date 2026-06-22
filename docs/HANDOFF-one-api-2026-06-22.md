@@ -1,6 +1,6 @@
 # Handoff — Alteryx One API surface + auth hardening (2026-06-22)
 
-Session handoff for continuing the Alteryx One work in `ayx-rs`. Written at **v0.10.2**.
+Session handoff for continuing the Alteryx One work in `ayx-rs`. Written at **v0.10.3**.
 Read this first, then `docs/one-api-surface-audit.md` (the audit checklist) and
 `docs/one-live-validation.md` (per-endpoint status).
 
@@ -17,6 +17,9 @@ closed**. Shipped across four releases today:
   path). Resolved red-team M4. ~505 lines deleted.
 - **v0.10.2** — Auth-transport hardening: redirect-host allowlist (M2), interaction-id
   validation (M3), two more redacted error bodies, removed a latent unwrap. 306 tests.
+- **v0.10.3** — Dependency security bump: `quinn-proto` 0.11.14 → 0.11.15 for
+  RUSTSEC-2026-0185 (transitive HTTP/3 dep, not on the request path; restores green
+  `cargo audit`).
 
 Earlier in the day (v0.9.12–v0.9.14) landed the surface fixes: `flows update` PUT→PATCH,
 `workspace people`/`admins` endpoints, the `--output-file` panic-class fix,
