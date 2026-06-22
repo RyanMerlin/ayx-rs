@@ -71,7 +71,7 @@ pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileErro
                 return Err(ProfileError::Invalid(format!(
                     "unable to open keyring entry '{}': {}",
                     account, source
-                )))
+                )));
             }
         };
         return match entry.get_password() {

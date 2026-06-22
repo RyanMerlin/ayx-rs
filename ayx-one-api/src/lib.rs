@@ -1725,8 +1725,12 @@ pub fn initiate_device_auth(
             response_body_preview(&text)
         );
     }
-    let j: Value = serde_json::from_str(&text)
-        .with_context(|| format!("device auth response was not JSON: {}", response_body_preview(&text)))?;
+    let j: Value = serde_json::from_str(&text).with_context(|| {
+        format!(
+            "device auth response was not JSON: {}",
+            response_body_preview(&text)
+        )
+    })?;
     Ok(DeviceAuthResponse {
         device_code: j["device_code"]
             .as_str()
@@ -1740,9 +1744,7 @@ pub fn initiate_device_auth(
             .as_str()
             .context("device auth response missing verification_uri")?
             .to_string(),
-        verification_uri_complete: j["verification_uri_complete"]
-            .as_str()
-            .map(str::to_string),
+        verification_uri_complete: j["verification_uri_complete"].as_str().map(str::to_string),
         expires_in: j["expires_in"].as_u64().unwrap_or(300),
         interval: j["interval"].as_u64().unwrap_or(5),
     })
@@ -1768,10 +1770,16 @@ pub fn poll_device_token(
         .send()
         .context("device token poll request failed")?;
     let status = resp.status();
-    let text = resp.text().context("failed to read device token poll response")?;
+    let text = resp
+        .text()
+        .context("failed to read device token poll response")?;
     if status.is_success() {
-        let j: Value = serde_json::from_str(&text)
-            .with_context(|| format!("device token response was not JSON: {}", response_body_preview(&text)))?;
+        let j: Value = serde_json::from_str(&text).with_context(|| {
+            format!(
+                "device token response was not JSON: {}",
+                response_body_preview(&text)
+            )
+        })?;
         let access_token = j["access_token"]
             .as_str()
             .context("device token response missing access_token")?
@@ -1818,7 +1826,10 @@ pub fn generate_pkce_challenge() -> PkceChallenge {
     let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
     let digest = Sha256::digest(code_verifier.as_bytes());
     let code_challenge = URL_SAFE_NO_PAD.encode(digest);
-    PkceChallenge { code_verifier, code_challenge }
+    PkceChallenge {
+        code_verifier,
+        code_challenge,
+    }
 }
 
 /// Generate `n` cryptographically random bytes as a base64url string.
@@ -1856,7 +1867,9 @@ pub fn exchange_auth_code(
         .send()
         .context("authorization code exchange request failed")?;
     let status = resp.status();
-    let text = resp.text().context("failed to read token exchange response")?;
+    let text = resp
+        .text()
+        .context("failed to read token exchange response")?;
     if !status.is_success() {
         bail!(
             "authorization code exchange returned {}: {}",
@@ -1864,8 +1877,12 @@ pub fn exchange_auth_code(
             response_body_preview(&text)
         );
     }
-    let j: Value = serde_json::from_str(&text)
-        .with_context(|| format!("token exchange response was not JSON: {}", response_body_preview(&text)))?;
+    let j: Value = serde_json::from_str(&text).with_context(|| {
+        format!(
+            "token exchange response was not JSON: {}",
+            response_body_preview(&text)
+        )
+    })?;
     let access_token = j["access_token"]
         .as_str()
         .context("token exchange response missing access_token")?

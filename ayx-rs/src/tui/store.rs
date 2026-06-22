@@ -22,6 +22,7 @@ pub(crate) enum ProfileScope {
 #[derive(Debug, Clone)]
 pub(crate) struct ProfileRecord {
     pub name: String,
+    #[allow(dead_code)]
     pub path: PathBuf,
     pub scope: ProfileScope,
 }
@@ -111,10 +112,12 @@ fn write_profile_at(config_home: &Path, name: &str, config: &Config) -> Result<P
     Ok(path)
 }
 
+#[allow(dead_code)]
 fn default_profile_template(profile_name: &str) -> Config {
     default_one_profile_template(profile_name)
 }
 
+#[allow(dead_code)]
 pub(crate) fn list_profile_names_at(config_home: &Path) -> Result<Vec<String>> {
     Ok(list_profile_records_at(config_home)?
         .into_iter()
@@ -138,9 +141,9 @@ pub(crate) fn list_profile_records_at(config_home: &Path) -> Result<Vec<ProfileR
             continue;
         }
         if let Some(stem) = path.file_stem().and_then(|value| value.to_str()) {
-            let scope = match fs::read_to_string(&path).with_context(|| {
-                format!("failed to read profile file '{}'", path.display())
-            }) {
+            let scope = match fs::read_to_string(&path)
+                .with_context(|| format!("failed to read profile file '{}'", path.display()))
+            {
                 Ok(contents) => match serde_yaml::from_str::<Value>(&contents) {
                     Ok(value) => classify_profile_scope_value(&value),
                     Err(_) => continue,
@@ -163,6 +166,7 @@ pub(crate) fn load_profile_at(config_home: &Path, name: &str) -> Result<Config> 
     Config::load_from_path_lenient(&path).map_err(anyhow::Error::from)
 }
 
+#[allow(dead_code)]
 pub(crate) fn create_profile_from_default_at(config_home: &Path, name: &str) -> Result<PathBuf> {
     create_profile_from_default_scope_at(config_home, name, ProfileScope::One)
 }
@@ -336,11 +340,16 @@ mod tests {
 
         let records = list_profile_records_at(config_home).expect("records");
         assert_eq!(records.len(), 2);
-        assert!(records
-            .iter()
-            .any(|record| record.name == "one" && matches!(record.scope, ProfileScope::One)));
-        assert!(records
-            .iter()
-            .any(|record| record.name == "server" && matches!(record.scope, ProfileScope::Server)));
+        assert!(
+            records
+                .iter()
+                .any(|record| record.name == "one" && matches!(record.scope, ProfileScope::One))
+        );
+        assert!(
+            records
+                .iter()
+                .any(|record| record.name == "server"
+                    && matches!(record.scope, ProfileScope::Server))
+        );
     }
 }

@@ -111,6 +111,7 @@ mod tests {
                 refresh_token_ref: None,
                 workspace_credentials: Default::default(),
                 expected_workspace_id: None,
+                ..Default::default()
             });
         }
         if server {

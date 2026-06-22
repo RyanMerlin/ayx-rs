@@ -315,6 +315,29 @@ pub struct AlteryxOneProfile {
     pub auth_mode: AuthMode,
 }
 
+impl Default for AlteryxOneProfile {
+    fn default() -> Self {
+        Self {
+            account_email: String::new(),
+            base_url: None,
+            oauth_client_id: None,
+            client_secret: None,
+            client_secret_ref: None,
+            token_endpoint_url: None,
+            access_token: None,
+            access_token_ref: None,
+            refresh_token: None,
+            refresh_token_ref: None,
+            workspace_credentials: Default::default(),
+            expected_workspace_id: None,
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::User,
+        }
+    }
+}
+
 impl AlteryxOneProfile {
     pub fn normalized_base_url(&self) -> Option<String> {
         self.base_url
@@ -1301,13 +1324,25 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         // Only apply env-fallback tokens when there is no _ref already in the
         // profile.  A _ref (inline or keyring) is the authoritative stored
         // credential; the env var is a last-resort fallback.
-        if one.access_token.as_ref().is_none_or(|v| v.trim().is_empty())
-            && one.access_token_ref.as_ref().is_none_or(|v| v.trim().is_empty())
+        if one
+            .access_token
+            .as_ref()
+            .is_none_or(|v| v.trim().is_empty())
+            && one
+                .access_token_ref
+                .as_ref()
+                .is_none_or(|v| v.trim().is_empty())
         {
             one.access_token = access_token;
         }
-        if one.refresh_token.as_ref().is_none_or(|v| v.trim().is_empty())
-            && one.refresh_token_ref.as_ref().is_none_or(|v| v.trim().is_empty())
+        if one
+            .refresh_token
+            .as_ref()
+            .is_none_or(|v| v.trim().is_empty())
+            && one
+                .refresh_token_ref
+                .as_ref()
+                .is_none_or(|v| v.trim().is_empty())
         {
             one.refresh_token = refresh_token;
         }
@@ -1325,9 +1360,9 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
                 .client_secret
                 .as_ref()
                 .is_none_or(|value| value.trim().is_empty())
-            {
-                one.client_secret = Some(secret);
-            }
+        {
+            one.client_secret = Some(secret);
+        }
         if one
             .sp_token_endpoint_url
             .as_ref()
@@ -1851,12 +1886,17 @@ pub fn load_ayx_state() -> Result<AyxState, ProfileError> {
         path: path.display().to_string(),
         source,
     })?;
-    let mut state: AyxState = serde_yaml::from_str(&content).map_err(|source| ProfileError::Parse {
-        path: path.display().to_string(),
-        source,
-    })?;
-    state.active_profile = state.active_profile.map(|name| normalize_storage_name(&name));
-    state.active_workspace = state.active_workspace.map(|name| normalize_storage_name(&name));
+    let mut state: AyxState =
+        serde_yaml::from_str(&content).map_err(|source| ProfileError::Parse {
+            path: path.display().to_string(),
+            source,
+        })?;
+    state.active_profile = state
+        .active_profile
+        .map(|name| normalize_storage_name(&name));
+    state.active_workspace = state
+        .active_workspace
+        .map(|name| normalize_storage_name(&name));
     Ok(state)
 }
 
@@ -1981,7 +2021,9 @@ pub fn resolve_runtime_profile(
 
 pub fn list_central_profiles() -> Result<Vec<String>, ProfileError> {
     let mut names = list_named_yaml_entries(&ayx_profiles_dir()?)?;
-    if ayx_config_home()?.join(LEGACY_DEFAULT_PROFILE_FILE).exists()
+    if ayx_config_home()?
+        .join(LEGACY_DEFAULT_PROFILE_FILE)
+        .exists()
         && !names.iter().any(|name| name == DEFAULT_ACTIVE_PROFILE_NAME)
     {
         names.push(DEFAULT_ACTIVE_PROFILE_NAME.to_string());
@@ -2867,7 +2909,11 @@ server:
             serde_yaml::to_string(&base_config("legacy", "LegacyDb")).unwrap(),
         )
         .unwrap();
-        std::fs::write(temp.path().join("state.yaml"), "active_profile: default.yaml\n").unwrap();
+        std::fs::write(
+            temp.path().join("state.yaml"),
+            "active_profile: default.yaml\n",
+        )
+        .unwrap();
 
         let path = default_profile_storage_path().unwrap();
         assert_eq!(path, temp.path().join("default.yaml"));

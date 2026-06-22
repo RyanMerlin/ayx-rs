@@ -178,13 +178,25 @@ fn login(
                     };
 
                     let (status, body) = if !ok_path {
-                        ("404 Not Found", "<html><body><h2>Not found.</h2></body></html>")
+                        (
+                            "404 Not Found",
+                            "<html><body><h2>Not found.</h2></body></html>",
+                        )
                     } else if !state_ok {
-                        ("400 Bad Request", "<html><body><h2>State mismatch — possible CSRF. Please try again.</h2></body></html>")
+                        (
+                            "400 Bad Request",
+                            "<html><body><h2>State mismatch — possible CSRF. Please try again.</h2></body></html>",
+                        )
                     } else if code.is_some() {
-                        ("200 OK", "<html><body><h2>Authenticated!</h2><p>You can close this tab.</p></body></html>")
+                        (
+                            "200 OK",
+                            "<html><body><h2>Authenticated!</h2><p>You can close this tab.</p></body></html>",
+                        )
                     } else {
-                        ("400 Bad Request", "<html><body><h2>No authorization code in callback. Please try again.</h2></body></html>")
+                        (
+                            "400 Bad Request",
+                            "<html><body><h2>No authorization code in callback. Please try again.</h2></body></html>",
+                        )
                     };
                     let _ = write!(
                         stream,
@@ -222,7 +234,6 @@ fn login(
         (access, refresh)
     } else if !device {
         // --- Email OTP flow (default) ---
-        use std::io::Write as _;
         let base_url = ayx_one_api::resolve_one_base_url(&config);
         let email = config
             .alteryx_one
@@ -246,23 +257,17 @@ fn login(
         eprintln!("Sending one-time passcode to {}...", email);
         eprintln!("(Check your inbox for a 6-digit code)");
 
-        let result = ayx_one_api::email_otp_login(
-            &base_url,
-            &email,
-            &ws_gid,
-            || {
-                let mut line = String::new();
-                std::io::stdin()
-                    .read_line(&mut line)
-                    .map_err(|e| anyhow::anyhow!("failed to read OTP: {e}"))?;
-                Ok(line.trim().to_string())
-            },
-        )?;
+        let result = ayx_one_api::email_otp_login(&base_url, &email, &ws_gid, || {
+            let mut line = String::new();
+            std::io::stdin()
+                .read_line(&mut line)
+                .map_err(|e| anyhow::anyhow!("failed to read OTP: {e}"))?;
+            Ok(line.trim().to_string())
+        })?;
 
         // Sync workspace_gid into the profile in case it was resolved from
         // the active workspace credential rather than the top-level field.
-        config.alteryx_one.as_mut().unwrap().workspace_gid =
-            Some(result.workspace_gid.clone());
+        config.alteryx_one.as_mut().unwrap().workspace_gid = Some(result.workspace_gid.clone());
 
         if let Some(ref expires) = result.token_expires_at {
             eprintln!("Token expires: {expires}");
@@ -293,8 +298,8 @@ fn login(
         open_browser(uri);
 
         let mut interval = device_resp.interval;
-        let deadline = std::time::Instant::now()
-            + std::time::Duration::from_secs(device_resp.expires_in);
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(device_resp.expires_in);
 
         loop {
             std::thread::sleep(std::time::Duration::from_secs(interval));
@@ -364,5 +369,7 @@ fn open_browser(url: &str) {
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open").arg(url).spawn();
     #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("cmd").args(["/c", "start", url]).spawn();
+    let _ = std::process::Command::new("cmd")
+        .args(["/c", "start", url])
+        .spawn();
 }

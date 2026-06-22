@@ -70,6 +70,7 @@ impl LiveSmokeContext {
                 refresh_token_ref: None,
                 workspace_credentials: Default::default(),
                 expected_workspace_id: None,
+                ..Default::default()
             }),
             observability: None,
             server_api: None,

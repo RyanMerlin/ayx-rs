@@ -262,7 +262,9 @@ where
             Ok(result) => return Ok(result),
             Err(e) => {
                 if no_fallback {
-                    return Err(e.context("pure-HTTP failed (AYX_ONE_AUTH_NO_FALLBACK=1, not falling back)"));
+                    return Err(e.context(
+                        "pure-HTTP failed (AYX_ONE_AUTH_NO_FALLBACK=1, not falling back)",
+                    ));
                 }
                 eprintln!(
                     "Pure-HTTP authentication failed ({e:#}); \
@@ -357,7 +359,10 @@ where
         &client,
         reqwest::Url::parse_with_params(
             &enter_url,
-            &[("workspace", ws_name.as_str()), ("workspaceGid", workspace_gid)],
+            &[
+                ("workspace", ws_name.as_str()),
+                ("workspaceGid", workspace_gid),
+            ],
         )
         .context("failed to build workspace-entry URL")?,
         25,
@@ -388,16 +393,13 @@ where
     follow_redirects(&client, resume_url, 25)?;
 
     // 6. Read and decode the workspace bearer.
-    let base_for_cookies =
-        reqwest::Url::parse(base).context("base_url is not a valid URL")?;
-    let law = cookie_value_from_jar(&jar, &base_for_cookies, "local-auth-workspace").context(
-        "local-auth-workspace cookie was not set — authentication did not complete",
-    )?;
+    let base_for_cookies = reqwest::Url::parse(base).context("base_url is not a valid URL")?;
+    let law = cookie_value_from_jar(&jar, &base_for_cookies, "local-auth-workspace")
+        .context("local-auth-workspace cookie was not set — authentication did not complete")?;
     let bearer = decode_local_auth_workspace(&law)?;
 
     // 7. Mint a 30-day PAT.
-    let csrf =
-        cookie_value_from_jar(&jar, &base_for_cookies, "x-csrf-token").unwrap_or_default();
+    let csrf = cookie_value_from_jar(&jar, &base_for_cookies, "x-csrf-token").unwrap_or_default();
     let pat: Value = client
         .post(format!("{base}/v4/apiAccessTokens"))
         .header("x-csrf-token", csrf)
@@ -457,10 +459,10 @@ where
     // cannot redirect the write.
     let script_path = write_script(workdir.path())?;
 
-    let otp_file      = workdir.path().join("otp.txt");
-    let result_file   = workdir.path().join("result.json");
-    let ready_file    = workdir.path().join("otp-ready.txt");
-    let pw_need_file  = workdir.path().join("password-needed.txt");
+    let otp_file = workdir.path().join("otp.txt");
+    let result_file = workdir.path().join("result.json");
+    let ready_file = workdir.path().join("otp-ready.txt");
+    let pw_need_file = workdir.path().join("password-needed.txt");
 
     // ── Verify the OTP email is actually reachable before starting the browser ─
     // sendPasscode is used here only to check the email is valid; the actual
@@ -477,7 +479,7 @@ where
         .arg(email)
         .arg(base_url)
         .arg(workspace_gid)
-        .arg(workdir.path())   // private dir; Python builds paths inside it
+        .arg(workdir.path()) // private dir; Python builds paths inside it
         .env("AYX_WORKSPACE_PASSWORD", &ws_password)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::inherit())
@@ -494,7 +496,9 @@ where
     {
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
-            if ready_file.exists() { break; }
+            if ready_file.exists() {
+                break;
+            }
             if matches!(child.try_wait(), Ok(Some(_))) {
                 bail!("auth subprocess exited before sending OTP email (check stderr above)");
             }
@@ -529,7 +533,9 @@ where
     {
         let deadline = Instant::now() + Duration::from_secs(300);
         loop {
-            if otp_file.exists() { break; }
+            if otp_file.exists() {
+                break;
+            }
             if matches!(child.try_wait(), Ok(Some(_))) {
                 bail!("auth subprocess exited before OTP was provided (check stderr above)");
             }
@@ -545,7 +551,9 @@ where
     {
         let deadline = Instant::now() + Duration::from_secs(240);
         loop {
-            if result_file.exists() { break; }
+            if result_file.exists() {
+                break;
+            }
 
             // Python couldn't find AYX_WORKSPACE_PASSWORD → prompt now.
             if pw_need_file.exists() {
@@ -553,7 +561,8 @@ where
                 eprint!("Workspace password: ");
                 let _ = std::io::stderr().flush();
                 let mut pw = String::new();
-                std::io::stdin().read_line(&mut pw)
+                std::io::stdin()
+                    .read_line(&mut pw)
                     .context("failed to read workspace password")?;
                 write_nofollow(&otp_file, pw.trim().as_bytes())
                     .context("failed to write workspace password to temp file")?;
@@ -621,8 +630,7 @@ fn write_nofollow(path: &PathBuf, data: &[u8]) -> Result<()> {
     #[cfg(not(unix))]
     {
         // Non-Unix: best-effort restricted write (no O_NOFOLLOW equivalent).
-        std::fs::write(path, data)
-            .with_context(|| format!("write {}", path.display()))?;
+        std::fs::write(path, data).with_context(|| format!("write {}", path.display()))?;
     }
     Ok(())
 }
@@ -633,9 +641,13 @@ fn libc_nofollow() -> i32 {
     // Using the platform constant via libc would require adding a libc dep;
     // instead hard-code the Linux value and fall back gracefully on others.
     #[cfg(target_os = "linux")]
-    { 0x20000 }
+    {
+        0x20000
+    }
     #[cfg(not(target_os = "linux"))]
-    { 0 }
+    {
+        0
+    }
 }
 
 /// Write the embedded Playwright script to a temp file and return its path.
@@ -679,9 +691,7 @@ where
             return Ok(());
         }
         if early_exit() {
-            bail!(
-                "auth subprocess exited before completing (check stderr above for details)"
-            );
+            bail!("auth subprocess exited before completing (check stderr above for details)");
         }
         if Instant::now() > deadline {
             bail!("timed out after {}s", timeout.as_secs());
@@ -694,7 +704,12 @@ where
 
 /// Resolve the workspace display name (e.g. "alteryx-fde") from its GID by
 /// querying `/v4/auth/accounts`.  The workspace-entry URL needs the name.
-fn resolve_workspace_name(client: &Client, base: &str, email: &str, workspace_gid: &str) -> Result<String> {
+fn resolve_workspace_name(
+    client: &Client,
+    base: &str,
+    email: &str,
+    workspace_gid: &str,
+) -> Result<String> {
     let accounts_url = reqwest::Url::parse_with_params(
         &format!("{base}/v4/auth/accounts"),
         &[("includeInvited", "workspaces,accounts")],
@@ -715,7 +730,9 @@ fn resolve_workspace_name(client: &Client, base: &str, email: &str, workspace_gi
         .json()
         .context("/v4/auth/accounts response was not JSON")?;
 
-    let accounts = accounts.as_array().context("accounts response was not an array")?;
+    let accounts = accounts
+        .as_array()
+        .context("accounts response was not an array")?;
     for account in accounts {
         if let Some(workspaces) = account["workspaces"].as_array() {
             for ws in workspaces {
@@ -754,11 +771,7 @@ fn resolve_workspace_password() -> Result<String> {
 /// Follow 3xx redirects manually with the client's cookie jar, returning the
 /// ordered list of every URL visited (requested URLs and redirect targets).
 /// Stops at the first non-redirect response or after `max_hops` redirects.
-fn follow_redirects(
-    client: &Client,
-    start: reqwest::Url,
-    max_hops: usize,
-) -> Result<Vec<String>> {
+fn follow_redirects(client: &Client, start: reqwest::Url, max_hops: usize) -> Result<Vec<String>> {
     let mut visited = vec![start.to_string()];
     let mut current = start;
     for _ in 0..max_hops {
@@ -848,11 +861,7 @@ fn random_hex(n: usize) -> String {
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn cookie_value_from_jar(
-    jar: &Jar,
-    url: &url::Url,
-    name: &str,
-) -> Option<String> {
+fn cookie_value_from_jar(jar: &Jar, url: &url::Url, name: &str) -> Option<String> {
     use reqwest::header::HeaderValue;
     let hv: HeaderValue = jar.cookies(url)?;
     let raw = hv.to_str().ok()?;

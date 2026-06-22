@@ -42,8 +42,8 @@ use crate::onboard::{
 };
 
 use super::store::{
-    create_profile_from_default_scope_at, delete_profile_at, duplicate_profile_at,
-    list_profile_records_at, rename_profile_at, ProfileRecord, ProfileScope,
+    ProfileRecord, ProfileScope, create_profile_from_default_scope_at, delete_profile_at,
+    duplicate_profile_at, list_profile_records_at, rename_profile_at,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,6 +147,7 @@ impl ProfileView {
         }
     }
 
+    #[allow(dead_code)]
     pub fn next(self) -> Self {
         match self {
             ProfileView::All => ProfileView::One,
@@ -983,11 +984,11 @@ impl App {
     }
 
     pub fn new() -> Result<Self> {
-        let state = load_ayx_state().map_err(anyhow::Error::from)?;
-        let config_home = ayx_config_home().map_err(anyhow::Error::from)?;
-        let profiles = list_profile_records_at(&config_home).map_err(anyhow::Error::from)?;
+        let state = load_ayx_state()?;
+        let config_home = ayx_config_home()?;
+        let profiles = list_profile_records_at(&config_home)?;
         let workspaces = load_workspace_entries()?;
-        let target_path = default_profile_storage_path().map_err(anyhow::Error::from)?;
+        let target_path = default_profile_storage_path()?;
         let current_config = Config::load_from_path_with_environment_lenient(&target_path, None)
             .unwrap_or_else(|_| default_config());
         let runtime_resolution = resolve_runtime_profile(None).ok();
@@ -2398,7 +2399,7 @@ impl App {
     }
 
     fn reload_indexes(&mut self) -> Result<()> {
-        self.profiles = list_profile_records_at(&self.config_home).map_err(anyhow::Error::from)?;
+        self.profiles = list_profile_records_at(&self.config_home)?;
         self.workspaces = load_workspace_entries()?;
         self.sync_selected_entries();
         self.status_message = "Indexes reloaded".to_string();

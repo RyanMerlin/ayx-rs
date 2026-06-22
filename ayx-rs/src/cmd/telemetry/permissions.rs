@@ -442,6 +442,7 @@ mod tests {
             refresh_token_ref: None,
             workspace_credentials: Default::default(),
             expected_workspace_id: ws.map(String::from),
+            ..Default::default()
         });
     }
 
