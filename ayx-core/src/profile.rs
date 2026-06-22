@@ -589,6 +589,13 @@ impl Config {
         Self::load_from_resolved_path_lenient(&resolved)
     }
 
+    pub fn load_from_path_lenient_without_active_overlay(
+        path: &Path,
+    ) -> Result<Self, ProfileError> {
+        let resolved = resolve_profile_path(path)?;
+        Self::load_from_resolved_path_lenient_without_active_overlay(&resolved)
+    }
+
     pub fn load_from_path_with_environment_lenient(
         path: &Path,
         environment: Option<&str>,
@@ -628,6 +635,13 @@ impl Config {
     fn load_from_resolved_path_lenient(path: &Path) -> Result<Self, ProfileError> {
         let (path_str, env_values, value) = Self::read_profile_value(path)?;
         Self::load_config_from_value(path, path_str, value, env_values, None)
+    }
+
+    fn load_from_resolved_path_lenient_without_active_overlay(
+        path: &Path,
+    ) -> Result<Self, ProfileError> {
+        let (path_str, env_values, value) = Self::read_profile_value(path)?;
+        Self::load_config_without_active_overlay(path, path_str, value, env_values, None)
     }
 
     fn load_from_resolved_path_with_environment(
@@ -702,6 +716,36 @@ impl Config {
         Self::finalize_loaded_config(config, env_values, path)
     }
 
+    fn load_config_without_active_overlay(
+        path: &Path,
+        path_str: String,
+        value: serde_yaml::Value,
+        env_values: HashMap<String, String>,
+        environment: Option<&str>,
+    ) -> Result<Self, ProfileError> {
+        let config = if is_workspace_value(&value) {
+            let workspace: WorkspaceConfig =
+                serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+                    path: path_str.clone(),
+                    source,
+                })?;
+            let active = environment.unwrap_or(&workspace.active_environment);
+            workspace.environments.get(active).cloned().ok_or_else(|| {
+                ProfileError::Invalid(format!(
+                    "workspace '{}' does not contain environment '{}'",
+                    workspace.workspace_name, active
+                ))
+            })?
+        } else {
+            serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+                path: path_str,
+                source,
+            })?
+        };
+
+        Self::finalize_loaded_config_without_overlay(config, env_values, path)
+    }
+
     fn finalize_loaded_config(
         config: Self,
         env_values: HashMap<String, String>,
@@ -710,6 +754,16 @@ impl Config {
         let config = apply_env_fallbacks(config, &env_values);
         let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
         Ok(overlay_active_profile_one_from_state(config, current_path))
+    }
+
+    fn finalize_loaded_config_without_overlay(
+        config: Self,
+        env_values: HashMap<String, String>,
+        _current_path: &Path,
+    ) -> Result<Self, ProfileError> {
+        let config = apply_env_fallbacks(config, &env_values);
+        let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
+        Ok(config)
     }
 
     fn with_server_api_overrides(mut self) -> Result<Self, ProfileError> {
@@ -1293,32 +1347,16 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         if let Some(value) = account_email {
             one.account_email = value;
         }
-        if one
-            .base_url
-            .as_ref()
-            .is_none_or(|value| value.trim().is_empty())
-        {
+        if base_url.is_some() {
             one.base_url = base_url;
         }
-        if one
-            .oauth_client_id
-            .as_ref()
-            .is_none_or(|value| value.trim().is_empty())
-        {
+        if oauth_client_id.is_some() {
             one.oauth_client_id = oauth_client_id;
         }
-        if one
-            .client_secret
-            .as_ref()
-            .is_none_or(|value| value.trim().is_empty())
-        {
+        if client_secret.is_some() {
             one.client_secret = client_secret;
         }
-        if one
-            .token_endpoint_url
-            .as_ref()
-            .is_none_or(|value| value.trim().is_empty())
-        {
+        if token_endpoint_url.is_some() {
             one.token_endpoint_url = token_endpoint_url;
         }
         // Only apply env-fallback tokens when there is no _ref already in the
@@ -2247,6 +2285,24 @@ mod tests {
         }
     }
 
+    struct CurrentDirGuard {
+        old: PathBuf,
+    }
+
+    impl CurrentDirGuard {
+        fn set(dir: &Path) -> Self {
+            let old = std::env::current_dir().unwrap();
+            std::env::set_current_dir(dir).unwrap();
+            Self { old }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.old);
+        }
+    }
+
     fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
         TEST_ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
     }
@@ -2507,6 +2563,40 @@ mod tests {
     }
 
     #[test]
+    fn load_from_path_lenient_without_active_overlay_keeps_source_profile() {
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let config_home = temp.path().join("ayx-home");
+        fs::create_dir_all(config_home.join("profiles")).unwrap();
+
+        let _guard = EnvGuard::set("AYX_CONFIG_HOME", config_home.to_str().unwrap());
+        save_ayx_state(&AyxState {
+            active_profile: Some("shared".to_string()),
+            active_workspace: None,
+        })
+        .unwrap();
+
+        let mut shared = base_config("shared", "SharedService");
+        shared.alteryx_one.as_mut().unwrap().account_email = "shared@example.com".to_string();
+        let shared_path = profile_storage_path("shared").unwrap();
+        fs::write(&shared_path, serde_yaml::to_string(&shared).unwrap()).unwrap();
+
+        let mut local = base_config("local", "LocalService");
+        local.alteryx_one.as_mut().unwrap().account_email = "local@example.com".to_string();
+        let local_path = profile_storage_path("local").unwrap();
+        fs::write(&local_path, serde_yaml::to_string(&local).unwrap()).unwrap();
+
+        let loaded = Config::load_from_path_lenient_without_active_overlay(&local_path).unwrap();
+        assert_eq!(
+            loaded
+                .alteryx_one
+                .as_ref()
+                .map(|one| one.account_email.as_str()),
+            Some("local@example.com")
+        );
+    }
+
+    #[test]
     fn one_token_endpoint_normalizes_issuer_root() {
         let profile = AlteryxOneProfile {
             account_email: "user@example.com".to_string(),
@@ -2700,6 +2790,11 @@ mod tests {
     #[test]
     fn runtime_profile_loader_supports_legacy_profile_shape_without_top_level_mongo() {
         let _lock = test_env_lock();
+        // Register an in-memory keyring so the loader's secret-ref resolution is
+        // hermetic: CI runners are headless (no Secret Service / D-Bus / keychain),
+        // so without a store `Entry::new` fails and the load errors. With the mock
+        // store present, the unset entries resolve to `None` and the profile loads.
+        keyring_core::set_default_store(keyring_core::mock::Store::new().unwrap());
         let temp = tempfile::tempdir().unwrap();
         let config_home = temp.path().join("ayx-home");
         let profiles_dir = config_home.join("profiles");
@@ -2830,6 +2925,34 @@ sqlserver:
                 .as_ref()
                 .map(|one| one.account_email.as_str()),
             Some("ryan.merlin@alteryx.com")
+        );
+    }
+
+    #[test]
+    fn env_file_overrides_stale_profile_auth_fields() {
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _cwd = CurrentDirGuard::set(temp.path());
+
+        let env_file = temp.path().join(".env");
+        fs::write(
+            &env_file,
+            "AYX_ACCOUNT_EMAIL=fresh@example.com\nAYX_ONE_API_ACCESS_TOKEN=fresh-access\nAYX_ONE_API_REFRESH_TOKEN=fresh-refresh\nAYX_ONE_TOKEN_ENDPOINT_URL=https://pingauth.example.com/as\n",
+        )
+        .unwrap();
+
+        let profile_path = temp.path().join("config.yaml");
+        let profile = base_config("default", "ServiceDb");
+        fs::write(&profile_path, serde_yaml::to_string(&profile).unwrap()).unwrap();
+
+        let loaded = Config::load_from_path_lenient(&profile_path).unwrap();
+        let one = loaded.alteryx_one.as_ref().unwrap();
+        assert_eq!(one.account_email, "fresh@example.com");
+        assert_eq!(one.access_token.as_deref(), Some("fresh-access"));
+        assert_eq!(one.refresh_token.as_deref(), Some("fresh-refresh"));
+        assert_eq!(
+            one.token_endpoint_url.as_deref(),
+            Some("https://pingauth.example.com/as")
         );
     }
 

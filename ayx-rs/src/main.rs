@@ -166,6 +166,35 @@ fn sanitize_live_probe_for_user(probe_data: &Value, access_token: &str) -> Value
     Value::Object(sanitized)
 }
 
+fn access_token_claim_summary(access_token: Option<&str>) -> Option<Value> {
+    let claims = decode_token_claims(access_token?)?;
+    let exp = claims.get("exp").and_then(Value::as_i64)?;
+    let iat = claims.get("iat").and_then(Value::as_i64);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs() as i64)?;
+    let mut summary = serde_json::Map::new();
+    summary.insert("expired".to_string(), Value::Bool(now >= exp));
+    summary.insert("exp".to_string(), Value::from(exp));
+    summary.insert(
+        "seconds_remaining".to_string(),
+        Value::from((exp - now).max(0)),
+    );
+    if let Some(iat) = iat {
+        summary.insert("iat".to_string(), Value::from(iat));
+    }
+    for key in ["iss", "sub", "email"] {
+        if let Some(value) = claims.get(key).cloned() {
+            summary.insert(key.to_string(), value);
+        }
+    }
+    if let Some(aud) = claims.get("aud").cloned() {
+        summary.insert("aud".to_string(), aud);
+    }
+    Some(Value::Object(summary))
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "ayx",
@@ -181,10 +210,12 @@ fn sanitize_live_probe_for_user(probe_data: &Value, access_token: &str) -> Value
     disable_help_subcommand = true
 )]
 struct Cli {
-    #[arg(long, default_value = "text")]
+    #[arg(long, default_value = "text", global = true)]
     output: String,
-    #[arg(long)]
-    environment: Option<String>,
+    #[arg(long = "env", alias = "environment", global = true)]
+    environment_flag: Option<String>,
+    #[arg(value_name = "ENV", hide = true, last = true, global = true)]
+    environment_tail: Option<String>,
     /// Global apply flag for mutating One API commands.
     ///
     /// Without `--apply`, mutating One requests (POST/PUT/PATCH/DELETE) return
@@ -215,6 +246,14 @@ struct Cli {
 
     #[command(subcommand)]
     command: Command,
+}
+
+impl Cli {
+    fn resolved_environment(&self) -> Option<&str> {
+        self.environment_flag
+            .as_deref()
+            .or(self.environment_tail.as_deref())
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -473,6 +512,18 @@ fn parse_param_kv(s: &str) -> Result<(String, String), String> {
     Ok((k.to_string(), v.to_string()))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_env_after_nested_subcommand() {
+        let cli = Cli::try_parse_from(["ayx", "one", "flows", "list", "--env", "prod"])
+            .expect("parser should accept trailing --env");
+        assert_eq!(cli.resolved_environment(), Some("prod"));
+    }
+}
+
 #[derive(Subcommand, Debug)]
 enum ProfileCommand {
     List,
@@ -714,8 +765,8 @@ pub(crate) enum WorkflowCommand {
     Replace {
         #[arg(long)]
         input: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
+        #[arg(long = "output-path")]
+        output_path: PathBuf,
         #[arg(long)]
         find: String,
         #[arg(long)]
@@ -726,14 +777,14 @@ pub(crate) enum WorkflowCommand {
     Repackage {
         #[arg(long)]
         input_dir: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
+        #[arg(long = "output-path")]
+        output_path: PathBuf,
     },
     Recurse {
         #[arg(long)]
         input: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
+        #[arg(long = "output-path")]
+        output_path: PathBuf,
         #[arg(long)]
         rules: Option<PathBuf>,
         #[arg(long = "find")]
@@ -756,8 +807,8 @@ pub(crate) enum WorkflowCommand {
     ConvertCloud {
         #[arg(long)]
         input: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
+        #[arg(long = "output-path")]
+        output_path: PathBuf,
         #[arg(long, default_value_t = false)]
         fail_on_unsupported: bool,
     },
@@ -794,8 +845,8 @@ pub(crate) enum WorkflowCommand {
     Migrate {
         #[arg(long)]
         input: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
+        #[arg(long = "output-path")]
+        output_path: PathBuf,
         #[arg(long)]
         find: String,
         #[arg(long)]
@@ -4601,27 +4652,29 @@ fn execute(cli: Cli) -> Result<Envelope> {
         ayx_server_api::set_debug_trace(true);
         eprintln!(
             "[debug] apply={} environment={:?} no_verify_tls={} verbose={}",
-            cli.apply, cli.environment, cli.no_verify_tls, cli.verbose
+            cli.apply,
+            cli.resolved_environment(),
+            cli.no_verify_tls,
+            cli.verbose
         );
     }
 
     // `load_profile` is intentionally a tiny shim around the environment-aware
-    // central runtime loader. Capturing `cli.environment` here keeps the
+    // central runtime loader. Capturing the resolved environment here keeps the
     // runtime-only call-sites concise while the explicit path loaders below
     // remain available for onboarding/editor flows.
-    let environment = cli.environment.clone();
+    let environment = cli
+        .environment_flag
+        .clone()
+        .or(cli.environment_tail.clone());
     let load_profile = |profile: Option<&str>| -> Result<Config> {
         load_profile_with_env(profile, environment.as_deref())
     };
     let envelope = match cli.command {
-        Command::Mongo { command } => cmd::mongo::execute(cli.environment.as_deref(), command)?,
-        Command::Server { command } => cmd::server::execute(cli.environment.as_deref(), command)?,
-        Command::Sqlserver { command } => {
-            cmd::sqlserver::execute(cli.environment.as_deref(), command)?
-        }
-        Command::Workflow { command } => {
-            cmd::workflow::execute(cli.environment.as_deref(), command)?
-        }
+        Command::Mongo { command } => cmd::mongo::execute(environment.as_deref(), command)?,
+        Command::Server { command } => cmd::server::execute(environment.as_deref(), command)?,
+        Command::Sqlserver { command } => cmd::sqlserver::execute(environment.as_deref(), command)?,
+        Command::Workflow { command } => cmd::workflow::execute(environment.as_deref(), command)?,
         Command::Tools { command } => cmd::tools::execute(command)?,
         Command::Onboard {
             profile,
@@ -4630,7 +4683,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
         } => {
             let detail = onboard::run_onboarding(
                 &profile,
-                cli.environment.as_deref(),
+                environment.as_deref(),
                 non_interactive,
                 environments,
             )?;
@@ -4655,14 +4708,14 @@ fn execute(cli: Cli) -> Result<Envelope> {
             command.as_ref(),
             profile.as_deref(),
             fix,
-            cli.environment.as_deref(),
+            environment.as_deref(),
         )?,
         Command::Discover { deep, path } => cmd::discover::execute(path, deep)?,
         Command::One { command } => cmd::one::execute(
             cmd::one::Ctx {
                 apply: cli.apply,
                 yes: cli.yes,
-                environment: cli.environment.as_deref(),
+                environment: environment.as_deref(),
             },
             command,
         )?,
@@ -4760,7 +4813,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     "selected_profile": resolution.as_ref().map(|r| r.selected_profile.clone()),
                     "selection_source": resolution.as_ref().map(|r| r.selection_source.clone()),
                     "resolved_profile_path": resolution.as_ref().map(|r| r.resolved_profile_path.clone()),
-                    "environment": cli.environment.clone(),
+                    "environment": environment.clone(),
                     "account_email": account_email,
                     "one_base_url": one_base_url,
                     "expected_workspace_id": expected_workspace_id,
@@ -4839,9 +4892,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
         },
         Command::Tactics { command } => cmd::registry::execute_tactics(cli.apply, command)?,
         Command::Workflows { command } => cmd::registry::execute_workflows(cli.apply, command)?,
-        Command::Telemetry { command } => {
-            cmd::telemetry::execute(cli.environment.as_deref(), command)?
-        }
+        Command::Telemetry { command } => cmd::telemetry::execute(environment.as_deref(), command)?,
     };
     Ok(envelope)
 }
@@ -5518,6 +5569,7 @@ pub(crate) fn one_platform_auth_status_envelope(config: &Config) -> Result<Envel
             } else {
                 "missing"
             },
+            "access_token_claims": access_token_claim_summary(access_token),
             "validation_target": "/v4/apiAccessTokens",
             "workspace_probe": workspace_probe.as_ref().map(|probe| {
                 sanitize_live_probe_for_user(
@@ -5541,18 +5593,8 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
     let oauth_client_id = one.resolved_oauth_client_id();
     let has_token = access_token.is_some();
     let has_refresh_token = refresh_token.is_some();
-    let workspace_probe = if has_token {
-        one_api_live_request(
-            config,
-            "platform",
-            "auth-diagnose",
-            "GET",
-            "/v4/apiAccessTokens",
-            false,
-            &[],
-        )?
-    } else {
-        Envelope::ok_with_data(
+    if !has_token {
+        return Ok(Envelope::ok_with_data(
             "one platform auth diagnose",
             json!({
                 "product": "one",
@@ -5572,36 +5614,69 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                     "Populate alteryx_one.access_token in the active central profile if you prefer config-based storage"
                 ],
             }),
-        )
+        ));
+    }
+
+    let workspace_probe = match one_api_live_request(
+        config,
+        "platform",
+        "auth-diagnose",
+        "GET",
+        "/v4/apiAccessTokens",
+        false,
+        &[],
+    ) {
+        Ok(probe) => Some(probe),
+        Err(err) => {
+            return Ok(Envelope::ok_with_data(
+                "one platform auth diagnose",
+                json!({
+                    "product": "one",
+                    "surface": "platform",
+                    "profile": config.profile_name,
+                    "workspace_id": workspace_id,
+                    "oauth_client_id_present": oauth_client_id.is_some(),
+                    "base_url": one.normalized_base_url(),
+                    "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
+                    "access_token_present": true,
+                    "refresh_token_present": has_refresh_token,
+                    "access_token_claims": access_token_claim_summary(access_token),
+                    "diagnosis": "token present but workspace probe failed",
+                    "workspace_probe_error": err.to_string(),
+                    "recommendations": [
+                        "If the access token is expired, mint a fresh one or repair refresh-token auth",
+                        "Confirm the active profile is pointing at the intended workspace and auth issuer",
+                        "Use one platform auth status for posture and one platform workspace current for live reachability",
+                    ],
+                }),
+            ));
+        }
     };
 
-    if has_token {
-        Ok(Envelope::ok_with_data(
-            "one platform auth diagnose",
-            json!({
-                "product": "one",
-                "surface": "platform",
-                "profile": config.profile_name,
-                "workspace_id": workspace_id,
-                "oauth_client_id_present": oauth_client_id.is_some(),
-                "base_url": one.normalized_base_url(),
-                "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
-                "access_token_present": true,
-                "refresh_token_present": has_refresh_token,
-                "diagnosis": "token present and workspace probe executed",
-                "workspace_probe": sanitize_live_probe_for_user(
-                    &workspace_probe.data,
-                    access_token.unwrap_or(""),
-                ),
-                "recommendations": [
-                    "Use one platform token or auth status for evidence",
-                    "Route any failing symptoms into the workflow guidance layer",
-                ],
-            }),
-        ))
-    } else {
-        Ok(workspace_probe)
-    }
+    Ok(Envelope::ok_with_data(
+        "one platform auth diagnose",
+        json!({
+            "product": "one",
+            "surface": "platform",
+            "profile": config.profile_name,
+            "workspace_id": workspace_id,
+            "oauth_client_id_present": oauth_client_id.is_some(),
+            "base_url": one.normalized_base_url(),
+            "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
+            "access_token_present": true,
+            "refresh_token_present": has_refresh_token,
+            "access_token_claims": access_token_claim_summary(access_token),
+            "diagnosis": "token present and workspace probe executed",
+            "workspace_probe": sanitize_live_probe_for_user(
+                &workspace_probe.as_ref().unwrap().data,
+                access_token.unwrap_or(""),
+            ),
+            "recommendations": [
+                "Use one platform token or auth status for evidence",
+                "Route any failing symptoms into the workflow guidance layer",
+            ],
+        }),
+    ))
 }
 
 fn perform_self_update(

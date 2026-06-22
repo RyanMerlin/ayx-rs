@@ -1,6 +1,16 @@
+# Rust build artifacts
 target/
 **/target/
 .cargo/
+
+# Node / web build artifacts
+node_modules/
+dist/
+build/
+coverage/
+.astro/
+
+# Scratch and editor state
 .idea/
 .vscode/
 .env
@@ -9,8 +19,13 @@ target/
 *.log
 *.tmp
 .temp/
+tmp/
+.cache/
 .codex
-docs-site/node_modules/
-docs-site/.docusaurus/
-docs-site/build/
-docs-site/docs/
+.agents/
+backups/
+
+# Current docs site outputs
+site/node_modules/
+site/dist/
+site/.astro/

@@ -1,0 +1,27 @@
+{
+  "id": "configuration",
+  "title": "Configuration",
+  "description": "Config home",
+  "source": "@site/docs/configuration.md",
+  "sourceDirName": ".",
+  "slug": "/configuration",
+  "permalink": "/configuration",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 3,
+  "frontMatter": {
+    "title": "Configuration",
+    "sidebar_position": 3
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Getting Started",
+    "permalink": "/getting-started"
+  },
+  "next": {
+    "title": "Safety Model",
+    "permalink": "/safety-model"
+  }
+}

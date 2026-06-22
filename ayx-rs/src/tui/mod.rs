@@ -48,6 +48,10 @@ pub fn run() -> Result<Envelope> {
 
     let result = run_loop(&mut terminal, &mut app);
 
+    // Drop the app before restoring the terminal so background workers can
+    // release their senders and exit cleanly.
+    drop(app);
+
     let _ = disable_raw_mode();
     let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
     let _ = terminal.show_cursor();

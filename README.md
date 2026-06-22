@@ -249,13 +249,14 @@ cargo nextest run --workspace --locked
 
 ## Documentation
 
-The published docs site lives at **<https://ayx-rs.pages.dev>** and is built from `docs-site/` with Docusaurus.
-It includes the generated command surface, configuration reference, Alteryx Server API (rendered from `docs/swagger-v3.json`), and versioned release notes.
+The published docs surface lives in `site/` and is built with Astro/Starlight.
+It is designed to ship with versioned docs so the current command surface,
+release notes, and configuration references stay aligned with tagged releases.
 
 Build it locally with:
 
-```bash
-cd docs-site
+```powershell
+cd site
 npm ci
 npm run build  # or: npm start  (for live reload)
 ```
@@ -266,7 +267,7 @@ For the One surface specifically, the live validation plan is documented in `doc
 
 ## Fixtures
 
-The repository includes a `RuntimeSettings.xml` fixture for offline validation of embedded discovery paths.
+The repository includes a `docs/fixtures/RuntimeSettings.xml` fixture for offline validation of embedded discovery paths.
 
 ## Full Command Tree
 

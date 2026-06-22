@@ -1,0 +1,27 @@
+{
+  "id": "troubleshooting",
+  "title": "Troubleshooting",
+  "description": "Start with doctor",
+  "source": "@site/docs/troubleshooting.md",
+  "sourceDirName": ".",
+  "slug": "/troubleshooting",
+  "permalink": "/troubleshooting",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 2,
+  "frontMatter": {
+    "title": "Troubleshooting",
+    "sidebar_position": 2
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "AYX-RS v0.9.9 Release Notes",
+    "permalink": "/releases/v0.9.9"
+  },
+  "next": {
+    "title": "Contributing to ayx-rs",
+    "permalink": "/contributing"
+  }
+}

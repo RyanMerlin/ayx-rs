@@ -60,11 +60,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: docs-site/package-lock.json
+          cache-dependency-path: site/package-lock.json
       - run: npm ci
-        working-directory: docs-site
+        working-directory: site
       - run: npm run build
-        working-directory: docs-site
+        working-directory: site
 
   audit:
     name: cargo-audit

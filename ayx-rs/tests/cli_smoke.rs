@@ -6,6 +6,39 @@ use std::process::Command;
 
 use serde_json::Value;
 
+fn assert_json_output_works_before_and_after(base_args: &[&str], check: fn(&Value)) {
+    for args in [
+        {
+            let mut v = vec!["--output", "json"];
+            v.extend_from_slice(base_args);
+            v
+        },
+        {
+            let mut v = base_args.to_vec();
+            v.extend_from_slice(&["--output", "json"]);
+            v
+        },
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+            .args(&args)
+            .output()
+            .unwrap_or_else(|_| panic!("ayx binary should run for args: {args:?}"));
+
+        assert!(
+            output.status.success(),
+            "command failed for args {args:?}\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let json: Value = serde_json::from_str(&stdout).unwrap_or_else(|_| {
+            panic!("expected JSON stdout for args: {args:?}\nstdout:\n{stdout}")
+        });
+        check(&json);
+    }
+}
+
 #[test]
 fn ayx_help_renders() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
@@ -333,6 +366,45 @@ fn discover_root_lists_top_level_commands() {
 }
 
 #[test]
+fn output_json_works_when_flag_is_trailing_for_discover() {
+    assert_json_output_works_before_and_after(&["discover"], |json| {
+        assert_eq!(json["ok"], serde_json::json!(true));
+        assert_eq!(json["data"]["schema_version"], serde_json::json!(1));
+        assert_eq!(json["data"]["binary"], serde_json::json!("ayx"));
+    });
+}
+
+#[test]
+fn output_json_works_when_flag_is_trailing_for_catalog_list() {
+    assert_json_output_works_before_and_after(&["catalog", "list", "--format", "full"], |json| {
+        assert_eq!(json["ok"], serde_json::json!(true));
+        let commands = json["data"]["commands"].as_array().expect("commands array");
+        assert!(!commands.is_empty());
+        assert!(commands.iter().any(|item| item["name"] == "discover"));
+    });
+}
+
+#[test]
+fn output_json_works_when_flag_is_trailing_for_tactics_list() {
+    assert_json_output_works_before_and_after(&["tactics", "list"], |json| {
+        assert_eq!(json["ok"], serde_json::json!(true));
+        let tactics = json["data"]["tactics"].as_array().expect("tactics array");
+        assert!(!tactics.is_empty());
+    });
+}
+
+#[test]
+fn output_json_works_when_flag_is_trailing_for_workflows_list() {
+    assert_json_output_works_before_and_after(&["workflows", "list"], |json| {
+        assert_eq!(json["ok"], serde_json::json!(true));
+        let workflows = json["data"]["workflows"]
+            .as_array()
+            .expect("workflows array");
+        assert!(!workflows.is_empty());
+    });
+}
+
+#[test]
 fn workflow_help_renders() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(["workflow", "--help"])
@@ -382,7 +454,7 @@ fn workflow_convert_cloud_smoke() {
             "convert-cloud",
             "--input",
             input.to_str().unwrap(),
-            "--output",
+            "--output-path",
             output.to_str().unwrap(),
         ])
         .output()

@@ -1,0 +1,23 @@
+{
+  "id": "releases/v0.9.9",
+  "title": "AYX-RS v0.9.9 Release Notes",
+  "description": "This release tightens the Alteryx One cloud API surface and makes the live validation story much clearer.",
+  "source": "@site/docs/releases/v0.9.9.md",
+  "sourceDirName": "releases",
+  "slug": "/releases/v0.9.9",
+  "permalink": "/releases/v0.9.9",
+  "draft": false,
+  "unlisted": false,
+  "tags": [],
+  "version": "current",
+  "frontMatter": {},
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "AYX-RS v0.9.10 Release Notes",
+    "permalink": "/releases/v0.9.10"
+  },
+  "next": {
+    "title": "Troubleshooting",
+    "permalink": "/troubleshooting"
+  }
+}

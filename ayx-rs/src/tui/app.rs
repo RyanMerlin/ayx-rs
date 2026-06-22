@@ -147,6 +147,8 @@ impl ProfileView {
         }
     }
 
+    // Cycles All → One → Server. Views currently switch via direct assignment, so
+    // this is unused for now; kept for a future "cycle profile views" keybinding.
     #[allow(dead_code)]
     pub fn next(self) -> Self {
         match self {
@@ -984,13 +986,22 @@ impl App {
     }
 
     pub fn new() -> Result<Self> {
-        let state = load_ayx_state()?;
-        let config_home = ayx_config_home()?;
+        Self::new_with_runtime(true, true)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_without_worker() -> Result<Self> {
+        Self::new_with_runtime(false, false)
+    }
+
+    fn new_with_runtime(spawn_worker: bool, prime_refreshes: bool) -> Result<Self> {
+        let state = load_ayx_state().map_err(anyhow::Error::from)?;
+        let config_home = ayx_config_home().map_err(anyhow::Error::from)?;
         let profiles = list_profile_records_at(&config_home)?;
         let workspaces = load_workspace_entries()?;
-        let target_path = default_profile_storage_path()?;
-        let current_config = Config::load_from_path_with_environment_lenient(&target_path, None)
-            .unwrap_or_else(|_| default_config());
+        let target_path = default_profile_storage_path().map_err(anyhow::Error::from)?;
+        let current_config = Config::load_from_path_lenient_without_active_overlay(&target_path)
+            .map_err(anyhow::Error::from)?;
         let runtime_resolution = resolve_runtime_profile(None).ok();
 
         let mut sidebar = ListState::default();
@@ -1036,13 +1047,19 @@ impl App {
             status_message: "Ready".to_string(),
             toast: None,
             crud_prompt: None,
-            worker: Some(super::worker::BackgroundWorker::spawn()),
+            worker: if spawn_worker {
+                Some(super::worker::BackgroundWorker::spawn())
+            } else {
+                None
+            },
             latest_connectivity_request: None,
             latest_one_browser_request: None,
         };
         app.sync_selected_entries();
-        app.refresh_connectivity();
-        app.refresh_one_browser();
+        if prime_refreshes {
+            app.refresh_connectivity();
+            app.refresh_one_browser();
+        }
         Ok(app)
     }
 
@@ -1907,8 +1924,7 @@ impl App {
         kind: TargetKind,
     ) -> Result<()> {
         let config = match kind {
-            TargetKind::Profile => Config::load_from_path_with_environment_lenient(&path, None)
-                .unwrap_or_else(|_| default_config()),
+            TargetKind::Profile => Config::load_from_path_lenient_without_active_overlay(&path)?,
             TargetKind::Workspace => {
                 Config::load_from_path_with_environment_lenient(&path, environment.as_deref())?
             }
@@ -2226,8 +2242,8 @@ impl App {
             TargetKind::Workspace => {
                 if let Some(profile_name) = self.active_profile.as_ref() {
                     let path = profile_storage_path(profile_name).map_err(anyhow::Error::from)?;
-                    let mut config = Config::load_from_path_with_environment_lenient(&path, None)
-                        .unwrap_or_else(|_| default_config());
+                    let mut config = Config::load_from_path_lenient_without_active_overlay(&path)
+                        .map_err(anyhow::Error::from)?;
                     config.profile_name = profile_name.clone();
                     config
                 } else {
@@ -2308,10 +2324,17 @@ impl App {
                 }
             }
         }
-        self.current_config = Config::load_from_path_with_environment_lenient(
-            &reload_path,
-            self.target_environment.as_deref(),
-        )?;
+        self.current_config =
+            if matches!(self.target_kind, TargetKind::Profile) || self.active_profile.is_some() {
+                Config::load_from_path_lenient_without_active_overlay(&reload_path)
+                    .map_err(anyhow::Error::from)?
+            } else {
+                Config::load_from_path_with_environment_lenient(
+                    &reload_path,
+                    self.target_environment.as_deref(),
+                )
+                .map_err(anyhow::Error::from)?
+            };
         self.config_form = ConfigForm::from_config(&self.current_config);
         self.credentials = CredentialsForm::from_config(&self.current_config);
         self.refresh_connectivity();
@@ -2378,10 +2401,17 @@ impl App {
                 write_workspace_config(&self.target_path, &workspace)?;
             }
         }
-        self.current_config = Config::load_from_path_with_environment_lenient(
-            &self.target_path,
-            self.target_environment.as_deref(),
-        )?;
+        self.current_config =
+            if matches!(self.target_kind, TargetKind::Profile) || self.active_profile.is_some() {
+                Config::load_from_path_lenient_without_active_overlay(&self.target_path)
+                    .map_err(anyhow::Error::from)?
+            } else {
+                Config::load_from_path_with_environment_lenient(
+                    &self.target_path,
+                    self.target_environment.as_deref(),
+                )
+                .map_err(anyhow::Error::from)?
+            };
         self.config_form = ConfigForm::from_config(&self.current_config);
         self.credentials = CredentialsForm::from_config(&self.current_config);
         self.refresh_connectivity();
@@ -2562,7 +2592,16 @@ impl App {
         self.one_browser.panels = vec![panel];
         self.one_browser.last_run = Some(format!("{:?}", std::time::SystemTime::now()));
         self.one_browser.item_cursor = 0;
-        self.status_message = format!("One browser refreshed: {}", resource.label());
+        self.status_message = if self
+            .one_browser
+            .panels
+            .first()
+            .is_some_and(|panel| panel.is_error)
+        {
+            format!("One browser error: {}", resource.label())
+        } else {
+            format!("One browser refreshed: {}", resource.label())
+        };
     }
 
     pub fn active_one_browser_items(&self) -> Vec<OneBrowserItem> {
@@ -2647,4 +2686,49 @@ fn load_workspace_entries() -> Result<Vec<WorkspaceEntry>> {
     }
     entries.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn live_smoke_enabled() -> bool {
+        matches!(
+            std::env::var("AYX_ONE_LIVE_SMOKE").ok().as_deref(),
+            Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+        )
+    }
+
+    #[test]
+    fn one_browser_workspace_list_shows_live_items() {
+        if !live_smoke_enabled() {
+            return;
+        }
+
+        let mut app = App::new_without_worker().expect("app should load the active config");
+        app.select_screen(Screen::One);
+        app.open_one_browser_resource(OneBrowserResource::WorkspaceList, None, false)
+            .expect("workspace list should load");
+
+        let panel = app
+            .one_browser
+            .panels
+            .first()
+            .expect("workspace list panel should exist");
+        if panel.is_error {
+            panic!(
+                "workspace list failed in live TUI smoke:\n{}",
+                panel.lines.join("\n")
+            );
+        }
+
+        let items = app.active_one_browser_items();
+        assert!(
+            !items.is_empty(),
+            "expected live workspace items in One Browser panel\npanel: {:?}\nlines: {:?}",
+            panel.title,
+            panel.lines
+        );
+        assert_eq!(panel.title, "Workspace List");
+    }
 }
