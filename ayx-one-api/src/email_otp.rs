@@ -1,10 +1,13 @@
 /// Email OTP authentication flow for Alteryx One.
 ///
-/// The OTP validation (sendPasscode / validatePasscode) runs over plain HTTP.
-/// Workspace OIDC — which requires browser-side PKCE and JavaScript — is
-/// delegated to a Python/Playwright subprocess.  The two halves are stitched
-/// together via temp files: Rust writes the OTP the user types, Python reads
-/// it, completes the browser flow, mints a PAT, and writes the result JSON.
+/// `email_otp_login` tries a pure-reqwest path first (no browser, no Python):
+/// sendPasscode → validatePasscode → follow the workspace-entry redirect chain
+/// (Accept: text/html required — the BFF serves 302 to OIDC only for HTML
+/// requests) → POST /session with workspace password → resume OIDC →
+/// local-auth-workspace cookie → mint 30-day PAT.
+///
+/// Falls back to a Python/Playwright subprocess automatically on any failure.
+/// `AYX_ONE_AUTH_FORCE_BROWSER=1` skips the pure-HTTP path entirely.
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -666,7 +669,7 @@ fn write_script(workdir: &std::path::Path) -> Result<PathBuf> {
 /// Poll until `path` exists, checking every 500 ms up to `timeout`.
 /// `early_exit` returns true if the subprocess exited early (skip waiting).
 #[allow(dead_code)]
-fn wait_for_file<F>(path: &PathBuf, timeout: Duration, early_exit: F) -> Result<()>
+fn wait_for_file<F>(path: &std::path::Path, timeout: Duration, early_exit: F) -> Result<()>
 where
     F: Fn() -> bool,
 {

@@ -1973,16 +1973,14 @@ pub fn resolve_one_base_url(config: &Config) -> String {
         .alteryx_one
         .as_ref()
         .is_some_and(|one| one.auth_mode == AuthMode::ServicePrincipal)
-    {
-        if let Some(url) = config
+        && let Some(url) = config
             .alteryx_one
             .as_ref()
             .and_then(|one| one.resolved_sp_api_base_url())
-        {
-            let trimmed = url.trim().trim_end_matches('/').to_string();
-            if !trimmed.is_empty() {
-                return trimmed;
-            }
+    {
+        let trimmed = url.trim().trim_end_matches('/').to_string();
+        if !trimmed.is_empty() {
+            return trimmed;
         }
     }
     if let Some(one) = config.alteryx_one.as_ref()

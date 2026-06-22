@@ -1320,15 +1320,14 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         }
         // SP client secret reuses the shared client_secret field when no
         // dedicated sp_client_secret is available.
-        if let Some(secret) = sp_client_secret {
-            if one
+        if let Some(secret) = sp_client_secret
+            && one
                 .client_secret
                 .as_ref()
                 .is_none_or(|value| value.trim().is_empty())
             {
                 one.client_secret = Some(secret);
             }
-        }
         if one
             .sp_token_endpoint_url
             .as_ref()
