@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use ayx_core::observability::redact_text;
 use reqwest::blocking::Client;
 use reqwest::cookie::{CookieStore as _, Jar};
 use reqwest::redirect::Policy;
@@ -120,7 +121,10 @@ where
     let validate_status = validate.status();
     if !validate_status.is_success() {
         let body = validate.text().unwrap_or_default();
-        bail!("validatePasscode failed: HTTP {validate_status}: {body}");
+        bail!(
+            "validatePasscode failed: HTTP {validate_status}: {}",
+            redact_text(&body.chars().take(200).collect::<String>())
+        );
     }
 
     // 3. Enter the workspace; follow redirects to the password page and capture
@@ -228,7 +232,10 @@ fn resolve_workspace_name(
     if !accounts_resp.status().is_success() {
         let status = accounts_resp.status();
         let body = accounts_resp.text().unwrap_or_default();
-        bail!("/v4/auth/accounts returned HTTP {status}: {body}");
+        bail!(
+            "/v4/auth/accounts returned HTTP {status}: {}",
+            redact_text(&body.chars().take(200).collect::<String>())
+        );
     }
     let accounts: Value = accounts_resp
         .json()
@@ -272,10 +279,46 @@ fn resolve_workspace_password() -> Result<String> {
     Ok(pw)
 }
 
+/// Returns `true` if `host` is allowed given the auth base host.
+///
+/// Allowed hosts are: the base host itself, its parent domain (base host minus
+/// its leftmost label), and any sibling subdomain of that parent.  The parent
+/// must itself contain a dot so that a 2-label base like `foo.com` never
+/// grants access to arbitrary `.com` hosts.
+///
+/// Example: base `us1.alteryxcloud.com` allows `us1.alteryxcloud.com`,
+/// `alteryxcloud.com`, and `pingauth.alteryxcloud.com`, but rejects `evil.com`
+/// and `alteryxcloud.com.evil.com`.
+fn host_allowed(host: &str, base_host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let base_host = base_host.trim_end_matches('.').to_ascii_lowercase();
+    if host == base_host {
+        return true;
+    }
+    // Parent = base_host minus its leftmost label.  Require the parent to
+    // still contain a dot so we never allow an entire TLD (e.g. ".com").
+    if let Some((_, parent)) = base_host.split_once('.')
+        && parent.contains('.')
+    {
+        return host == parent || host.ends_with(&format!(".{parent}"));
+    }
+    false
+}
+
 /// Follow 3xx redirects manually with the client's cookie jar, returning the
 /// ordered list of every URL visited (requested URLs and redirect targets).
 /// Stops at the first non-redirect response or after `max_hops` redirects.
+///
+/// Every redirect *target* is validated against an allowlist derived from the
+/// starting URL's host: only the base host, its parent domain, and sibling
+/// subdomains of that parent are permitted.  An off-domain target causes an
+/// immediate error without sending a request (and therefore without forwarding
+/// cookies).
 fn follow_redirects(client: &Client, start: reqwest::Url, max_hops: usize) -> Result<Vec<String>> {
+    let base_host = start
+        .host_str()
+        .context("auth base URL has no host")?
+        .to_ascii_lowercase();
     let mut visited = vec![start.to_string()];
     let mut current = start;
     for _ in 0..max_hops {
@@ -297,17 +340,43 @@ fn follow_redirects(client: &Client, start: reqwest::Url, max_hops: usize) -> Re
             .and_then(|v| v.to_str().ok())
             .context("redirect response missing Location header")?;
         // Resolve relative Locations against the current URL.
-        current = current
+        let next = current
             .join(location)
             .with_context(|| format!("invalid redirect Location: {location}"))?;
+        // Validate the redirect target before following it.
+        let next_host = next.host_str().unwrap_or("");
+        if !host_allowed(next_host, &base_host) {
+            let parent = base_host
+                .split_once('.')
+                .map(|(_, p)| p)
+                .unwrap_or(&base_host);
+            bail!(
+                "refusing to follow auth redirect to off-domain host '{}' \
+                 (expected an *.{} host); the auth flow may have changed or been tampered with",
+                next_host,
+                parent,
+            );
+        }
+        current = next;
         visited.push(current.to_string());
     }
     bail!("exceeded {max_hops} redirects while following the auth flow")
 }
 
+/// Returns `true` if `s` has a valid shape for an OIDC interaction id:
+/// 6–128 ASCII alphanumeric/`_`/`-` characters.
+fn is_valid_interaction_id(s: &str) -> bool {
+    (6..=128).contains(&s.len())
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 /// Pull the OIDC interaction id out of the redirect chain.  Prefers the
 /// `interaction_id=` query parameter; falls back to a `/token/<id>` path
 /// segment (ignoring the `/token/auth/...` callback path).
+///
+/// Candidates are validated with `is_valid_interaction_id` before being
+/// returned; malformed or oversized values are skipped.
 fn extract_interaction_id(visited: &[String]) -> Option<String> {
     for url in visited {
         if let Some(idx) = url.find("interaction_id=") {
@@ -316,7 +385,7 @@ fn extract_interaction_id(visited: &[String]) -> Option<String> {
                 .chars()
                 .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
                 .collect();
-            if !id.is_empty() {
+            if is_valid_interaction_id(&id) {
                 return Some(id);
             }
         }
@@ -328,7 +397,7 @@ fn extract_interaction_id(visited: &[String]) -> Option<String> {
                 .chars()
                 .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
                 .collect();
-            if !seg.is_empty() && seg != "auth" {
+            if is_valid_interaction_id(&seg) && seg != "auth" {
                 return Some(seg);
             }
         }
@@ -369,4 +438,137 @@ fn cookie_value_from_jar(jar: &Jar, url: &url::Url, name: &str) -> Option<String
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_interaction_id, host_allowed, is_valid_interaction_id};
+
+    // ── host_allowed ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn host_allowed_exact_base() {
+        assert!(host_allowed("us1.alteryxcloud.com", "us1.alteryxcloud.com"));
+    }
+
+    #[test]
+    fn host_allowed_sibling_subdomain() {
+        assert!(host_allowed(
+            "pingauth.alteryxcloud.com",
+            "us1.alteryxcloud.com"
+        ));
+    }
+
+    #[test]
+    fn host_allowed_parent_domain() {
+        assert!(host_allowed("alteryxcloud.com", "us1.alteryxcloud.com"));
+    }
+
+    #[test]
+    fn host_allowed_rejects_unrelated() {
+        assert!(!host_allowed("evil.com", "us1.alteryxcloud.com"));
+    }
+
+    #[test]
+    fn host_allowed_rejects_subdomain_lookalike() {
+        // "alteryxcloud.com.evil.com" ends with ".com" but should not match
+        assert!(!host_allowed(
+            "alteryxcloud.com.evil.com",
+            "us1.alteryxcloud.com"
+        ));
+    }
+
+    #[test]
+    fn host_allowed_rejects_prefix_lookalike() {
+        assert!(!host_allowed("notalteryxcloud.com", "us1.alteryxcloud.com"));
+    }
+
+    #[test]
+    fn host_allowed_rejects_empty() {
+        assert!(!host_allowed("", "us1.alteryxcloud.com"));
+    }
+
+    #[test]
+    fn host_allowed_two_label_base_only_allows_exact() {
+        // Parent of "foo.com" is "com" which has no dot — only exact match allowed.
+        assert!(host_allowed("foo.com", "foo.com"));
+        assert!(!host_allowed("bar.com", "foo.com"));
+        assert!(!host_allowed("sub.foo.com", "foo.com"));
+    }
+
+    // ── is_valid_interaction_id ───────────────────────────────────────────────
+
+    #[test]
+    fn valid_typical_id() {
+        assert!(is_valid_interaction_id("glqI9FpDHQkirawE3nYD5"));
+    }
+
+    #[test]
+    fn invalid_too_short() {
+        assert!(!is_valid_interaction_id("abc"));
+    }
+
+    #[test]
+    fn invalid_too_long() {
+        let long: String = "a".repeat(129);
+        assert!(!is_valid_interaction_id(&long));
+    }
+
+    #[test]
+    fn valid_min_length() {
+        assert!(is_valid_interaction_id("abcdef"));
+    }
+
+    #[test]
+    fn valid_max_length() {
+        let s: String = "a".repeat(128);
+        assert!(is_valid_interaction_id(&s));
+    }
+
+    // ── extract_interaction_id ────────────────────────────────────────────────
+
+    #[test]
+    fn extract_from_query_param() {
+        let visited = vec![
+            "https://us1.alteryxcloud.com/".to_string(),
+            "https://pingauth.alteryxcloud.com/as/authorization.oauth2?interaction_id=glqI9FpDHQkirawE3nYD5&client_id=x".to_string(),
+        ];
+        assert_eq!(
+            extract_interaction_id(&visited),
+            Some("glqI9FpDHQkirawE3nYD5".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_from_token_path() {
+        let visited = vec![
+            "https://us1.alteryxcloud.com/".to_string(),
+            "https://us1.alteryxcloud.com/token/glqI9FpDHQkirawE3nYD5/resume".to_string(),
+        ];
+        assert_eq!(
+            extract_interaction_id(&visited),
+            Some("glqI9FpDHQkirawE3nYD5".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_skips_token_auth_segment() {
+        let visited = vec!["https://us1.alteryxcloud.com/token/auth/callback?code=abc".to_string()];
+        // "/token/auth" has seg="auth" which is excluded; no valid id found.
+        assert_eq!(extract_interaction_id(&visited), None);
+    }
+
+    #[test]
+    fn extract_rejects_oversized_id() {
+        let oversized = "a".repeat(129);
+        let visited = vec![format!(
+            "https://pingauth.alteryxcloud.com/as/authorization.oauth2?interaction_id={oversized}"
+        )];
+        assert_eq!(extract_interaction_id(&visited), None);
+    }
+
+    #[test]
+    fn extract_returns_none_for_empty_chain() {
+        assert_eq!(extract_interaction_id(&[]), None);
+    }
 }

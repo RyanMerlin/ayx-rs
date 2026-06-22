@@ -5682,6 +5682,31 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
         }
     };
 
+    let Some(probe) = workspace_probe.as_ref() else {
+        // Unreachable: workspace_probe is Some at this point (the Err arm
+        // returned early above), but bind defensively rather than .unwrap().
+        return Ok(Envelope::ok_with_data(
+            "one platform auth diagnose",
+            json!({
+                "product": "one",
+                "surface": "platform",
+                "profile": config.profile_name,
+                "workspace_id": workspace_id,
+                "oauth_client_id_present": oauth_client_id.is_some(),
+                "base_url": one.normalized_base_url(),
+                "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
+                "access_token_present": true,
+                "refresh_token_present": has_refresh_token,
+                "access_token_claims": access_token_claim_summary(access_token),
+                "diagnosis": "token present but workspace probe was not executed",
+                "workspace_probe": null,
+                "recommendations": [
+                    "Use one platform token or auth status for evidence",
+                    "Route any failing symptoms into the workflow guidance layer",
+                ],
+            }),
+        ));
+    };
     Ok(Envelope::ok_with_data(
         "one platform auth diagnose",
         json!({
@@ -5697,7 +5722,7 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
             "access_token_claims": access_token_claim_summary(access_token),
             "diagnosis": "token present and workspace probe executed",
             "workspace_probe": sanitize_live_probe_for_user(
-                &workspace_probe.as_ref().unwrap().data,
+                &probe.data,
                 access_token.unwrap_or(""),
             ),
             "recommendations": [

@@ -5,11 +5,13 @@
 
 Full test notes in `docs/HANDOFF-pure-http-auth.md`. Per-endpoint status in `docs/one-live-validation.md`.
 
-> **Status (v0.10.0):** all five phases complete. A security + correctness red-team of the
-> auth flow and surface work followed; all blocking findings are fixed and test-covered. Key
-> model fact established: the PAT is **workspace-bound** (the `x-alteryx-workspace-gid` header is
-> ignored server-side), which drove the argless `workspace people`/`admins` and the new
-> `workspace switch` command.
+> **Status (v0.10.2):** all five phases complete. The security + correctness red-team of the
+> auth flow and surface work is fully closed — the deferred M2/M3 transport items (redirect-host
+> allowlist, interaction-id shape validation, broader response-body redaction) landed in v0.10.2.
+> The Playwright/headless-Chromium fallback was removed in v0.10.1; the email-OTP flow is now
+> pure-HTTP only. Key model fact established: the PAT is **workspace-bound** (the
+> `x-alteryx-workspace-gid` header is ignored server-side), which drove the argless
+> `workspace people`/`admins` and the new `workspace switch` command.
 
 ---
 

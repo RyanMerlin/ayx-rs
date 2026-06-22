@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.2 — 2026-06-22
+
+### Security
+
+- **Redirect-host allowlist** on the auth flow. The OTP→OIDC redirect follower now refuses to follow a `Location` to any host outside the base domain and its subdomains (e.g. `us1.alteryxcloud.com` allows `pingauth.alteryxcloud.com` but rejects `evil.com` and `alteryxcloud.com.evil.com`). An off-domain redirect is never requested, so no cookies are sent off-domain. (red-team M2)
+- **Interaction-id shape validation.** The OIDC interaction id pulled from the redirect chain is now bounds-checked (6–128 chars, restricted charset) before use. (red-team M3)
+- **Redacted two more raw response bodies** (`validatePasscode`, `/v4/auth/accounts` error paths) that previously interpolated unredacted bodies into errors — same leak class fixed earlier in the preflight path.
+
+### Robustness
+
+- Removed a latent `unwrap()` in the `auth diagnose` envelope builder (safe-by-construction today, but a footgun if the control flow changed).
+
+### Tests
+
+- 18 new unit tests for the redirect-host allowlist and interaction-id validation (306 total).
+
 ## 0.10.1 — 2026-06-22
 
 ### Removed

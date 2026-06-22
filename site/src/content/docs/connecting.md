@@ -38,6 +38,17 @@ ayx whoami          # shows the workspace you're connected to
 
 If `doctor auth` passes but a command later fails, it's almost always an expired token — refresh it and retry.
 
+## Auth-transport safety
+
+The email-OTP first-login flow is pure-HTTP (reqwest). There is no browser, Python, or Playwright dependency.
+
+During the OIDC flow, ayx applies two transport-level guards:
+
+- **Redirect-host allowlist.** The redirect follower only accepts the configured Alteryx domain and its subdomains. An off-domain redirect (e.g. to an unrelated host) is rejected with an error before any credential is sent.
+- **Interaction-id validation.** The OIDC interaction id is validated for shape (6–128 characters, restricted charset) before use. A malformed value from the server is rejected rather than forwarded.
+
+Response bodies are redacted in auth-flow error output so credential material does not appear in logs or terminal output.
+
 ## Connecting to Alteryx Server (optional)
 
 If you also administer Alteryx Server, add a `server:` block to your profile with the Server API host and credentials:

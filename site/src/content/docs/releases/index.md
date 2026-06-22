@@ -7,6 +7,23 @@ sidebar:
 
 Release notes for each tagged version of `ayx`. For current behavior, use the live docs above; for a specific binary, read the notes for that version.
 
+## v0.10.2
+
+**Auth-transport security hardening.**
+
+- **Redirect-host allowlist.** The OIDC redirect follower now refuses off-domain redirects. Only the configured base host, its parent domain, and sibling subdomains are accepted (e.g. `us1.alteryxcloud.com` permits `pingauth.alteryxcloud.com`; a redirect to `evil.com` is rejected with an error).
+- **Interaction-id shape validation.** The OIDC interaction id is validated at parse time: 6–128 characters, restricted charset. Malformed values are rejected before any network request is made.
+- **Broader response-body redaction.** Two additional error paths (`validatePasscode` and `/v4/auth/accounts`) now redact response bodies in error output. Combined with prior redaction, all major auth-flow error paths suppress raw server responses.
+- **Latent unwrap removed in `auth diagnose`.** A panic path reachable under certain error conditions in the diagnose command has been removed.
+
+Known limitation (tracked for a follow-up): loading a profile that contains an `env:`-backed secret ref and then saving it can materialize the resolved value as a concrete secret, dropping the `env:` indirection. Preserving `env:` refs through a load→save round-trip is tracked but not yet fixed.
+
+## v0.10.1
+
+**Playwright fallback removed.**  The email-OTP first-login flow is now pure-HTTP only (reqwest). The headless-Chromium fallback path that was present as a last resort has been removed. There are no longer any `python3`, `playwright`, or `chromium` dependencies for authentication. The `AYX_ONE_AUTH_FORCE_BROWSER` and `AYX_ONE_AUTH_NO_FALLBACK` environment variables have been removed.
+
+The separate `--browser` PKCE auth-code flow on `auth login` is unaffected.
+
 ## v0.10.0
 
 **Workspace model clarified — the token determines the workspace.**  The `x-alteryx-workspace-gid` header is ignored server-side; switching workspaces requires `workspace switch` (re-points to an already-authenticated credential) or `auth login` (authenticates a new one).
