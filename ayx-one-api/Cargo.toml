@@ -11,7 +11,6 @@ ayx-core = { path = "../ayx-core" }
 base64.workspace = true
 chrono.workspace = true
 getrandom = "0.2"
-tempfile.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

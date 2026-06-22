@@ -1,5 +1,9 @@
 # Pure-HTTP first-login for Alteryx One
 
+> **v0.10.1 update:** The Playwright/browser fallback was REMOVED.  Pure-HTTP is now the
+> only authentication path.  The `AYX_ONE_AUTH_FORCE_BROWSER` and `AYX_ONE_AUTH_NO_FALLBACK`
+> env vars no longer exist.  The browser fallback lives in git history if ever needed.
+
 **Completed:** 2026-06-22
 **Branch:** `fix/keyring-no-default-store`
 **Status:** ✅ End-to-end verified. Committed as `9d96b50`.
@@ -108,8 +112,7 @@ cookie set → POST /v4/apiAccessTokens → 30-day PAT stored.
 ayx one platform auth login
 ```
 - Prompts for one 6-digit OTP (emailed to the account).
-- Runs pure-HTTP first; on any failure auto-falls-back to Playwright and prints the reason.
-- `AYX_ONE_AUTH_FORCE_BROWSER=1` skips pure-HTTP entirely.
+- Runs the pure-HTTP flow exclusively (no browser, no Python dependency).
 - On success the 30-day PAT lands in the profile under `access_token_ref`.
 
 ## Operational notes

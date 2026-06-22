@@ -1404,8 +1404,7 @@ pub(crate) enum OnePlatformAuthCommand {
     ///
     /// Default (no flags): email OTP flow — sends a one-time passcode to your
     /// account email address, then completes the Alteryx One OIDC workspace
-    /// handshake via a headless Chromium browser (python3 + playwright required:
-    /// pip install playwright && playwright install chromium).
+    /// handshake via a pure-HTTP reqwest flow (no browser or Python required).
     ///
     /// With --device: device-code flow — prints a short URL and code; open
     /// the URL on any device, enter the code, and the CLI stores your tokens

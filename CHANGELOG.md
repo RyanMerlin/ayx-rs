@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.1 — 2026-06-22
+
+### Removed
+
+- Dropped the Playwright/headless-Chromium fallback from the Alteryx One first-login flow. The pure-HTTP reqwest flow (proven through v0.10.0) is now the only path — no `python3`, `playwright`, or `chromium` dependency, and no `AYX_ONE_AUTH_FORCE_BROWSER` / `AYX_ONE_AUTH_NO_FALLBACK` env vars. This removes ~505 lines (including an embedded Python script), drops the unused `tempfile` dependency, and resolves the red-team M4 finding (the workspace password was passed to the subprocess via an env var). The full browser implementation remains in git history if Alteryx ever changes their OIDC flow.
+- Removed dead helpers orphaned by the earlier pure-HTTP refactor (`random_hex`, `wait_for_file`).
+
 ## 0.10.0 — 2026-06-22
 
 Alteryx One authentication GA. This milestone follows a security and correctness
