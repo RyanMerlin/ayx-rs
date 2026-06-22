@@ -137,6 +137,15 @@ panicking at runtime on every invocation. All four renamed their file arg to
 - `server runtime-settings`
 - `tools workspace init`
 
+The following workflow commands use `--output-path` (not `--output`), so they
+were never affected by the collision bug and work correctly at all versions:
+
+- `workflow replace`
+- `workflow repackage`
+- `workflow recurse`
+- `workflow convert-cloud`
+- `workflow migrate`
+
 ## Follow-Up
 
 As more endpoints are confirmed, add them to the live matrix and keep the coverage grouped by family so the report stays readable.

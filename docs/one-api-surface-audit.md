@@ -1,9 +1,15 @@
 # Alteryx One API Surface Audit — `alteryx-fde`
 
 **Date:** 2026-06-22  
-**Tested with:** `ayx` v0.9.11, PAT via pure-HTTP OTP login, workspace `alteryx-fde` (id=91946, tier=platform_packaging)
+**Tested with:** `ayx` v0.9.11 → v0.10.0, PAT via pure-HTTP OTP login, workspace `alteryx-fde` (id=91946, tier=platform_packaging)
 
-Full test notes in `docs/HANDOFF-pure-http-auth.md`.
+Full test notes in `docs/HANDOFF-pure-http-auth.md`. Per-endpoint status in `docs/one-live-validation.md`.
+
+> **Status (v0.10.0):** all five phases complete. A security + correctness red-team of the
+> auth flow and surface work followed; all blocking findings are fixed and test-covered. Key
+> model fact established: the PAT is **workspace-bound** (the `x-alteryx-workspace-gid` header is
+> ignored server-side), which drove the argless `workspace people`/`admins` and the new
+> `workspace switch` command.
 
 ---
 

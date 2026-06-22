@@ -256,7 +256,63 @@ pub fn redact_text(input: &str) -> String {
         }
         out.push(c);
     }
-    redact_query_params(&out)
+    let out = redact_query_params(&out);
+    redact_bare_jwts(&out)
+}
+
+/// Redact bare JWT tokens of the form `eyJ<header>.<payload>.<signature>`.
+///
+/// Only matches the three-part dotted form with base64url characters so that
+/// short `eyJ`-prefixed strings (e.g. plain base64 blobs) aren't accidentally
+/// caught unless they really look like a JWT.
+fn redact_bare_jwts(input: &str) -> String {
+    // Base64url alphabet: A-Za-z0-9 _ -
+    // We match eyJ...<dot>...<dot>...  where each segment is ≥1 base64url char.
+    let bytes = input.as_bytes();
+    let len = bytes.len();
+    let mut out = String::with_capacity(len);
+    let mut i = 0;
+    while i < len {
+        // Look for the prefix "eyJ" (base64url for `{"`)
+        if i + 3 <= len && &bytes[i..i + 3] == b"eyJ" {
+            // Scan a base64url segment
+            let seg_start = i;
+            let mut j = i;
+            while j < len && is_base64url(bytes[j]) {
+                j += 1;
+            }
+            // We need exactly two dots separating three segments
+            if j < len && bytes[j] == b'.' {
+                let mut k = j + 1;
+                while k < len && is_base64url(bytes[k]) {
+                    k += 1;
+                }
+                if k < len && bytes[k] == b'.' {
+                    let mut m = k + 1;
+                    while m < len && is_base64url(bytes[m]) {
+                        m += 1;
+                    }
+                    // All three segments must have ≥1 char and first must start with eyJ
+                    let seg1_len = j - seg_start;
+                    let seg2_len = k - (j + 1);
+                    let seg3_len = m - (k + 1);
+                    if seg1_len >= 3 && seg2_len >= 1 && seg3_len >= 1 {
+                        out.push_str("***");
+                        i = m;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+#[inline]
+fn is_base64url(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'-'
 }
 
 fn redact_query_params(input: &str) -> String {
@@ -268,6 +324,12 @@ fn redact_query_params(input: &str) -> String {
         "api_key",
         "apikey",
         "client_secret",
+        "tokenvalue",
+        "local-auth-workspace",
+        "x-csrf-token",
+        "passcode",
+        "passcodereferenceid",
+        "secret",
     ];
     const VALUE_TERMINATORS: &[char] = &['&', ' ', '"', '\'', '\n', '\r', '\t', ','];
     const DELIMITERS: &[char] = &['&', '?', ' ', '"', '\''];
@@ -347,6 +409,12 @@ pub fn redact_json(value: &Value) -> Value {
         "apikey",
         "client_secret",
         "authorization",
+        "tokenvalue",
+        "local-auth-workspace",
+        "x-csrf-token",
+        "passcode",
+        "passcodereferenceid",
+        "secret",
     ];
     match value {
         Value::Object(map) => {
@@ -446,5 +514,41 @@ mod tests {
         assert!(!s.contains("rt-xyz"));
         assert!(!s.contains("at-1"));
         assert!(s.contains("\"foo\":\"bar\""));
+    }
+
+    #[test]
+    fn masks_tokenvalue_key() {
+        let r = redact_text("tokenValue=abc123");
+        assert!(!r.contains("abc123"), "leaked: {r}");
+        assert!(
+            r.contains("tokenvalue=***") || r.contains("tokenValue=***"),
+            "got: {r}"
+        );
+    }
+
+    #[test]
+    fn masks_local_auth_workspace_with_jwt_value() {
+        let jwt = "eyJhbGc.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        let input = format!("local-auth-workspace={jwt}");
+        let r = redact_text(&input);
+        assert!(!r.contains("eyJhbGc"), "leaked JWT header: {r}");
+        assert!(r.contains("local-auth-workspace=***"), "got: {r}");
+    }
+
+    #[test]
+    fn masks_bare_jwt_in_text() {
+        let jwt = "eyJaaa.bbb.ccc";
+        let r = redact_text(jwt);
+        assert!(!r.contains("eyJaaa"), "leaked: {r}");
+        assert_eq!(r, "***");
+    }
+
+    #[test]
+    fn bare_jwt_masked_inside_larger_string() {
+        let jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.sig123";
+        let input = format!("Bearer {jwt}");
+        let r = redact_text(&input);
+        assert!(!r.contains("eyJhbGciOiJSUzI1NiJ9"), "leaked: {r}");
+        assert!(r.contains("Bearer ***") || r.contains("***"), "got: {r}");
     }
 }

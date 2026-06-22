@@ -1347,16 +1347,35 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         if let Some(value) = account_email {
             one.account_email = value;
         }
-        if base_url.is_some() {
+        // Gap-fill rule: env vars fill only when the profile value is absent
+        // or empty. A non-empty profile value always wins. This is consistent
+        // with the token fields below and makes profiles authoritative.
+        if one
+            .base_url
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
             one.base_url = base_url;
         }
-        if oauth_client_id.is_some() {
+        if one
+            .oauth_client_id
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
             one.oauth_client_id = oauth_client_id;
         }
-        if client_secret.is_some() {
+        if one
+            .client_secret
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
             one.client_secret = client_secret;
         }
-        if token_endpoint_url.is_some() {
+        if one
+            .token_endpoint_url
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
             one.token_endpoint_url = token_endpoint_url;
         }
         // Only apply env-fallback tokens when there is no _ref already in the

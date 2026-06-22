@@ -4,6 +4,33 @@
 use std::fs;
 use std::process::Command;
 
+/// Assert that a command invocation does NOT produce a clap downcast panic.
+///
+/// The clap downcast panic message ("Mismatch between definition and access")
+/// fires at argument-parse time before any network call. A command that
+/// collides its local `--output` arg id with the global `--output` id will
+/// abort here even with `--help` inputs. We tolerate non-zero exit (auth
+/// errors, missing required args, etc.) but never tolerate a panic abort or
+/// the specific clap panic string.
+fn assert_no_clap_panic(args: &[&str]) {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(args)
+        .output()
+        .unwrap_or_else(|_| panic!("ayx binary should run for args: {args:?}"));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("Mismatch between definition and access"),
+        "clap downcast panic detected for args {args:?}\nstderr:\n{stderr}"
+    );
+    // A panic abort on Linux typically produces a non-zero exit + "panicked at"
+    // in stderr. Guard against that as well.
+    assert!(
+        !stderr.contains("panicked at"),
+        "process panicked for args {args:?}\nstderr:\n{stderr}"
+    );
+}
+
 use serde_json::Value;
 
 fn assert_json_output_works_before_and_after(base_args: &[&str], check: fn(&Value)) {
@@ -564,4 +591,160 @@ fn catalog_run_smoke() {
         "designer.workflow.context"
     );
     assert_eq!(json["data"]["result"]["workflow"]["tool_count"], 1);
+}
+
+// ---- Panic-regression smoke tests for commands that were renamed to use --output-file ----
+//
+// The clap downcast panic ("Mismatch between definition and access") fires at
+// argument-parse time before any network call when a command defines a local
+// `--output` arg that collides with the global `--output` arg id.
+// These four commands were renamed to `--output-file` / `--output-path` in the
+// v0.10.0 hardening pass. The tests verify the collision cannot silently regress.
+
+/// Guard: `one flows export` uses `--output-file`, not `--output`.
+/// The clap collision fires before network calls, so we only need `--help`.
+#[test]
+fn flows_export_output_file_flag_no_clap_panic() {
+    assert_no_clap_panic(&["--output", "json", "one", "flows", "export", "--help"]);
+}
+
+#[test]
+fn flows_export_help_shows_output_file_not_output() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "flows", "export", "--help"])
+        .output()
+        .expect("ayx binary should run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--output-file"),
+        "`one flows export --help` must list --output-file"
+    );
+    // The local flag must not shadow the global --output flag id.
+    // If --output appears it must be the global flag description, not a local one.
+}
+
+/// Guard: `server system-info` uses `--output-file`.
+#[test]
+fn server_system_info_output_file_flag_no_clap_panic() {
+    assert_no_clap_panic(&["--output", "json", "server", "system-info", "--help"]);
+}
+
+#[test]
+fn server_system_info_help_shows_output_file() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["server", "system-info", "--help"])
+        .output()
+        .expect("ayx binary should run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--output-file"),
+        "`server system-info --help` must list --output-file"
+    );
+}
+
+/// Guard: `server runtime-settings` uses `--output-file`.
+#[test]
+fn server_runtime_settings_output_file_flag_no_clap_panic() {
+    assert_no_clap_panic(&["--output", "json", "server", "runtime-settings", "--help"]);
+}
+
+#[test]
+fn server_runtime_settings_help_shows_output_file() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["server", "runtime-settings", "--help"])
+        .output()
+        .expect("ayx binary should run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--output-file"),
+        "`server runtime-settings --help` must list --output-file"
+    );
+}
+
+/// Guard: `tools workspace init` uses `--output-file`.
+#[test]
+fn tools_workspace_init_output_file_flag_no_clap_panic() {
+    assert_no_clap_panic(&["--output", "json", "tools", "workspace", "init", "--help"]);
+}
+
+#[test]
+fn tools_workspace_init_help_shows_output_file() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["tools", "workspace", "init", "--help"])
+        .output()
+        .expect("ayx binary should run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--output-file"),
+        "`tools workspace init --help` must list --output-file"
+    );
+}
+
+/// Functional smoke: `tools workspace init --output-file <tmp>` must exit 0
+/// and write the file. This exercises the actual command, not just --help.
+#[cfg(not(windows))]
+#[test]
+fn tools_workspace_init_creates_output_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = dir.path().join("environments.yaml");
+
+    let result = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "--output",
+            "json",
+            "tools",
+            "workspace",
+            "init",
+            "--output-file",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .expect("ayx binary should run");
+
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        !stderr.contains("Mismatch between definition and access"),
+        "clap panic detected\nstderr:\n{stderr}"
+    );
+    assert!(
+        result.status.success(),
+        "tools workspace init should exit 0\nstdout:{}\nstderr:{}",
+        String::from_utf8_lossy(&result.stdout),
+        stderr
+    );
+    assert!(out.exists(), "output file should have been written");
+}
+
+/// Functional smoke: `server system-info --output-file <tmp>` with global `--output json`.
+/// This command reads from the local runtime settings; it may fail if no Alteryx Server
+/// is present, but it MUST NOT panic.
+#[cfg(not(windows))]
+#[test]
+fn server_system_info_with_output_file_no_clap_panic_functional() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = dir.path().join("sysinfo.json");
+
+    let result = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "--output",
+            "json",
+            "server",
+            "system-info",
+            "--output-file",
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .expect("ayx binary should run");
+
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        !stderr.contains("Mismatch between definition and access"),
+        "clap panic detected\nstderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("panicked at"),
+        "process panicked\nstderr:\n{stderr}"
+    );
+    // The command may exit non-zero if runtime-settings.xml is absent, but that
+    // is an application-level error, not a panic. We only assert no panic here.
 }

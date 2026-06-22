@@ -345,9 +345,16 @@ fn login(
     let profile_name = config.profile_name.clone();
 
     let path = profile_storage_path(&profile_name)?;
-    crate::onboard::write_config(&path, &config, &std::collections::BTreeMap::new())
-        .context("failed to save profile")?;
+    let secretize = crate::onboard::write_config_with_policy(
+        &path,
+        &config,
+        crate::onboard::InlineSecretPolicy::Allow,
+    )
+    .context("failed to save profile")?;
 
+    if let Some(msg) = crate::onboard::inline_secret_warning(&secretize.inline_fields) {
+        eprintln!("warning: {msg}");
+    }
     eprintln!("Credentials stored in profile '{profile_name}'.");
     Ok(Envelope::ok_with_data(
         "credentials stored",
@@ -359,6 +366,7 @@ fn login(
             "endpoint": endpoint,
             "token_length": final_access_token.len(),
             "has_refresh_token": final_refresh_token.is_some(),
+            "inline_secret_fields": secretize.inline_fields,
         }),
     ))
 }

@@ -1315,12 +1315,13 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(long)]
         workspace_id: String,
     },
-    People {
+    People,
+    Admins,
+    /// Select which authenticated workspace is active for this profile.
+    Switch {
         #[arg(long)]
-        workspace_id: String,
-    },
-    Admins {
-        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long, value_name = "WORKSPACE_ID")]
         workspace_id: String,
     },
     InviteUsers {

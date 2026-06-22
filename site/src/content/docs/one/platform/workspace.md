@@ -7,6 +7,10 @@ sidebar:
 
 `ayx one platform workspace` manages Alteryx One workspaces — listing them, reading and writing configuration, controlling membership, and transferring ownership. Mutating commands are dry-run by default; add `--apply` to commit.
 
+## Workspaces are token-bound
+
+The Alteryx One PAT you authenticated with determines your active workspace. The `x-alteryx-workspace-gid` header that some API clients send is ignored server-side — the token rules. You cannot change the active workspace by editing a workspace GID in your profile. Instead, use `workspace switch` to re-point to any workspace credential you have already authenticated, or run `auth login` for a new workspace if you haven't authenticated there yet.
+
 ## Quick reference
 
 | Command | What it does |
@@ -22,13 +26,14 @@ sidebar:
 | `workspace save-configuration-v4 --workspace-id <id> --body <json>` | Write v4 configuration to a specific workspace |
 | `workspace delete-current-configuration` | Delete configuration on the current workspace |
 | `workspace delete-configuration --workspace-id <id>` | Delete configuration on a specific workspace |
-| `workspace people --workspace-id <id>` | List members of a workspace |
-| `workspace admins --workspace-id <id>` | List admins of a workspace |
-| `workspace invite-users --workspace-id <id>` | Invite users to a workspace |
-| `workspace remove-user --workspace-id <id> --person-id <id>` | Remove a user from a workspace |
-| `workspace suspend-users --workspace-id <id>` | Suspend users in a workspace |
-| `workspace unsuspend-users --workspace-id <id>` | Unsuspend users in a workspace |
-| `workspace transfer --workspace-id <id>` | Transfer workspace ownership |
+| `workspace people` | List members of the active workspace |
+| `workspace admins` | List admins of the active workspace |
+| `workspace switch --workspace-id <id>` | Make an already-authenticated workspace credential active |
+| `workspace invite-users` | Invite users to the active workspace |
+| `workspace remove-user --person-id <id>` | Remove a user from the active workspace |
+| `workspace suspend-users` | Suspend users in the active workspace |
+| `workspace unsuspend-users` | Unsuspend users in the active workspace |
+| `workspace transfer` | Transfer active workspace ownership |
 | `workspace transfer-assets --body <json>` | Transfer assets between workspaces |
 
 ## Listing workspaces
@@ -115,20 +120,17 @@ ayx one platform workspace delete-configuration --workspace-id <id> --apply --ye
 ### List members and admins
 
 ```bash
-ayx one platform workspace people --workspace-id <id>
-ayx one platform workspace admins --workspace-id <id>
+ayx one platform workspace people
+ayx one platform workspace admins
 ```
 
-`people` queries `GET /v4/people` and `admins` queries `GET /v4/people?role=admin`. The `--workspace-id` argument is accepted for context but the underlying API does not scope these calls by workspace ID.
+`people` queries `GET /v4/people` and `admins` queries `GET /v4/people?role=admin`. Both are scoped to the active workspace via the token — they no longer accept `--workspace-id`.
 
 ### Invite users
 
 ```bash
-# Preview (--workspace-id is optional; defaults from the profile's workspace_gid)
+# Preview
 ayx one platform workspace invite-users
-
-# With explicit workspace
-ayx one platform workspace invite-users --workspace-id <id>
 
 # Commit
 ayx one platform workspace invite-users --apply
@@ -138,11 +140,10 @@ ayx one platform workspace invite-users --apply
 
 ```bash
 # Preview
-ayx one platform workspace remove-user --workspace-id <id> --person-id <id>
+ayx one platform workspace remove-user --person-id <id>
 
 # Commit (non-interactive)
 ayx one platform workspace remove-user \
-  --workspace-id <id> \
   --person-id <id> \
   --apply --yes
 ```
@@ -151,26 +152,41 @@ ayx one platform workspace remove-user \
 
 ```bash
 # Suspend
-ayx one platform workspace suspend-users --workspace-id <id> --apply --yes
+ayx one platform workspace suspend-users --apply --yes
 
 # Unsuspend
-ayx one platform workspace unsuspend-users --workspace-id <id> --apply
+ayx one platform workspace unsuspend-users --apply
 ```
 
 ## Transferring ownership
 
 ```bash
-# Transfer workspace ownership (preview)
-ayx one platform workspace transfer --workspace-id <id>
+# Transfer active workspace ownership (preview)
+ayx one platform workspace transfer
 
 # Commit
-ayx one platform workspace transfer --workspace-id <id> --apply --yes
+ayx one platform workspace transfer --apply --yes
 
 # Transfer assets between workspaces
 ayx one platform workspace transfer-assets --body '<json>' --apply
 ```
 
 `transfer-assets` requires a JSON `--body` describing the transfer. Use `--profile <name>` to target a specific environment.
+
+### Workspace mismatch errors
+
+The membership and ownership mutation commands (`invite-users`, `remove-user`, `suspend-users`, `unsuspend-users`, `transfer`, `transfer-assets`) operate on the active workspace determined by the token. Passing a `--workspace-id` that does not match the active workspace will be rejected. Omit the flag and use `workspace switch` to change the active workspace instead.
+
+## Switching workspaces
+
+`workspace switch` re-points the CLI to a workspace credential you have already authenticated. It takes effect immediately — no profile reload required.
+
+```bash
+# Switch to a workspace you've previously logged into
+ayx one platform workspace switch --workspace-id <id>
+```
+
+If you haven't authenticated for that workspace yet, the command errors and directs you to run `auth login` for that workspace first. This is the correct path for changing workspaces — you cannot switch by editing the workspace GID directly, because the active workspace is determined by the token, not a config value.
 
 ## Automation patterns
 
@@ -179,9 +195,8 @@ ayx one platform workspace transfer-assets --body '<json>' --apply
 ayx --output json one platform workspace list --all \
   | jq -r '.data[].id'
 
-# Bulk suspend users in a workspace (CI/script)
+# Bulk suspend users in the active workspace (CI/script)
 ayx one platform workspace suspend-users \
-  --workspace-id <id> \
   --apply --yes
 
 # Export current workspace config for review

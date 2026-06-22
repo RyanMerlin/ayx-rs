@@ -94,10 +94,12 @@ ayx one connections create --body "$(cat body.json)" --apply
 
 The command derives each field from the connector metadata:
 
-- `type` — `jdbc` for relational connectors, `remotefile` for others
+- `type` — `jdbc` for relational connectors, `remotefile` for others; when the connector type cannot be confidently inferred, the field emits a `<jdbc|remotefile|…>` placeholder
 - `vendor` / `vendorName` — taken from the connector slug
 - `credentialType` — taken from the metadata (e.g. `apiKey`, `oauth2`)
 - `params` — a skeleton of the connector-specific parameter fields
+
+When the connector type is ambiguous, the template also adds a `_note` field explaining why a placeholder was used and what values are valid. Replace the placeholder before passing the body to `connections create`.
 
 Example derivations:
 
@@ -105,6 +107,7 @@ Example derivations:
 |---|---|---|---|
 | `bigquery` | `jdbc` | `apiKey` | `{ "projectId": "" }` |
 | `gsheetsuser` | `remotefile` | `oauth2` | connector-specific fields |
+| unknown type | `<jdbc\|remotefile\|…>` | from metadata | `_note` field included |
 
 Pipe the output to a file and pass it to `connections create --body <file>`. Use `connector-metadata defaults` alongside `template` to verify expected field values before submitting.
 

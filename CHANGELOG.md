@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.10.0 — 2026-06-22
+
+Alteryx One authentication GA. This milestone follows a security and correctness
+red-team of the auth flow and the API surface work; all blocking findings are fixed
+and covered by tests (288 total, up from 255).
+
+### Security
+
+- `auth login` now warns when a 30-day PAT is stored inline (plaintext YAML) because the OS keyring is unavailable — previously silent on headless hosts. The inline-secret warning is shared with the onboarding path.
+- Workspace preflight errors now redact the response body preview, matching the sibling parse-failure branch. No more raw response bodies (which can echo tokens/cookies) in error chains.
+- The secret redactor now masks the field names this auth flow actually produces (`tokenValue`, `local-auth-workspace`, `x-csrf-token`, `passcode`, `passcodeReferenceId`, `secret`) plus bare JWT-shaped tokens (`eyJ…`).
+
+### Workspace model
+
+- The Alteryx One PAT is workspace-bound — the `x-alteryx-workspace-gid` header is ignored server-side; the token alone determines the workspace. The CLI now reflects this:
+  - `workspace people` and `workspace admins` are argless (the old required `--workspace-id` was silently ignored and could imply the wrong workspace).
+  - New `workspace switch --workspace-id <id>` selects an already-authenticated workspace credential instantly; if you have not logged into that workspace, it tells you to `auth login`.
+  - `workspace invite-users` and the other membership mutations now reject an explicit `--workspace-id` that does not match the active workspace, instead of letting the path and the token diverge on a destructive operation.
+
+### Correctness
+
+- `connections connector-metadata template`: the connection-`type` heuristic now emits a `<jdbc|remotefile|…>` placeholder (with a `_note`) when it cannot confidently infer the type, instead of silently defaulting to `remotefile` for every non-relational connector.
+- `job-groups list`: synthesized names now disambiguate multiple runs of one flow (`flow-{flowId} ({id})` / `flow-{flowId} @ {createdAt}`) instead of collapsing to a single `flow-{flowId}`.
+- `apply_env_fallbacks`: restored uniform gap-fill precedence (env fills only an absent profile value) for `base_url`, `oauth_client_id`, `client_secret`, `token_endpoint_url`, matching the documented "last-resort fallback" contract.
+
+### Tests
+
+- 33 new deterministic tests: panic-regression guards for the four `--output-file` commands, plus unit coverage for the job-group name synthesizer, the connection-template builder, `resolve_workspace_id`, and the One-only-profile guard.
+
 ## 0.9.14 — 2026-06-22
 
 ### Bug fixes

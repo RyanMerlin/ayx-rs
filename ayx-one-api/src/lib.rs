@@ -1613,10 +1613,11 @@ fn verify_workspace_identity(
     let status = response.status();
     let text = response.text().unwrap_or_default();
     if !status.is_success() {
+        let preview = redact_text(&text.chars().take(200).collect::<String>());
         bail!(
             "workspace preflight failed: GET /v4/workspaces/current returned {} ({}). Refusing to send mutating request to {mutation_url}. Verify token or unset alteryx_one.expected_workspace_id.",
             status.as_u16(),
-            text.chars().take(200).collect::<String>()
+            preview
         );
     }
     let body: Value = match serde_json::from_str(&text) {

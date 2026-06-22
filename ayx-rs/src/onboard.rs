@@ -272,11 +272,8 @@ pub fn run_onboarding(
     let _ = secret_refs; // Preserved for API stability; refs come from secretize.
 
     let mut warnings = collect_onboarding_warnings(&config);
-    if !secretize.inline_fields.is_empty() {
-        warnings.push(format!(
-            "Stored {} secret(s) inline in YAML because the OS keyring was unavailable. Configure a keyring backend (Secret Service / Keychain / DPAPI) and run `ayx onboard` again to migrate.",
-            secretize.inline_fields.len()
-        ));
+    if let Some(msg) = inline_secret_warning(&secretize.inline_fields) {
+        warnings.push(msg);
     }
 
     Ok(json!({
@@ -795,6 +792,19 @@ pub(crate) fn write_config_with_policy(
     let body = serde_yaml::to_string(&canonical_profile_value(&export)?)?;
     write_restricted(path, body.as_bytes())?;
     Ok(out)
+}
+
+/// Returns a warning string if any secrets were stored inline (keyring unavailable), else None.
+///
+/// Used by both the onboarding flow and `auth login` to surface the same advisory to the user.
+pub(crate) fn inline_secret_warning(inline_fields: &[String]) -> Option<String> {
+    if inline_fields.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Stored {} secret(s) inline in plaintext YAML because the OS keyring was unavailable. Configure a keyring backend (Secret Service / Keychain / DPAPI) and re-run to migrate.",
+        inline_fields.len()
+    ))
 }
 
 /// Write a file with 0o600 permissions on Unix. On other platforms falls back

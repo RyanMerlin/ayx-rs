@@ -15,7 +15,7 @@ All mutating commands (anything that creates, updates, suspends, removes, or del
 |---|---|---|
 | Platform status | `ayx one platform status` | Check platform health |
 | Asset inventory | `ayx one platform inventory` | List platform assets |
-| Workspaces | `ayx one platform workspace` | Manage workspaces, membership, configuration, transfers |
+| Workspaces | `ayx one platform workspace` | Manage workspaces, membership, configuration, transfers, and workspace switching |
 | People | `ayx one platform person` | Create, update, delete users; reset passwords |
 | API tokens | `ayx one platform token` | Issue and revoke API tokens |
 | Roles | `ayx one platform role` | Assign and unassign roles to subjects |

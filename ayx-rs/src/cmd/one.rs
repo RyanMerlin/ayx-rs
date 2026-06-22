@@ -13,9 +13,17 @@
 
 use anyhow::Result;
 use ayx_core::envelope::Envelope;
+use ayx_core::profile::Config;
 use ayx_one::{api_inventory_envelope, api_status_envelope};
 
 use crate::OneCommand;
+
+/// Returns `true` when the profile has an Alteryx One section but no
+/// Server API section. In this case `status`/`inventory` must redirect
+/// to `ayx one doctor platform` rather than attempting a Server API call.
+fn is_one_only_profile(config: &Config) -> bool {
+    config.alteryx_one.is_some() && config.api.is_none()
+}
 
 /// Borrow Cli's apply + yes for the TTY confirm prompts inside delete arms.
 pub struct Ctx<'a> {
@@ -57,7 +65,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
         }
         Some(OneCommand::Status { profile }) => {
             let config = load_profile!(profile.as_deref(), environment)?;
-            if config.alteryx_one.is_some() && config.api.is_none() {
+            if is_one_only_profile(&config) {
                 Envelope::ok(
                     "ayx one status shows Server API status. For Alteryx One profiles, use `ayx one doctor platform` to check auth and connectivity.",
                 )
@@ -67,7 +75,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
         }
         Some(OneCommand::Inventory { profile }) => {
             let config = load_profile!(profile.as_deref(), environment)?;
-            if config.alteryx_one.is_some() && config.api.is_none() {
+            if is_one_only_profile(&config) {
                 Envelope::ok(
                     "ayx one inventory shows Server API inventory. For Alteryx One profiles, use `ayx one doctor platform` to check auth and connectivity.",
                 )
@@ -96,4 +104,96 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
             super::one_desktop_exec::execute(&runtime, profile)?
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use ayx_core::profile::{
+        AlteryxOneProfile, ApiAuth, ApiAuthMode, ApiProfile, Config, MongoDatabases, MongoMode,
+        MongoProfile,
+    };
+
+    use super::is_one_only_profile;
+
+    fn base_mongo() -> MongoProfile {
+        MongoProfile {
+            mode: MongoMode::Embedded,
+            databases: MongoDatabases {
+                gallery_name: "g".into(),
+                service_name: "s".into(),
+            },
+            embedded: None,
+            managed: None,
+        }
+    }
+
+    fn minimal_config() -> Config {
+        Config {
+            profile_name: "test".into(),
+            mongo: base_mongo(),
+            alteryx_one: None,
+            observability: None,
+            server_api: None,
+            api: None,
+            server: None,
+            sqlserver: None,
+            upgrade: None,
+        }
+    }
+
+    #[test]
+    fn one_only_profile_true_when_one_present_and_no_api() {
+        let mut config = minimal_config();
+        config.alteryx_one = Some(AlteryxOneProfile {
+            account_email: "t@e.com".into(),
+            ..Default::default()
+        });
+        assert!(is_one_only_profile(&config));
+    }
+
+    #[test]
+    fn one_only_profile_false_when_both_one_and_api_present() {
+        let mut config = minimal_config();
+        config.alteryx_one = Some(AlteryxOneProfile {
+            account_email: "t@e.com".into(),
+            ..Default::default()
+        });
+        config.api = Some(ApiProfile {
+            base_url: "https://srv".into(),
+            auth: ApiAuth {
+                mode: ApiAuthMode::Pat,
+                pat: Some("tok".into()),
+                client_id: None,
+                client_secret: None,
+                client_secret_ref: None,
+                scope: None,
+            },
+            timeout_ms: None,
+        });
+        assert!(!is_one_only_profile(&config));
+    }
+
+    #[test]
+    fn one_only_profile_false_when_neither_present() {
+        let config = minimal_config();
+        assert!(!is_one_only_profile(&config));
+    }
+
+    #[test]
+    fn one_only_profile_false_when_only_api_present() {
+        let mut config = minimal_config();
+        config.api = Some(ApiProfile {
+            base_url: "https://srv".into(),
+            auth: ApiAuth {
+                mode: ApiAuthMode::Pat,
+                pat: Some("tok".into()),
+                client_id: None,
+                client_secret: None,
+                client_secret_ref: None,
+                scope: None,
+            },
+            timeout_ms: None,
+        });
+        assert!(!is_one_only_profile(&config));
+    }
 }

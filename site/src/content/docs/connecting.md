@@ -15,6 +15,8 @@ ayx onboard
 
 The wizard prompts for your workspace and credentials, validates them as you go, and writes a profile. For unattended setup (CI), pass `--non-interactive` with the values supplied through the environment.
 
+When you log in (`auth login`) on a machine where no OS keyring backend is available, ayx warns that credentials will be stored inline in the config file (plaintext at rest). Configuring a keyring backend — such as the system keychain on macOS, `libsecret` on Linux, or Windows Credential Manager — eliminates plaintext storage and suppresses the warning.
+
 ## What you'll need
 
 | Field | Where it comes from |
