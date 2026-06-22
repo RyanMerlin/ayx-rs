@@ -33,15 +33,15 @@ These require new subcommands or corrected endpoint targets.
 - [x] **`connections connector-metadata list` — gap documented** — DONE v0.9.12  
   `/v4/connectors` returns 404 — no enumeration endpoint exists in the Alteryx One v4 API. The `connector-metadata` help text now documents this gap and lists known working slugs (`gsheetsuser`, `remotefile`, etc.). A `list` subcommand is deferred until the API adds enumeration support.
 
-- [ ] **`flows permissions` — add a read command**  
-  Currently `flows permissions --body <FILE>` is a POST (write permissions). There is no read surface. Add `flows permissions get --flow-id <ID>` that hits `GET /v4/flows/{id}/permissions` (or equivalent) and returns the current permission set.
+- [x] **`flows permissions` — add a read command** — DONE v0.9.13  
+  Added `ayx one flows permissions-get --flow-id <ID>` that hits `GET /v4/flows/{id}/permissions`. The endpoint returns 403 via PAT (permission_denied error code). The command exists and surfaces a clean `permission_denied` error — not a gap in the CLI, a limitation in the API's PAT scope. Documented in `site/src/content/docs/one/flows/permissions.md`.
 
 - [x] **`platform workspace people/admins` — fixed correct endpoints** — DONE v0.9.12  
   `people` → `GET /v4/people` (workspace context via `x-alteryx-workspace-gid` header — live-verified 200, 9 members returned).  
   `admins` → `GET /v4/people?role=admin`. Both `/v4/workspaces/{id}/people` and `/v4/workspaces/{id}/admins` are confirmed non-existent routes.
 
-- [ ] **`job-groups` — `name=None` on all 25 entries**  
-  Job-groups created from flow runs have no explicit name. The `flowRun.flowId` field is the only association back to the originating flow. `job-groups list` output is currently unintelligible for users (25 rows, all `name=None`). Fix: in the text output formatter, synthesize a display name like `flow-{flowId} run at {createdAt}` when `name` is null. Or surface `flowRun.id` and `ranfrom` fields as default columns.
+- [x] **`job-groups` — `name=None` on all entries** — DONE v0.9.13  
+  `ayx one job-groups list` now post-processes the response: when `name` is null, synthesizes a display name from `flowRun.flowId` (`flow-{flowId}`) or falls back to `job-{id}`. The API returns no job-groups in the `alteryx-fde` workspace currently so this was implemented based on the known item shape from the prior audit session.
 
 ---
 

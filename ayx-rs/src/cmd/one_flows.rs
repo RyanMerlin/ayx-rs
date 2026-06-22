@@ -33,7 +33,7 @@ pub(crate) fn execute(
 ) -> Result<Envelope> {
     Ok(match command {
         None => Envelope::ok(
-            "one flows commands available: list, count, library, folders, detail, create, update, delete, copy, run, validate, parameters, inputs, outputs, permissions, move, replace-dataset, import, import-dry-run, export, export-dry-run",
+            "one flows commands available: list, count, library, folders, detail, create, update, delete, copy, run, validate, parameters, inputs, outputs, permissions-get, permissions, move, replace-dataset, import, import-dry-run, export, export-dry-run",
         ),
         Some(OneFlowsCommand::List {
             profile,
@@ -433,6 +433,19 @@ pub(crate) fn execute(
                 "outputs",
                 "GET",
                 "/v4/flows/{id}/outputs",
+                false,
+                &[("id", flow_id.as_str())],
+            )?
+        }
+        Some(OneFlowsCommand::PermissionsGet { profile, flow_id }) => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
+            one_api_live_request(
+                &config,
+                "flow",
+                "permissions-get",
+                "GET",
+                "/v4/flows/{id}/permissions",
                 false,
                 &[("id", flow_id.as_str())],
             )?

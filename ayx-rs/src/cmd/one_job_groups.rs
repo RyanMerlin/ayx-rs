@@ -24,14 +24,16 @@ pub(crate) fn execute(
                 .with_limit(limit)
                 .with_page_token(page_token)
                 .with_all(all, max_pages);
-            ayx_one_api::one_api_list_request(
+            let mut envelope = ayx_one_api::one_api_list_request(
                 &config,
                 "jobGroup",
                 "list",
                 "/v4/jobLibrary",
                 &[],
                 &params,
-            )?
+            )?;
+            synthesize_job_group_names(&mut envelope.data);
+            envelope
         }
         Some(OneJobGroupCommand::Count { profile }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
@@ -239,4 +241,42 @@ pub(crate) fn execute(
             )?
         }
     })
+}
+
+/// Synthesize a display name for job-groups that have `name: null`.
+///
+/// Job-groups created from flow runs have no user-assigned name. The only
+/// identifying context available is `flowRun.flowId` (or top-level `flowId`)
+/// and the group's own `id`. This function patches each null-name item
+/// in-place so downstream consumers always have a non-null name to display.
+fn synthesize_job_group_names(data: &mut serde_json::Value) {
+    let items = match data.get_mut("items").and_then(|v| v.as_array_mut()) {
+        Some(arr) => arr,
+        None => return,
+    };
+    for item in items.iter_mut() {
+        let obj = match item.as_object_mut() {
+            Some(o) => o,
+            None => continue,
+        };
+        // Only synthesize when name is null or missing.
+        let name_is_null = obj.get("name").map(|n| n.is_null()).unwrap_or(true);
+        if !name_is_null {
+            continue;
+        }
+        // Try flowRun.flowId first, then top-level flowId.
+        let flow_id = obj
+            .get("flowRun")
+            .and_then(|fr| fr.get("flowId"))
+            .and_then(|v| v.as_str())
+            .or_else(|| obj.get("flowId").and_then(|v| v.as_str()));
+        let synthesized = match flow_id {
+            Some(fid) => format!("flow-{fid}"),
+            None => {
+                let id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+                format!("job-{id}")
+            }
+        };
+        obj.insert("name".to_string(), serde_json::Value::String(synthesized));
+    }
 }

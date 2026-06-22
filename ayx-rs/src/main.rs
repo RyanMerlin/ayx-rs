@@ -1635,6 +1635,12 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long)]
         flow_id: Option<String>,
     },
+    PermissionsGet {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        flow_id: Option<String>,
+    },
     Permissions {
         #[arg(long)]
         profile: Option<String>,
