@@ -308,7 +308,7 @@ pub fn write_workspace_template(
             ),
         ]),
     };
-    write_workspace_config(profile_path, &workspace)?;
+    serialize_workspace_to(profile_path, &workspace)?;
 
     Ok(json!({
             "profile": profile_path.display().to_string(),
@@ -326,10 +326,30 @@ pub fn write_workspace_template(
     }))
 }
 
-pub(crate) fn write_workspace_config(path: &Path, workspace: &WorkspaceConfig) -> Result<()> {
+/// Serialize a workspace to disk verbatim, without secretizing — used by the
+/// template writer, which intentionally emits editable placeholder secrets
+/// (e.g. `curator_api_secret: replace-me`) for the user to fill in.
+fn serialize_workspace_to(path: &Path, workspace: &WorkspaceConfig) -> Result<()> {
     let body = serde_yaml::to_string(&canonical_workspace_value(workspace)?)?;
     write_sensitive_file(path, body.as_bytes())?;
     Ok(())
+}
+
+/// Persist a workspace, secretizing each environment's secrets first.
+///
+/// Secure by default: a secret that was loaded into a workspace environment
+/// (e.g. an `env:`/`keyring:` ref resolved to a concrete value, or a freshly
+/// minted token) is moved behind a secret ref rather than serialized as
+/// plaintext YAML. Without this pass the workspace-save path materialized
+/// resolved secrets to disk in the clear (red-team High #2). Use
+/// [`serialize_workspace_to`] for the template path, which keeps placeholders.
+pub(crate) fn write_workspace_config(path: &Path, workspace: &WorkspaceConfig) -> Result<()> {
+    let mut secured = workspace.clone();
+    for config in secured.environments.values_mut() {
+        let scope = config.profile_name.clone();
+        secretize_config(config, &scope, InlineSecretPolicy::Allow)?;
+    }
+    serialize_workspace_to(path, &secured)
 }
 
 fn template_config_with_profile(profile_name: &str) -> Config {
@@ -477,6 +497,38 @@ pub(crate) fn secretize_config(
                 .insert("alteryx_one.client_secret".to_string(), reference);
         }
         for (workspace_id, credential) in one.workspace_credentials.iter_mut() {
+            if let Some(value) = credential.access_token.take() {
+                let existing_ref = credential.access_token_ref.clone();
+                let field =
+                    format!("alteryx_one.workspace_credentials['{workspace_id}'].access_token");
+                let account = secret_scope(scope, &field);
+                let reference = persist_secret_field(
+                    existing_ref.as_deref(),
+                    &account,
+                    &value,
+                    &field,
+                    policy,
+                    &mut out,
+                )?;
+                credential.access_token_ref = Some(reference.clone());
+                out.refs.insert(field, reference);
+            }
+            if let Some(value) = credential.refresh_token.take() {
+                let existing_ref = credential.refresh_token_ref.clone();
+                let field =
+                    format!("alteryx_one.workspace_credentials['{workspace_id}'].refresh_token");
+                let account = secret_scope(scope, &field);
+                let reference = persist_secret_field(
+                    existing_ref.as_deref(),
+                    &account,
+                    &value,
+                    &field,
+                    policy,
+                    &mut out,
+                )?;
+                credential.refresh_token_ref = Some(reference.clone());
+                out.refs.insert(field, reference);
+            }
             if let Some(value) = credential.client_secret.take() {
                 let existing_ref = credential.client_secret_ref.clone();
                 let field =
@@ -1368,6 +1420,145 @@ mod tests {
         assert!(
             !on_disk.contains("env:AYX_TEST_LOGIN_TOKEN"),
             "a freshly minted token must overwrite the env: ref so it persists:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn workspace_credential_env_ref_preserved_on_round_trip() {
+        // A workspace-scoped credential whose access_token is env:-backed must
+        // survive load->save like the top-level token — not get double-stored as
+        // BOTH a resolved plaintext value AND the env: ref (red-team High #1).
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("default.yaml");
+        std::fs::write(
+            &path,
+            r#"profile_name: wsenvtest
+alteryx_one:
+  account_email: test@example.com
+  base_url: https://us1.alteryxcloud.com
+  workspace_credentials:
+    '91946':
+      access_token_ref: env:AYX_TEST_WS_TOKEN
+"#,
+        )
+        .unwrap();
+
+        unsafe { std::env::set_var("AYX_TEST_WS_TOKEN", "ws-secret-from-env") };
+        let config = Config::load_from_path_with_environment(&path, None).unwrap();
+        write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        unsafe { std::env::remove_var("AYX_TEST_WS_TOKEN") };
+
+        assert!(
+            on_disk.contains("access_token_ref: env:AYX_TEST_WS_TOKEN"),
+            "workspace env: ref must be preserved on round-trip:\n{on_disk}"
+        );
+        assert!(
+            !on_disk.contains("ws-secret-from-env"),
+            "workspace token must not be materialized as plaintext (double-store):\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn workspace_credential_fresh_token_is_secretized_not_plaintext() {
+        // A fresh workspace-scoped token (e.g. `auth login --workspace-id`) must be
+        // secretized on save, not written as bare plaintext YAML (red-team High #1).
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("default.yaml");
+        std::fs::write(
+            &path,
+            r#"profile_name: wsfreshtest
+alteryx_one:
+  account_email: test@example.com
+  base_url: https://us1.alteryxcloud.com
+  workspace_credentials:
+    '91946':
+      access_token: fresh-ws-token
+"#,
+        )
+        .unwrap();
+
+        let config = Config::load_from_path_with_environment(&path, None).unwrap();
+        write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+
+        assert!(
+            !on_disk.contains("access_token: fresh-ws-token"),
+            "workspace token must be secretized to a ref, not bare plaintext:\n{on_disk}"
+        );
+        assert!(
+            on_disk.contains("inline:fresh-ws-token") || on_disk.contains("keyring:"),
+            "workspace token must be stored behind a secret ref:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn write_workspace_config_secretizes_secrets() {
+        // The workspace-save path must secretize secrets, not serialize resolved
+        // plaintext straight to disk (red-team High #2).
+        let temp = tempfile::tempdir().unwrap();
+        let env_path = temp.path().join("env.yaml");
+        std::fs::write(
+            &env_path,
+            r#"profile_name: dev
+alteryx_one:
+  account_email: test@example.com
+  base_url: https://us1.alteryxcloud.com
+  access_token: ws-plaintext-token
+"#,
+        )
+        .unwrap();
+        let env_config = Config::load_from_path_with_environment(&env_path, None).unwrap();
+
+        let workspace = WorkspaceConfig {
+            workspace_name: "lab".to_string(),
+            active_environment: "dev".to_string(),
+            environments: HashMap::from([("dev".to_string(), env_config)]),
+        };
+        let ws_path = temp.path().join("workspace.yaml");
+        write_workspace_config(&ws_path, &workspace).unwrap();
+
+        let on_disk = std::fs::read_to_string(&ws_path).unwrap();
+        assert!(
+            !on_disk.contains("access_token: ws-plaintext-token"),
+            "write_workspace_config must secretize secrets, not write plaintext:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn rotated_token_persists_and_resolves_after_env_removed() {
+        // Strengthen the login-rotation guarantee (red-team Medium): a rotated token
+        // must actually PERSIST — resolve after the env var is gone — not merely
+        // cause the old env: ref to disappear.
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("default.yaml");
+        std::fs::write(
+            &path,
+            r#"profile_name: rotatetest
+alteryx_one:
+  account_email: test@example.com
+  base_url: https://us1.alteryxcloud.com
+  access_token_ref: env:AYX_TEST_ROTATE_TOKEN
+"#,
+        )
+        .unwrap();
+
+        unsafe { std::env::set_var("AYX_TEST_ROTATE_TOKEN", "old-value") };
+        let mut config = Config::load_from_path_with_environment(&path, None).unwrap();
+        config.alteryx_one.as_mut().unwrap().access_token = Some("rotated-token".to_string());
+        write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
+        unsafe { std::env::remove_var("AYX_TEST_ROTATE_TOKEN") };
+
+        let reloaded = Config::load_from_path_with_environment(&path, None).unwrap();
+        assert_eq!(
+            reloaded.alteryx_one.unwrap().access_token.as_deref(),
+            Some("rotated-token"),
+            "rotated token must persist and resolve after the env var is removed"
+        );
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !on_disk.contains("access_token: rotated-token"),
+            "rotated token must be stored as a secret ref, not bare plaintext:\n{on_disk}"
         );
     }
 }
