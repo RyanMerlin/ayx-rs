@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.3 — 2026-06-22
+
+### Security (dependencies)
+
+- Bumped `quinn-proto` 0.11.14 → 0.11.15 to clear **RUSTSEC-2026-0185** (remote memory exhaustion / DoS via unbounded out-of-order stream reassembly), published the same day. `quinn-proto` is a transitive HTTP/3 QUIC dependency not on the CLI's HTTP/1.1 request path, so this is a `Cargo.lock`-only change with no behavior impact — but it restores a green `cargo audit` gate.
+
 ## 0.10.2 — 2026-06-22
 
 ### Security
