@@ -14,7 +14,7 @@ use ayx_core::profile::{
     WorkspaceConfig, canonical_profile_value, canonical_workspace_value,
     default_profile_storage_path, default_workspace_storage_path, normalize_alteryx_base_url,
 };
-use ayx_core::secrets::{keyring_account, store_secret_with_fallback};
+use ayx_core::secrets::{keyring_account, resolve_secret_ref, store_secret_with_fallback};
 use ayx_core::sensitive::write_sensitive_file;
 use ayx_server::util::runtime_settings_summary;
 
@@ -392,6 +392,37 @@ fn store(
     Ok(reference)
 }
 
+/// Persist a secret field, preserving an existing `env:` indirection.
+///
+/// On load, `env:`-backed refs (`access_token_ref: env:FOO`) are resolved into a
+/// concrete in-memory value. Without this guard a subsequent save would re-store
+/// that resolved value into keyring/inline storage and overwrite the `env:` ref,
+/// silently relocating a secret the user chose to keep in their environment
+/// (red-team security L1). When the existing ref is an `env:` ref that still
+/// resolves to the unchanged value, keep it as-is and store nothing. A changed
+/// value (e.g. a fresh `auth login` token) no longer matches the env ref and is
+/// secretized normally.
+fn persist_secret_field(
+    existing_ref: Option<&str>,
+    account: &str,
+    value: &str,
+    field: &str,
+    policy: InlineSecretPolicy,
+    out: &mut SecretizeOutput,
+) -> Result<String> {
+    if let Some(reference) = existing_ref
+        && reference.starts_with("env:")
+        // The `env:` gate makes `.ok()` lossless: `resolve_secret_ref` is infallible
+        // for the `env:` branch (it returns `Ok(env::var(..).ok())`), so `.ok()` can
+        // never hide a real error here. If the value differs or the env var is unset,
+        // we fall through and secretize the live value — the safe direction.
+        && resolve_secret_ref(reference).ok().flatten().as_deref() == Some(value)
+    {
+        return Ok(reference.to_string());
+    }
+    store(account, value, field, policy, out)
+}
+
 pub(crate) fn secretize_config(
     config: &mut Config,
     scope: &str,
@@ -401,8 +432,10 @@ pub(crate) fn secretize_config(
 
     if let Some(one) = config.alteryx_one.as_mut() {
         if let Some(value) = one.access_token.take() {
+            let existing_ref = one.access_token_ref.clone();
             let account = secret_scope(scope, "alteryx_one.access_token");
-            let reference = store(
+            let reference = persist_secret_field(
+                existing_ref.as_deref(),
                 &account,
                 &value,
                 "alteryx_one.access_token",
@@ -414,8 +447,10 @@ pub(crate) fn secretize_config(
                 .insert("alteryx_one.access_token".to_string(), reference);
         }
         if let Some(value) = one.refresh_token.take() {
+            let existing_ref = one.refresh_token_ref.clone();
             let account = secret_scope(scope, "alteryx_one.refresh_token");
-            let reference = store(
+            let reference = persist_secret_field(
+                existing_ref.as_deref(),
                 &account,
                 &value,
                 "alteryx_one.refresh_token",
@@ -427,8 +462,10 @@ pub(crate) fn secretize_config(
                 .insert("alteryx_one.refresh_token".to_string(), reference);
         }
         if let Some(value) = one.client_secret.take() {
+            let existing_ref = one.client_secret_ref.clone();
             let account = secret_scope(scope, "alteryx_one.client_secret");
-            let reference = store(
+            let reference = persist_secret_field(
+                existing_ref.as_deref(),
                 &account,
                 &value,
                 "alteryx_one.client_secret",
@@ -441,10 +478,18 @@ pub(crate) fn secretize_config(
         }
         for (workspace_id, credential) in one.workspace_credentials.iter_mut() {
             if let Some(value) = credential.client_secret.take() {
+                let existing_ref = credential.client_secret_ref.clone();
                 let field =
                     format!("alteryx_one.workspace_credentials['{workspace_id}'].client_secret");
                 let account = secret_scope(scope, &field);
-                let reference = store(&account, &value, &field, policy, &mut out)?;
+                let reference = persist_secret_field(
+                    existing_ref.as_deref(),
+                    &account,
+                    &value,
+                    &field,
+                    policy,
+                    &mut out,
+                )?;
                 credential.client_secret_ref = Some(reference.clone());
                 out.refs.insert(field, reference);
             }
@@ -454,8 +499,10 @@ pub(crate) fn secretize_config(
     if let Some(api) = config.api.as_mut()
         && let Some(value) = api.auth.client_secret.take()
     {
+        let existing_ref = api.auth.client_secret_ref.clone();
         let account = secret_scope(scope, "server.api.client_secret");
-        let reference = store(
+        let reference = persist_secret_field(
+            existing_ref.as_deref(),
             &account,
             &value,
             "server.api.client_secret",
@@ -470,9 +517,11 @@ pub(crate) fn secretize_config(
     if let Some(server) = config.server.as_mut()
         && !server.curator_api_secret.trim().is_empty()
     {
+        let existing_ref = server.curator_api_secret_ref.clone();
         let value = std::mem::take(&mut server.curator_api_secret);
         let account = secret_scope(scope, "server.curator_api_secret");
-        let reference = store(
+        let reference = persist_secret_field(
+            existing_ref.as_deref(),
             &account,
             &value,
             "server.curator_api_secret",
@@ -487,8 +536,10 @@ pub(crate) fn secretize_config(
     if let Some(mongo) = config.mongo.managed.as_mut()
         && let Some(value) = mongo.password.take()
     {
+        let existing_ref = mongo.password_ref.clone();
         let account = secret_scope(scope, "server.storage.mongo.managed.password");
-        let reference = store(
+        let reference = persist_secret_field(
+            existing_ref.as_deref(),
             &account,
             &value,
             "server.storage.mongo.managed.password",
@@ -516,8 +567,16 @@ pub(crate) fn secretize_config(
             if let Some(conn) = conn
                 && let Some(value) = conn.password.take()
             {
+                let existing_ref = conn.password_ref.clone();
                 let account = secret_scope(scope, label);
-                let reference = store(&account, &value, label, policy, &mut out)?;
+                let reference = persist_secret_field(
+                    existing_ref.as_deref(),
+                    &account,
+                    &value,
+                    label,
+                    policy,
+                    &mut out,
+                )?;
                 conn.password_ref = Some(reference.clone());
                 out.refs.insert(label.to_string(), reference);
             }
@@ -1229,5 +1288,86 @@ mod tests {
         assert!(content.contains("environments:"));
         assert!(content.contains("dev:"));
         assert!(content.contains("prod:"));
+    }
+
+    #[test]
+    fn round_trip_preserves_env_backed_token_ref() {
+        // An `env:`-backed access_token_ref must survive a load -> save round-trip.
+        // Resolving it at load and re-secretizing on save must NOT relocate the
+        // secret into keyring/inline storage (red-team security L1).
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("default.yaml");
+        std::fs::write(
+            &path,
+            "profile_name: envtest\n\
+             alteryx_one:\n  \
+               account_email: test@example.com\n  \
+               base_url: https://us1.alteryxcloud.com\n  \
+               access_token_ref: env:AYX_TEST_ROUNDTRIP_TOKEN\n",
+        )
+        .unwrap();
+
+        // nextest process-isolates each test, so mutating an env var here is safe.
+        unsafe { std::env::set_var("AYX_TEST_ROUNDTRIP_TOKEN", "secret-from-env") };
+
+        let config = Config::load_from_path_with_environment(&path, None).unwrap();
+        // Sanity: the ref resolved to the env value in memory.
+        assert_eq!(
+            config.alteryx_one.as_ref().unwrap().access_token.as_deref(),
+            Some("secret-from-env"),
+            "precondition: env ref should resolve in memory"
+        );
+
+        write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
+
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        unsafe { std::env::remove_var("AYX_TEST_ROUNDTRIP_TOKEN") };
+
+        assert!(
+            on_disk.contains("access_token_ref: env:AYX_TEST_ROUNDTRIP_TOKEN"),
+            "env:-backed ref must be preserved as-is on round-trip, got:\n{on_disk}"
+        );
+        assert!(
+            !on_disk.contains("inline:secret-from-env"),
+            "secret value must not be materialized inline:\n{on_disk}"
+        );
+        assert!(
+            !on_disk.contains("keyring:"),
+            "env: ref must not be relocated into keyring storage:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn fresh_token_overwrites_env_backed_ref() {
+        // A changed value (e.g. a fresh `auth login` / rotation) no longer matches
+        // the env ref and MUST be secretized — the env: indirection is overwritten,
+        // so the new token actually persists. This guards the login boundary.
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("default.yaml");
+        std::fs::write(
+            &path,
+            "profile_name: logintest\n\
+             alteryx_one:\n  \
+               account_email: test@example.com\n  \
+               base_url: https://us1.alteryxcloud.com\n  \
+               access_token_ref: env:AYX_TEST_LOGIN_TOKEN\n",
+        )
+        .unwrap();
+
+        unsafe { std::env::set_var("AYX_TEST_LOGIN_TOKEN", "old-env-value") };
+
+        let mut config = Config::load_from_path_with_environment(&path, None).unwrap();
+        // Simulate `auth login` minting a new token onto the profile.
+        config.alteryx_one.as_mut().unwrap().access_token = Some("new-rotated-token".to_string());
+
+        write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
+
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        unsafe { std::env::remove_var("AYX_TEST_LOGIN_TOKEN") };
+
+        assert!(
+            !on_disk.contains("env:AYX_TEST_LOGIN_TOKEN"),
+            "a freshly minted token must overwrite the env: ref so it persists:\n{on_disk}"
+        );
     }
 }
