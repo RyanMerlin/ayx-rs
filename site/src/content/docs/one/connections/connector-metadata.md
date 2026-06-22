@@ -20,6 +20,8 @@ Connector metadata describes how Alteryx One handles a specific connector type: 
 
 All commands require `--connector <connector-type>`.
 
+> **No connector enumeration in v4.** There is no `/v4/connectors` endpoint — connector slugs cannot be listed via the API. Known working slugs verified against the live API: `gsheetsuser`, `remotefile`, `bigquery`. You must know the slug in advance to use these commands.
+
 ## Inspecting connector metadata
 
 ```bash

@@ -119,14 +119,19 @@ ayx one platform workspace people --workspace-id <id>
 ayx one platform workspace admins --workspace-id <id>
 ```
 
+`people` queries `GET /v4/people` and `admins` queries `GET /v4/people?role=admin`. The `--workspace-id` argument is accepted for context but the underlying API does not scope these calls by workspace ID.
+
 ### Invite users
 
 ```bash
-# Preview
+# Preview (--workspace-id is optional; defaults from the profile's workspace_gid)
+ayx one platform workspace invite-users
+
+# With explicit workspace
 ayx one platform workspace invite-users --workspace-id <id>
 
 # Commit
-ayx one platform workspace invite-users --workspace-id <id> --apply
+ayx one platform workspace invite-users --apply
 ```
 
 ### Remove a user

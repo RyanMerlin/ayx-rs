@@ -13,6 +13,8 @@ The `ayx one flows permissions` command sets the access permissions on a flow. I
 |---|---|
 | `ayx one flows permissions` | Set permissions on a flow |
 
+> **Note:** `GET /v4/flows/{id}/permissions` returns 403 when authenticated via PAT and is not currently accessible through the CLI. The `permissions` subcommand (POST) for setting permissions works as documented below.
+
 ## Set permissions
 
 ```bash

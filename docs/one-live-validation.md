@@ -72,6 +72,19 @@ The current smoke harness lives in `ayx-rs/tests/one_live_smoke.rs` and already:
 - validates the most important read paths across the One surface
 - reports the surface and operation names in the envelope assertions
 
+## Known Endpoint Status (as of v0.9.12)
+
+| Endpoint | Status | Notes |
+|---|---|---|
+| `PATCH /v4/flows/{id}` | validated_live | Fixed in v0.9.12; was PUT (returned 403) |
+| `GET /v4/people` | validated_live | Fixed in v0.9.12; replaces broken `/v4/workspaces/{id}/people` |
+| `GET /v4/people?role=admin` | validated_live | Fixed in v0.9.12; replaces broken `/v4/workspaces/{id}/admins` |
+| `GET /v4/flows/{id}/permissions` | blocked_by_scope | Returns 403 via PAT; not accessible through the CLI |
+| `GET /v4/connectors` | blocked_by_scope | Returns 404; no connector enumeration endpoint in v4 |
+| `/v4/billing/*` | blocked_by_scope | Returns 404 on platform_packaging tier; enterprise-only |
+| `/v4/plans/*` | blocked_by_scope | Returns 404 on platform_packaging tier; enterprise-only |
+| `/v4/scheduling/*` | blocked_by_scope | Returns 404 on platform_packaging tier; enterprise-only |
+
 ## Follow-Up
 
 As more endpoints are confirmed, add them to the live matrix and keep the coverage grouped by family so the report stays readable.

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.12 — 2026-06-22
+
+### One API endpoint fixes
+
+- `flows update`: switched from `PUT /v4/flows/{id}` (returned 403) to `PATCH /v4/flows/{id}` (returns 200). Full CRUD on flows now works.
+- `workspace people`: switched from `GET /v4/workspaces/{id}/people` (404) to `GET /v4/people` (200).
+- `workspace admins`: switched from `GET /v4/workspaces/{id}/admins` (404) to `GET /v4/people?role=admin` (200).
+
+### CLI ergonomics
+
+- `--body <FILE>`: all 32 body mutation args now accept a path to a JSON file (previously the help text was ambiguous). Pass a file path or use `-` for stdin.
+- `ayx one status` and `ayx one inventory` on One-only profiles: clean message instead of an internal config error.
+- `platform workspace invite-users` and related membership commands: `--workspace-id` is now optional and defaults from the profile's `workspace_gid`.
+
+### Documentation
+
+- Billing, plans, and scheduling help text notes enterprise-tier requirement; commands return 404 on `platform_packaging` workspaces.
+- `connector-metadata`: help text documents that connector enumeration (`list`) is not available via the v4 API; no `/v4/connectors` endpoint exists.
+
 ## 0.9.10 — 2026-06-20
 
 ### Docs and release cleanup

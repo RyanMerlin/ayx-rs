@@ -7,6 +7,8 @@ sidebar:
 
 `ayx one billing` provides read-only access to billing and consumption data for your Alteryx One account. Use it to retrieve current account details or export usage records for cost tracking and chargebacks.
 
+> **Enterprise tier required.** Billing endpoints return 404 on `platform_packaging` workspaces. Commands are present in all builds but will only succeed on enterprise-tier accounts.
+
 ## Quick reference
 
 | Command | What it does |
