@@ -1798,26 +1798,42 @@ server_api:
 
     #[test]
     fn workspace_save_surfaces_inline_fields_when_keyring_unavailable() {
-        // In CI (and most developer machines without a keyring daemon) the OS keyring
-        // is unavailable, so secretize_config falls back to `inline:` storage.
-        // write_workspace_config must return the merged SecretizeOutput so callers
-        // can surface the inline_fields warning — not silently discard it.
+        // Force the keyring-store step to fail deterministically so the inline
+        // fallback path always runs, regardless of whether the host has a live
+        // D-Bus Secret Service. AYX_FORCE_INLINE_SECRETS is an env-var lever
+        // in store_keyring_secret (see ayx-core/src/secrets.rs). It is NOT
+        // gated with #[cfg(test)] because cfg(test) inside a library crate is
+        // inactive when that crate is compiled as a dependency — the env-var
+        // guard is sufficient for production safety (undocumented, no CLI
+        // surface, inert when unset). nextest process-isolates each test, so
+        // the env mutation is safe.
+        unsafe {
+            std::env::set_var("AYX_FORCE_INLINE_SECRETS", "1");
+        }
         let _home = isolated_config_home();
         let ws = workspace_with_one_env_secret("shh");
         let tmp = tempfile::tempdir().unwrap();
         let ws_path = tmp.path().join("ws.yaml");
         let out = write_workspace_config(&ws_path, &ws).unwrap();
-        // If the keyring IS available (unlikely in CI), inline_fields will be empty
-        // and the ref will be a keyring: ref — both are fine; the important invariant
-        // is that the return type now carries the info rather than dropping it.
-        // When the keyring is NOT available, inline_fields must be non-empty.
-        let on_disk = std::fs::read_to_string(&ws_path).unwrap();
-        if on_disk.contains("inline:") {
-            assert!(
-                !out.inline_fields.is_empty(),
-                "inline fallback must be reported in SecretizeOutput, not swallowed"
-            );
+        // Restore before any assertions so a panic doesn't leak the var.
+        unsafe {
+            std::env::remove_var("AYX_FORCE_INLINE_SECRETS");
         }
+        // With the keyring forced unavailable, write_workspace_config must fall
+        // back to inline storage AND surface that fact in SecretizeOutput.
+        let on_disk = std::fs::read_to_string(&ws_path).unwrap();
+        assert!(
+            on_disk.contains("inline:"),
+            "forced-unavailable keyring must produce inline: ref on disk"
+        );
+        assert!(
+            !out.inline_fields.is_empty(),
+            "inline fallback must be reported in SecretizeOutput, not swallowed"
+        );
+        assert!(
+            out.inline_fields.iter().any(|f| f.contains("access_token")),
+            "inline_fields must name the secretized field (access_token)"
+        );
         // refs must always be populated (at least the one secretized field).
         assert!(
             !out.refs.is_empty(),

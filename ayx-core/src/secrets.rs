@@ -91,7 +91,35 @@ pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileErro
 /// On failure (no keyring backend, denied access, etc.) returns an error so
 /// callers must decide explicitly whether to fall back. Use
 /// [`store_secret_with_fallback`] when an inline fallback is acceptable.
+///
+/// # Test-only override
+///
+/// Setting `AYX_FORCE_INLINE_SECRETS=1` (or other truthy values) makes this
+/// function behave as if the OS keyring were unavailable — it returns the same
+/// error as a headless host with no D-Bus / Secret Service backend. This lets
+/// tests deterministically exercise the inline-fallback path without requiring
+/// a live Secret Service on the test machine.
+///
+/// The var is deliberately NOT gated with `#[cfg(test)]`. `cfg(test)` inside a
+/// library crate is inactive when that crate is compiled as a dependency during
+/// another crate's test run (`cargo nextest run -p ayx-rs`). Guarding by env
+/// var alone is sufficient for production safety: the var is undocumented for
+/// end-users, has no CLI surface, and is inert unless explicitly set.
 pub fn store_keyring_secret(account: &str, secret: &str) -> Result<String, ProfileError> {
+    // Deterministic inline-fallback lever for tests. Inert in production because
+    // the env var is never set outside of explicit test fixtures. It mirrors the
+    // contract of AYX_ALLOW_INLINE_SECRETS (which permits inline after keyring
+    // failure) by making the keyring step itself fail deterministically.
+    if matches!(
+        env::var("AYX_FORCE_INLINE_SECRETS").ok().as_deref(),
+        Some("1") | Some("true") | Some("yes") | Some("TRUE") | Some("YES")
+    ) {
+        return Err(ProfileError::Invalid(format!(
+            "unable to open keyring entry '{}': keyring unavailable (forced by \
+             AYX_FORCE_INLINE_SECRETS). Set AYX_ALLOW_INLINE_SECRETS=1 to store in YAML instead.",
+            account
+        )));
+    }
     ensure_keyring_store();
     let entry = Entry::new(SECRET_SERVICE, account).map_err(|source| {
         ProfileError::Invalid(format!(
