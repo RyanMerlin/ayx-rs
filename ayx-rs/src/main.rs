@@ -37,6 +37,7 @@ mod capability;
 mod cmd;
 mod onboard;
 mod render;
+pub(crate) mod secret;
 mod tui;
 
 fn decode_token_claims(access_token: &str) -> Option<Value> {
