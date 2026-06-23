@@ -7,14 +7,6 @@ use crate::profile::ProfileError;
 
 const SECRET_SERVICE: &str = "ayx";
 
-/// Register the platform credential store as keyring-core's default, exactly once.
-///
-/// keyring 4.x (keyring-core) selects the credential store at runtime rather than
-/// via a compile-time feature, so a store must be registered before any `Entry`
-/// is created. If the store cannot be created — e.g. no Secret Service / D-Bus
-/// session on a headless host — we leave the default unset; subsequent `Entry`
-/// operations then return `NoDefaultStore`, which callers already treat as
-/// "keyring unavailable" (inline fallback where permitted).
 /// Returns `true` when the named environment variable is set to a truthy value
 /// (`1`, `true`, `yes`, `TRUE`, `YES`). Treats an unset or empty variable as
 /// falsy. Used to gate `AYX_ALLOW_INLINE_SECRETS` and, when the
@@ -26,6 +18,14 @@ fn env_truthy(name: &str) -> bool {
     )
 }
 
+/// Register the platform credential store as keyring-core's default, exactly once.
+///
+/// keyring 4.x (keyring-core) selects the credential store at runtime rather than
+/// via a compile-time feature, so a store must be registered before any `Entry`
+/// is created. If the store cannot be created — e.g. no Secret Service / D-Bus
+/// session on a headless host — we leave the default unset; subsequent `Entry`
+/// operations then return `NoDefaultStore`, which callers already treat as
+/// "keyring unavailable" (inline fallback where permitted).
 fn ensure_keyring_store() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
