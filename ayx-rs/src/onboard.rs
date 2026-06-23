@@ -409,7 +409,7 @@ pub(crate) enum InlineSecretPolicy {
     Allow,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct SecretizeOutput {
     pub refs: BTreeMap<String, String>,
     pub inline_fields: Vec<String>,
@@ -420,6 +420,32 @@ pub(crate) struct SecretizeOutput {
     /// accumulate one entry per environment.  In-memory only — not serialized to
     /// disk.
     pub scopes_used: Vec<String>,
+}
+
+impl std::fmt::Debug for SecretizeOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Redact inline secret values to prevent accidental leakage through
+        // debug-print paths (logs, test failure output, panic messages).
+        // `inline:<secret>` refs in `refs` are replaced with `inline:***`.
+        // `env:` and `keyring:` refs are locations, not secrets, and may print.
+        let redacted: BTreeMap<&str, String> = self
+            .refs
+            .iter()
+            .map(|(k, v)| {
+                let displayed = if v.starts_with("inline:") {
+                    "inline:***".to_string()
+                } else {
+                    v.clone()
+                };
+                (k.as_str(), displayed)
+            })
+            .collect();
+        f.debug_struct("SecretizeOutput")
+            .field("refs", &redacted)
+            .field("inline_fields", &self.inline_fields)
+            .field("scopes_used", &self.scopes_used)
+            .finish()
+    }
 }
 
 fn store(
@@ -2444,6 +2470,54 @@ server_api:
             staging_account, old_shared_account,
             "workspace-scoped staging account must differ from old profile_name scope; \
              staging={staging_account} old={old_shared_account}"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Debug-redaction: SecretizeOutput must not expose inline secret values.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn secretize_output_debug_redacts_inline_values() {
+        // Build a SecretizeOutput that contains an inline ref (simulating the
+        // inline-fallback path) alongside a keyring ref and an env ref.
+        let mut out = SecretizeOutput::default();
+        out.refs.insert(
+            "alteryx_one.access_token".to_string(),
+            "inline:SUPER_SECRET_TOKEN".to_string(),
+        );
+        out.refs.insert(
+            "server.api.client_secret".to_string(),
+            "keyring:myprofile/server.api.client_secret".to_string(),
+        );
+        out.refs.insert(
+            "alteryx_one.refresh_token".to_string(),
+            "env:AYX_REFRESH_TOKEN".to_string(),
+        );
+        out.inline_fields
+            .push("alteryx_one.access_token".to_string());
+        out.scopes_used.push("myprofile".to_string());
+
+        let debug_output = format!("{out:?}");
+
+        // The raw secret value must NOT appear anywhere in the debug output.
+        assert!(
+            !debug_output.contains("SUPER_SECRET_TOKEN"),
+            "Debug output must not contain the raw inline secret value; got: {debug_output}"
+        );
+        // The inline placeholder must be present so the field is still visible.
+        assert!(
+            debug_output.contains("inline:***"),
+            "Debug output must contain the redacted inline placeholder; got: {debug_output}"
+        );
+        // Non-secret refs (keyring location, env var name) are not redacted.
+        assert!(
+            debug_output.contains("keyring:myprofile/server.api.client_secret"),
+            "keyring refs (locations, not values) must not be redacted; got: {debug_output}"
+        );
+        assert!(
+            debug_output.contains("env:AYX_REFRESH_TOKEN"),
+            "env refs (var names, not values) must not be redacted; got: {debug_output}"
         );
     }
 }
