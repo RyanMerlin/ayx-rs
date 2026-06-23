@@ -170,10 +170,14 @@ fn resolved_inline_or_ref(value: &str, ref_: Option<&str>) -> Option<String> {
 /// `inline_placeholder`.
 fn ref_form_for(value: &str, ref_: Option<&str>, inline_placeholder: &str) -> String {
     if let Some(r) = ref_ {
-        if r.starts_with("inline:") {
-            return inline_placeholder.to_string();
+        // Allowlist: only `env:` and `keyring:` refs name a *location* (not a
+        // value) and are safe to print verbatim.  Anything else — `inline:` (embeds
+        // the secret as a suffix), a bare value, or any unknown future scheme —
+        // is redacted to `inline_placeholder` to prevent accidental secret leaks.
+        if r.starts_with("env:") || r.starts_with("keyring:") {
+            return r.to_string();
         }
-        return r.to_string();
+        return inline_placeholder.to_string();
     }
     if !value.is_empty() {
         return inline_placeholder.to_string();
@@ -3381,6 +3385,34 @@ server:
         assert!(
             !finalized.api.as_ref().unwrap().is_derived(),
             "explicit api must not be derived"
+        );
+    }
+
+    #[test]
+    fn ref_form_for_redacts_schemeless_ref() {
+        // A scheme-less value in a `_ref` field (e.g. written by a future ref scheme
+        // or a malformed config) must be redacted, not printed verbatim.
+        assert_eq!(
+            ref_form_for("", Some("bare-secret-value"), "inline:***"),
+            "inline:***",
+            "scheme-less ref must be redacted, not printed verbatim"
+        );
+        // env: and keyring: are the only allowlisted schemes.
+        assert_eq!(
+            ref_form_for("", Some("env:MY_VAR"), "inline:***"),
+            "env:MY_VAR",
+            "env: ref must be printed verbatim"
+        );
+        assert_eq!(
+            ref_form_for("", Some("keyring:my/account"), "inline:***"),
+            "keyring:my/account",
+            "keyring: ref must be printed verbatim"
+        );
+        // inline: refs must always be redacted (the suffix IS the secret).
+        assert_eq!(
+            ref_form_for("", Some("inline:actual-secret"), "inline:***"),
+            "inline:***",
+            "inline: ref suffix must be redacted"
         );
     }
 }
