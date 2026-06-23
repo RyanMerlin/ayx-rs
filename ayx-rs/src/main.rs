@@ -5219,9 +5219,18 @@ fn profile_migrate_envelope(profile: &Path, name: Option<&str>) -> Result<Envelo
         fs::create_dir_all(parent)?;
     }
     let mut config = Config::load_from_path(profile)?;
+    // Derive the keyring scope from the *target* file stem, identical to how
+    // `write_config_with_policy` does it.  Using `target_name` raw would produce
+    // a different scope when the caller passes a name with a `.yaml` suffix or
+    // surrounding whitespace (e.g. "prod.yaml" → stem "prod"), causing the
+    // migrate-write scope to differ from every subsequent normal save scope.
+    let migrate_scope = target
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&target_name);
     let secretize = onboard::secretize_config(
         &mut config,
-        &target_name,
+        migrate_scope,
         onboard::InlineSecretPolicy::Allow,
     )?;
     let body = serde_yaml::to_string(&ayx_core::profile::canonical_profile_value(&config)?)?;
