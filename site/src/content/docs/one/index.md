@@ -24,7 +24,6 @@ All mutating commands are dry-run by default. Nothing changes on the server unti
 | Platform & users | `ayx one platform` | Workspaces, users, tokens, roles, API auth |
 | Billing | `ayx one billing` | Account information and usage exports |
 | Diagnostics | `ayx one doctor` / `ayx one status` / `ayx one inventory` | Health checks across auth, platform, plans, scheduling, and billing |
-| Visual interface | `ayx one ui` | Experimental — session management, workflow editing surface, data, library, schedules, jobs |
 
 ## How `--apply` keeps you safe
 
@@ -66,6 +65,5 @@ ayx one flows list --profile staging
 - [Webhooks](/one/webhooks/) — webhook-triggered flow tasks
 - [Billing](/one/billing/) — account and usage data
 - [Diagnostics](/one/diagnostics/) — health checks and status
-- [Visual interface](/one/ui/) — experimental visual-interface surface
 - [Platform overview](/one/platform/) — users, workspaces, roles, tokens
 - [Safety model](/safety-model/) — dry-run and `--apply` in detail

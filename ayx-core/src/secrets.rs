@@ -26,7 +26,7 @@ fn env_truthy(name: &str) -> bool {
 /// session on a headless host — we leave the default unset; subsequent `Entry`
 /// operations then return `NoDefaultStore`, which callers already treat as
 /// "keyring unavailable" (inline fallback where permitted).
-fn ensure_keyring_store() {
+pub fn ensure_keyring_store() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
