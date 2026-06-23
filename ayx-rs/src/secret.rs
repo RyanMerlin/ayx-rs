@@ -377,4 +377,92 @@ mod tests {
         assert!(!refs.contains("plain_value"));
         assert_eq!(refs.len(), 2);
     }
+
+    // Integration tests: use a temp dir as AYX_CONFIG_HOME.
+    // No live keyring access required — candidate detection only.
+
+    fn make_config_home() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("profiles")).unwrap();
+        dir
+    }
+
+    fn write_profile(dir: &tempfile::TempDir, stem: &str, profile_name: &str, extra: &str) {
+        let path = dir.path().join("profiles").join(format!("{stem}.yaml"));
+        std::fs::write(path, format!("profile_name: {profile_name}\n{extra}")).unwrap();
+    }
+
+    #[test]
+    fn no_candidates_when_stem_matches_profile_name() {
+        let tmp = make_config_home();
+        write_profile(&tmp, "default", "default", "");
+        let candidates = prune_candidates(tmp.path(), None).unwrap();
+        assert!(candidates.is_empty(), "expected no candidates, got {candidates:?}");
+    }
+
+    #[test]
+    fn detects_orphans_when_profile_name_differs_from_stem() {
+        let tmp = make_config_home();
+        write_profile(&tmp, "my_profile", "My Profile", "");
+        let candidates = prune_candidates(tmp.path(), None).unwrap();
+        let would_delete: Vec<_> = candidates
+            .iter()
+            .filter(|c| c.status == CandidateStatus::WouldDelete)
+            .collect();
+        assert_eq!(would_delete.len(), STATIC_FIELDS.len());
+        assert!(would_delete
+            .iter()
+            .any(|c| c.account == "My_Profile/alteryx_one.access_token"));
+    }
+
+    #[test]
+    fn live_ref_marks_candidate_as_live() {
+        let tmp = make_config_home();
+        write_profile(&tmp, "my_profile", "My Profile", "");
+        write_profile(
+            &tmp,
+            "other",
+            "other",
+            "access_token_ref: \"keyring:My_Profile/alteryx_one.access_token\"\n",
+        );
+        let candidates = prune_candidates(tmp.path(), None).unwrap();
+        let live: Vec<_> = candidates
+            .iter()
+            .filter(|c| c.status == CandidateStatus::LiveRef)
+            .collect();
+        assert!(live
+            .iter()
+            .any(|c| c.account == "My_Profile/alteryx_one.access_token"));
+    }
+
+    #[test]
+    fn profile_filter_scopes_to_one_profile() {
+        let tmp = make_config_home();
+        write_profile(&tmp, "my_profile", "My Profile", "");
+        write_profile(&tmp, "other_profile", "Other Profile", "");
+        let candidates = prune_candidates(tmp.path(), Some("my_profile")).unwrap();
+        assert!(candidates.iter().all(|c| c.profile_stem == "my_profile"));
+    }
+
+    #[test]
+    fn profile_filter_unknown_returns_ok_empty() {
+        let tmp = make_config_home();
+        write_profile(&tmp, "default", "default", "");
+        let candidates = prune_candidates(tmp.path(), Some("nonexistent")).unwrap();
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn workspace_credentials_produce_dynamic_fields() {
+        let tmp = make_config_home();
+        write_profile(
+            &tmp,
+            "my_profile",
+            "My Profile",
+            "alteryx_one:\n  workspace_credentials:\n    ws1: {}\n    ws2: {}\n",
+        );
+        let candidates = prune_candidates(tmp.path(), None).unwrap();
+        // 8 static + 3 fields × 2 workspaces = 14
+        assert_eq!(candidates.len(), STATIC_FIELDS.len() + 6);
+    }
 }
