@@ -25,6 +25,7 @@ pub(super) fn api_profile_to_server_api_ref(api: &ApiProfile) -> Option<ServerAp
         base_url: api.base_url.clone(),
         client_id,
         client_secret,
+        client_secret_ref: api.auth.client_secret_ref.clone(),
     })
 }
 
@@ -33,6 +34,7 @@ pub(super) fn server_profile_to_server_api_ref(server: &ServerProfile) -> Option
         base_url: server.webapi_url.clone(),
         client_id: server.curator_api_key.clone(),
         client_secret: server.curator_api_secret.clone(),
+        client_secret_ref: server.curator_api_secret_ref.clone(),
     })
 }
 

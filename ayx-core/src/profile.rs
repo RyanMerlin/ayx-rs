@@ -536,7 +536,10 @@ pub struct ServerProfile {
 pub struct ServerApiProfile {
     pub base_url: String,
     pub client_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub client_secret: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -767,6 +770,17 @@ impl Config {
     }
 
     fn with_server_api_overrides(mut self) -> Result<Self, ProfileError> {
+        // Resolve an `env:`/`keyring:`/`inline:` ref on the shared `server_api`
+        // secret BEFORE it is expanded into the `api`/`server` representations, so
+        // all three carry the same resolved value, and propagate the ref so the
+        // later secretize-on-save preserves `env:` refs across every copy.
+        if let Some(shared) = self.server_api.as_mut()
+            && shared.client_secret.is_empty()
+            && let Some(reference) = shared.client_secret_ref.as_deref()
+            && let Some(secret) = resolve_secret_ref(reference)?
+        {
+            shared.client_secret = secret;
+        }
         if let Some(shared) = &self.server_api {
             if self.api.is_none() {
                 self.api = Some(ApiProfile {
@@ -776,7 +790,7 @@ impl Config {
                         pat: None,
                         client_id: Some(shared.client_id.clone()),
                         client_secret: Some(shared.client_secret.clone()),
-                        client_secret_ref: None,
+                        client_secret_ref: shared.client_secret_ref.clone(),
                         scope: Some(String::new()),
                     },
                     timeout_ms: None,
@@ -788,7 +802,7 @@ impl Config {
                     webapi_url: normalize_alteryx_base_url(&shared.base_url),
                     curator_api_key: shared.client_id.clone(),
                     curator_api_secret: shared.client_secret.clone(),
-                    curator_api_secret_ref: None,
+                    curator_api_secret_ref: shared.client_secret_ref.clone(),
                     verify_tls: None,
                 });
             }
@@ -1826,6 +1840,7 @@ fn canonical_server_value(config: &Config) -> Result<Option<serde_yaml::Value>, 
                     base_url: server.webapi_url.clone(),
                     client_id: server.curator_api_key.clone(),
                     client_secret: server.curator_api_secret.clone(),
+                    client_secret_ref: server.curator_api_secret_ref.clone(),
                 })
             })
     });
@@ -1882,12 +1897,21 @@ fn canonical_server_value(config: &Config) -> Result<Option<serde_yaml::Value>, 
 }
 
 fn api_profile_to_server_api(api: &ApiProfile) -> Option<ServerApiProfile> {
-    let client_id = api.auth.client_id.as_ref()?.clone();
-    let client_secret = api.auth.client_secret.as_ref()?.clone();
+    let client_id = api
+        .auth
+        .client_id
+        .as_ref()
+        .filter(|v| !v.is_empty())?
+        .clone();
+    // Carry the ref through even when the plaintext is absent — after secretize,
+    // `client_secret` is None and the secret lives in `client_secret_ref`, which
+    // must reach the canonical `server.api.client_secret_ref` output (not be
+    // dropped, which would lose the secret on round-trip).
     Some(ServerApiProfile {
         base_url: api.base_url.clone(),
         client_id,
-        client_secret,
+        client_secret: api.auth.client_secret.clone().unwrap_or_default(),
+        client_secret_ref: api.auth.client_secret_ref.clone(),
     })
 }
 
@@ -2365,6 +2389,7 @@ mod tests {
                 base_url: "http://localhost/webapi/".to_string(),
                 client_id: "client".to_string(),
                 client_secret: "secret".to_string(),
+                client_secret_ref: None,
             }),
             api: None,
             server: None,
