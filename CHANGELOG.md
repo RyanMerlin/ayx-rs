@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased — 0.11.0
+## 0.11.0 — 2026-06-23
 
 ### Breaking changes
 
-- **On-disk format** (`#50`): the canonical config format now uses `client_secret_ref` /
+- **On-disk format** (`#50`, `#51`): the canonical config format now uses `client_secret_ref` /
   `curator_api_secret_ref` to store secrets indirectly (keyring or env references).
   Config files written by v0.11.0 are not readable by older binaries that lack
   the `_ref` fields. Existing plaintext configs load fine on upgrade; the ref is
@@ -28,12 +28,7 @@
   (workspace environments) as the stable scope, rather than the mutable
   `profile_name` field. After the first save, the old account (if any) may remain
   in your keyring; it is harmless and can be pruned with `ayx secret prune`
-  (forthcoming — see issue #4).
-
-### Follow-ups
-
-- `ayx secret prune` (#4): remove stale keyring accounts left by the old
-  `profile_name`-scoped naming scheme.
+  (tracked in issue #4).
 
 ## 0.10.3 — 2026-06-22
 
