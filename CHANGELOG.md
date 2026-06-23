@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased — 0.11.0
+
+### Breaking changes
+
+- **On-disk format** (`#50`): the canonical config format now uses `client_secret_ref` /
+  `curator_api_secret_ref` to store secrets indirectly (keyring or env references).
+  Config files written by v0.11.0 are not readable by older binaries that lack
+  the `_ref` fields. Existing plaintext configs load fine on upgrade; the ref is
+  written on the next save (lazy migration).
+
+### Features
+
+- **Server-API secret consolidation** (`#51`): a single canonical source
+  (`server_api.client_secret`) is now the authoritative secret for Alteryx Server
+  connectivity. The legacy `api.auth.client_secret` and `server.curator_api_secret`
+  fields are synthesized (derived, read-only) views of the same secret; writing to
+  them is a no-op when they carry the same value as `server_api`. A mixed-state
+  conflict (two representations resolving to different values) is detected at the
+  write boundary and reported with field names and ref forms — never the resolved
+  secret value itself.
+
+### Migration notes
+
+- **Keyring accounts re-key on next save** (lazy migration): the keyring account
+  name now uses the on-disk file stem (standalone profiles) or `workspace.env`
+  (workspace environments) as the stable scope, rather than the mutable
+  `profile_name` field. After the first save, the old account (if any) may remain
+  in your keyring; it is harmless and can be pruned with `ayx secret prune`
+  (forthcoming — see issue #4).
+
+### Follow-ups
+
+- `ayx secret prune` (#4): remove stale keyring accounts left by the old
+  `profile_name`-scoped naming scheme.
+
 ## 0.10.3 — 2026-06-22
 
 ### Security (dependencies)
