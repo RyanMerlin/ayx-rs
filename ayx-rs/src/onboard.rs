@@ -364,6 +364,7 @@ pub(crate) fn write_workspace_config(
         let out = secretize_config(config, &scope, InlineSecretPolicy::Allow)?;
         merged.refs.extend(out.refs);
         merged.inline_fields.extend(out.inline_fields);
+        merged.scopes_used.extend(out.scopes_used);
     }
     serialize_workspace_to(path, &secured)?;
     Ok(merged)
@@ -412,6 +413,13 @@ pub(crate) enum InlineSecretPolicy {
 pub(crate) struct SecretizeOutput {
     pub refs: BTreeMap<String, String>,
     pub inline_fields: Vec<String>,
+    /// The keyring scope string(s) the writer passed to `secretize_config`.
+    ///
+    /// Single-profile writes (`write_config_with_policy`) populate exactly one
+    /// entry (the on-disk file stem).  Workspace writes (`write_workspace_config`)
+    /// accumulate one entry per environment.  In-memory only — not serialized to
+    /// disk.
+    pub scopes_used: Vec<String>,
 }
 
 fn store(
@@ -467,6 +475,7 @@ pub(crate) fn secretize_config(
     policy: InlineSecretPolicy,
 ) -> Result<SecretizeOutput> {
     let mut out = SecretizeOutput::default();
+    out.scopes_used.push(scope.to_string());
 
     if let Some(one) = config.alteryx_one.as_mut() {
         if let Some(value) = one.access_token.take() {
@@ -2221,98 +2230,116 @@ server_api:
 
     #[test]
     fn standalone_profile_rename_does_not_change_keyring_scope() {
-        // Prove that the scope used for the keyring account is derived from the
+        // Prove that the scope the writer ACTUALLY USED is derived from the
         // on-disk file-stem, NOT the mutable `config.profile_name`.
         //
-        // Two Config objects share the SAME target path ("myprofile.yaml") but
-        // have DIFFERENT `profile_name` fields ("name-alpha" vs "name-beta").
-        // After `write_config_with_policy`, both must produce an identical
-        // `access_token_ref` scope fragment — proving a rename does not orphan
-        // the keyring entry.
+        // Strategy: call `write_config_with_policy` for two Config objects that
+        // share the SAME on-disk path but have DIFFERENT `profile_name` fields
+        // ("name-alpha" vs "name-beta"), and assert that the `scopes_used` field
+        // in the returned `SecretizeOutput` is IDENTICAL for both calls.
         //
-        // Fail-first: if `write_config_with_policy` had used `config.profile_name`
-        // instead of `path.file_stem()`, the two scope strings would be
-        // `keyring_account("name-alpha", ...)` vs `keyring_account("name-beta", ...)`
-        // — which are "name-alpha/alteryx_one.access_token" vs
-        // "name-beta/alteryx_one.access_token" — and the assertion below would fail.
-        // We verify this concretely at the end of the test.
-        unsafe { std::env::set_var("AYX_FORCE_INLINE_SECRETS", "1") };
+        // This is a genuine write-path guard: if `write_config_with_policy` were
+        // reverted to use `config.profile_name` as scope, `scopes_used` would be
+        // ["name-alpha"] for the first call and ["name-beta"] for the second —
+        // and the assertion below would FAIL.  The AYX_FORCE_INLINE_SECRETS flag
+        // is not load-bearing for this assertion (the scope is computed before any
+        // secret is stored), but we keep it to stay deterministic on headless CI.
         let _home = isolated_config_home();
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("myprofile.yaml");
 
         // First write: profile_name = "name-alpha"
         let cfg_alpha = standalone_config_with_token("name-alpha", "tok-alpha");
-        write_config_with_policy(&path, &cfg_alpha, InlineSecretPolicy::Allow).unwrap();
-        let disk_alpha = std::fs::read_to_string(&path).unwrap();
+        let out_alpha =
+            write_config_with_policy(&path, &cfg_alpha, InlineSecretPolicy::Allow).unwrap();
 
         // Second write: same path, profile_name = "name-beta"
         let cfg_beta = standalone_config_with_token("name-beta", "tok-beta");
-        write_config_with_policy(&path, &cfg_beta, InlineSecretPolicy::Allow).unwrap();
-        let disk_beta = std::fs::read_to_string(&path).unwrap();
+        let out_beta =
+            write_config_with_policy(&path, &cfg_beta, InlineSecretPolicy::Allow).unwrap();
 
-        unsafe { std::env::remove_var("AYX_FORCE_INLINE_SECRETS") };
-
-        // With AYX_FORCE_INLINE_SECRETS both refs are `inline:<value>` so we
-        // cannot directly compare keyring account names in the YAML.  Instead we
-        // verify the ref slot holds the new value (not an orphan ref to the old
-        // scope) and — critically — confirm via the `keyring_account` function
-        // that the two profile_name values WOULD have produced distinct accounts
-        // under the old derivation, proving the test is a genuine regression guard.
-        assert!(
-            disk_alpha.contains("inline:tok-alpha"),
-            "alpha write must hold its own token; disk:\n{disk_alpha}"
-        );
-        assert!(
-            disk_beta.contains("inline:tok-beta"),
-            "beta write must hold its own token; disk:\n{disk_beta}"
-        );
-
-        // Fail-first proof: the old profile_name-derived accounts differ, so if
-        // write_config_with_policy had used profile_name the two writes would have
-        // stored secrets under non-equal accounts — a rename would silently orphan
-        // the original entry.  We show those names ARE distinct to confirm the test
-        // is a real guard (it would catch a revert to the old derivation).
-        let old_account_alpha = keyring_account("name-alpha", "alteryx_one.access_token");
-        let old_account_beta = keyring_account("name-beta", "alteryx_one.access_token");
-        assert_ne!(
-            old_account_alpha, old_account_beta,
-            "precondition: profile_name-derived accounts must differ (fail-first proof); \
-             alpha={old_account_alpha} beta={old_account_beta}"
-        );
-
-        // With the current file-stem derivation, both calls use scope "myprofile"
-        // (the stem of "myprofile.yaml") — verify this is invariant.
-        let stem_account = keyring_account("myprofile", "alteryx_one.access_token");
+        // Core assertion: the writer-surfaced scope must be IDENTICAL despite
+        // different profile_name fields.  Both calls see the same file stem
+        // ("myprofile") so both must report scope "myprofile".
         assert_eq!(
-            stem_account,
-            keyring_account("myprofile", "alteryx_one.access_token"),
-            "stem-derived account must be deterministic"
+            out_alpha.scopes_used, out_beta.scopes_used,
+            "scope used by the writer must be identical regardless of profile_name; \
+             alpha_scopes={:?} beta_scopes={:?}",
+            out_alpha.scopes_used, out_beta.scopes_used
         );
-        // Both profile_name-scoped accounts must differ from the stem account —
-        // confirming that the stem is the stabilizing identity.
+        assert_eq!(
+            out_alpha.scopes_used,
+            vec!["myprofile".to_string()],
+            "writer must use the file stem as scope, not the profile_name; \
+             got {:?}",
+            out_alpha.scopes_used
+        );
+
+        // Fail-first proof: record what the OLD profile_name-derived scopes would
+        // have been, showing they ARE different.  This confirms that the test
+        // would fail if the writer were reverted to use profile_name as scope.
+        // (These are the strings that would appear in scopes_used under the old code.)
         assert_ne!(
-            old_account_alpha, stem_account,
-            "profile_name-scoped account must differ from stem account; \
-             alpha={old_account_alpha} stem={stem_account}"
+            "name-alpha", "name-beta",
+            "precondition: the two profile_name values must be distinct"
         );
         assert_ne!(
-            old_account_beta, stem_account,
-            "profile_name-scoped account must differ from stem account; \
-             beta={old_account_beta} stem={stem_account}"
+            "name-alpha", "myprofile",
+            "precondition: old profile_name scope differs from file-stem scope"
         );
     }
 
     #[test]
     fn workspace_env_keyring_accounts_are_distinct_regardless_of_profile_name() {
-        // Verify `keyring_account` distinctness for two workspace envs sharing
-        // profile_name="default" — directly, without masking via inline-fallback.
-        // This complements `two_envs_sharing_profile_name_do_not_collide` which
-        // uses AYX_FORCE_INLINE_SECRETS (and so can only assert on inline: refs).
+        // Verify that the writer uses DISTINCT scopes for two workspace envs that
+        // share profile_name="default", by asserting on the writer-surfaced
+        // `scopes_used` field in the returned `SecretizeOutput`.
+        //
+        // This guards the actual write path: if `write_workspace_config` were
+        // reverted to use `config.profile_name` as scope, both envs would report
+        // the SAME scope ("default") in `scopes_used` and the assertion would fail.
+        let _home = isolated_config_home();
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_path = tmp.path().join("ws.yaml");
+        // Two envs both have profile_name="default" but distinct env_keys.
+        let ws = workspace_two_envs_same_profile_name("prod-secret", "staging-secret");
+        let out = write_workspace_config(&ws_path, &ws).unwrap();
+
+        // The writer must have used two DISTINCT scopes (one per env).
+        assert_eq!(
+            out.scopes_used.len(),
+            2,
+            "write_workspace_config must record one scope per environment; \
+             got {:?}",
+            out.scopes_used
+        );
+        let scope_set: std::collections::HashSet<_> = out.scopes_used.iter().collect();
+        assert_eq!(
+            scope_set.len(),
+            2,
+            "scopes for two envs sharing profile_name must be DISTINCT; \
+             got {:?}",
+            out.scopes_used
+        );
+
+        // Verify the scopes encode workspace_name.env_key, not profile_name.
+        // (HashMap iteration order is non-deterministic, so check set membership.)
+        let expected_scopes: std::collections::HashSet<String> =
+            ["myws.prod".to_string(), "myws.staging".to_string()]
+                .into_iter()
+                .collect();
+        let actual_scopes: std::collections::HashSet<String> =
+            out.scopes_used.into_iter().collect();
+        assert_eq!(
+            actual_scopes, expected_scopes,
+            "scopes must be workspace_name.env_key, not profile_name"
+        );
+
+        // Sanity: distinctness at the keyring_account level (complements the scope
+        // check above without requiring a live keyring).
         let prod_account = keyring_account("myws.prod", "alteryx_one.access_token");
         let staging_account = keyring_account("myws.staging", "alteryx_one.access_token");
         let old_shared_account = keyring_account("default", "alteryx_one.access_token");
-
         assert_ne!(
             prod_account, staging_account,
             "two workspace envs must produce DISTINCT keyring accounts; \

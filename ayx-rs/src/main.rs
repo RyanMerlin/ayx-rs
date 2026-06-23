@@ -5236,14 +5236,16 @@ fn profile_migrate_envelope(profile: &Path, name: Option<&str>) -> Result<Envelo
     let body = serde_yaml::to_string(&ayx_core::profile::canonical_profile_value(&config)?)?;
     onboard::write_restricted(&target, body.as_bytes())?;
     let mut state = load_ayx_state()?;
-    state.active_profile = Some(target_name.clone());
+    // Use the same normalized stem that write_config_with_policy uses for scope so
+    // active_profile matches what `profile list` shows (normalized, no .yaml suffix).
+    state.active_profile = Some(migrate_scope.to_string());
     save_ayx_state(&state)?;
     Ok(Envelope::ok_with_data(
         "profile migrated",
         json!({
             "source": profile.display().to_string(),
             "target": target.display().to_string(),
-            "active_profile": target_name,
+            "active_profile": migrate_scope,
             "secret_refs": secretize.refs.keys().collect::<Vec<_>>(),
             "inline_secret_fields": secretize.inline_fields,
             "next_steps": [
