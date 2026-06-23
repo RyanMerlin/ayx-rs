@@ -400,6 +400,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "crossterm",
+ "keyring-core",
  "ratatui",
  "regex",
  "reqwest",

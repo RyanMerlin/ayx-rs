@@ -121,12 +121,9 @@ fn collect_all_keyring_refs(profiles_dir: &Path) -> Result<HashSet<String>> {
     Ok(refs)
 }
 
-/// Extract workspace credential keys from raw YAML text without a full `Config`
-/// parse.  Returns an empty vec on parse failure (resilient to schema skew).
-fn workspace_ids_from_yaml(text: &str) -> Vec<String> {
-    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(text) else {
-        return vec![];
-    };
+/// Extract workspace credential keys from a parsed YAML value.
+/// Returns an empty vec when the field is absent or has an unexpected shape.
+fn workspace_ids_from_value(value: &serde_yaml::Value) -> Vec<String> {
     value
         .get("alteryx_one")
         .and_then(|o| o.get("workspace_credentials"))
@@ -199,7 +196,7 @@ pub fn prune_candidates(
             continue; // no profile_name field — skip
         };
 
-        let ws_ids = workspace_ids_from_yaml(&text);
+        let ws_ids = workspace_ids_from_value(&yaml_value);
         let ws_id_refs: Vec<&str> = ws_ids.iter().map(String::as_str).collect();
 
         let old_accounts = legacy_accounts_for_mismatch(profile_name, stem, &ws_id_refs);
@@ -219,6 +216,68 @@ pub fn prune_candidates(
     }
 
     Ok(candidates)
+}
+
+/// Result of attempting to delete a single orphan account.
+#[derive(Debug, Clone)]
+pub struct ApplyResult {
+    pub profile_stem: String,
+    pub account: String,
+    pub status: ApplyStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApplyStatus {
+    Deleted,
+    NotFound,
+    LiveRef,
+    Failed(String),
+}
+
+/// Delete orphaned keyring accounts identified by `prune_candidates`.
+///
+/// `LiveRef` candidates are never touched.  `WouldDelete` candidates have
+/// `Entry::delete_credential()` called; `NoEntry` maps to `NotFound`.
+pub fn apply_prune(candidates: Vec<PruneCandidate>) -> Vec<ApplyResult> {
+    use ayx_core::secrets::ensure_keyring_store;
+    use keyring_core::Entry;
+
+    ensure_keyring_store();
+
+    apply_prune_with_deleter(candidates, |account| {
+        let entry = Entry::new("ayx", account)?;
+        entry.delete_credential()
+    })
+}
+
+/// Testable core of `apply_prune`: accepts an injectable deleter so unit tests
+/// can exercise routing logic without a live keyring.
+fn apply_prune_with_deleter<F>(
+    candidates: Vec<PruneCandidate>,
+    mut deleter: F,
+) -> Vec<ApplyResult>
+where
+    F: FnMut(&str) -> Result<(), keyring_core::Error>,
+{
+    candidates
+        .into_iter()
+        .map(|c| {
+            let status = match c.status {
+                CandidateStatus::LiveRef => ApplyStatus::LiveRef,
+                CandidateStatus::NotFound => ApplyStatus::NotFound,
+                CandidateStatus::WouldDelete => match deleter(&c.account) {
+                    Ok(()) => ApplyStatus::Deleted,
+                    Err(keyring_core::Error::NoEntry) => ApplyStatus::NotFound,
+                    Err(e) => ApplyStatus::Failed(e.to_string()),
+                },
+            };
+            ApplyResult {
+                profile_stem: c.profile_stem,
+                account: c.account,
+                status,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -265,6 +324,47 @@ mod tests {
         assert!(accounts.iter().any(|a| {
             a == "old/alteryx_one.workspace_credentials['ws1'].access_token"
         }));
+    }
+
+    // apply_prune tests — these run without a live keyring; they verify the
+    // routing logic for LiveRef and WouldDelete candidates.
+    // Actual keyring delete is exercised by the integration test in Task 4.
+
+    #[test]
+    fn apply_skips_live_refs() {
+        let candidates = vec![PruneCandidate {
+            profile_stem: "p".into(),
+            account: "old/field".into(),
+            status: CandidateStatus::LiveRef,
+        }];
+        let results = apply_prune_with_deleter(candidates, |_| {
+            panic!("should not delete a live ref")
+        });
+        assert_eq!(results[0].status, ApplyStatus::LiveRef);
+    }
+
+    #[test]
+    fn apply_reports_not_found() {
+        use keyring_core::Error as KError;
+        let candidates = vec![PruneCandidate {
+            profile_stem: "p".into(),
+            account: "old/field".into(),
+            status: CandidateStatus::WouldDelete,
+        }];
+        // Simulate NoEntry response from the keyring.
+        let results = apply_prune_with_deleter(candidates, |_| Err(KError::NoEntry));
+        assert_eq!(results[0].status, ApplyStatus::NotFound);
+    }
+
+    #[test]
+    fn apply_reports_deleted() {
+        let candidates = vec![PruneCandidate {
+            profile_stem: "p".into(),
+            account: "old/field".into(),
+            status: CandidateStatus::WouldDelete,
+        }];
+        let results = apply_prune_with_deleter(candidates, |_| Ok(()));
+        assert_eq!(results[0].status, ApplyStatus::Deleted);
     }
 
     #[test]
