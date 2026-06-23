@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.1 — 2026-06-23
+
+### Added
+
+- `ayx secret prune` — removes keyring accounts orphaned by the v0.11.0
+  profile_name to file-stem scope migration.  Dry-run by default; `--apply`
+  to delete.  Targets the deterministic set of accounts writable by
+  `secretize_config`; never enumerates the full keyring.  See
+  [docs/releases/v0.11.1.md](docs/releases/v0.11.1.md).
+
 ## 0.11.0 — 2026-06-23
 
 ### Breaking changes

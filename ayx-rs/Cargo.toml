@@ -28,6 +28,7 @@ ayx-registry = { path = "../ayx-registry" }
 self_update.workspace = true
 tokio.workspace = true
 base64.workspace = true
+keyring-core.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -37,6 +37,7 @@ mod capability;
 mod cmd;
 mod onboard;
 mod render;
+pub(crate) mod secret;
 mod tui;
 
 fn decode_token_claims(access_token: &str) -> Option<Value> {
@@ -310,6 +311,11 @@ enum Command {
         #[command(subcommand)]
         command: ProfileCommand,
     },
+    #[command(about = "Keyring secret inspection and maintenance")]
+    Secret {
+        #[command(subcommand)]
+        command: SecretCommand,
+    },
     #[command(about = "Progressive live discovery of the CLI tree")]
     Discover {
         #[arg(long)]
@@ -540,6 +546,22 @@ enum ProfileCommand {
         profile: PathBuf,
         #[arg(long)]
         name: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SecretCommand {
+    #[command(
+        about = "Remove orphaned keyring accounts from the pre-v0.11.0 profile_name-scoped naming scheme",
+        long_about = "Identifies keyring accounts written by ayx < v0.11.0 where the \
+                      profile_name field differs from the on-disk file stem.  Dry-run by \
+                      default; use --apply to delete."
+    )]
+    Prune {
+        #[arg(long, help = "Limit to a single profile by file stem (e.g. 'default')")]
+        profile: Option<String>,
+        #[arg(long, help = "Delete the orphaned accounts (default: dry-run only)")]
+        apply: bool,
     },
 }
 
@@ -4915,6 +4937,126 @@ fn execute(cli: Cli) -> Result<Envelope> {
                         "removed": report.removed,
                         "bytes_freed": report.bytes_freed,
                         "removed_paths": report.removed_paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+                    }),
+                )
+            }
+        },
+        Command::Secret { command } => match command {
+            SecretCommand::Prune { profile, apply } => {
+                let config_home = ayx_config_home().map_err(|e| anyhow::anyhow!("{}", e))?;
+                let profile_filter = profile.as_deref();
+
+                let candidates = secret::prune_candidates(&config_home, profile_filter)?;
+
+                if candidates.is_empty() {
+                    return Ok(Envelope::ok_with_data(
+                        "no orphaned accounts found",
+                        json!({
+                            "applied": apply,
+                            "summary": { "candidates": 0, "deleted": 0, "skipped": 0, "not_found": 0, "failed": 0 },
+                            "entries": [],
+                        }),
+                    ));
+                }
+
+                if !apply {
+                    let entries: Vec<serde_json::Value> = candidates
+                        .iter()
+                        .map(|c| {
+                            json!({
+                                "profile": c.profile_stem,
+                                "account": c.account,
+                                "status": match c.status {
+                                    secret::CandidateStatus::WouldDelete => "would_delete",
+                                    secret::CandidateStatus::LiveRef => "live_ref",
+                                    secret::CandidateStatus::NotFound => "not_found",
+                                },
+                            })
+                        })
+                        .collect();
+                    let would_delete = candidates
+                        .iter()
+                        .filter(|c| c.status == secret::CandidateStatus::WouldDelete)
+                        .count();
+                    let skipped = candidates
+                        .iter()
+                        .filter(|c| c.status == secret::CandidateStatus::LiveRef)
+                        .count();
+                    return Ok(Envelope::ok_with_data(
+                        format!(
+                            "dry run: {} account(s) would be deleted; re-run with --apply",
+                            would_delete
+                        ),
+                        json!({
+                            "applied": false,
+                            "summary": {
+                                "candidates": would_delete,
+                                "deleted": 0,
+                                "skipped": skipped,
+                                "not_found": 0,
+                                "failed": 0,
+                            },
+                            "entries": entries,
+                        }),
+                    ));
+                }
+
+                let results = secret::apply_prune(candidates);
+                let deleted = results
+                    .iter()
+                    .filter(|r| r.status == secret::ApplyStatus::Deleted)
+                    .count();
+                let not_found = results
+                    .iter()
+                    .filter(|r| r.status == secret::ApplyStatus::NotFound)
+                    .count();
+                let skipped = results
+                    .iter()
+                    .filter(|r| r.status == secret::ApplyStatus::LiveRef)
+                    .count();
+                let failed_count = results
+                    .iter()
+                    .filter(|r| matches!(r.status, secret::ApplyStatus::Failed(_)))
+                    .count();
+
+                let entries: Vec<serde_json::Value> = results
+                    .iter()
+                    .map(|r| {
+                        json!({
+                            "profile": r.profile_stem,
+                            "account": r.account,
+                            "status": match &r.status {
+                                secret::ApplyStatus::Deleted   => "deleted",
+                                secret::ApplyStatus::NotFound  => "not_found",
+                                secret::ApplyStatus::LiveRef   => "live_ref",
+                                secret::ApplyStatus::Failed(_) => "failed",
+                            },
+                        })
+                    })
+                    .collect();
+
+                if failed_count > 0 {
+                    anyhow::bail!(
+                        "prune completed with {} failure(s): deleted {}, skipped {}, not_found {}",
+                        failed_count,
+                        deleted,
+                        skipped,
+                        not_found
+                    );
+                }
+
+                Envelope::ok_with_data(
+                    format!("deleted {} orphaned account(s)", deleted),
+                    json!({
+                        "applied": true,
+                        "summary": {
+                            "candidates": deleted + not_found,
+                            "deleted": deleted,
+                            "skipped": skipped,
+                            "not_found": not_found,
+                            "failed": 0,
+                        },
+                        "entries": entries,
                     }),
                 )
             }
