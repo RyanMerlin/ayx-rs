@@ -4,9 +4,6 @@
 //! used the mutable `profile_name` as the keyring scope.  v0.11.0+ uses the stable
 //! on-disk file stem.  When these differ, old accounts become orphaned.
 //!
-//! NOTE: dead_code lint is suppressed here because the command surface is wired
-//! in Task 3.  Remove this attribute once `ayx secret prune` is added to main.rs.
-#![allow(dead_code)]
 
 use std::{
     collections::HashSet,
@@ -49,7 +46,9 @@ pub enum CandidateStatus {
     /// A `keyring:` ref in a current config file points at this account — skip.
     LiveRef,
     /// Account does not exist in the keyring (already cleaned up or never written).
-    /// TODO(Task 2): populated by apply_prune after keyring probe; prune_candidates never sets this.
+    /// `prune_candidates` never sets this; callers may inject it and `apply_prune` handles it
+    /// as a no-op passthrough.
+    #[allow(dead_code)]
     NotFound,
 }
 
