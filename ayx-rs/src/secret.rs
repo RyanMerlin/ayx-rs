@@ -5,11 +5,7 @@
 //! on-disk file stem.  When these differ, old accounts become orphaned.
 //!
 
-use std::{
-    collections::HashSet,
-    fs,
-    path::Path,
-};
+use std::{collections::HashSet, fs, path::Path};
 
 use anyhow::Result;
 use ayx_core::secrets::keyring_account;
@@ -74,9 +70,7 @@ fn legacy_accounts_for_mismatch(
         .collect();
     for ws_id in workspace_ids {
         for suffix in ["access_token", "refresh_token", "client_secret"] {
-            let field = format!(
-                "alteryx_one.workspace_credentials['{ws_id}'].{suffix}"
-            );
+            let field = format!("alteryx_one.workspace_credentials['{ws_id}'].{suffix}");
             accounts.push(keyring_account(old_scope, &field));
         }
     }
@@ -111,9 +105,15 @@ fn collect_all_keyring_refs(profiles_dir: &Path) -> Result<HashSet<String>> {
             continue;
         }
         match fs::read_to_string(&path) {
-            Ok(text) => { refs.extend(keyring_refs_from_text(&text)); }
+            Ok(text) => {
+                refs.extend(keyring_refs_from_text(&text));
+            }
             Err(e) => {
-                eprintln!("warning: could not read '{}' for keyring ref scan: {}", path.display(), e);
+                eprintln!(
+                    "warning: could not read '{}' for keyring ref scan: {}",
+                    path.display(),
+                    e
+                );
             }
         }
     }
@@ -188,10 +188,7 @@ pub fn prune_candidates(
                 continue;
             }
         };
-        let Some(profile_name) = yaml_value
-            .get("profile_name")
-            .and_then(|v| v.as_str())
-        else {
+        let Some(profile_name) = yaml_value.get("profile_name").and_then(|v| v.as_str()) else {
             continue; // no profile_name field — skip
         };
 
@@ -251,10 +248,7 @@ pub fn apply_prune(candidates: Vec<PruneCandidate>) -> Vec<ApplyResult> {
 
 /// Testable core of `apply_prune`: accepts an injectable deleter so unit tests
 /// can exercise routing logic without a live keyring.
-fn apply_prune_with_deleter<F>(
-    candidates: Vec<PruneCandidate>,
-    mut deleter: F,
-) -> Vec<ApplyResult>
+fn apply_prune_with_deleter<F>(candidates: Vec<PruneCandidate>, mut deleter: F) -> Vec<ApplyResult>
 where
     F: FnMut(&str) -> Result<(), keyring_core::Error>,
 {
@@ -312,7 +306,11 @@ mod tests {
         let accounts = legacy_accounts_for_mismatch("old_name", "my-profile", &[]);
         // static fields only, no workspace creds
         assert_eq!(accounts.len(), STATIC_FIELDS.len());
-        assert!(accounts.iter().any(|a| a == "old_name/alteryx_one.access_token"));
+        assert!(
+            accounts
+                .iter()
+                .any(|a| a == "old_name/alteryx_one.access_token")
+        );
     }
 
     #[test]
@@ -320,9 +318,11 @@ mod tests {
         let accounts = legacy_accounts_for_mismatch("old", "new", &["ws1"]);
         // 8 static + 3 per workspace
         assert_eq!(accounts.len(), STATIC_FIELDS.len() + 3);
-        assert!(accounts.iter().any(|a| {
-            a == "old/alteryx_one.workspace_credentials['ws1'].access_token"
-        }));
+        assert!(
+            accounts
+                .iter()
+                .any(|a| { a == "old/alteryx_one.workspace_credentials['ws1'].access_token" })
+        );
     }
 
     // apply_prune tests — these run without a live keyring; they verify the
@@ -336,9 +336,8 @@ mod tests {
             account: "old/field".into(),
             status: CandidateStatus::LiveRef,
         }];
-        let results = apply_prune_with_deleter(candidates, |_| {
-            panic!("should not delete a live ref")
-        });
+        let results =
+            apply_prune_with_deleter(candidates, |_| panic!("should not delete a live ref"));
         assert_eq!(results[0].status, ApplyStatus::LiveRef);
     }
 
@@ -397,7 +396,10 @@ mod tests {
         let tmp = make_config_home();
         write_profile(&tmp, "default", "default", "");
         let candidates = prune_candidates(tmp.path(), None).unwrap();
-        assert!(candidates.is_empty(), "expected no candidates, got {candidates:?}");
+        assert!(
+            candidates.is_empty(),
+            "expected no candidates, got {candidates:?}"
+        );
     }
 
     #[test]
@@ -410,9 +412,11 @@ mod tests {
             .filter(|c| c.status == CandidateStatus::WouldDelete)
             .collect();
         assert_eq!(would_delete.len(), STATIC_FIELDS.len());
-        assert!(would_delete
-            .iter()
-            .any(|c| c.account == "My_Profile/alteryx_one.access_token"));
+        assert!(
+            would_delete
+                .iter()
+                .any(|c| c.account == "My_Profile/alteryx_one.access_token")
+        );
     }
 
     #[test]
@@ -430,9 +434,10 @@ mod tests {
             .iter()
             .filter(|c| c.status == CandidateStatus::LiveRef)
             .collect();
-        assert!(live
-            .iter()
-            .any(|c| c.account == "My_Profile/alteryx_one.access_token"));
+        assert!(
+            live.iter()
+                .any(|c| c.account == "My_Profile/alteryx_one.access_token")
+        );
     }
 
     #[test]

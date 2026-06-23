@@ -4943,8 +4943,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
         },
         Command::Secret { command } => match command {
             SecretCommand::Prune { profile, apply } => {
-                let config_home = ayx_config_home()
-                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                let config_home = ayx_config_home().map_err(|e| anyhow::anyhow!("{}", e))?;
                 let profile_filter = profile.as_deref();
 
                 let candidates = secret::prune_candidates(&config_home, profile_filter)?;
