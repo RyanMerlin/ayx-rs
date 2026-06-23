@@ -96,6 +96,7 @@ fn default_server_profile_template(profile_name: &str) -> Config {
         curator_api_secret: String::new(),
         curator_api_secret_ref: None,
         verify_tls: Some(true),
+        derived: false,
     });
     config.server_api = None;
     config.sqlserver = None;
@@ -367,6 +368,7 @@ mod tests {
             curator_api_secret: "s".to_string(),
             curator_api_secret_ref: None,
             verify_tls: Some(true),
+            derived: false,
         });
         create_profile_from_config_at(config_home.as_path(), "server-source", &source).unwrap();
 

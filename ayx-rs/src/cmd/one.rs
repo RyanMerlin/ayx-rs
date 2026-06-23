@@ -169,6 +169,7 @@ mod tests {
                 scope: None,
             },
             timeout_ms: None,
+            derived: false,
         });
         assert!(!is_one_only_profile(&config));
     }
@@ -193,6 +194,7 @@ mod tests {
                 scope: None,
             },
             timeout_ms: None,
+            derived: false,
         });
         assert!(!is_one_only_profile(&config));
     }

@@ -500,6 +500,7 @@ mod tests {
             curator_api_secret: "s".into(),
             curator_api_secret_ref: None,
             verify_tls: None,
+            derived: false,
         });
         // Sanity: a server-only profile picks Server in auto mode.
         let pick = super::super::source::pick(&cfg, None).unwrap();

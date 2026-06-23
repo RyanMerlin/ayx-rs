@@ -360,6 +360,7 @@ fn template_config_with_profile(profile_name: &str) -> Config {
         curator_api_secret: "replace-me".to_string(),
         curator_api_secret_ref: None,
         verify_tls: Some(true),
+        derived: false,
     });
     config
 }
@@ -690,6 +691,7 @@ fn default_server() -> ServerProfile {
         curator_api_secret: String::new(),
         curator_api_secret_ref: None,
         verify_tls: Some(true),
+        derived: false,
     }
 }
 

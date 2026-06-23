@@ -1928,6 +1928,7 @@ mod tests {
                 scope: None,
             },
             timeout_ms: None,
+            derived: false,
         };
 
         assert_eq!(normalized_base_url(&api), "http://localhost/webapi/");
@@ -1946,6 +1947,7 @@ mod tests {
                 scope: None,
             },
             timeout_ms: None,
+            derived: false,
         };
 
         let client = build_client(&api).expect("client should build");
@@ -1982,6 +1984,7 @@ mod tests {
                     scope: None,
                 },
                 timeout_ms: Some(1000),
+                derived: false,
             }),
             alteryx_one: None,
             observability: None,
@@ -1991,6 +1994,7 @@ mod tests {
                 curator_api_secret: "secret".to_string(),
                 curator_api_secret_ref: None,
                 verify_tls: Some(true),
+                derived: false,
             }),
             sqlserver: None,
             upgrade: None,

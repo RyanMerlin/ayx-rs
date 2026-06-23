@@ -85,6 +85,7 @@ impl LiveSmokeContext {
                     scope: None,
                 },
                 timeout_ms: Some(60_000),
+                derived: false,
             }),
             server: None,
             sqlserver: None,

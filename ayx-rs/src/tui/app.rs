@@ -1996,6 +1996,7 @@ impl App {
                     scope: Some(String::new()),
                 },
                 timeout_ms: None,
+                derived: false,
             });
             if !server_api_base.is_empty() {
                 api.base_url = normalize_alteryx_base_url(&server_api_base);

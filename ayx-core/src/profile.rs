@@ -179,6 +179,17 @@ pub struct ApiProfile {
     pub base_url: String,
     pub auth: ApiAuth,
     pub timeout_ms: Option<u64>,
+    /// True when this profile was synthesized from `server_api` by
+    /// `with_server_api_overrides`, not written directly by the user.
+    /// Skipped on serialization so it never persists to disk.
+    #[serde(skip, default)]
+    pub derived: bool,
+}
+
+impl ApiProfile {
+    pub fn is_derived(&self) -> bool {
+        self.derived
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -530,6 +541,17 @@ pub struct ServerProfile {
     #[serde(default)]
     pub curator_api_secret_ref: Option<String>,
     pub verify_tls: Option<bool>,
+    /// True when this profile was synthesized from `server_api` by
+    /// `with_server_api_overrides`, not written directly by the user.
+    /// Skipped on serialization so it never persists to disk.
+    #[serde(skip, default)]
+    pub derived: bool,
+}
+
+impl ServerProfile {
+    pub fn is_derived(&self) -> bool {
+        self.derived
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -794,6 +816,7 @@ impl Config {
                         scope: Some(String::new()),
                     },
                     timeout_ms: None,
+                    derived: true,
                 });
             }
 
@@ -804,6 +827,7 @@ impl Config {
                     curator_api_secret: shared.client_secret.clone(),
                     curator_api_secret_ref: shared.client_secret_ref.clone(),
                     verify_tls: None,
+                    derived: true,
                 });
             }
         }
@@ -3087,5 +3111,94 @@ server:
 
         let cfg = Config::load_from_path(Path::new("config.yaml")).unwrap();
         assert_eq!(cfg.profile_name, "legacy");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Task-1 helpers: minimal in-memory configs for derived-marker tests.
+    // ---------------------------------------------------------------------------
+
+    /// A bare `Config` with only `server_api` populated; `api` and `server` are
+    /// `None` so `with_server_api_overrides` will synthesize both from scratch.
+    fn config_with_server_api_only(base_url: &str, client_id: &str, client_secret: &str) -> Config {
+        Config {
+            profile_name: "test".to_string(),
+            mongo: MongoProfile::default(),
+            alteryx_one: None,
+            observability: None,
+            server_api: Some(ServerApiProfile {
+                base_url: base_url.to_string(),
+                client_id: client_id.to_string(),
+                client_secret: client_secret.to_string(),
+                client_secret_ref: None,
+            }),
+            api: None,
+            server: None,
+            sqlserver: None,
+            upgrade: None,
+        }
+    }
+
+    /// A `Config` with an explicit `api` already set by the user.  `server` is
+    /// also pre-populated so neither synthesized arm fires.
+    fn config_with_explicit_api(base_url: &str, client_id: &str, client_secret: &str) -> Config {
+        Config {
+            profile_name: "test".to_string(),
+            mongo: MongoProfile::default(),
+            alteryx_one: None,
+            observability: None,
+            server_api: Some(ServerApiProfile {
+                base_url: base_url.to_string(),
+                client_id: client_id.to_string(),
+                client_secret: client_secret.to_string(),
+                client_secret_ref: None,
+            }),
+            api: Some(ApiProfile {
+                base_url: base_url.to_string(),
+                auth: ApiAuth {
+                    mode: ApiAuthMode::Oauth2ClientCredentials,
+                    pat: None,
+                    client_id: Some(client_id.to_string()),
+                    client_secret: Some(client_secret.to_string()),
+                    client_secret_ref: None,
+                    scope: None,
+                },
+                timeout_ms: None,
+                derived: false,
+            }),
+            server: Some(ServerProfile {
+                webapi_url: base_url.to_string(),
+                curator_api_key: client_id.to_string(),
+                curator_api_secret: client_secret.to_string(),
+                curator_api_secret_ref: None,
+                verify_tls: None,
+                derived: false,
+            }),
+            sqlserver: None,
+            upgrade: None,
+        }
+    }
+
+    #[test]
+    fn synthesized_api_and_server_are_marked_derived() {
+        let cfg = config_with_server_api_only("https://x.example", "cid", "shh");
+        let finalized = cfg.with_server_api_overrides().unwrap();
+        assert!(
+            finalized.api.as_ref().unwrap().is_derived(),
+            "synthesized api must be derived"
+        );
+        assert!(
+            finalized.server.as_ref().unwrap().is_derived(),
+            "synthesized server must be derived"
+        );
+    }
+
+    #[test]
+    fn user_authored_api_is_not_derived() {
+        let cfg = config_with_explicit_api("https://x.example", "cid", "shh");
+        let finalized = cfg.with_server_api_overrides().unwrap();
+        assert!(
+            !finalized.api.as_ref().unwrap().is_derived(),
+            "explicit api must not be derived"
+        );
     }
 }
