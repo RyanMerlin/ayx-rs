@@ -109,12 +109,12 @@ export default defineConfig({
         {
           label: 'Reference',
           collapsed: true,
-          autogenerate: { directory: 'reference' },
+          items: [{ autogenerate: { directory: 'reference' } }],
         },
         {
           label: 'Releases',
           collapsed: true,
-          autogenerate: { directory: 'releases' },
+          items: [{ autogenerate: { directory: 'releases' } }],
         },
       ],
       pagefind: true,
