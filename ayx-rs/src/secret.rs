@@ -49,6 +49,7 @@ pub enum CandidateStatus {
     /// A `keyring:` ref in a current config file points at this account — skip.
     LiveRef,
     /// Account does not exist in the keyring (already cleaned up or never written).
+    /// TODO(Task 2): populated by apply_prune after keyring probe; prune_candidates never sets this.
     NotFound,
 }
 
@@ -110,8 +111,11 @@ fn collect_all_keyring_refs(profiles_dir: &Path) -> Result<HashSet<String>> {
         if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
             continue;
         }
-        if let Ok(text) = fs::read_to_string(&path) {
-            refs.extend(keyring_refs_from_text(&text));
+        match fs::read_to_string(&path) {
+            Ok(text) => { refs.extend(keyring_refs_from_text(&text)); }
+            Err(e) => {
+                eprintln!("warning: could not read '{}' for keyring ref scan: {}", path.display(), e);
+            }
         }
     }
     Ok(refs)
@@ -178,10 +182,16 @@ pub fn prune_candidates(
         };
 
         // Extract profile_name from YAML without full Config deserialize.
-        let yaml_value: serde_yaml::Value =
-            serde_yaml::from_str(&text).map_err(|e| {
-                anyhow::anyhow!("failed to parse profile '{}': {}", stem, e)
-            })?;
+        let yaml_value: serde_yaml::Value = match serde_yaml::from_str(&text) {
+            Ok(v) => v,
+            Err(e) => {
+                if profile_filter.is_some() {
+                    anyhow::bail!("failed to parse profile '{}': {}", stem, e);
+                }
+                eprintln!("warning: skipping unparseable profile '{}': {}", stem, e);
+                continue;
+            }
+        };
         let Some(profile_name) = yaml_value
             .get("profile_name")
             .and_then(|v| v.as_str())
