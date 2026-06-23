@@ -2,10 +2,7 @@
 title: Visual interface
 description: Experimental commands that target the Alteryx One visual-interface surface — sessions, workflow editing, data, library, schedules, and jobs.
 sidebar:
-  order: 6
-  badge:
-    text: Experimental
-    variant: caution
+  hidden: true
 ---
 
 :::caution[Experimental]
