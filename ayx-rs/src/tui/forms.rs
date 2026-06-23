@@ -584,5 +584,6 @@ pub(super) fn default_server_profile() -> ServerProfile {
         curator_api_secret: String::new(),
         curator_api_secret_ref: None,
         verify_tls: Some(true),
+        derived: false,
     }
 }

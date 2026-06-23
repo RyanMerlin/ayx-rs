@@ -121,6 +121,7 @@ mod tests {
                 curator_api_secret: "s".into(),
                 curator_api_secret_ref: None,
                 verify_tls: None,
+                derived: false,
             });
         }
         c

@@ -9,6 +9,182 @@ use thiserror::Error;
 use crate::secrets::resolve_secret_ref;
 use crate::sensitive::write_sensitive_file;
 
+// ---------------------------------------------------------------------------
+// Task 4: mixed-state secret conflict detection
+// ---------------------------------------------------------------------------
+
+/// A diagnostic record for a single representation's resolved secret.
+struct SecretCandidate {
+    /// Human-readable label, e.g. `"server_api.client_secret_ref"`.
+    label: String,
+    /// The ref string that was resolved (e.g. `"inline:..."`, `"env:FOO"`).
+    ref_form: String,
+}
+
+/// Error returned when two non-derived secret representations both resolve to
+/// *different* concrete values, indicating a mixed-state configuration.
+///
+/// The message names the conflicting fields and their ref forms so the operator
+/// can identify which value to remove.  It never includes the resolved secret
+/// values themselves.
+#[derive(Debug, Error)]
+#[error(
+    "mixed secret state: {source_a} and {source_b} resolve to different values; \
+     remove one or run `ayx config edit` to consolidate. \
+     ({ref_a} vs {ref_b})"
+)]
+pub struct MixedSecretState {
+    /// Label of the first conflicting source field.
+    pub source_a: String,
+    /// Label of the second conflicting source field.
+    pub source_b: String,
+    /// Ref form of the first source (never the resolved value).
+    pub ref_a: String,
+    /// Ref form of the second source (never the resolved value).
+    pub ref_b: String,
+}
+
+/// Check whether multiple secret representations in `config` disagree.
+///
+/// For each populated representation (`server_api`, non-derived `api`,
+/// non-derived `server`) we attempt to resolve the secret to a concrete string.
+/// When two representations both resolve **and** their values differ, we return
+/// `Err(MixedSecretState)`.  If either side is unresolvable (e.g. an unset
+/// `env:` var, a missing keyring entry) we cannot prove a conflict and degrade
+/// gracefully to `Ok(())`.
+///
+/// The error message names only field labels and ref forms — never the resolved
+/// secret values — to avoid leaking credentials into logs or terminal output.
+pub fn detect_secret_conflict(config: &Config) -> Result<(), MixedSecretState> {
+    // Collect (label, ref_form, resolved_value) for each non-derived
+    // representation that has a secret to speak of.
+    let mut candidates: Vec<(SecretCandidate, String)> = Vec::new();
+
+    // 1. server_api.client_secret / client_secret_ref
+    if let Some(sa) = config.server_api.as_ref()
+        && let Some(val) =
+            resolved_inline_or_ref(&sa.client_secret, sa.client_secret_ref.as_deref())
+    {
+        let ref_form = ref_form_for(
+            &sa.client_secret,
+            sa.client_secret_ref.as_deref(),
+            "inline:***",
+        );
+        candidates.push((
+            SecretCandidate {
+                label: "server_api.client_secret".to_string(),
+                ref_form,
+            },
+            val,
+        ));
+    }
+
+    // 2. api.auth.client_secret / client_secret_ref — only when user-authored
+    if let Some(api) = config.api.as_ref()
+        && !api.is_derived()
+        && let Some(val) = resolved_inline_or_ref(
+            api.auth.client_secret.as_deref().unwrap_or(""),
+            api.auth.client_secret_ref.as_deref(),
+        )
+    {
+        let ref_form = ref_form_for(
+            api.auth.client_secret.as_deref().unwrap_or(""),
+            api.auth.client_secret_ref.as_deref(),
+            "inline:***",
+        );
+        candidates.push((
+            SecretCandidate {
+                label: "api.auth.client_secret".to_string(),
+                ref_form,
+            },
+            val,
+        ));
+    }
+
+    // 3. server.curator_api_secret / curator_api_secret_ref — only when user-authored
+    if let Some(srv) = config.server.as_ref()
+        && !srv.is_derived()
+        && let Some(val) = resolved_inline_or_ref(
+            &srv.curator_api_secret,
+            srv.curator_api_secret_ref.as_deref(),
+        )
+    {
+        let ref_form = ref_form_for(
+            &srv.curator_api_secret,
+            srv.curator_api_secret_ref.as_deref(),
+            "inline:***",
+        );
+        candidates.push((
+            SecretCandidate {
+                label: "server.curator_api_secret".to_string(),
+                ref_form,
+            },
+            val,
+        ));
+    }
+
+    // Compare every pair that both resolved to a concrete value.
+    for i in 0..candidates.len() {
+        for j in (i + 1)..candidates.len() {
+            let (cand_a, val_a) = &candidates[i];
+            let (cand_b, val_b) = &candidates[j];
+            if val_a != val_b {
+                return Err(MixedSecretState {
+                    source_a: cand_a.label.clone(),
+                    source_b: cand_b.label.clone(),
+                    ref_a: cand_a.ref_form.clone(),
+                    ref_b: cand_b.ref_form.clone(),
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Resolve a secret from either an inline plaintext value or a ref string.
+///
+/// Returns `None` if:
+/// - Both `value` is empty and `ref_` is `None` (no secret configured).
+/// - The ref is unresolvable (env var not set, keyring miss) — we cannot prove
+///   a conflict in this case, so we degrade gracefully.
+fn resolved_inline_or_ref(value: &str, ref_: Option<&str>) -> Option<String> {
+    if !value.is_empty() {
+        return Some(value.to_string());
+    }
+    if let Some(r) = ref_ {
+        // Silently ignore resolution errors — an unresolvable ref cannot prove a
+        // conflict and must never make the config un-loadable.
+        return resolve_secret_ref(r).ok().flatten();
+    }
+    None
+}
+
+/// Return the ref-form string for display in the error message.
+/// Never includes the resolved plaintext value — only the ref or a
+/// redacted inline placeholder.
+///
+/// `env:` and `keyring:` refs name a *location* (not a value) and are safe to
+/// print verbatim.  An `inline:` ref embeds the secret as its suffix; it is
+/// treated exactly like a bare plaintext value and replaced with
+/// `inline_placeholder`.
+fn ref_form_for(value: &str, ref_: Option<&str>, inline_placeholder: &str) -> String {
+    if let Some(r) = ref_ {
+        // Allowlist: only `env:` and `keyring:` refs name a *location* (not a
+        // value) and are safe to print verbatim.  Anything else — `inline:` (embeds
+        // the secret as a suffix), a bare value, or any unknown future scheme —
+        // is redacted to `inline_placeholder` to prevent accidental secret leaks.
+        if r.starts_with("env:") || r.starts_with("keyring:") {
+            return r.to_string();
+        }
+        return inline_placeholder.to_string();
+    }
+    if !value.is_empty() {
+        return inline_placeholder.to_string();
+    }
+    String::new()
+}
+
 #[derive(Debug, Error)]
 pub enum ProfileError {
     #[error("failed to read config file '{path}': {source}")]
@@ -179,6 +355,17 @@ pub struct ApiProfile {
     pub base_url: String,
     pub auth: ApiAuth,
     pub timeout_ms: Option<u64>,
+    /// True when this profile was synthesized from `server_api` by
+    /// `with_server_api_overrides`, not written directly by the user.
+    /// Skipped on serialization so it never persists to disk.
+    #[serde(skip, default)]
+    pub derived: bool,
+}
+
+impl ApiProfile {
+    pub fn is_derived(&self) -> bool {
+        self.derived
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -530,6 +717,17 @@ pub struct ServerProfile {
     #[serde(default)]
     pub curator_api_secret_ref: Option<String>,
     pub verify_tls: Option<bool>,
+    /// True when this profile was synthesized from `server_api` by
+    /// `with_server_api_overrides`, not written directly by the user.
+    /// Skipped on serialization so it never persists to disk.
+    #[serde(skip, default)]
+    pub derived: bool,
+}
+
+impl ServerProfile {
+    pub fn is_derived(&self) -> bool {
+        self.derived
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -756,6 +954,12 @@ impl Config {
     ) -> Result<Self, ProfileError> {
         let config = apply_env_fallbacks(config, &env_values);
         let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
+        // Warn-only: a mixed-state config is suspicious but still loadable.
+        // The write boundary enforces the hard-error; reads must proceed so the
+        // operator can inspect and repair the config.
+        if let Err(e) = detect_secret_conflict(&config) {
+            eprintln!("[ayx WARN] {e}");
+        }
         Ok(overlay_active_profile_one_from_state(config, current_path))
     }
 
@@ -766,6 +970,10 @@ impl Config {
     ) -> Result<Self, ProfileError> {
         let config = apply_env_fallbacks(config, &env_values);
         let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
+        // Warn-only: same rationale as finalize_loaded_config above.
+        if let Err(e) = detect_secret_conflict(&config) {
+            eprintln!("[ayx WARN] {e}");
+        }
         Ok(config)
     }
 
@@ -794,6 +1002,7 @@ impl Config {
                         scope: Some(String::new()),
                     },
                     timeout_ms: None,
+                    derived: true,
                 });
             }
 
@@ -804,6 +1013,7 @@ impl Config {
                     curator_api_secret: shared.client_secret.clone(),
                     curator_api_secret_ref: shared.client_secret_ref.clone(),
                     verify_tls: None,
+                    derived: true,
                 });
             }
         }
@@ -3087,5 +3297,122 @@ server:
 
         let cfg = Config::load_from_path(Path::new("config.yaml")).unwrap();
         assert_eq!(cfg.profile_name, "legacy");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Task-1 helpers: minimal in-memory configs for derived-marker tests.
+    // ---------------------------------------------------------------------------
+
+    /// A bare `Config` with only `server_api` populated; `api` and `server` are
+    /// `None` so `with_server_api_overrides` will synthesize both from scratch.
+    fn config_with_server_api_only(base_url: &str, client_id: &str, client_secret: &str) -> Config {
+        Config {
+            profile_name: "test".to_string(),
+            mongo: MongoProfile::default(),
+            alteryx_one: None,
+            observability: None,
+            server_api: Some(ServerApiProfile {
+                base_url: base_url.to_string(),
+                client_id: client_id.to_string(),
+                client_secret: client_secret.to_string(),
+                client_secret_ref: None,
+            }),
+            api: None,
+            server: None,
+            sqlserver: None,
+            upgrade: None,
+        }
+    }
+
+    /// A `Config` with an explicit `api` already set by the user.  `server` is
+    /// also pre-populated so neither synthesized arm fires.
+    fn config_with_explicit_api(base_url: &str, client_id: &str, client_secret: &str) -> Config {
+        Config {
+            profile_name: "test".to_string(),
+            mongo: MongoProfile::default(),
+            alteryx_one: None,
+            observability: None,
+            server_api: Some(ServerApiProfile {
+                base_url: base_url.to_string(),
+                client_id: client_id.to_string(),
+                client_secret: client_secret.to_string(),
+                client_secret_ref: None,
+            }),
+            api: Some(ApiProfile {
+                base_url: base_url.to_string(),
+                auth: ApiAuth {
+                    mode: ApiAuthMode::Oauth2ClientCredentials,
+                    pat: None,
+                    client_id: Some(client_id.to_string()),
+                    client_secret: Some(client_secret.to_string()),
+                    client_secret_ref: None,
+                    scope: None,
+                },
+                timeout_ms: None,
+                derived: false,
+            }),
+            server: Some(ServerProfile {
+                webapi_url: base_url.to_string(),
+                curator_api_key: client_id.to_string(),
+                curator_api_secret: client_secret.to_string(),
+                curator_api_secret_ref: None,
+                verify_tls: None,
+                derived: false,
+            }),
+            sqlserver: None,
+            upgrade: None,
+        }
+    }
+
+    #[test]
+    fn synthesized_api_and_server_are_marked_derived() {
+        let cfg = config_with_server_api_only("https://x.example", "cid", "shh");
+        let finalized = cfg.with_server_api_overrides().unwrap();
+        assert!(
+            finalized.api.as_ref().unwrap().is_derived(),
+            "synthesized api must be derived"
+        );
+        assert!(
+            finalized.server.as_ref().unwrap().is_derived(),
+            "synthesized server must be derived"
+        );
+    }
+
+    #[test]
+    fn user_authored_api_is_not_derived() {
+        let cfg = config_with_explicit_api("https://x.example", "cid", "shh");
+        let finalized = cfg.with_server_api_overrides().unwrap();
+        assert!(
+            !finalized.api.as_ref().unwrap().is_derived(),
+            "explicit api must not be derived"
+        );
+    }
+
+    #[test]
+    fn ref_form_for_redacts_schemeless_ref() {
+        // A scheme-less value in a `_ref` field (e.g. written by a future ref scheme
+        // or a malformed config) must be redacted, not printed verbatim.
+        assert_eq!(
+            ref_form_for("", Some("bare-secret-value"), "inline:***"),
+            "inline:***",
+            "scheme-less ref must be redacted, not printed verbatim"
+        );
+        // env: and keyring: are the only allowlisted schemes.
+        assert_eq!(
+            ref_form_for("", Some("env:MY_VAR"), "inline:***"),
+            "env:MY_VAR",
+            "env: ref must be printed verbatim"
+        );
+        assert_eq!(
+            ref_form_for("", Some("keyring:my/account"), "inline:***"),
+            "keyring:my/account",
+            "keyring: ref must be printed verbatim"
+        );
+        // inline: refs must always be redacted (the suffix IS the secret).
+        assert_eq!(
+            ref_form_for("", Some("inline:actual-secret"), "inline:***"),
+            "inline:***",
+            "inline: ref suffix must be redacted"
+        );
     }
 }

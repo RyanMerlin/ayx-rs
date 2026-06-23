@@ -33,6 +33,12 @@ base64.workspace = true
 tempfile.workspace = true
 regex.workspace = true
 reqwest = { workspace = true }
+# Enable the test-inline-forcing feature so AYX_FORCE_INLINE_SECRETS is active
+# during `cargo nextest run` / `cargo test` for this crate.  The production
+# [dependencies] edge above does NOT enable this feature, so the seam is
+# compiled out of release binaries (Cargo resolver = "2" keeps dev-dep feature
+# activations isolated from the normal build graph).
+ayx-core = { path = "../ayx-core", features = ["test-inline-forcing"] }
 
 [[bin]]
 name = "ayx"

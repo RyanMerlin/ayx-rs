@@ -30,7 +30,7 @@ Tactics are named, safety-classified playbooks. Each tactic documents its steps,
 
 ## Bundled tactics
 
-Run `ayx tactics list` to see the full list. As of v0.9.10:
+Run `ayx tactics list` to see the full list. As of v0.11.0:
 
 | ID | Title | Safety | Tags |
 |----|-------|--------|------|

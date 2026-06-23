@@ -13,9 +13,19 @@ fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
     path
 }
 
+/// Point `AYX_CONFIG_HOME` at the given directory for the duration of the
+/// returned guard. nextest process-isolates each test, so mutating env vars
+/// here is safe. Keeps the host's active-profile overlay from contaminating
+/// tests that load through the strict config loader.
+fn isolated_config_home(dir: &std::path::Path) {
+    // SAFETY: nextest runs each test in its own process.
+    unsafe { std::env::set_var("AYX_CONFIG_HOME", dir) };
+}
+
 #[test]
 fn loads_minimal_valid_config() {
     let dir = unique_temp_dir("ayx-core-profile");
+    isolated_config_home(&dir);
     let path = dir.join("config.yaml");
     fs::write(
         &path,
@@ -44,6 +54,7 @@ api:
 #[test]
 fn rejects_missing_required_fields() {
     let dir = unique_temp_dir("ayx-core-profile-invalid");
+    isolated_config_home(&dir);
     let path = dir.join("config.yaml");
     fs::write(
         &path,
@@ -67,6 +78,7 @@ mongo:
 #[test]
 fn loads_observability_block() {
     let dir = unique_temp_dir("ayx-core-profile-observability");
+    isolated_config_home(&dir);
     let path = dir.join("config.yaml");
     fs::write(
         &path,
@@ -101,6 +113,7 @@ observability:
 #[test]
 fn validates_enabled_observability_path() {
     let dir = unique_temp_dir("ayx-core-profile-observability-invalid");
+    isolated_config_home(&dir);
     let path = dir.join("config.yaml");
     fs::write(
         &path,

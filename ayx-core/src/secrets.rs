@@ -7,6 +7,17 @@ use crate::profile::ProfileError;
 
 const SECRET_SERVICE: &str = "ayx";
 
+/// Returns `true` when the named environment variable is set to a truthy value
+/// (`1`, `true`, `yes`, `TRUE`, `YES`). Treats an unset or empty variable as
+/// falsy. Used to gate `AYX_ALLOW_INLINE_SECRETS` and, when the
+/// `test-inline-forcing` feature is active, `AYX_FORCE_INLINE_SECRETS`.
+fn env_truthy(name: &str) -> bool {
+    matches!(
+        env::var(name).ok().as_deref(),
+        Some("1") | Some("true") | Some("yes") | Some("TRUE") | Some("YES")
+    )
+}
+
 /// Register the platform credential store as keyring-core's default, exactly once.
 ///
 /// keyring 4.x (keyring-core) selects the credential store at runtime rather than
@@ -91,7 +102,35 @@ pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileErro
 /// On failure (no keyring backend, denied access, etc.) returns an error so
 /// callers must decide explicitly whether to fall back. Use
 /// [`store_secret_with_fallback`] when an inline fallback is acceptable.
+///
+/// # Test lever (feature-gated; compiled out of release binaries)
+///
+/// When the `test-inline-forcing` Cargo feature is enabled, setting
+/// `AYX_FORCE_INLINE_SECRETS=1` (or another truthy value) makes this function
+/// behave as if the OS keyring were unavailable — it returns the same error as
+/// a headless host with no D-Bus / Secret Service backend. This lets tests
+/// deterministically exercise the inline-fallback path without requiring a live
+/// Secret Service on the test machine.
+///
+/// The feature is **not enabled by default** and is absent from all production
+/// dependency edges. It is intended to be enabled only via
+/// `[dev-dependencies]` in crates that need headless-CI test coverage of the
+/// inline-fallback path. When the feature is off (i.e. in any release binary),
+/// `AYX_FORCE_INLINE_SECRETS` has **no effect whatsoever** — this block is not
+/// compiled in and the function goes straight to the real keyring.
 pub fn store_keyring_secret(account: &str, secret: &str) -> Result<String, ProfileError> {
+    // Deterministic inline-fallback lever for tests. Compiled out of release
+    // binaries (requires feature "test-inline-forcing"). When the feature is
+    // active, the env var mirrors the AYX_ALLOW_INLINE_SECRETS contract by
+    // making the keyring step itself fail deterministically.
+    #[cfg(feature = "test-inline-forcing")]
+    if env_truthy("AYX_FORCE_INLINE_SECRETS") {
+        return Err(ProfileError::Invalid(format!(
+            "unable to open keyring entry '{}': keyring unavailable (forced by \
+             AYX_FORCE_INLINE_SECRETS). Set AYX_ALLOW_INLINE_SECRETS=1 to store in YAML instead.",
+            account
+        )));
+    }
     ensure_keyring_store();
     let entry = Entry::new(SECRET_SERVICE, account).map_err(|source| {
         ProfileError::Invalid(format!(
@@ -120,10 +159,7 @@ pub fn store_secret_with_fallback(
     match store_keyring_secret(account, secret) {
         Ok(reference) => Ok((reference, false)),
         Err(err) => {
-            let env_opt_in = matches!(
-                env::var("AYX_ALLOW_INLINE_SECRETS").ok().as_deref(),
-                Some("1") | Some("true") | Some("yes") | Some("TRUE") | Some("YES")
-            );
+            let env_opt_in = env_truthy("AYX_ALLOW_INLINE_SECRETS");
             if allow_inline || env_opt_in {
                 Ok((format!("inline:{secret}"), true))
             } else {

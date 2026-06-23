@@ -1996,6 +1996,7 @@ impl App {
                     scope: Some(String::new()),
                 },
                 timeout_ms: None,
+                derived: false,
             });
             if !server_api_base.is_empty() {
                 api.base_url = normalize_alteryx_base_url(&server_api_base);
@@ -2299,7 +2300,7 @@ impl App {
     }
 
     fn persist_one_config(&mut self, config: Config) -> Result<()> {
-        let mut secret_refs: BTreeMap<String, String> = BTreeMap::new();
+        let empty_refs = BTreeMap::new();
         let reload_path = match self.target_kind {
             TargetKind::Profile => self.target_path.clone(),
             TargetKind::Workspace => {
@@ -2310,20 +2311,18 @@ impl App {
                 }
             }
         };
-        match self.target_kind {
-            TargetKind::Profile => {
-                secret_refs = write_config(&self.target_path, &config, &secret_refs)?;
-            }
+        let secretize_out = match self.target_kind {
+            TargetKind::Profile => write_config(&self.target_path, &config, &empty_refs)?,
             TargetKind::Workspace => {
                 if let Some(profile_name) = self.active_profile.as_ref() {
                     let profile_path =
                         profile_storage_path(profile_name).map_err(anyhow::Error::from)?;
-                    secret_refs = write_config(&profile_path, &config, &secret_refs)?;
+                    write_config(&profile_path, &config, &empty_refs)?
                 } else {
-                    secret_refs = write_config(&self.target_path, &config, &secret_refs)?;
+                    write_config(&self.target_path, &config, &empty_refs)?
                 }
             }
-        }
+        };
         self.current_config =
             if matches!(self.target_kind, TargetKind::Profile) || self.active_profile.is_some() {
                 Config::load_from_path_lenient_without_active_overlay(&reload_path)
@@ -2339,10 +2338,7 @@ impl App {
         self.credentials = CredentialsForm::from_config(&self.current_config);
         self.refresh_connectivity();
         self.refresh_one_browser();
-        if secret_refs
-            .values()
-            .any(|reference| reference.starts_with("inline:"))
-        {
+        if !secretize_out.inline_fields.is_empty() {
             self.push_toast(
                 "Saved with inline secret refs because the keyring backend was unavailable."
                     .to_string(),
@@ -2353,7 +2349,8 @@ impl App {
     }
 
     fn persist_current_config(&mut self, config: Config) -> Result<()> {
-        match self.target_kind {
+        let empty_refs = BTreeMap::new();
+        let secretize_out = match self.target_kind {
             TargetKind::Profile => {
                 let desired_name = config.profile_name.trim();
                 if desired_name.is_empty() {
@@ -2383,8 +2380,7 @@ impl App {
                         self.active_profile = state.active_profile.clone();
                     }
                 }
-                let secret_refs: BTreeMap<String, String> = BTreeMap::new();
-                write_config(&self.target_path, &config, &secret_refs)?;
+                write_config(&self.target_path, &config, &empty_refs)?
             }
             TargetKind::Workspace => {
                 let mut workspace =
@@ -2398,9 +2394,9 @@ impl App {
                     persisted.alteryx_one = None;
                 }
                 workspace.environments.insert(env_name, persisted);
-                write_workspace_config(&self.target_path, &workspace)?;
+                write_workspace_config(&self.target_path, &workspace)?
             }
-        }
+        };
         self.current_config =
             if matches!(self.target_kind, TargetKind::Profile) || self.active_profile.is_some() {
                 Config::load_from_path_lenient_without_active_overlay(&self.target_path)
@@ -2416,6 +2412,13 @@ impl App {
         self.credentials = CredentialsForm::from_config(&self.current_config);
         self.refresh_connectivity();
         self.refresh_one_browser();
+        if !secretize_out.inline_fields.is_empty() {
+            self.push_toast(
+                "Saved with inline secret refs because the keyring backend was unavailable."
+                    .to_string(),
+                false,
+            );
+        }
         Ok(())
     }
 
