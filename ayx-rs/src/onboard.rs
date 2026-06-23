@@ -12,7 +12,8 @@ use ayx_core::profile::{
     AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded, MongoManaged, MongoMode,
     MongoProfile, ServerProfile, SqlServerConnectionProfile, SqlServerProfile, TlsConfig,
     WorkspaceConfig, canonical_profile_value, canonical_workspace_value,
-    default_profile_storage_path, default_workspace_storage_path, normalize_alteryx_base_url,
+    default_profile_storage_path, default_workspace_storage_path, detect_secret_conflict,
+    normalize_alteryx_base_url,
 };
 use ayx_core::secrets::{keyring_account, resolve_secret_ref, store_secret_with_fallback};
 use ayx_core::sensitive::write_sensitive_file;
@@ -937,6 +938,11 @@ pub(crate) fn write_config_with_policy(
     config: &Config,
     policy: InlineSecretPolicy,
 ) -> Result<SecretizeOutput> {
+    // Hard-error when multiple secret representations carry different resolved
+    // values.  This is a write-time guard: it prevents silently persisting a
+    // mixed-state config that would be ambiguous to reload.
+    detect_secret_conflict(config).map_err(anyhow::Error::from)?;
+
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -1250,8 +1256,9 @@ fn detect_alteryx_service_path(runtime_settings_path: Option<&Path>) -> Option<P
 mod tests {
     use super::*;
     use ayx_core::profile::{
-        Config, MongoDatabases, MongoEmbedded, MongoMode, MongoProfile, SqlServerConnectionProfile,
-        SqlServerProfile, WorkspaceConfig, load_workspace_config,
+        ApiAuth, ApiAuthMode, ApiProfile, Config, MongoDatabases, MongoEmbedded, MongoMode,
+        MongoProfile, ServerApiProfile, SqlServerConnectionProfile, SqlServerProfile,
+        WorkspaceConfig, detect_secret_conflict, load_workspace_config,
     };
     use std::collections::HashMap;
 
@@ -1838,6 +1845,146 @@ server_api:
         assert!(
             !out.refs.is_empty(),
             "SecretizeOutput::refs must be populated on workspace save"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Task 4: mixed-state secret conflict detection helpers + tests
+    // ---------------------------------------------------------------------------
+
+    /// Minimal Config skeleton — only the fields that differ per test are set.
+    fn conflict_base(profile_name: &str) -> Config {
+        Config {
+            profile_name: profile_name.to_string(),
+            mongo: MongoProfile::default(),
+            alteryx_one: None,
+            observability: None,
+            server_api: None,
+            api: None,
+            server: None,
+            sqlserver: None,
+            upgrade: None,
+        }
+    }
+
+    /// Config where `server_api.client_secret_ref = inline:{old}` and
+    /// `api.auth.client_secret = {new_val}`.  Both are resolvable; they differ →
+    /// `detect_secret_conflict` must error.
+    fn config_with_conflicting_secrets(old: &str, new_val: &str) -> Config {
+        let mut cfg = conflict_base("conflict-test");
+        cfg.server_api = Some(ServerApiProfile {
+            base_url: "https://example.com".to_string(),
+            client_id: "cid".to_string(),
+            client_secret: String::new(),
+            client_secret_ref: Some(format!("inline:{old}")),
+        });
+        cfg.api = Some(ApiProfile {
+            base_url: "https://example.com".to_string(),
+            auth: ApiAuth {
+                mode: ApiAuthMode::Oauth2ClientCredentials,
+                pat: None,
+                client_id: Some("cid".to_string()),
+                client_secret: Some(new_val.to_string()),
+                client_secret_ref: None,
+                scope: None,
+            },
+            timeout_ms: None,
+            derived: false, // user-authored — conflict detection must inspect this
+        });
+        cfg
+    }
+
+    /// Config where one side uses an env var that is NOT set → unresolvable →
+    /// cannot prove conflict → `detect_secret_conflict` must return `Ok`.
+    fn config_with_one_unresolvable_ref() -> Config {
+        // Use a name that is extremely unlikely to be set in any real environment.
+        let env_var = "AYX_CONFLICT_TEST_MISSING_VAR_49283747";
+        // Ensure it is not set (safe because nextest process-isolates each test).
+        unsafe { std::env::remove_var(env_var) };
+
+        let mut cfg = conflict_base("unresolvable-test");
+        cfg.server_api = Some(ServerApiProfile {
+            base_url: "https://example.com".to_string(),
+            client_id: "cid".to_string(),
+            client_secret: String::new(),
+            client_secret_ref: Some(format!("env:{env_var}")),
+        });
+        cfg.api = Some(ApiProfile {
+            base_url: "https://example.com".to_string(),
+            auth: ApiAuth {
+                mode: ApiAuthMode::Oauth2ClientCredentials,
+                pat: None,
+                client_id: Some("cid".to_string()),
+                client_secret: Some("DIFFERENT".to_string()),
+                client_secret_ref: None,
+                scope: None,
+            },
+            timeout_ms: None,
+            derived: false,
+        });
+        cfg
+    }
+
+    /// Config where `server_api.client_secret_ref = inline:{secret}` and
+    /// `api.auth.client_secret = {secret}`.  Both resolve to the same value →
+    /// `detect_secret_conflict` must return `Ok`.
+    fn config_with_matching_secrets(secret: &str) -> Config {
+        let mut cfg = conflict_base("matching-test");
+        cfg.server_api = Some(ServerApiProfile {
+            base_url: "https://example.com".to_string(),
+            client_id: "cid".to_string(),
+            client_secret: String::new(),
+            client_secret_ref: Some(format!("inline:{secret}")),
+        });
+        cfg.api = Some(ApiProfile {
+            base_url: "https://example.com".to_string(),
+            auth: ApiAuth {
+                mode: ApiAuthMode::Oauth2ClientCredentials,
+                pat: None,
+                client_id: Some("cid".to_string()),
+                client_secret: Some(secret.to_string()),
+                client_secret_ref: None,
+                scope: None,
+            },
+            timeout_ms: None,
+            derived: false,
+        });
+        cfg
+    }
+
+    #[test]
+    fn conflicting_resolved_secrets_error_at_write_boundary() {
+        let _home = isolated_config_home();
+        // server_api.client_secret_ref = inline:OLD ; api.auth.client_secret = NEW
+        // (both resolve, differ → write must hard-error)
+        let cfg = config_with_conflicting_secrets("OLD", "NEW");
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("c.yaml");
+        let err = write_config_with_policy(&path, &cfg, InlineSecretPolicy::Allow).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("server_api"),
+            "error must name the conflicting sources; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn unresolvable_ref_does_not_error() {
+        let _home = isolated_config_home();
+        // one side env:MISSING → unresolvable → cannot prove conflict → Ok
+        let cfg = config_with_one_unresolvable_ref();
+        assert!(
+            detect_secret_conflict(&cfg).is_ok(),
+            "unresolvable ref must degrade to warn, not error"
+        );
+    }
+
+    #[test]
+    fn identical_secrets_across_reps_do_not_error() {
+        let cfg = config_with_matching_secrets("SAME");
+        assert!(
+            detect_secret_conflict(&cfg).is_ok(),
+            "identical resolved values must not error"
         );
     }
 }

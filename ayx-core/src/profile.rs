@@ -9,6 +9,170 @@ use thiserror::Error;
 use crate::secrets::resolve_secret_ref;
 use crate::sensitive::write_sensitive_file;
 
+// ---------------------------------------------------------------------------
+// Task 4: mixed-state secret conflict detection
+// ---------------------------------------------------------------------------
+
+/// A diagnostic record for a single representation's resolved secret.
+struct SecretCandidate {
+    /// Human-readable label, e.g. `"server_api.client_secret_ref"`.
+    label: String,
+    /// The ref string that was resolved (e.g. `"inline:..."`, `"env:FOO"`).
+    ref_form: String,
+}
+
+/// Error returned when two non-derived secret representations both resolve to
+/// *different* concrete values, indicating a mixed-state configuration.
+///
+/// The message names the conflicting fields and their ref forms so the operator
+/// can identify which value to remove.  It never includes the resolved secret
+/// values themselves.
+#[derive(Debug, Error)]
+#[error(
+    "mixed secret state: {source_a} and {source_b} resolve to different values; \
+     remove one or run `ayx config edit` to consolidate. \
+     ({ref_a} vs {ref_b})"
+)]
+pub struct MixedSecretState {
+    /// Label of the first conflicting source field.
+    pub source_a: String,
+    /// Label of the second conflicting source field.
+    pub source_b: String,
+    /// Ref form of the first source (never the resolved value).
+    pub ref_a: String,
+    /// Ref form of the second source (never the resolved value).
+    pub ref_b: String,
+}
+
+/// Check whether multiple secret representations in `config` disagree.
+///
+/// For each populated representation (`server_api`, non-derived `api`,
+/// non-derived `server`) we attempt to resolve the secret to a concrete string.
+/// When two representations both resolve **and** their values differ, we return
+/// `Err(MixedSecretState)`.  If either side is unresolvable (e.g. an unset
+/// `env:` var, a missing keyring entry) we cannot prove a conflict and degrade
+/// gracefully to `Ok(())`.
+///
+/// The error message names only field labels and ref forms — never the resolved
+/// secret values — to avoid leaking credentials into logs or terminal output.
+pub fn detect_secret_conflict(config: &Config) -> Result<(), MixedSecretState> {
+    // Collect (label, ref_form, resolved_value) for each non-derived
+    // representation that has a secret to speak of.
+    let mut candidates: Vec<(SecretCandidate, String)> = Vec::new();
+
+    // 1. server_api.client_secret / client_secret_ref
+    if let Some(sa) = config.server_api.as_ref()
+        && let Some(val) =
+            resolved_inline_or_ref(&sa.client_secret, sa.client_secret_ref.as_deref())
+    {
+        let ref_form = ref_form_for(
+            &sa.client_secret,
+            sa.client_secret_ref.as_deref(),
+            "inline:***",
+        );
+        candidates.push((
+            SecretCandidate {
+                label: "server_api.client_secret".to_string(),
+                ref_form,
+            },
+            val,
+        ));
+    }
+
+    // 2. api.auth.client_secret / client_secret_ref — only when user-authored
+    if let Some(api) = config.api.as_ref()
+        && !api.is_derived()
+        && let Some(val) = resolved_inline_or_ref(
+            api.auth.client_secret.as_deref().unwrap_or(""),
+            api.auth.client_secret_ref.as_deref(),
+        )
+    {
+        let ref_form = ref_form_for(
+            api.auth.client_secret.as_deref().unwrap_or(""),
+            api.auth.client_secret_ref.as_deref(),
+            "inline:***",
+        );
+        candidates.push((
+            SecretCandidate {
+                label: "api.auth.client_secret".to_string(),
+                ref_form,
+            },
+            val,
+        ));
+    }
+
+    // 3. server.curator_api_secret / curator_api_secret_ref — only when user-authored
+    if let Some(srv) = config.server.as_ref()
+        && !srv.is_derived()
+        && let Some(val) = resolved_inline_or_ref(
+            &srv.curator_api_secret,
+            srv.curator_api_secret_ref.as_deref(),
+        )
+    {
+        let ref_form = ref_form_for(
+            &srv.curator_api_secret,
+            srv.curator_api_secret_ref.as_deref(),
+            "inline:***",
+        );
+        candidates.push((
+            SecretCandidate {
+                label: "server.curator_api_secret".to_string(),
+                ref_form,
+            },
+            val,
+        ));
+    }
+
+    // Compare every pair that both resolved to a concrete value.
+    for i in 0..candidates.len() {
+        for j in (i + 1)..candidates.len() {
+            let (cand_a, val_a) = &candidates[i];
+            let (cand_b, val_b) = &candidates[j];
+            if val_a != val_b {
+                return Err(MixedSecretState {
+                    source_a: cand_a.label.clone(),
+                    source_b: cand_b.label.clone(),
+                    ref_a: cand_a.ref_form.clone(),
+                    ref_b: cand_b.ref_form.clone(),
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Resolve a secret from either an inline plaintext value or a ref string.
+///
+/// Returns `None` if:
+/// - Both `value` is empty and `ref_` is `None` (no secret configured).
+/// - The ref is unresolvable (env var not set, keyring miss) — we cannot prove
+///   a conflict in this case, so we degrade gracefully.
+fn resolved_inline_or_ref(value: &str, ref_: Option<&str>) -> Option<String> {
+    if !value.is_empty() {
+        return Some(value.to_string());
+    }
+    if let Some(r) = ref_ {
+        // Silently ignore resolution errors — an unresolvable ref cannot prove a
+        // conflict and must never make the config un-loadable.
+        return resolve_secret_ref(r).ok().flatten();
+    }
+    None
+}
+
+/// Return the ref-form string for display in the error message.
+/// Never includes the resolved plaintext value — only the ref or a
+/// redacted inline placeholder.
+fn ref_form_for(value: &str, ref_: Option<&str>, inline_placeholder: &str) -> String {
+    if let Some(r) = ref_ {
+        return r.to_string();
+    }
+    if !value.is_empty() {
+        return inline_placeholder.to_string();
+    }
+    String::new()
+}
+
 #[derive(Debug, Error)]
 pub enum ProfileError {
     #[error("failed to read config file '{path}': {source}")]
@@ -778,6 +942,12 @@ impl Config {
     ) -> Result<Self, ProfileError> {
         let config = apply_env_fallbacks(config, &env_values);
         let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
+        // Warn-only: a mixed-state config is suspicious but still loadable.
+        // The write boundary enforces the hard-error; reads must proceed so the
+        // operator can inspect and repair the config.
+        if let Err(e) = detect_secret_conflict(&config) {
+            eprintln!("[ayx WARN] {e}");
+        }
         Ok(overlay_active_profile_one_from_state(config, current_path))
     }
 
@@ -788,6 +958,10 @@ impl Config {
     ) -> Result<Self, ProfileError> {
         let config = apply_env_fallbacks(config, &env_values);
         let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
+        // Warn-only: same rationale as finalize_loaded_config above.
+        if let Err(e) = detect_secret_conflict(&config) {
+            eprintln!("[ayx WARN] {e}");
+        }
         Ok(config)
     }
 
