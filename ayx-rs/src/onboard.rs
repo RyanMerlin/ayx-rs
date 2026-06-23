@@ -1581,12 +1581,23 @@ alteryx_one:
         );
     }
 
+    /// Tempdir that also points `AYX_CONFIG_HOME` at itself, so the strict config
+    /// loader's active-profile overlay finds no host state to contaminate the
+    /// fixture. nextest process-isolates each test, so the env mutation is safe.
+    fn isolated_config_home() -> tempfile::TempDir {
+        let temp = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::set_var("AYX_CONFIG_HOME", temp.path());
+        }
+        temp
+    }
+
     #[test]
     fn server_api_sourced_secret_is_secretized_not_plaintext() {
         // A profile carrying a top-level `server_api:` section must not write its
         // client_secret to disk as plaintext (red-team High; the canonical
         // `server.api.client_secret` schema previously had no ref slot).
-        let temp = tempfile::tempdir().unwrap();
+        let temp = isolated_config_home();
         let path = temp.path().join("default.yaml");
         std::fs::write(
             &path,
@@ -1613,7 +1624,7 @@ server_api:
 
     #[test]
     fn api_sourced_server_secret_is_secretized_not_plaintext() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = isolated_config_home();
         let path = temp.path().join("default.yaml");
         std::fs::write(
             &path,
@@ -1643,7 +1654,7 @@ api:
     #[test]
     fn server_api_secret_round_trips_through_ref() {
         // Save (secretize) then reload — the resolved secret must survive.
-        let temp = tempfile::tempdir().unwrap();
+        let temp = isolated_config_home();
         let path = temp.path().join("default.yaml");
         std::fs::write(
             &path,
@@ -1670,7 +1681,7 @@ server_api:
 
     #[test]
     fn server_api_env_ref_preserved_on_round_trip() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = isolated_config_home();
         let path = temp.path().join("default.yaml");
         std::fs::write(
             &path,
