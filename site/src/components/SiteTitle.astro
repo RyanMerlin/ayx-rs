@@ -1,12 +1,14 @@
 ---
 // Text-only site title with a version badge. Mono type carries the CLI identity.
+import { ayxVersionLabel } from '../version';
+
 const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
 ---
 
 <a href={siteTitleHref} class="site-title sl-flex" translate="no">
   <span class="prompt" aria-hidden="true">&gt;_</span>
   <span class="title-text">{siteTitle}</span>
-  <span class="version-badge">v0.9.10</span>
+  <span class="version-badge">{ayxVersionLabel}</span>
 </a>
 
 <style>

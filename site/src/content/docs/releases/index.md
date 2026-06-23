@@ -7,6 +7,10 @@ sidebar:
 
 Release notes for each tagged version of `ayx`. For current behavior, use the live docs above; for a specific binary, read the notes for that version.
 
+## v0.10.3
+
+**Dependency security bump.** `quinn-proto` was bumped from 0.11.14 to 0.11.15 to clear **RUSTSEC-2026-0185**, a remote memory-exhaustion / DoS advisory in a transitive HTTP/3 QUIC dependency. `quinn-proto` is not on the CLI's HTTP/1.1 request path, so this is a `Cargo.lock`-only change with no behavior impact, but it restores a green `cargo audit` gate.
+
 ## v0.10.2
 
 **Auth-transport security hardening.**
