@@ -343,13 +343,23 @@ fn serialize_workspace_to(path: &Path, workspace: &WorkspaceConfig) -> Result<()
 /// plaintext YAML. Without this pass the workspace-save path materialized
 /// resolved secrets to disk in the clear (red-team High #2). Use
 /// [`serialize_workspace_to`] for the template path, which keeps placeholders.
-pub(crate) fn write_workspace_config(path: &Path, workspace: &WorkspaceConfig) -> Result<()> {
+///
+/// Returns the merged [`SecretizeOutput`] across all environments so callers
+/// can surface the `inline_fields` warning when the OS keyring is unavailable.
+pub(crate) fn write_workspace_config(
+    path: &Path,
+    workspace: &WorkspaceConfig,
+) -> Result<SecretizeOutput> {
     let mut secured = workspace.clone();
+    let mut merged = SecretizeOutput::default();
     for config in secured.environments.values_mut() {
         let scope = config.profile_name.clone();
-        secretize_config(config, &scope, InlineSecretPolicy::Allow)?;
+        let out = secretize_config(config, &scope, InlineSecretPolicy::Allow)?;
+        merged.refs.extend(out.refs);
+        merged.inline_fields.extend(out.inline_fields);
     }
-    serialize_workspace_to(path, &secured)
+    serialize_workspace_to(path, &secured)?;
+    Ok(merged)
 }
 
 fn template_config_with_profile(profile_name: &str) -> Config {
@@ -905,12 +915,17 @@ fn prompt_sql_connection(
     Ok(conn)
 }
 
+/// Write a profile and return the full [`SecretizeOutput`] (refs + inline-fallback fields).
+///
+/// The `_secret_refs` parameter is kept for call-site compatibility but is no longer
+/// used; refs come from the returned `SecretizeOutput`. Callers should check
+/// [`inline_secret_warning`] on `output.inline_fields` to surface the advisory to users.
 pub(crate) fn write_config(
     path: &Path,
     config: &Config,
     _secret_refs: &BTreeMap<String, String>,
-) -> Result<BTreeMap<String, String>> {
-    Ok(write_config_with_policy(path, config, InlineSecretPolicy::Allow)?.refs)
+) -> Result<SecretizeOutput> {
+    write_config_with_policy(path, config, InlineSecretPolicy::Allow)
 }
 
 /// Write a profile file under `path`. Returns refs + inline-fallback warnings.
@@ -1757,6 +1772,56 @@ server_api:
         assert!(
             !out.refs.contains_key("server.curator_api_secret"),
             "no orphan curator account"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Task 3: write_workspace_config must return SecretizeOutput — no silent discard.
+    // ---------------------------------------------------------------------------
+
+    /// Build a WorkspaceConfig with a single environment that carries one secret.
+    fn workspace_with_one_env_secret(secret_value: &str) -> WorkspaceConfig {
+        // Embed the secret as an inline access_token so secretize_config has
+        // something to secretize (and fall back to inline when keyring absent).
+        let yaml = format!(
+            "profile_name: ws-env\nalteryx_one:\n  account_email: test@example.com\n  base_url: https://us1.alteryxcloud.com\n  access_token: {secret_value}\n"
+        );
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), yaml).unwrap();
+        let env_cfg = Config::load_from_path_with_environment(tmp.path(), None).unwrap();
+        WorkspaceConfig {
+            workspace_name: "test-ws".to_string(),
+            active_environment: "env".to_string(),
+            environments: HashMap::from([("env".to_string(), env_cfg)]),
+        }
+    }
+
+    #[test]
+    fn workspace_save_surfaces_inline_fields_when_keyring_unavailable() {
+        // In CI (and most developer machines without a keyring daemon) the OS keyring
+        // is unavailable, so secretize_config falls back to `inline:` storage.
+        // write_workspace_config must return the merged SecretizeOutput so callers
+        // can surface the inline_fields warning — not silently discard it.
+        let _home = isolated_config_home();
+        let ws = workspace_with_one_env_secret("shh");
+        let tmp = tempfile::tempdir().unwrap();
+        let ws_path = tmp.path().join("ws.yaml");
+        let out = write_workspace_config(&ws_path, &ws).unwrap();
+        // If the keyring IS available (unlikely in CI), inline_fields will be empty
+        // and the ref will be a keyring: ref — both are fine; the important invariant
+        // is that the return type now carries the info rather than dropping it.
+        // When the keyring is NOT available, inline_fields must be non-empty.
+        let on_disk = std::fs::read_to_string(&ws_path).unwrap();
+        if on_disk.contains("inline:") {
+            assert!(
+                !out.inline_fields.is_empty(),
+                "inline fallback must be reported in SecretizeOutput, not swallowed"
+            );
+        }
+        // refs must always be populated (at least the one secretized field).
+        assert!(
+            !out.refs.is_empty(),
+            "SecretizeOutput::refs must be populated on workspace save"
         );
     }
 }
