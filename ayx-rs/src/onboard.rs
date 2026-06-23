@@ -1955,9 +1955,12 @@ server_api:
     #[test]
     fn conflicting_resolved_secrets_error_at_write_boundary() {
         let _home = isolated_config_home();
-        // server_api.client_secret_ref = inline:OLD ; api.auth.client_secret = NEW
-        // (both resolve, differ → write must hard-error)
-        let cfg = config_with_conflicting_secrets("OLD", "NEW");
+        // Use a distinctive sentinel so a leak is unambiguous in the assertion.
+        // server_api.client_secret_ref = inline:ZZ_SENTINEL_OLD_9137
+        // api.auth.client_secret = ZZ_SENTINEL_NEW_9137
+        // Both resolve, values differ → write must hard-error AND must NOT leak
+        // the cleartext sentinel through the inline: ref.
+        let cfg = config_with_conflicting_secrets("ZZ_SENTINEL_OLD_9137", "ZZ_SENTINEL_NEW_9137");
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("c.yaml");
         let err = write_config_with_policy(&path, &cfg, InlineSecretPolicy::Allow).unwrap_err();
@@ -1965,6 +1968,20 @@ server_api:
         assert!(
             msg.contains("server_api"),
             "error must name the conflicting sources; got: {msg}"
+        );
+        // The inline: ref must be redacted — the cleartext sentinel must NOT appear.
+        assert!(
+            !msg.contains("ZZ_SENTINEL_OLD_9137"),
+            "error message must not leak the resolved secret via inline: ref; got: {msg}"
+        );
+        assert!(
+            !msg.contains("ZZ_SENTINEL_NEW_9137"),
+            "error message must not leak the bare plaintext secret; got: {msg}"
+        );
+        // Confirm the redacted placeholder IS present so we know the ref was rendered.
+        assert!(
+            msg.contains("inline:***"),
+            "error message must contain the redacted inline placeholder; got: {msg}"
         );
     }
 

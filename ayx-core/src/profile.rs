@@ -163,8 +163,16 @@ fn resolved_inline_or_ref(value: &str, ref_: Option<&str>) -> Option<String> {
 /// Return the ref-form string for display in the error message.
 /// Never includes the resolved plaintext value — only the ref or a
 /// redacted inline placeholder.
+///
+/// `env:` and `keyring:` refs name a *location* (not a value) and are safe to
+/// print verbatim.  An `inline:` ref embeds the secret as its suffix; it is
+/// treated exactly like a bare plaintext value and replaced with
+/// `inline_placeholder`.
 fn ref_form_for(value: &str, ref_: Option<&str>, inline_placeholder: &str) -> String {
     if let Some(r) = ref_ {
+        if r.starts_with("inline:") {
+            return inline_placeholder.to_string();
+        }
         return r.to_string();
     }
     if !value.is_empty() {
