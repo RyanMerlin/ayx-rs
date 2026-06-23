@@ -1285,8 +1285,8 @@ mod tests {
     use super::*;
     use ayx_core::profile::{
         ApiAuth, ApiAuthMode, ApiProfile, Config, MongoDatabases, MongoEmbedded, MongoMode,
-        MongoProfile, ServerApiProfile, SqlServerConnectionProfile, SqlServerProfile,
-        WorkspaceConfig, detect_secret_conflict, load_workspace_config,
+        MongoProfile, ServerApiProfile, ServerProfile, SqlServerConnectionProfile,
+        SqlServerProfile, WorkspaceConfig, detect_secret_conflict, load_workspace_config,
     };
     use std::collections::HashMap;
 
@@ -1384,6 +1384,7 @@ mod tests {
 
     #[test]
     fn environments_template_writes_named_environments() {
+        let _home = isolated_config_home();
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("environments.yaml");
         let detail = write_workspace_template(&path, "prod", "dev", "prod").unwrap();
@@ -1424,6 +1425,7 @@ mod tests {
         // An `env:`-backed access_token_ref must survive a load -> save round-trip.
         // Resolving it at load and re-secretizing on save must NOT relocate the
         // secret into keyring/inline storage (red-team security L1).
+        let _home = isolated_config_home();
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("default.yaml");
         std::fs::write(
@@ -1471,6 +1473,7 @@ mod tests {
         // A changed value (e.g. a fresh `auth login` / rotation) no longer matches
         // the env ref and MUST be secretized — the env: indirection is overwritten,
         // so the new token actually persists. This guards the login boundary.
+        let _home = isolated_config_home();
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("default.yaml");
         std::fs::write(
@@ -1505,6 +1508,7 @@ mod tests {
         // A workspace-scoped credential whose access_token is env:-backed must
         // survive load->save like the top-level token — not get double-stored as
         // BOTH a resolved plaintext value AND the env: ref (red-team High #1).
+        let _home = isolated_config_home();
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("default.yaml");
         std::fs::write(
@@ -1540,6 +1544,7 @@ alteryx_one:
     fn workspace_credential_fresh_token_is_secretized_not_plaintext() {
         // A fresh workspace-scoped token (e.g. `auth login --workspace-id`) must be
         // secretized on save, not written as bare plaintext YAML (red-team High #1).
+        let _home = isolated_config_home();
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("default.yaml");
         std::fs::write(
@@ -1573,6 +1578,7 @@ alteryx_one:
     fn write_workspace_config_secretizes_secrets() {
         // The workspace-save path must secretize secrets, not serialize resolved
         // plaintext straight to disk (red-team High #2).
+        let _home = isolated_config_home();
         let temp = tempfile::tempdir().unwrap();
         let env_path = temp.path().join("env.yaml");
         std::fs::write(
@@ -1697,7 +1703,7 @@ api:
         )
         .unwrap();
         let config = Config::load_from_path_with_environment(&path, None).unwrap();
-        write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
+        let out = write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
         let on_disk = std::fs::read_to_string(&path).unwrap();
         assert!(
             !on_disk.contains("client_secret: API-CLIENT-SECRET"),
@@ -1706,6 +1712,14 @@ api:
         assert!(
             on_disk.contains("client_secret_ref:"),
             "api-sourced server.api secret must be a ref:\n{on_disk}"
+        );
+        // Task 2 carryover: a user-authored api:-only config must produce exactly one ref,
+        // self-documenting that the single logical secret is stored behind exactly one account.
+        assert_eq!(
+            out.refs.len(),
+            1,
+            "api-only config must produce exactly one secret ref, got: {:?}",
+            out.refs
         );
     }
 
@@ -1807,6 +1821,82 @@ server_api:
         assert!(
             !out.refs.contains_key("server.curator_api_secret"),
             "no orphan curator account"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Task 6: server-only config round-trips without leaving an orphan.
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn server_only_config_round_trips_without_orphan() {
+        // A `server:`-only authored profile (the legacy path used before server_api
+        // was introduced) must: save with a `_ref` (no plaintext on disk), reload
+        // cleanly, resolve the secret to the original value, and NOT produce a
+        // separate `server.curator_api_secret` orphan keyring account alongside the
+        // canonical `server.api.client_secret` account.
+        //
+        // With AYX_FORCE_INLINE_SECRETS the ref is `inline:<value>` rather than
+        // `keyring:...`, so the test is deterministic on headless CI.
+        unsafe { std::env::set_var("AYX_FORCE_INLINE_SECRETS", "1") };
+        let _home = isolated_config_home();
+        let path = _home.path().join("profiles").join("server-rt.yaml");
+
+        // Build a server:-only Config (not server_api) in-memory.
+        let mut cfg = super::default_config();
+        cfg.profile_name = "server-rt".to_string();
+        cfg.server = Some(ServerProfile {
+            webapi_url: "https://x.example".to_string(),
+            curator_api_key: "key".to_string(),
+            curator_api_secret: "shh".to_string(),
+            curator_api_secret_ref: None,
+            verify_tls: None,
+            derived: false,
+        });
+
+        // Write (secretize): the plaintext must be replaced with a ref.
+        let out = write_config_with_policy(&path, &cfg, InlineSecretPolicy::Allow).unwrap();
+        unsafe { std::env::remove_var("AYX_FORCE_INLINE_SECRETS") };
+
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !on_disk.contains("curator_api_secret: shh"),
+            "server-only secret must not be plaintext on disk:\n{on_disk}"
+        );
+        assert!(
+            on_disk.contains("client_secret_ref:"),
+            "server-only secret must be stored behind a ref:\n{on_disk}"
+        );
+
+        // Exactly ONE keyring account — no orphan `server.curator_api_secret` alongside
+        // the canonical `server.api.client_secret`.
+        assert_eq!(
+            out.refs.len(),
+            1,
+            "exactly one secret ref written for a server-only config, got: {:?}",
+            out.refs
+        );
+        assert!(
+            out.refs.contains_key("server.curator_api_secret"),
+            "the single ref must be server.curator_api_secret for a server:-only authored config, got: {:?}",
+            out.refs
+        );
+
+        // Round-trip: reload and resolve.
+        unsafe { std::env::set_var("AYX_FORCE_INLINE_SECRETS", "1") };
+        let reloaded = Config::load_from_path_with_environment(&path, None).unwrap();
+        unsafe { std::env::remove_var("AYX_FORCE_INLINE_SECRETS") };
+
+        // After with_server_api_overrides, server.curator_api_secret is the synthesized view.
+        // The test asserts that the secret resolves correctly from whatever canonical form was saved.
+        let resolved_secret = reloaded
+            .server
+            .as_ref()
+            .map(|s| s.curator_api_secret.as_str())
+            .unwrap_or("");
+        assert_eq!(
+            resolved_secret, "shh",
+            "server-only secret must resolve correctly after round-trip"
         );
     }
 
