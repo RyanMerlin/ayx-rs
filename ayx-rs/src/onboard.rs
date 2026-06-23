@@ -549,7 +549,12 @@ pub(crate) fn secretize_config(
         }
     }
 
+    // Secretize the api/server views only when they are user-authored (not derived
+    // from server_api by with_server_api_overrides). A derived view carries the same
+    // logical secret as server_api and would create a duplicate or orphan keyring
+    // account if secretized independently.
     if let Some(api) = config.api.as_mut()
+        && !api.is_derived()
         && let Some(value) = api.auth.client_secret.take()
     {
         let existing_ref = api.auth.client_secret_ref.clone();
@@ -587,6 +592,7 @@ pub(crate) fn secretize_config(
     }
 
     if let Some(server) = config.server.as_mut()
+        && !server.is_derived()
         && !server.curator_api_secret.trim().is_empty()
     {
         let existing_ref = server.curator_api_secret_ref.clone();
@@ -1712,6 +1718,45 @@ server_api:
         assert!(
             !on_disk.contains("sa-from-env"),
             "server.api env-backed secret must not be materialized:\n{on_disk}"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Task 2: single-arm secretize — server_api source writes exactly one ref.
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn server_api_sourced_config_writes_single_keyring_account() {
+        // server_api only -> the load path calls with_server_api_overrides, synthesizing
+        // derived api+server copies. secretize_config must write exactly one keyring
+        // account (via the server_api arm) and not create a second orphan account for
+        // server.curator_api_secret.
+        let temp = isolated_config_home();
+        let path = temp.path().join("default.yaml");
+        std::fs::write(
+            &path,
+            r#"profile_name: satest
+server_api:
+  base_url: https://x.example
+  client_id: cid
+  client_secret: shh
+"#,
+        )
+        .unwrap();
+        // load triggers with_server_api_overrides: api and server are synthesized (derived)
+        let mut cfg = Config::load_from_path_with_environment(&path, None).unwrap();
+        let out = secretize_config(&mut cfg, "wsenv", InlineSecretPolicy::Allow).unwrap();
+        // one logical secret -> one ref key; NO server.curator_api_secret orphan
+        assert_eq!(
+            out.refs.len(),
+            1,
+            "exactly one secret persisted, got {:?}",
+            out.refs
+        );
+        assert!(out.refs.contains_key("server.api.client_secret"));
+        assert!(
+            !out.refs.contains_key("server.curator_api_secret"),
+            "no orphan curator account"
         );
     }
 }
