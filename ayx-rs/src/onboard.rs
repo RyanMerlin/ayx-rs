@@ -566,6 +566,25 @@ pub(crate) fn secretize_config(
             .insert("server.api.client_secret".to_string(), reference);
     }
 
+    if let Some(server_api) = config.server_api.as_mut()
+        && !server_api.client_secret.is_empty()
+    {
+        let value = std::mem::take(&mut server_api.client_secret);
+        let existing_ref = server_api.client_secret_ref.clone();
+        let account = secret_scope(scope, "server.api.client_secret");
+        let reference = persist_secret_field(
+            existing_ref.as_deref(),
+            &account,
+            &value,
+            "server.api.client_secret",
+            policy,
+            &mut out,
+        )?;
+        server_api.client_secret_ref = Some(reference.clone());
+        out.refs
+            .insert("server.api.client_secret".to_string(), reference);
+    }
+
     if let Some(server) = config.server.as_mut()
         && !server.curator_api_secret.trim().is_empty()
     {
@@ -1559,6 +1578,127 @@ alteryx_one:
         assert!(
             !on_disk.contains("access_token: rotated-token"),
             "rotated token must be stored as a secret ref, not bare plaintext:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn server_api_sourced_secret_is_secretized_not_plaintext() {
+        // A profile carrying a top-level `server_api:` section must not write its
+        // client_secret to disk as plaintext (red-team High; the canonical
+        // `server.api.client_secret` schema previously had no ref slot).
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("default.yaml");
+        std::fs::write(
+            &path,
+            r#"profile_name: saprobe
+server_api:
+  base_url: https://server.example.com
+  client_id: cid
+  client_secret: SERVERAPI-SECRET
+"#,
+        )
+        .unwrap();
+        let config = Config::load_from_path_with_environment(&path, None).unwrap();
+        write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !on_disk.contains("client_secret: SERVERAPI-SECRET"),
+            "server.api client_secret must not be plaintext on save:\n{on_disk}"
+        );
+        assert!(
+            on_disk.contains("client_secret_ref:"),
+            "server.api secret must be stored behind a ref:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn api_sourced_server_secret_is_secretized_not_plaintext() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("default.yaml");
+        std::fs::write(
+            &path,
+            r#"profile_name: apisrc
+api:
+  base_url: https://server.example.com
+  auth:
+    mode: oauth2_client_credentials
+    client_id: cid
+    client_secret: API-CLIENT-SECRET
+"#,
+        )
+        .unwrap();
+        let config = Config::load_from_path_with_environment(&path, None).unwrap();
+        write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !on_disk.contains("client_secret: API-CLIENT-SECRET"),
+            "api-sourced server.api secret must not be bare plaintext on save:\n{on_disk}"
+        );
+        assert!(
+            on_disk.contains("client_secret_ref:"),
+            "api-sourced server.api secret must be a ref:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn server_api_secret_round_trips_through_ref() {
+        // Save (secretize) then reload — the resolved secret must survive.
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("default.yaml");
+        std::fs::write(
+            &path,
+            r#"profile_name: rtprobe
+server_api:
+  base_url: https://server.example.com
+  client_id: cid
+  client_secret: ROUNDTRIP-SECRET
+"#,
+        )
+        .unwrap();
+        let config = Config::load_from_path_with_environment(&path, None).unwrap();
+        write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
+        let reloaded = Config::load_from_path_with_environment(&path, None).unwrap();
+        assert_eq!(
+            reloaded
+                .server_api
+                .as_ref()
+                .map(|s| s.client_secret.as_str()),
+            Some("ROUNDTRIP-SECRET"),
+            "server.api secret must resolve from its ref after a secretized save"
+        );
+    }
+
+    #[test]
+    fn server_api_env_ref_preserved_on_round_trip() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("default.yaml");
+        std::fs::write(
+            &path,
+            r#"profile_name: saenv
+server_api:
+  base_url: https://server.example.com
+  client_id: cid
+  client_secret_ref: env:AYX_TEST_SA_SECRET
+"#,
+        )
+        .unwrap();
+        unsafe { std::env::set_var("AYX_TEST_SA_SECRET", "sa-from-env") };
+        let config = Config::load_from_path_with_environment(&path, None).unwrap();
+        assert_eq!(
+            config.server_api.as_ref().map(|s| s.client_secret.as_str()),
+            Some("sa-from-env"),
+            "precondition: server.api env ref should resolve in memory"
+        );
+        write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        unsafe { std::env::remove_var("AYX_TEST_SA_SECRET") };
+        assert!(
+            on_disk.contains("client_secret_ref: env:AYX_TEST_SA_SECRET"),
+            "server.api env: ref must be preserved:\n{on_disk}"
+        );
+        assert!(
+            !on_disk.contains("sa-from-env"),
+            "server.api env-backed secret must not be materialized:\n{on_disk}"
         );
     }
 }
