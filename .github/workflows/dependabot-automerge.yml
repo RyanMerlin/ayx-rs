@@ -1,0 +1,37 @@
+name: Dependabot auto-merge
+
+# Auto-merges low-risk Dependabot PRs once all required status checks pass.
+# Scope: cargo patch/minor bumps and any github-actions bump (grouped, CI-gated).
+# Cargo MAJOR bumps are intentionally excluded — they come as their own PR and
+# are reviewed by hand. Uses GitHub's native auto-merge, so the merge only
+# happens after the required checks (Rustfmt, Clippy, Test ubuntu/macos,
+# cargo-audit) are green.
+
+on: pull_request_target
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      # No PR code is checked out — this only reads metadata and calls the API,
+      # so pull_request_target is safe here.
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for safe updates
+        if: >
+          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+          steps.meta.outputs.update-type == 'version-update:semver-minor' ||
+          steps.meta.outputs.package-ecosystem == 'github_actions'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
