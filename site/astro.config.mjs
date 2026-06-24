@@ -82,7 +82,6 @@ export default defineConfig({
             'one/webhooks',
             'one/billing',
             'one/diagnostics',
-            { slug: 'one/ui', badge: { text: 'Experimental', variant: 'caution' } },
           ],
         },
         {
