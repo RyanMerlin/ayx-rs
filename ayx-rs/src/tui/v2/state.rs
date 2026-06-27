@@ -3,6 +3,7 @@ use crate::tui::v2::context::Context;
 use crate::tui::v2::nav::{NavStack, View};
 use crate::tui::v2::resource::{Kind, Row};
 use serde_json::Value;
+use tui_input::Input;
 
 #[derive(Debug, Clone)]
 pub struct ListView {
@@ -12,7 +13,7 @@ pub struct ListView {
     pub loading: bool,
     pub error: Option<String>,
     pub token: u64,
-    pub filter: String,
+    pub filter: Input,
     pub filtering: bool,
 }
 
@@ -25,17 +26,18 @@ impl ListView {
             loading: true,
             error: None,
             token: 0,
-            filter: String::new(),
+            filter: Input::default(),
             filtering: false,
         }
     }
 
     pub fn visible(&self) -> Vec<&Row> {
-        if self.filter.is_empty() {
+        let term = self.filter.value();
+        if term.is_empty() {
             return self.rows.iter().collect();
         }
 
-        let needle = self.filter.to_lowercase();
+        let needle = term.to_lowercase();
         self.rows
             .iter()
             .filter(|row| {
@@ -146,9 +148,9 @@ mod tests {
     }
 
     #[test]
-    fn visible_filters_case_insensitive_on_first_cell() {
+    fn visible_filters_on_input_value() {
         let mut lv = lv_with(&["Daily ETL", "Sales Rollup", "daily report"]);
-        lv.filter = "daily".to_string();
+        lv.filter = tui_input::Input::default().with_value("daily".to_string());
         let vis = lv.visible();
         assert_eq!(vis.len(), 2);
         assert_eq!(vis[0].cells[0].text, "Daily ETL");
@@ -157,7 +159,7 @@ mod tests {
     #[test]
     fn selected_indexes_into_visible() {
         let mut lv = lv_with(&["aaa", "bbb", "abc"]);
-        lv.filter = "a".to_string();
+        lv.filter = tui_input::Input::default().with_value("a".to_string());
         lv.cursor = 1;
         assert_eq!(lv.selected().unwrap().cells[0].text, "abc");
     }

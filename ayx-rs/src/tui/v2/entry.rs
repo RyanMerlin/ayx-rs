@@ -12,6 +12,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use tui_input::InputRequest;
 
 use crate::tui::store::default_config_with_profile;
 use crate::tui::v2::action::{Action, initial_load_effect, update};
@@ -95,6 +96,29 @@ fn dispatch_effects(effects: Vec<Effect>, worker: &Worker, config: &Config) {
     }
 }
 
+/// Map a key to a tui-input request, using only the pure (backend-agnostic)
+/// `InputRequest` API so no crossterm version coupling is introduced. Returns
+/// None for keys that are not text-editing input. Ctrl/Alt+char is NOT an insert.
+fn key_to_input_request(key: KeyEvent) -> Option<InputRequest> {
+    use crossterm::event::KeyModifiers;
+
+    match key.code {
+        KeyCode::Char(c)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            Some(InputRequest::InsertChar(c))
+        }
+        KeyCode::Backspace => Some(InputRequest::DeletePrevChar),
+        KeyCode::Delete => Some(InputRequest::DeleteNextChar),
+        KeyCode::Left => Some(InputRequest::GoToPrevChar),
+        KeyCode::Right => Some(InputRequest::GoToNextChar),
+        KeyCode::Home => Some(InputRequest::GoToStart),
+        KeyCode::End => Some(InputRequest::GoToEnd),
+        _ => None,
+    }
+}
+
 fn map_key(state: &AppState, key: KeyEvent) -> Option<Action> {
     use crate::tui::v2::resource::Kind;
 
@@ -102,11 +126,9 @@ fn map_key(state: &AppState, key: KeyEvent) -> Option<Action> {
 
     if state.list.filtering && !on_detail {
         return match key.code {
-            KeyCode::Char(c) => Some(Action::FilterInput(c)),
-            KeyCode::Backspace => Some(Action::FilterBackspace),
             KeyCode::Enter => Some(Action::FilterApply),
             KeyCode::Esc => Some(Action::FilterClear),
-            _ => None,
+            _ => key_to_input_request(key).map(Action::FilterEdit),
         };
     }
 
@@ -231,6 +253,8 @@ mod tests {
 
     #[test]
     fn slash_starts_filter_then_typing_feeds_it() {
+        use tui_input::InputRequest;
+
         let mut s = list_state();
         assert!(matches!(
             map_key(&s, k(KeyCode::Char('/'))),
@@ -239,7 +263,7 @@ mod tests {
         s.list.filtering = true;
         assert!(matches!(
             map_key(&s, k(KeyCode::Char('x'))),
-            Some(Action::FilterInput('x'))
+            Some(Action::FilterEdit(InputRequest::InsertChar('x')))
         ));
         assert!(matches!(
             map_key(&s, k(KeyCode::Enter)),

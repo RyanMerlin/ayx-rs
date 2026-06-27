@@ -7,6 +7,7 @@ use crate::tui::v2::resource::kind_impl;
 use crate::tui::v2::resource::{Kind, Row};
 use crate::tui::v2::state::{AppState, DetailView, ListView};
 use serde_json::Value;
+use tui_input::InputRequest;
 
 #[derive(Debug, Clone)]
 pub enum Action {
@@ -15,8 +16,7 @@ pub enum Action {
     SwitchKind(Kind),
     Open,
     FilterStart,
-    FilterInput(char),
-    FilterBackspace,
+    FilterEdit(InputRequest),
     FilterApply,
     FilterClear,
     Back,
@@ -93,13 +93,8 @@ pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.list.filtering = true;
             Vec::new()
         }
-        Action::FilterInput(c) => {
-            state.list.filter.push(c);
-            state.list.cursor = 0;
-            Vec::new()
-        }
-        Action::FilterBackspace => {
-            state.list.filter.pop();
+        Action::FilterEdit(req) => {
+            state.list.filter.handle(req);
             state.list.cursor = 0;
             Vec::new()
         }
@@ -108,7 +103,7 @@ pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::FilterClear => {
-            state.list.filter.clear();
+            state.list.filter = tui_input::Input::default();
             state.list.filtering = false;
             state.list.cursor = 0;
             Vec::new()
@@ -600,10 +595,11 @@ mod tests {
     }
 
     #[test]
-    fn filter_flow_narrows_and_resets_cursor() {
+    fn filter_edit_narrows_and_resets_cursor() {
+        use tui_input::InputRequest;
+
         let mut s = test_state();
         let _ = initial_load_effect(&mut s);
-        let tok = s.list.token;
         s.list.rows = (0..5)
             .map(|i| crate::tui::v2::resource::Row {
                 id: format!("fl_{i}"),
@@ -611,19 +607,18 @@ mod tests {
             })
             .collect();
         s.list.loading = false;
-        let _ = tok;
         update(&mut s, Action::CursorDown);
         update(&mut s, Action::FilterStart);
         assert!(s.list.filtering);
-        update(&mut s, Action::FilterInput('3'));
-        assert_eq!(s.list.filter, "3");
+        update(&mut s, Action::FilterEdit(InputRequest::InsertChar('3')));
+        assert_eq!(s.list.filter.value(), "3");
         assert_eq!(s.list.cursor, 0, "cursor resets when filter changes");
         assert_eq!(s.list.visible().len(), 1);
         update(&mut s, Action::FilterApply);
         assert!(!s.list.filtering);
-        assert_eq!(s.list.filter, "3", "apply keeps the term");
+        assert_eq!(s.list.filter.value(), "3", "apply keeps the term");
         update(&mut s, Action::FilterClear);
-        assert!(s.list.filter.is_empty());
+        assert!(s.list.filter.value().is_empty());
         assert!(!s.list.filtering);
     }
 
