@@ -2,13 +2,15 @@
 //! reducer is the only place state mutates; it returns Effects for the
 //! worker to run. Pure-ish: no I/O here.
 use crate::tui::v2::effect::Effect;
-use crate::tui::v2::resource::Row;
-use crate::tui::v2::state::AppState;
+use crate::tui::v2::nav::{NavStack, View};
+use crate::tui::v2::resource::{Kind, Row};
+use crate::tui::v2::state::{AppState, ListView};
 
 #[derive(Debug, Clone)]
 pub enum Action {
     CursorDown,
     CursorUp,
+    SwitchKind(Kind),
     Back,
     Quit,
     ListLoaded { token: u64, rows: Vec<Row> },
@@ -30,6 +32,17 @@ pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
         Action::CursorUp => {
             state.list.select_up();
             Vec::new()
+        }
+        Action::SwitchKind(kind) => {
+            if state.list.kind == kind && matches!(state.nav.top(), View::ResourceList { .. }) {
+                return Vec::new();
+            }
+
+            state.nav = NavStack::new(View::ResourceList { kind });
+            state.list = ListView::new(kind);
+            let token = mint_token(state);
+            state.list.token = token;
+            vec![Effect::FetchList { kind, token }]
         }
         Action::Back => {
             // Phase 0 has only the root list; nothing to pop. No-op.
@@ -227,6 +240,39 @@ mod tests {
         );
         assert_eq!(s.list.cursor, 0);
         assert_eq!(s.list.rows.len(), 1);
+    }
+
+    #[test]
+    fn switch_kind_resets_list_and_emits_fetch() {
+        use crate::tui::v2::resource::Kind;
+
+        let mut s = test_state();
+        let effects = update(&mut s, Action::SwitchKind(Kind::Job));
+        assert_eq!(s.list.kind, Kind::Job);
+        assert!(s.list.loading);
+        assert!(s.list.rows.is_empty());
+        assert!(matches!(
+            s.nav.top(),
+            crate::tui::v2::nav::View::ResourceList { kind: Kind::Job }
+        ));
+        match effects.as_slice() {
+            [
+                Effect::FetchList {
+                    kind: Kind::Job,
+                    token,
+                },
+            ] => assert_eq!(*token, s.list.token),
+            other => panic!("expected one FetchList(Job), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn switch_to_current_kind_is_noop() {
+        use crate::tui::v2::resource::Kind;
+
+        let mut s = test_state();
+        let effects = update(&mut s, Action::SwitchKind(Kind::Flow));
+        assert!(effects.is_empty());
     }
 
     #[test]

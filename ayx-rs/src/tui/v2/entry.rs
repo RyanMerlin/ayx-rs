@@ -95,11 +95,16 @@ fn dispatch_effects(effects: Vec<Effect>, worker: &Worker, config: &Config) {
 }
 
 fn map_key(key: KeyEvent) -> Option<Action> {
+    use crate::tui::v2::resource::Kind;
+
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => Some(Action::CursorDown),
         KeyCode::Up | KeyCode::Char('k') => Some(Action::CursorUp),
         KeyCode::Esc => Some(Action::Back),
         KeyCode::Char('q') => Some(Action::Quit),
+        KeyCode::Char(c @ '1'..='5') => {
+            Kind::from_index((c as u8 - b'1') as usize).map(Action::SwitchKind)
+        }
         _ => None,
     }
 }
@@ -135,6 +140,25 @@ mod tests {
     fn q_quits_esc_is_back() {
         assert!(matches!(map_key(k(KeyCode::Char('q'))), Some(Action::Quit)));
         assert!(matches!(map_key(k(KeyCode::Esc)), Some(Action::Back)));
+    }
+
+    #[test]
+    fn number_keys_switch_kind() {
+        use crate::tui::v2::resource::Kind;
+
+        assert!(matches!(
+            map_key(k(KeyCode::Char('1'))),
+            Some(Action::SwitchKind(Kind::Flow))
+        ));
+        assert!(matches!(
+            map_key(k(KeyCode::Char('3'))),
+            Some(Action::SwitchKind(Kind::Job))
+        ));
+        assert!(matches!(
+            map_key(k(KeyCode::Char('5'))),
+            Some(Action::SwitchKind(Kind::Workspace))
+        ));
+        assert!(map_key(k(KeyCode::Char('6'))).is_none());
     }
 
     #[test]

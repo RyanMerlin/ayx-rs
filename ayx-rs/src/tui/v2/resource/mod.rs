@@ -48,6 +48,17 @@ impl Kind {
             Kind::Workspace,
         ]
     }
+
+    pub fn index(self) -> usize {
+        Kind::all()
+            .iter()
+            .position(|&k| k == self)
+            .expect("kind is in all()")
+    }
+
+    pub fn from_index(i: usize) -> Option<Kind> {
+        Kind::all().get(i).copied()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,5 +234,14 @@ mod tests {
         for &k in Kind::all() {
             assert!(!kind_impl(k).columns().is_empty(), "{k:?} has no columns");
         }
+    }
+
+    #[test]
+    fn kind_index_roundtrip() {
+        for (i, &k) in Kind::all().iter().enumerate() {
+            assert_eq!(k.index(), i);
+            assert_eq!(Kind::from_index(i), Some(k));
+        }
+        assert_eq!(Kind::from_index(99), None);
     }
 }
