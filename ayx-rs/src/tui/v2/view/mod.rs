@@ -11,6 +11,7 @@ mod detail;
 mod footer;
 mod header;
 mod list;
+mod palette;
 
 pub fn render(frame: &mut Frame, state: &AppState) {
     frame.render_widget(Block::default().style(theme::app()), frame.area());
@@ -27,6 +28,7 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         View::ResourceDetail { .. } => detail::render(frame, state, chunks[1]),
     }
     footer::render(frame, state, chunks[2]);
+    palette::render(frame, state);
 }
 
 #[cfg(test)]
