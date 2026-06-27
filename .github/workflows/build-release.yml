@@ -153,6 +153,56 @@ jobs:
           name: ayx-${{ matrix.target }}
           path: dist/ayx-${{ matrix.target }}.tar.gz
 
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add x86_64-pc-windows-msvc
+          rustup component add rustfmt clippy
+      - name: Install cargo-nextest
+        run: cargo install --locked cargo-nextest
+        shell: bash
+      - name: Check formatting
+        run: cargo fmt --check
+        shell: bash
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+        shell: bash
+      - name: Run tests
+        run: cargo nextest run --workspace
+        shell: bash
+      - name: Build release
+        run: cargo build --release --target x86_64-pc-windows-msvc
+        shell: bash
+      - name: Verify release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="${GITHUB_WORKSPACE}/target/x86_64-pc-windows-msvc/release/ayx.exe"
+          test -f "$binary"
+          ls -l "$binary"
+      - name: Package Windows release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactDir = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          $packageRoot = Join-Path $artifactDir 'ayx-x86_64-pc-windows-msvc'
+          New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'target/x86_64-pc-windows-msvc/release/ayx.exe') (Join-Path $packageRoot 'ayx.exe')
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'README.md') $packageRoot
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'scripts/install.ps1') $packageRoot
+          $zipPath = Join-Path $artifactDir 'ayx-x86_64-pc-windows-msvc.zip'
+          Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath $zipPath -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ayx-x86_64-pc-windows-msvc
+          path: dist/ayx-x86_64-pc-windows-msvc.zip
+
   sbom:
     needs:
       - build-linux
@@ -182,6 +232,7 @@ jobs:
     needs:
       - build-linux
       - build-macos
+      - build-windows
     # `sbom` is not in `needs` so a billing block or transient sbom failure
     # doesn't prevent the binaries + checksums + cosign bundles from being
     # published. The download-artifact step below tolerates a missing sbom
@@ -206,7 +257,8 @@ jobs:
           for f in \
             dist/ayx-x86_64-unknown-linux-gnu/ayx-x86_64-unknown-linux-gnu.tar.gz \
             dist/ayx-x86_64-apple-darwin/ayx-x86_64-apple-darwin.tar.gz \
-            dist/ayx-aarch64-apple-darwin/ayx-aarch64-apple-darwin.tar.gz; do
+            dist/ayx-aarch64-apple-darwin/ayx-aarch64-apple-darwin.tar.gz \
+            dist/ayx-x86_64-pc-windows-msvc/ayx-x86_64-pc-windows-msvc.zip; do
             cp "$f" release/
           done
           # Bundle the SBOM(s).
@@ -253,6 +305,7 @@ jobs:
             release/ayx-x86_64-unknown-linux-gnu.tar.gz
             release/ayx-x86_64-apple-darwin.tar.gz
             release/ayx-aarch64-apple-darwin.tar.gz
+            release/ayx-x86_64-pc-windows-msvc.zip
             release/ayx-sbom.tar.gz
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -264,6 +317,8 @@ jobs:
             release/ayx-x86_64-apple-darwin.tar.gz.sigstore
             release/ayx-aarch64-apple-darwin.tar.gz
             release/ayx-aarch64-apple-darwin.tar.gz.sigstore
+            release/ayx-x86_64-pc-windows-msvc.zip
+            release/ayx-x86_64-pc-windows-msvc.zip.sigstore
             release/ayx-sbom.tar.gz
             release/ayx-sbom.tar.gz.sigstore
             release/SHA256SUMS
