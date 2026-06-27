@@ -2844,3 +2844,34 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 - `map_key` signature changes once (Task 10: `(key)` → `(&AppState, key)`); all call sites and tests updated in the same task. Tasks 8 & 11 add arms to the pre-Task-10 and post-Task-10 signatures respectively, in the correct order.
 
 **Phasing note:** This plan delivers working, testable software on its own — `AYX_TUI_V2=1 ayx tui` browses all five assets with switch/drill/filter in the new architecture. Phases 3–5 (palette/help/tui-input, workspace switching, actions) each get their own plan.
+
+## STATUS
+
+**Phase 1 (Browser Core) COMPLETE — 2026-06-27.** All five assets browse through the
+ResourceKind registry behind `AYX_TUI_V2=1 ayx tui`: switch (1-5/Tab/BackTab), async
+drill to scrollable detail (no freeze, no truncation), `/` filter, per-view
+footer, status tones. Staleness moved to in-state generation tokens. Legacy TUI
+untouched. Workspace-wide suite green (421/421), clippy clean, fmt clean.
+
+Built via subagent-driven-development: codex (gpt-5.4, high effort on the meaty
+tasks) implemented all 12 tasks; Claude (opus) reviewed + committed each; the
+generation-token refactor (Task 7) and the whole branch got dedicated rust-reviewer
+(opus) passes (both APPROVE). Commit range: a126df9..3064a20 (13 commits off main fe6b58a).
+
+**Manual live smoke (Task 13 Step 2): PENDING — needs an interactive TTY + an authed
+workspace.** Run `AYX_TUI_V2=1 ayx tui` and exercise: tab/number switch across all
+5 assets; j/k + reactive panel; Enter drill to scrollable detail (workspace = no-op);
+/ filter; q quit; then `ayx tui` (no env var) = legacy path intact.
+
+Deferred to later phases (unchanged from the scope mapping): cross-asset drill
+(flow→runs), Ctrl+K palette + ? help + tui-input (Phase 3), workspace switching
++ inline OTP (Phase 4), actions run/cancel/enable (Phase 5).
+
+**Follow-ups logged from the final review (non-blocking):**
+- Worker-thread panic (e.g. OAuth-refresh OS-entropy `expect`) leaves a view in
+  `⟳ loading…` forever — the always-worker model makes a worker panic worse than
+  Phase 0. Harden: `catch_unwind` in `worker_loop` emitting a `*Failed`, or surface
+  a terminal error on closed-channel `try_recv`.
+- `Action::Open` relies on `map_key` routing Enter→Back when on a detail; add a
+  defensive `if state.detail.is_some() { return; }` so the reducer is correct
+  independent of the key layer (matters once the Phase-3 palette can emit `Open`).
