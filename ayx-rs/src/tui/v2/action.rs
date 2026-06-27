@@ -14,6 +14,11 @@ pub enum Action {
     CursorUp,
     SwitchKind(Kind),
     Open,
+    FilterStart,
+    FilterInput(char),
+    FilterBackspace,
+    FilterApply,
+    FilterClear,
     Back,
     Quit,
     ListLoaded { token: u64, rows: Vec<Row> },
@@ -84,6 +89,30 @@ pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
             state.detail = Some(DetailView::new(kind, id.clone(), title, token));
             vec![Effect::FetchDetail { kind, id, token }]
         }
+        Action::FilterStart => {
+            state.list.filtering = true;
+            Vec::new()
+        }
+        Action::FilterInput(c) => {
+            state.list.filter.push(c);
+            state.list.cursor = 0;
+            Vec::new()
+        }
+        Action::FilterBackspace => {
+            state.list.filter.pop();
+            state.list.cursor = 0;
+            Vec::new()
+        }
+        Action::FilterApply => {
+            state.list.filtering = false;
+            Vec::new()
+        }
+        Action::FilterClear => {
+            state.list.filter.clear();
+            state.list.filtering = false;
+            state.list.cursor = 0;
+            Vec::new()
+        }
         Action::Back => {
             if state.detail.is_some() {
                 state.detail = None;
@@ -100,8 +129,9 @@ pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
                 state.list.rows = rows;
                 state.list.loading = false;
                 state.list.error = None;
-                if state.list.cursor >= state.list.rows.len() {
-                    state.list.cursor = state.list.rows.len().saturating_sub(1);
+                let visible_len = state.list.visible().len();
+                if state.list.cursor >= visible_len {
+                    state.list.cursor = visible_len.saturating_sub(1);
                 }
             }
             Vec::new()
@@ -567,6 +597,34 @@ mod tests {
         let detail = s.detail.as_ref().unwrap();
         assert!(!detail.loading);
         assert_eq!(detail.json.as_ref().unwrap()["id"], "right-slot");
+    }
+
+    #[test]
+    fn filter_flow_narrows_and_resets_cursor() {
+        let mut s = test_state();
+        let _ = initial_load_effect(&mut s);
+        let tok = s.list.token;
+        s.list.rows = (0..5)
+            .map(|i| crate::tui::v2::resource::Row {
+                id: format!("fl_{i}"),
+                cells: vec![crate::tui::v2::resource::Cell::plain(format!("name {i}"))],
+            })
+            .collect();
+        s.list.loading = false;
+        let _ = tok;
+        update(&mut s, Action::CursorDown);
+        update(&mut s, Action::FilterStart);
+        assert!(s.list.filtering);
+        update(&mut s, Action::FilterInput('3'));
+        assert_eq!(s.list.filter, "3");
+        assert_eq!(s.list.cursor, 0, "cursor resets when filter changes");
+        assert_eq!(s.list.visible().len(), 1);
+        update(&mut s, Action::FilterApply);
+        assert!(!s.list.filtering);
+        assert_eq!(s.list.filter, "3", "apply keeps the term");
+        update(&mut s, Action::FilterClear);
+        assert!(s.list.filter.is_empty());
+        assert!(!s.list.filtering);
     }
 
     #[test]

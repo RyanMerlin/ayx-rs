@@ -100,6 +100,16 @@ fn map_key(state: &AppState, key: KeyEvent) -> Option<Action> {
 
     let on_detail = matches!(state.nav.top(), View::ResourceDetail { .. });
 
+    if state.list.filtering && !on_detail {
+        return match key.code {
+            KeyCode::Char(c) => Some(Action::FilterInput(c)),
+            KeyCode::Backspace => Some(Action::FilterBackspace),
+            KeyCode::Enter => Some(Action::FilterApply),
+            KeyCode::Esc => Some(Action::FilterClear),
+            _ => None,
+        };
+    }
+
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => Some(Action::CursorDown),
         KeyCode::Up | KeyCode::Char('k') => Some(Action::CursorUp),
@@ -110,6 +120,7 @@ fn map_key(state: &AppState, key: KeyEvent) -> Option<Action> {
         } else {
             Action::Open
         }),
+        KeyCode::Char('/') if !on_detail => Some(Action::FilterStart),
         KeyCode::Char(c @ '1'..='5') => {
             Kind::from_index((c as u8 - b'1') as usize).map(Action::SwitchKind)
         }
@@ -215,6 +226,24 @@ mod tests {
         assert!(matches!(
             map_key(&s, k(KeyCode::BackTab)),
             Some(Action::SwitchKind(Kind::Workspace))
+        ));
+    }
+
+    #[test]
+    fn slash_starts_filter_then_typing_feeds_it() {
+        let mut s = list_state();
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('/'))),
+            Some(Action::FilterStart)
+        ));
+        s.list.filtering = true;
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('x'))),
+            Some(Action::FilterInput('x'))
+        ));
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Enter)),
+            Some(Action::FilterApply)
         ));
     }
 
