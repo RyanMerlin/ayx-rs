@@ -4,8 +4,10 @@ use ratatui::layout::{Constraint, Layout};
 use ratatui::widgets::Block;
 
 use crate::tui::theme;
+use crate::tui::v2::nav::View;
 use crate::tui::v2::state::AppState;
 
+mod detail;
 mod footer;
 mod header;
 mod list;
@@ -20,7 +22,10 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     .split(frame.area());
 
     header::render(frame, state, chunks[0]);
-    list::render(frame, state, chunks[1]);
+    match state.nav.top() {
+        View::ResourceList { .. } => list::render(frame, state, chunks[1]),
+        View::ResourceDetail { .. } => detail::render(frame, state, chunks[1]),
+    }
     footer::render(frame, state, chunks[2]);
 }
 

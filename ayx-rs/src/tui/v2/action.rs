@@ -31,11 +31,17 @@ pub(crate) fn mint_token(state: &mut AppState) -> u64 {
 pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
     match action {
         Action::CursorDown => {
-            state.list.select_down();
+            match state.detail.as_mut() {
+                Some(d) => d.scroll_down(),
+                None => state.list.select_down(),
+            }
             Vec::new()
         }
         Action::CursorUp => {
-            state.list.select_up();
+            match state.detail.as_mut() {
+                Some(d) => d.scroll_up(),
+                None => state.list.select_up(),
+            }
             Vec::new()
         }
         Action::SwitchKind(kind) => {
@@ -265,6 +271,26 @@ mod tests {
         update(&mut s, Action::CursorDown);
         assert_eq!(s.list.cursor, 1);
         update(&mut s, Action::CursorUp);
+        assert_eq!(s.list.cursor, 0);
+    }
+
+    #[test]
+    fn cursor_scrolls_detail_when_open() {
+        let mut s = test_state();
+        let _ = initial_load_effect(&mut s);
+        let tok = s.list.token;
+        update(
+            &mut s,
+            Action::ListLoaded {
+                token: tok,
+                rows: rows(3),
+            },
+        );
+        update(&mut s, Action::Open);
+        update(&mut s, Action::CursorDown);
+        assert_eq!(s.detail.as_ref().unwrap().scroll, 1);
+        update(&mut s, Action::CursorUp);
+        assert_eq!(s.detail.as_ref().unwrap().scroll, 0);
         assert_eq!(s.list.cursor, 0);
     }
 

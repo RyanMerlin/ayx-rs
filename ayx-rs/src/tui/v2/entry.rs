@@ -17,6 +17,7 @@ use crate::tui::store::default_config_with_profile;
 use crate::tui::v2::action::{Action, initial_load_effect, update};
 use crate::tui::v2::context::Context;
 use crate::tui::v2::effect::Effect;
+use crate::tui::v2::nav::View;
 use crate::tui::v2::state::AppState;
 use crate::tui::v2::view;
 use crate::tui::v2::worker::Worker;
@@ -74,7 +75,7 @@ fn main_loop(
         if event::poll(Duration::from_millis(200))?
             && let Event::Key(key) = event::read()?
             && key.kind == KeyEventKind::Press
-            && let Some(action) = map_key(key)
+            && let Some(action) = map_key(state, key)
         {
             let effects = update(state, action);
             dispatch_effects(effects, worker, config);
@@ -94,16 +95,33 @@ fn dispatch_effects(effects: Vec<Effect>, worker: &Worker, config: &Config) {
     }
 }
 
-fn map_key(key: KeyEvent) -> Option<Action> {
+fn map_key(state: &AppState, key: KeyEvent) -> Option<Action> {
     use crate::tui::v2::resource::Kind;
+
+    let on_detail = matches!(state.nav.top(), View::ResourceDetail { .. });
 
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => Some(Action::CursorDown),
         KeyCode::Up | KeyCode::Char('k') => Some(Action::CursorUp),
         KeyCode::Esc => Some(Action::Back),
         KeyCode::Char('q') => Some(Action::Quit),
+        KeyCode::Enter => Some(if on_detail {
+            Action::Back
+        } else {
+            Action::Open
+        }),
         KeyCode::Char(c @ '1'..='5') => {
             Kind::from_index((c as u8 - b'1') as usize).map(Action::SwitchKind)
+        }
+        KeyCode::Tab => {
+            let n = Kind::all().len();
+            let next = (state.list.kind.index() + 1) % n;
+            Kind::from_index(next).map(Action::SwitchKind)
+        }
+        KeyCode::BackTab => {
+            let n = Kind::all().len();
+            let prev = (state.list.kind.index() + n - 1) % n;
+            Kind::from_index(prev).map(Action::SwitchKind)
         }
         _ => None,
     }
@@ -115,54 +133,94 @@ mod tests {
     use crate::tui::v2::action::Action;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+    fn list_state() -> crate::tui::v2::state::AppState {
+        let ctx = crate::tui::v2::context::Context {
+            profile: "w".into(),
+            workspace: "w".into(),
+            user: "u".into(),
+        };
+        crate::tui::v2::state::AppState::new(ctx)
+    }
+
     fn k(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
     #[test]
     fn arrows_and_vim_keys_map_to_cursor() {
+        let s = list_state();
         assert!(matches!(
-            map_key(k(KeyCode::Down)),
+            map_key(&s, k(KeyCode::Down)),
             Some(Action::CursorDown)
         ));
         assert!(matches!(
-            map_key(k(KeyCode::Char('j'))),
+            map_key(&s, k(KeyCode::Char('j'))),
             Some(Action::CursorDown)
         ));
-        assert!(matches!(map_key(k(KeyCode::Up)), Some(Action::CursorUp)));
         assert!(matches!(
-            map_key(k(KeyCode::Char('k'))),
+            map_key(&s, k(KeyCode::Up)),
+            Some(Action::CursorUp)
+        ));
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('k'))),
             Some(Action::CursorUp)
         ));
     }
 
     #[test]
     fn q_quits_esc_is_back() {
-        assert!(matches!(map_key(k(KeyCode::Char('q'))), Some(Action::Quit)));
-        assert!(matches!(map_key(k(KeyCode::Esc)), Some(Action::Back)));
+        let s = list_state();
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('q'))),
+            Some(Action::Quit)
+        ));
+        assert!(matches!(map_key(&s, k(KeyCode::Esc)), Some(Action::Back)));
     }
 
     #[test]
     fn number_keys_switch_kind() {
         use crate::tui::v2::resource::Kind;
 
+        let s = list_state();
         assert!(matches!(
-            map_key(k(KeyCode::Char('1'))),
+            map_key(&s, k(KeyCode::Char('1'))),
             Some(Action::SwitchKind(Kind::Flow))
         ));
         assert!(matches!(
-            map_key(k(KeyCode::Char('3'))),
+            map_key(&s, k(KeyCode::Char('3'))),
             Some(Action::SwitchKind(Kind::Job))
         ));
         assert!(matches!(
-            map_key(k(KeyCode::Char('5'))),
+            map_key(&s, k(KeyCode::Char('5'))),
             Some(Action::SwitchKind(Kind::Workspace))
         ));
-        assert!(map_key(k(KeyCode::Char('6'))).is_none());
+        assert!(map_key(&s, k(KeyCode::Char('6'))).is_none());
+    }
+
+    #[test]
+    fn enter_opens_on_list() {
+        let s = list_state();
+        assert!(matches!(map_key(&s, k(KeyCode::Enter)), Some(Action::Open)));
+    }
+
+    #[test]
+    fn tab_cycles_kind() {
+        use crate::tui::v2::resource::Kind;
+
+        let s = list_state();
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Tab)),
+            Some(Action::SwitchKind(Kind::Connection))
+        ));
+        assert!(matches!(
+            map_key(&s, k(KeyCode::BackTab)),
+            Some(Action::SwitchKind(Kind::Workspace))
+        ));
     }
 
     #[test]
     fn unmapped_key_is_none() {
-        assert!(map_key(k(KeyCode::Char('z'))).is_none());
+        let s = list_state();
+        assert!(map_key(&s, k(KeyCode::Char('z'))).is_none());
     }
 }
