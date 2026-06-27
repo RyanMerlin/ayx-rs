@@ -28,9 +28,14 @@ mod one_browser;
 mod render_helpers;
 mod store;
 mod theme;
+mod v2;
 mod worker;
 
 pub fn run() -> Result<Envelope> {
+    if std::env::var("AYX_TUI_V2").is_ok() {
+        return v2::run();
+    }
+
     let mut app = App::new()?;
 
     enable_raw_mode()?;

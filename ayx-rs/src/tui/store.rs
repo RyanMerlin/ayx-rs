@@ -244,7 +244,7 @@ fn classify_profile_file(path: &Path) -> Result<Option<ProfileScope>> {
     Ok(Some(classify_profile_scope_value(&value)))
 }
 
-fn default_config_with_profile(profile_name: &str) -> Config {
+pub(crate) fn default_config_with_profile(profile_name: &str) -> Config {
     let mut config = default_config();
     config.profile_name = profile_name.to_string();
     config.mongo = MongoProfile {
