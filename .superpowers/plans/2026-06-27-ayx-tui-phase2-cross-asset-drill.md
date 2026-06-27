@@ -969,4 +969,44 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ## STATUS
 
-_(to be filled in at Task 6)_
+**Phase 2 (Cross-Asset Drill) COMPLETE — 2026-06-27.** `AYX_TUI_V2=1 ayx tui` now
+drills across assets: `r` on a flow detail → a scoped **runs** list (`flows › <flow> ›
+jobs` breadcrumb, client-side filtered to the flow's job groups); `f` on a job detail
+→ that run's **parent flow** detail (id from the job JSON). The nav stack gained a
+`View::ScopedList` rung and `Back` is now **rebuild-on-back** (pop → reconstruct the
+revealed view's slot → re-emit its fetch; token-safe). Workspace suite **456/456**,
+clippy/fmt clean.
+
+Built via subagent-driven-development on branch `feat/tui-v2-phase2-cross-asset-drill`:
+codex (gpt-5.4 high on Tasks 1-3, gpt-5.4-mini medium on Tasks 4-5) implemented all 5
+tasks in TDD order; Claude (opus) reviewed + independently re-validated + committed each.
+Tasks 4 & 5 ran in parallel (disjoint files, distinct target dirs).
+
+**Dual review (rust-reviewer opus + codex gpt-5.4 adversarial, in parallel):**
+- rust-reviewer: no Critical/High; ready-to-merge. Two Low items.
+- codex adversarial: **1 HIGH** — the scope filter matched only top-level
+  `flowId`/`flow_id`, but `/v4/jobLibrary` job groups created from flow runs carry the
+  parent id under **`flowRun.flowId`** (often with no top-level flowId), as the
+  codebase's own `cmd::one_job_groups::synthesize_job_group_names` documents. The drill
+  would have silently dropped exactly the runs it exists to show. **Verified against
+  source and FIXED** before merge (`item_flow_id` checks the nested shape first;
+  regression test added). commit `64aa04b`.
+- rust-reviewer Low #2 (help overlay didn't list `r`/`f`) → fixed, commit `cae8c59`.
+- rust-reviewer Low #1 (scope-filter is client-side; a flow whose jobs have neither
+  nested nor top-level flow id would show empty runs) is the accepted client-side-filter
+  trade-off (no server filter on `/v4/jobLibrary`) — **known limitation, not a blocker.**
+
+**Manual live smoke (Task 6 Step 2): PENDING** — needs a TTY + authed workspace. Key
+verification point: confirm the job **detail** endpoint (`/v4/jobGroups/{id}`) returns
+`flowId`/`flow_id` for the `f` relation; if not, capture `flow_id` at list time instead.
+
+**Follow-ups (non-blocking):**
+- rebuild-on-back refetches the revealed list and resets its cursor/filter (lean
+  single-slot model). Acceptable for a k9s-style browser; could cache the parent list
+  snapshot on the nav rung to restore instantly.
+- `JobKind::row` FLOW column still reads only top-level flow fields, so a nested-shape
+  run shows "(unknown flow)" in the FLOW column (pre-existing Phase-1 row mapping, not
+  introduced here; the run still lists and the breadcrumb names the flow).
+
+Deferred to later phases (unchanged): workspace switch + inline OTP (Phase 4);
+mutating run/cancel/enable actions (Phase 5).
