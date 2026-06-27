@@ -123,9 +123,21 @@ pub fn list_payload_to_action(
 /// scoped relation yet, so they pass everything through.
 fn item_in_scope(item: &Value, scope: &ListScope) -> bool {
     match scope.parent_kind {
-        Kind::Flow => str_field(item, &["flowId", "flow_id"]) == Some(scope.parent_id.as_str()),
+        Kind::Flow => item_flow_id(item) == Some(scope.parent_id.as_str()),
         _ => true,
     }
+}
+
+/// The parent flow id of a `/v4/jobLibrary` job item. Job groups created from a
+/// flow run carry the id under `flowRun.flowId` (and often have no top-level
+/// `flowId`), so the nested shape is checked first, then the top-level aliases.
+/// Mirrors `cmd::one_job_groups::synthesize_job_group_names`, which documents
+/// this exact precedence for the same endpoint.
+fn item_flow_id(item: &Value) -> Option<&str> {
+    item.get("flowRun")
+        .and_then(|fr| fr.get("flowId"))
+        .and_then(Value::as_str)
+        .or_else(|| str_field(item, &["flowId", "flow_id"]))
 }
 
 /// Pure mapping from a raw detail payload (or error) to an Action.
@@ -175,7 +187,11 @@ mod tests {
         let payload = Ok(json!({ "data": [
             { "id": "jg_1", "flowId": "fl_a", "status": "Succeeded" },
             { "id": "jg_2", "flowId": "fl_b", "status": "Failed" },
-            { "id": "jg_3", "flow_id": "fl_a", "status": "Running" }
+            { "id": "jg_3", "flow_id": "fl_a", "status": "Running" },
+            // Flow-run job group: parent id only under flowRun.flowId, no
+            // top-level flowId — the primary shape the drill must keep.
+            { "id": "jg_4", "flowRun": { "flowId": "fl_a" }, "status": "Queued" },
+            { "id": "jg_5", "flowRun": { "flowId": "fl_b" }, "status": "Queued" }
         ]}));
         let scope = ListScope {
             parent_kind: Kind::Flow,
@@ -183,8 +199,15 @@ mod tests {
         };
         match list_payload_to_action(Kind::Job, 1, Some(&scope), payload) {
             Action::ListLoaded { rows, .. } => {
-                assert_eq!(rows.len(), 2, "only fl_a's jobs survive");
-                assert!(rows.iter().all(|r| r.id == "jg_1" || r.id == "jg_3"));
+                assert_eq!(
+                    rows.len(),
+                    3,
+                    "fl_a jobs incl. nested flowRun.flowId survive"
+                );
+                assert!(
+                    rows.iter()
+                        .all(|r| r.id == "jg_1" || r.id == "jg_3" || r.id == "jg_4")
+                );
             }
             other => panic!("expected ListLoaded, got {other:?}"),
         }
