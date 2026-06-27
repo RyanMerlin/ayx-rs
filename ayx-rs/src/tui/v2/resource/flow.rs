@@ -48,8 +48,8 @@ impl ResourceKind for FlowKind {
         FLOW_COLUMNS
     }
 
-    fn extract_items(&self, _payload: &Value) -> Vec<Value> {
-        items_array(_payload)
+    fn extract_items(&self, payload: &Value) -> Vec<Value> {
+        items_array(payload)
     }
 
     fn row(&self, item: &Value) -> Row {
