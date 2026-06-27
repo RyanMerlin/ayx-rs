@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.11.2 — 2026-06-27
+
+### Fixed
+
+- **Windows release asset** (`#63`): `scripts/install.ps1` downloads
+  `ayx-x86_64-pc-windows-msvc.zip`, but the release workflow had no Windows build
+  job, so every prior release was missing that asset and the PowerShell
+  quick-start failed with a 404. Added a hardened `build-windows` job and wired
+  it into the release pipeline (SHA256SUMS, Sigstore signing, SLSA attestation).
+  This is the first release to publish a Windows binary.
+
+### Added
+
+- **Visual interface preview (TUI v2)** (`#62`): a new resource-browser TUI spine
+  (The Elm Architecture + a `ResourceKind` registry) is available behind
+  `AYX_TUI_V2=1 ayx tui`, currently browsing Alteryx One flows end-to-end. The
+  existing `ayx tui` is unchanged without the flag. Foundations for a forthcoming
+  workspace/asset browser.
+
 ## 0.11.1 — 2026-06-23
 
 ### Added
