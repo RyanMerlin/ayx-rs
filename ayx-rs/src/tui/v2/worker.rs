@@ -8,8 +8,8 @@ use ayx_core::profile::Config;
 use serde_json::Value;
 
 use crate::tui::v2::action::Action;
-use crate::tui::v2::effect::Effect;
-use crate::tui::v2::resource::{Kind, Row, kind_impl};
+use crate::tui::v2::effect::{Effect, ListScope};
+use crate::tui::v2::resource::{Kind, Row, kind_impl, str_field};
 
 struct Job {
     effect: Effect,
@@ -53,7 +53,7 @@ impl Worker {
 fn worker_loop(rx: Receiver<Job>, tx: Sender<Outcome>) {
     while let Ok(job) = rx.recv() {
         let action = match job.effect {
-            Effect::FetchList { kind, token } => {
+            Effect::FetchList { kind, token, scope } => {
                 let endpoint = kind_impl(kind).list_endpoint();
                 let payload = crate::one_api_live_request(
                     &job.config,
@@ -66,7 +66,7 @@ fn worker_loop(rx: Receiver<Job>, tx: Sender<Outcome>) {
                 )
                 .map(|env| env.data)
                 .map_err(|e| e.to_string());
-                list_payload_to_action(kind, token, payload)
+                list_payload_to_action(kind, token, scope.as_ref(), payload)
             }
             Effect::FetchDetail { kind, id, token } => match kind_impl(kind).detail_endpoint() {
                 Some(endpoint) => {
@@ -93,19 +93,38 @@ fn worker_loop(rx: Receiver<Job>, tx: Sender<Outcome>) {
     }
 }
 
-/// Pure mapping from a raw list payload (or error) to an Action. Unit-tested.
-pub fn list_payload_to_action(kind: Kind, token: u64, payload: Result<Value, String>) -> Action {
+/// Pure mapping from a raw list payload (or error) to an Action. When a `scope`
+/// is present, items are filtered to the parent's children before row-mapping
+/// (the display Row does not carry the parent id, so the filter must run on the
+/// raw item JSON). Unit-tested.
+pub fn list_payload_to_action(
+    kind: Kind,
+    token: u64,
+    scope: Option<&ListScope>,
+    payload: Result<Value, String>,
+) -> Action {
     match payload {
         Ok(value) => {
             let imp = kind_impl(kind);
             let rows: Vec<Row> = imp
                 .extract_items(&value)
                 .iter()
+                .filter(|item| scope.is_none_or(|s| item_in_scope(item, s)))
                 .map(|i| imp.row(i))
                 .collect();
             Action::ListLoaded { token, rows }
         }
         Err(error) => Action::ListFailed { token, error },
+    }
+}
+
+/// Does `item` belong to `scope`'s parent? Only `Kind::Flow` parents filter
+/// (flow -> runs: keep jobs whose flow id matches). Other parent kinds have no
+/// scoped relation yet, so they pass everything through.
+fn item_in_scope(item: &Value, scope: &ListScope) -> bool {
+    match scope.parent_kind {
+        Kind::Flow => str_field(item, &["flowId", "flow_id"]) == Some(scope.parent_id.as_str()),
+        _ => true,
     }
 }
 
@@ -128,7 +147,7 @@ mod tests {
         let payload = Ok(json!({
             "data": [ { "id": "fl_1", "name": "ETL" }, { "id": "fl_2", "name": "Roll" } ]
         }));
-        match list_payload_to_action(Kind::Flow, 7, payload) {
+        match list_payload_to_action(Kind::Flow, 7, None, payload) {
             Action::ListLoaded { token, rows } => {
                 assert_eq!(token, 7);
                 assert_eq!(rows.len(), 2);
@@ -140,12 +159,45 @@ mod tests {
 
     #[test]
     fn err_payload_maps_to_list_failed() {
-        match list_payload_to_action(Kind::Flow, 7, Err("401 unauthorized".into())) {
+        match list_payload_to_action(Kind::Flow, 7, None, Err("401 unauthorized".into())) {
             Action::ListFailed { token, error } => {
                 assert_eq!(token, 7);
                 assert!(error.contains("401"));
             }
             other => panic!("expected ListFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scope_filters_jobs_by_flow_id() {
+        use crate::tui::v2::effect::ListScope;
+
+        let payload = Ok(json!({ "data": [
+            { "id": "jg_1", "flowId": "fl_a", "status": "Succeeded" },
+            { "id": "jg_2", "flowId": "fl_b", "status": "Failed" },
+            { "id": "jg_3", "flow_id": "fl_a", "status": "Running" }
+        ]}));
+        let scope = ListScope {
+            parent_kind: Kind::Flow,
+            parent_id: "fl_a".into(),
+        };
+        match list_payload_to_action(Kind::Job, 1, Some(&scope), payload) {
+            Action::ListLoaded { rows, .. } => {
+                assert_eq!(rows.len(), 2, "only fl_a's jobs survive");
+                assert!(rows.iter().all(|r| r.id == "jg_1" || r.id == "jg_3"));
+            }
+            other => panic!("expected ListLoaded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_scope_keeps_all_items() {
+        let payload = Ok(json!({ "data": [
+            { "id": "jg_1", "flowId": "fl_a" }, { "id": "jg_2", "flowId": "fl_b" }
+        ]}));
+        match list_payload_to_action(Kind::Job, 1, None, payload) {
+            Action::ListLoaded { rows, .. } => assert_eq!(rows.len(), 2),
+            other => panic!("expected ListLoaded, got {other:?}"),
         }
     }
 

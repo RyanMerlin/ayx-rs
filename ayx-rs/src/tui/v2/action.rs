@@ -54,7 +54,11 @@ pub(crate) fn do_switch_kind(state: &mut AppState, kind: Kind) -> Vec<Effect> {
     state.detail = None;
     let token = mint_token(state);
     state.list.token = token;
-    vec![Effect::FetchList { kind, token }]
+    vec![Effect::FetchList {
+        kind,
+        token,
+        scope: None,
+    }]
 }
 
 /// Drill into `id` of `kind` (push detail view + fetch). Shared by the Open
@@ -269,6 +273,7 @@ pub fn initial_load_effect(state: &mut AppState) -> Effect {
     Effect::FetchList {
         kind: state.list.kind,
         token,
+        scope: None,
     }
 }
 
@@ -466,6 +471,7 @@ mod tests {
                 Effect::FetchList {
                     kind: Kind::Job,
                     token,
+                    ..
                 },
             ] => assert_eq!(*token, s.list.token),
             other => panic!("expected one FetchList(Job), got {other:?}"),
