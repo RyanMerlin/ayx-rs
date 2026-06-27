@@ -1,11 +1,10 @@
 //! Actions (user intents + async results) and the `update` reducer. The
 //! reducer is the only place state mutates; it returns Effects for the
 //! worker to run. Pure-ish: no I/O here.
-use crate::tui::v2::effect::Effect;
+use crate::tui::v2::effect::{Effect, ListScope};
 use crate::tui::v2::nav::{NavStack, View};
 use crate::tui::v2::palette::{self, PaletteAction};
-use crate::tui::v2::resource::kind_impl;
-use crate::tui::v2::resource::{Kind, Row};
+use crate::tui::v2::resource::{Kind, Row, kind_impl, str_field};
 use crate::tui::v2::state::{AppState, DetailView, ListView};
 use serde_json::Value;
 use tui_input::InputRequest;
@@ -16,6 +15,8 @@ pub enum Action {
     CursorUp,
     SwitchKind(Kind),
     Open,
+    ShowRuns,
+    OpenParentFlow,
     PaletteOpen,
     PaletteClose,
     PaletteEdit(InputRequest),
@@ -91,6 +92,111 @@ fn do_switch_kind_if_needed_then_open(
     do_open(state, kind, id, title)
 }
 
+/// Flow -> runs: from an open flow detail, drill into a scoped Job list
+/// filtered to this flow's runs. Replaces the single list slot (lean nav
+/// model) and records the relation on the nav stack so Back can rebuild the
+/// flow detail.
+fn do_show_runs(state: &mut AppState) -> Vec<Effect> {
+    let Some(detail) = state.detail.as_ref() else {
+        return Vec::new();
+    };
+    if detail.kind != Kind::Flow {
+        return Vec::new();
+    }
+    let parent_id = detail.id.clone();
+    let parent_title = detail.title.clone();
+
+    state.nav.push(View::ScopedList {
+        child_kind: Kind::Job,
+        parent_kind: Kind::Flow,
+        parent_id: parent_id.clone(),
+        parent_title,
+    });
+    state.list = ListView::new(Kind::Job);
+    state.detail = None;
+    let token = mint_token(state);
+    state.list.token = token;
+    vec![Effect::FetchList {
+        kind: Kind::Job,
+        token,
+        scope: Some(ListScope {
+            parent_kind: Kind::Flow,
+            parent_id,
+        }),
+    }]
+}
+
+/// Job -> flow: from an open job detail, open the parent flow's detail. The
+/// flow id comes from the job detail's JSON (`JobGroupSummary` carries
+/// `flow_id`). No-op if the json is absent or has no flow id.
+fn do_open_parent_flow(state: &mut AppState) -> Vec<Effect> {
+    let Some(detail) = state.detail.as_ref() else {
+        return Vec::new();
+    };
+    if detail.kind != Kind::Job {
+        return Vec::new();
+    }
+    let Some(json) = detail.json.as_ref() else {
+        return Vec::new();
+    };
+    let flow_id = str_field(json, &["flowId", "flow_id"])
+        .unwrap_or_default()
+        .to_string();
+    if flow_id.is_empty() {
+        return Vec::new();
+    }
+    let title = str_field(json, &["flowName", "flow_name"])
+        .unwrap_or(&flow_id)
+        .to_string();
+    do_open(state, Kind::Flow, flow_id, title)
+}
+
+/// Rebuild `state.list`/`state.detail` from the current `nav.top()` and emit
+/// the fetch that refills it. Called after a `Back` pop: the lean nav model
+/// keeps only one list + one detail slot, so a scoped drill clobbers them;
+/// walking back up must reconstruct the slot for the revealed view. Generation
+/// tokens make the refetch safe (a stale in-flight result is dropped on token
+/// mismatch).
+fn rebuild_for_top(state: &mut AppState) -> Vec<Effect> {
+    match state.nav.top().clone() {
+        View::ResourceList { kind } => {
+            state.detail = None;
+            state.list = ListView::new(kind);
+            let token = mint_token(state);
+            state.list.token = token;
+            vec![Effect::FetchList {
+                kind,
+                token,
+                scope: None,
+            }]
+        }
+        View::ScopedList {
+            child_kind,
+            parent_kind,
+            parent_id,
+            ..
+        } => {
+            state.detail = None;
+            state.list = ListView::new(child_kind);
+            let token = mint_token(state);
+            state.list.token = token;
+            vec![Effect::FetchList {
+                kind: child_kind,
+                token,
+                scope: Some(ListScope {
+                    parent_kind,
+                    parent_id,
+                }),
+            }]
+        }
+        View::ResourceDetail { kind, id, title } => {
+            let token = mint_token(state);
+            state.detail = Some(DetailView::new(kind, id.clone(), title, token));
+            vec![Effect::FetchDetail { kind, id, token }]
+        }
+    }
+}
+
 pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
     match action {
         Action::CursorDown => {
@@ -121,6 +227,8 @@ pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
                 .unwrap_or_else(|| id.clone());
             do_open(state, kind, id, title)
         }
+        Action::ShowRuns => do_show_runs(state),
+        Action::OpenParentFlow => do_open_parent_flow(state),
         Action::PaletteOpen => {
             state.help_open = false;
             // Leaving filter-edit mode — otherwise `filtering` could survive a
@@ -202,11 +310,11 @@ pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::Back => {
-            if state.detail.is_some() {
-                state.detail = None;
-                let _ = state.nav.pop();
+            if state.nav.pop() {
+                rebuild_for_top(state)
+            } else {
+                Vec::new()
             }
-            Vec::new()
         }
         Action::Quit => {
             state.should_quit = true;
@@ -544,6 +652,217 @@ mod tests {
         let effects = update(&mut s, Action::Open);
         assert!(s.detail.is_none());
         assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn show_runs_pushes_scoped_jobs_and_fetches_with_scope() {
+        use crate::tui::v2::effect::ListScope;
+        use crate::tui::v2::nav::View;
+        use crate::tui::v2::resource::Kind;
+
+        let mut s = test_state();
+        let _ = initial_load_effect(&mut s);
+        let lt = s.list.token;
+        update(
+            &mut s,
+            Action::ListLoaded {
+                token: lt,
+                rows: rows(1),
+            },
+        );
+        update(&mut s, Action::Open); // flow detail fl_0
+
+        let effects = update(&mut s, Action::ShowRuns);
+        assert!(s.detail.is_none());
+        assert_eq!(s.list.kind, Kind::Job);
+        assert!(matches!(
+            s.nav.top(),
+            View::ScopedList {
+                child_kind: Kind::Job,
+                parent_kind: Kind::Flow,
+                ..
+            }
+        ));
+        match effects.as_slice() {
+            [
+                Effect::FetchList {
+                    kind: Kind::Job,
+                    token,
+                    scope: Some(ListScope { parent_id, .. }),
+                },
+            ] => {
+                assert_eq!(parent_id, "fl_0");
+                assert_eq!(*token, s.list.token);
+            }
+            other => panic!("expected scoped FetchList(Job), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn show_runs_is_noop_off_a_flow_detail() {
+        let mut s = test_state();
+        let effects = update(&mut s, Action::ShowRuns);
+        assert!(effects.is_empty());
+        assert!(s.detail.is_none());
+    }
+
+    #[test]
+    fn open_parent_flow_opens_flow_detail_from_job_json() {
+        use crate::tui::v2::nav::View;
+        use crate::tui::v2::resource::Kind;
+        use serde_json::json;
+
+        let mut s = test_state();
+        update(&mut s, Action::SwitchKind(Kind::Job));
+        let lt = s.list.token;
+        update(
+            &mut s,
+            Action::ListLoaded {
+                token: lt,
+                rows: rows(1),
+            },
+        );
+        update(&mut s, Action::Open); // job detail
+        let dt = s.detail.as_ref().unwrap().token;
+        update(
+            &mut s,
+            Action::DetailLoaded {
+                token: dt,
+                json: json!({ "id": "jg_0", "flowId": "fl_42", "flowName": "Daily ETL" }),
+            },
+        );
+
+        let effects = update(&mut s, Action::OpenParentFlow);
+        let d = s.detail.as_ref().expect("flow detail opened");
+        assert_eq!(d.kind, Kind::Flow);
+        assert_eq!(d.id, "fl_42");
+        assert!(matches!(
+            s.nav.top(),
+            View::ResourceDetail {
+                kind: Kind::Flow,
+                ..
+            }
+        ));
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::FetchDetail {
+                kind: Kind::Flow,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn open_parent_flow_noop_when_job_json_lacks_flow_id() {
+        use crate::tui::v2::resource::Kind;
+        use serde_json::json;
+
+        let mut s = test_state();
+        update(&mut s, Action::SwitchKind(Kind::Job));
+        let lt = s.list.token;
+        update(
+            &mut s,
+            Action::ListLoaded {
+                token: lt,
+                rows: rows(1),
+            },
+        );
+        update(&mut s, Action::Open);
+        let dt = s.detail.as_ref().unwrap().token;
+        update(
+            &mut s,
+            Action::DetailLoaded {
+                token: dt,
+                json: json!({ "id": "jg_0" }),
+            },
+        );
+        let before = s.detail.as_ref().unwrap().kind;
+
+        let effects = update(&mut s, Action::OpenParentFlow);
+        assert!(effects.is_empty());
+        assert_eq!(
+            s.detail.as_ref().unwrap().kind,
+            before,
+            "still on the job detail"
+        );
+    }
+
+    #[test]
+    fn back_from_scoped_list_rebuilds_parent_detail_and_refetches() {
+        use crate::tui::v2::nav::View;
+        use crate::tui::v2::resource::Kind;
+
+        let mut s = test_state();
+        let _ = initial_load_effect(&mut s);
+        let lt = s.list.token;
+        update(
+            &mut s,
+            Action::ListLoaded {
+                token: lt,
+                rows: rows(1),
+            },
+        );
+        update(&mut s, Action::Open); // flow detail fl_0
+        update(&mut s, Action::ShowRuns); // scoped jobs
+
+        let effects = update(&mut s, Action::Back);
+        assert!(matches!(
+            s.nav.top(),
+            View::ResourceDetail {
+                kind: Kind::Flow,
+                ..
+            }
+        ));
+        let d = s.detail.as_ref().expect("parent flow detail rebuilt");
+        assert!(d.loading);
+        assert_eq!(d.id, "fl_0");
+        match effects.as_slice() {
+            [
+                Effect::FetchDetail {
+                    kind: Kind::Flow,
+                    id,
+                    token,
+                },
+            ] => {
+                assert_eq!(id, "fl_0");
+                assert_eq!(*token, d.token);
+            }
+            other => panic!("expected FetchDetail(Flow), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn back_from_detail_rebuilds_root_list_and_refetches() {
+        use crate::tui::v2::nav::View;
+        use crate::tui::v2::resource::Kind;
+
+        let mut s = test_state();
+        let _ = initial_load_effect(&mut s);
+        let lt = s.list.token;
+        update(
+            &mut s,
+            Action::ListLoaded {
+                token: lt,
+                rows: rows(2),
+            },
+        );
+        update(&mut s, Action::Open);
+
+        let effects = update(&mut s, Action::Back);
+        assert!(s.detail.is_none());
+        assert!(matches!(
+            s.nav.top(),
+            View::ResourceList { kind: Kind::Flow }
+        ));
+        assert!(s.list.loading);
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::FetchList {
+                kind: Kind::Flow,
+                scope: None,
+                ..
+            }]
+        ));
     }
 
     #[test]
