@@ -6,4 +6,5 @@ use crate::tui::v2::resource::Kind;
 #[derive(Debug, Clone)]
 pub enum Effect {
     FetchList { kind: Kind, token: u64 },
+    FetchDetail { kind: Kind, id: String, token: u64 },
 }

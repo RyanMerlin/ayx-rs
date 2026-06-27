@@ -68,6 +68,26 @@ fn worker_loop(rx: Receiver<Job>, tx: Sender<Outcome>) {
                 .map_err(|e| e.to_string());
                 list_payload_to_action(kind, token, payload)
             }
+            Effect::FetchDetail { kind, id, token } => match kind_impl(kind).detail_endpoint() {
+                Some(endpoint) => {
+                    let payload = crate::one_api_live_request(
+                        &job.config,
+                        endpoint.surface,
+                        endpoint.operation,
+                        "GET",
+                        endpoint.path,
+                        false,
+                        &[("id", id.as_str())],
+                    )
+                    .map(|env| env.data)
+                    .map_err(|e| e.to_string());
+                    detail_payload_to_action(token, payload)
+                }
+                None => Action::DetailFailed {
+                    token,
+                    error: "no detail endpoint for this kind".into(),
+                },
+            },
         };
         let _ = tx.send(Outcome { action });
     }
@@ -86,6 +106,14 @@ pub fn list_payload_to_action(kind: Kind, token: u64, payload: Result<Value, Str
             Action::ListLoaded { token, rows }
         }
         Err(error) => Action::ListFailed { token, error },
+    }
+}
+
+/// Pure mapping from a raw detail payload (or error) to an Action.
+pub fn detail_payload_to_action(token: u64, payload: Result<Value, String>) -> Action {
+    match payload {
+        Ok(json) => Action::DetailLoaded { token, json },
+        Err(error) => Action::DetailFailed { token, error },
     }
 }
 
@@ -118,6 +146,28 @@ mod tests {
                 assert!(error.contains("401"));
             }
             other => panic!("expected ListFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detail_ok_maps_to_detail_loaded() {
+        match detail_payload_to_action(3, Ok(json!({ "id": "x" }))) {
+            Action::DetailLoaded { token, json } => {
+                assert_eq!(token, 3);
+                assert_eq!(json["id"], "x");
+            }
+            other => panic!("expected DetailLoaded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detail_err_maps_to_detail_failed() {
+        match detail_payload_to_action(3, Err("404".into())) {
+            Action::DetailFailed { token, error } => {
+                assert_eq!(token, 3);
+                assert!(error.contains("404"));
+            }
+            other => panic!("expected DetailFailed, got {other:?}"),
         }
     }
 }
