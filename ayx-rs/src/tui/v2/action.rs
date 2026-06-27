@@ -119,6 +119,9 @@ pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
         }
         Action::PaletteOpen => {
             state.help_open = false;
+            // Leaving filter-edit mode — otherwise `filtering` could survive a
+            // palette-driven drill and silently capture keys back on the list.
+            state.list.filtering = false;
             state.palette.open = true;
             state.palette.input = tui_input::Input::default();
             state.palette.entries = palette::build_entries(state);
@@ -213,6 +216,17 @@ pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
                 let visible_len = state.list.visible().len();
                 if state.list.cursor >= visible_len {
                     state.list.cursor = visible_len.saturating_sub(1);
+                }
+                // If the palette is open over this list (e.g. opened before the
+                // initial load returned), refresh its entries so freshly-loaded
+                // rows become Open items instead of going stale.
+                if state.palette.open {
+                    state.palette.entries = palette::build_entries(state);
+                    let query = state.palette.input.value().to_string();
+                    state.palette.ranked = palette::rank(&query, &state.palette.entries);
+                    if state.palette.cursor >= state.palette.ranked.len() {
+                        state.palette.cursor = state.palette.ranked.len().saturating_sub(1);
+                    }
                 }
             }
             Vec::new()
@@ -775,6 +789,50 @@ mod tests {
         assert!(s.help_open);
         update(&mut s, Action::HelpClose);
         assert!(!s.help_open);
+    }
+
+    #[test]
+    fn palette_open_clears_filtering() {
+        // Opening the palette must drop filter-edit mode so it can't survive a
+        // palette-driven drill and silently capture keys back on the list.
+        let mut s = test_state();
+        s.list.filtering = true;
+        update(&mut s, Action::PaletteOpen);
+        assert!(!s.list.filtering);
+    }
+
+    #[test]
+    fn list_loaded_refreshes_open_palette() {
+        use crate::tui::v2::palette::PaletteCategory;
+        let mut s = test_state(); // Flow list, empty
+        let _ = initial_load_effect(&mut s);
+        let tok = s.list.token;
+        update(&mut s, Action::PaletteOpen);
+        // Palette opened over an empty list: 5 resources, 0 items.
+        assert_eq!(
+            s.palette
+                .entries
+                .iter()
+                .filter(|e| matches!(e.category, PaletteCategory::Item))
+                .count(),
+            0
+        );
+        update(
+            &mut s,
+            Action::ListLoaded {
+                token: tok,
+                rows: rows(2),
+            },
+        );
+        // Newly-loaded rows now appear as Open items in the live palette.
+        assert_eq!(
+            s.palette
+                .entries
+                .iter()
+                .filter(|e| matches!(e.category, PaletteCategory::Item))
+                .count(),
+            2
+        );
     }
 
     #[test]
