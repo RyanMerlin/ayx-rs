@@ -176,6 +176,38 @@ try {
     Write-Host "open a new shell to use ayx immediately"
   }
 
+  # Shadow check: a different `ayx` earlier on PATH silently wins (e.g. a stale
+  # `cargo install` copy under ~/.cargo/bin, which rustup places ahead of
+  # ~/.local/bin). We resolve against the PATH a freshly-opened shell will see —
+  # the persisted Machine + User values, NOT this process's PATH, which we may
+  # have just prepended $InstallDir to — so the warning reflects reality.
+  $installedExe = Join-Path $InstallDir 'ayx.exe'
+  $newShellPath = @(
+    [Environment]::GetEnvironmentVariable('Path', 'Machine'),
+    [Environment]::GetEnvironmentVariable('Path', 'User')
+  ) -join ';'
+  $shadow = $null
+  foreach ($dir in @($newShellPath -split ';' | Where-Object { $_ })) {
+    # Join-Path handles trailing backslashes (incl. drive roots like `C:\`);
+    # do not TrimEnd, which would turn `C:\` into drive-relative `C:`.
+    $candidate = Join-Path $dir 'ayx.exe'
+    # -LiteralPath + SilentlyContinue: a malformed/wildcard PATH entry must not
+    # turn this read-only diagnostic into a terminating failure under Stop.
+    if (Test-Path -LiteralPath $candidate -ErrorAction SilentlyContinue) {
+      if ([System.IO.Path]::GetFullPath($candidate) -ne [System.IO.Path]::GetFullPath($installedExe)) {
+        $shadow = $candidate
+      }
+      break
+    }
+  }
+  if ($shadow) {
+    Write-Warning "another 'ayx' is earlier on your PATH and will shadow this install:"
+    Write-Warning "    shadow:    $shadow"
+    Write-Warning "    installed: $installedExe"
+    Write-Warning "Remove the shadowing copy (e.g. Remove-Item '$shadow'), or move"
+    Write-Warning "$InstallDir ahead of it on PATH, then reopen your shell."
+  }
+
   # Optional: install PowerShell completions. Best-effort.
   # Skip entirely when $env:AYX_SKIP_COMPLETIONS = '1'.
   if ($env:AYX_SKIP_COMPLETIONS -ne '1') {
