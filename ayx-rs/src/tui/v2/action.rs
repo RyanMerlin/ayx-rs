@@ -137,6 +137,31 @@ mod tests {
     }
 
     #[test]
+    fn cursor_clamps_when_rows_shrink() {
+        let mut s = test_state();
+        update(
+            &mut s,
+            Action::ListLoaded {
+                kind: Kind::Flow,
+                rows: rows(3),
+            },
+        );
+        update(&mut s, Action::CursorDown);
+        update(&mut s, Action::CursorDown);
+        assert_eq!(s.list.cursor, 2);
+
+        update(
+            &mut s,
+            Action::ListLoaded {
+                kind: Kind::Flow,
+                rows: rows(1),
+            },
+        );
+        assert_eq!(s.list.cursor, 0);
+        assert_eq!(s.list.rows.len(), 1);
+    }
+
+    #[test]
     fn quit_sets_flag() {
         let mut s = test_state();
         update(&mut s, Action::Quit);
