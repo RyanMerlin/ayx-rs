@@ -27,14 +27,24 @@ fn tone_style(tone: StatusTone) -> Style {
 
 fn render_table(frame: &mut Frame, state: &AppState, area: Rect) {
     let imp = kind_impl(state.list.kind);
+    let visible = state.list.visible();
+    let title = if state.list.filter.is_empty() {
+        format!(" {} · {} ", state.list.kind.name(), state.list.rows.len())
+    } else {
+        format!(
+            " {} · {}/{}  /{}{} ",
+            state.list.kind.name(),
+            visible.len(),
+            state.list.rows.len(),
+            state.list.filter,
+            if state.list.filtering { "▏" } else { "" }
+        )
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::border(true))
         .style(theme::panel())
-        .title(Span::styled(
-            format!(" {} · {} ", state.list.kind.name(), state.list.rows.len()),
-            theme::accent(),
-        ));
+        .title(Span::styled(title, theme::accent()));
 
     if state.list.loading {
         frame.render_widget(
@@ -54,9 +64,9 @@ fn render_table(frame: &mut Frame, state: &AppState, area: Rect) {
         );
         return;
     }
-    if state.list.rows.is_empty() {
+    if visible.is_empty() {
         frame.render_widget(
-            Paragraph::new(" no items ")
+            Paragraph::new(" no matches ")
                 .block(block)
                 .style(theme::muted()),
             area,
@@ -75,9 +85,7 @@ fn render_table(frame: &mut Frame, state: &AppState, area: Rect) {
         .iter()
         .map(|c| Constraint::Length(c.width))
         .collect();
-    let rows: Vec<TRow> = state
-        .list
-        .rows
+    let rows: Vec<TRow> = visible
         .iter()
         .map(|r| TRow::new(r.cells.iter().map(render_cell).collect::<Vec<_>>()))
         .collect();

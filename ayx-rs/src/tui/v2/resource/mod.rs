@@ -1,24 +1,63 @@
 //! Resource model: the k9s engine. Each browsable asset implements
 //! `ResourceKind`, so the list/detail views and effect executor are written
-//! once and work for every asset. Phase 0 ships `Kind::Flow` only.
+//! once and work for every asset.
 use serde_json::Value;
 
+pub mod connection;
 pub mod flow;
+pub mod job;
+pub mod person;
+pub mod workspace;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Flow,
+    Connection,
+    Job,
+    Person,
+    Workspace,
 }
 
 impl Kind {
     pub fn name(self) -> &'static str {
         match self {
             Kind::Flow => "flows",
+            Kind::Connection => "connections",
+            Kind::Job => "jobs",
+            Kind::Person => "people",
+            Kind::Workspace => "workspaces",
+        }
+    }
+
+    pub fn singular(self) -> &'static str {
+        match self {
+            Kind::Flow => "flow",
+            Kind::Connection => "connection",
+            Kind::Job => "job",
+            Kind::Person => "person",
+            Kind::Workspace => "workspace",
         }
     }
 
     pub fn all() -> &'static [Kind] {
-        &[Kind::Flow]
+        &[
+            Kind::Flow,
+            Kind::Connection,
+            Kind::Job,
+            Kind::Person,
+            Kind::Workspace,
+        ]
+    }
+
+    pub fn index(self) -> usize {
+        Kind::all()
+            .iter()
+            .position(|&k| k == self)
+            .expect("kind is in all()")
+    }
+
+    pub fn from_index(i: usize) -> Option<Kind> {
+        Kind::all().get(i).copied()
     }
 }
 
@@ -70,6 +109,15 @@ pub struct ListEndpoint {
     pub path: &'static str,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct DetailEndpoint {
+    pub surface: &'static str,
+    pub operation: &'static str,
+    /// Path template with an `{id}` placeholder, interpolated by the worker via
+    /// `&[("id", id)]` (the same convention the CLI detail commands use).
+    pub path: &'static str,
+}
+
 /// Each browsable asset implements this. Pure data mapping — no I/O, no state.
 pub trait ResourceKind: Sync {
     fn columns(&self) -> &'static [Column];
@@ -78,13 +126,46 @@ pub trait ResourceKind: Sync {
     /// Map one item object to a display row (cells + stable id).
     fn row(&self, item: &Value) -> Row;
     fn list_endpoint(&self) -> ListEndpoint;
+    /// The single-item endpoint for drill-down, or `None` if the asset has no
+    /// per-id detail endpoint (e.g. Workspaces, whose detail is the switcher's
+    /// job in a later phase).
+    fn detail_endpoint(&self) -> Option<DetailEndpoint>;
 }
 
 /// Registry: map a `Kind` to its static trait object. Filled per-asset.
 pub fn kind_impl(kind: Kind) -> &'static dyn ResourceKind {
     match kind {
         Kind::Flow => &flow::FlowKind,
+        Kind::Connection => &connection::ConnectionKind,
+        Kind::Job => &job::JobKind,
+        Kind::Person => &person::PersonKind,
+        Kind::Workspace => &workspace::WorkspaceKind,
     }
+}
+
+/// One API list payloads wrap items under one of these keys depending on the
+/// endpoint/version. Try them in order, then fall back to a bare array.
+pub(crate) fn items_array(payload: &Value) -> Vec<Value> {
+    for key in ["data", "items", "results"] {
+        if let Some(arr) = payload.get(key).and_then(Value::as_array) {
+            return arr.clone();
+        }
+    }
+    if let Some(arr) = payload.as_array() {
+        return arr.clone();
+    }
+    Vec::new()
+}
+
+/// First present string field among `keys`.
+pub(crate) fn str_field<'a>(item: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|k| item.get(*k).and_then(Value::as_str))
+}
+
+/// "2026-06-20T10:00:00Z" -> "2026-06-20"; passthrough if not a timestamp.
+pub(crate) fn date_only(ts: &str) -> String {
+    ts.split('T').next().unwrap_or(ts).to_string()
 }
 
 #[cfg(test)]
@@ -105,5 +186,62 @@ mod tests {
 
         let toned = Cell::toned("failed", StatusTone::Danger);
         assert_eq!(toned.tone, StatusTone::Danger);
+    }
+
+    #[test]
+    fn items_array_reads_each_wrapper_key() {
+        use serde_json::json;
+        assert_eq!(items_array(&json!({ "data": [ {"a":1} ] })).len(), 1);
+        assert_eq!(
+            items_array(&json!({ "items": [ {"a":1}, {"b":2} ] })).len(),
+            2
+        );
+        assert_eq!(items_array(&json!({ "results": [ {"a":1} ] })).len(), 1);
+        assert_eq!(items_array(&json!([ {"a":1}, {"b":2} ])).len(), 2);
+        assert_eq!(items_array(&json!({ "nope": 1 })).len(), 0);
+    }
+
+    #[test]
+    fn str_field_first_present_wins() {
+        use serde_json::json;
+        let v = json!({ "displayName": "Bob", "name": "Robert" });
+        assert_eq!(str_field(&v, &["name", "displayName"]), Some("Robert"));
+        assert_eq!(str_field(&v, &["missing", "displayName"]), Some("Bob"));
+        assert_eq!(str_field(&v, &["missing"]), None);
+    }
+
+    #[test]
+    fn date_only_strips_time() {
+        assert_eq!(date_only("2026-06-20T10:00:00Z"), "2026-06-20");
+        assert_eq!(date_only("not-a-date"), "not-a-date");
+    }
+
+    #[test]
+    fn all_five_kinds_present_and_named() {
+        let all = Kind::all();
+        assert_eq!(all.len(), 5);
+        assert_eq!(Kind::Flow.name(), "flows");
+        assert_eq!(Kind::Connection.name(), "connections");
+        assert_eq!(Kind::Job.name(), "jobs");
+        assert_eq!(Kind::Person.name(), "people");
+        assert_eq!(Kind::Workspace.name(), "workspaces");
+        assert_eq!(Kind::Person.singular(), "person");
+        assert_eq!(Kind::Workspace.singular(), "workspace");
+    }
+
+    #[test]
+    fn registry_resolves_every_kind() {
+        for &k in Kind::all() {
+            assert!(!kind_impl(k).columns().is_empty(), "{k:?} has no columns");
+        }
+    }
+
+    #[test]
+    fn kind_index_roundtrip() {
+        for (i, &k) in Kind::all().iter().enumerate() {
+            assert_eq!(k.index(), i);
+            assert_eq!(Kind::from_index(i), Some(k));
+        }
+        assert_eq!(Kind::from_index(99), None);
     }
 }

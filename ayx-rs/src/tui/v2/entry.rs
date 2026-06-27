@@ -17,9 +17,10 @@ use crate::tui::store::default_config_with_profile;
 use crate::tui::v2::action::{Action, initial_load_effect, update};
 use crate::tui::v2::context::Context;
 use crate::tui::v2::effect::Effect;
+use crate::tui::v2::nav::View;
 use crate::tui::v2::state::AppState;
 use crate::tui::v2::view;
-use crate::tui::v2::worker::{RequestId, Worker};
+use crate::tui::v2::worker::Worker;
 
 pub fn run() -> Result<Envelope> {
     let runtime_resolution = resolve_runtime_profile(None).map_err(anyhow::Error::from)?;
@@ -30,13 +31,8 @@ pub fn run() -> Result<Envelope> {
 
     let mut state = AppState::new(context);
     let worker = Worker::spawn();
-    let mut list_request = 0;
-    dispatch_effects(
-        vec![initial_load_effect(&state)],
-        &worker,
-        &config,
-        &mut list_request,
-    );
+    let first = initial_load_effect(&mut state);
+    worker.submit(first, config.clone());
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -51,13 +47,7 @@ pub fn run() -> Result<Envelope> {
         previous_hook(panic_info);
     }));
 
-    let result = main_loop(
-        &mut terminal,
-        &mut state,
-        &worker,
-        &config,
-        &mut list_request,
-    );
+    let result = main_loop(&mut terminal, &mut state, &worker, &config);
 
     drop(worker);
     let _ = disable_raw_mode();
@@ -73,14 +63,11 @@ fn main_loop(
     state: &mut AppState,
     worker: &Worker,
     config: &Config,
-    list_request: &mut RequestId,
 ) -> Result<()> {
     loop {
         while let Ok(outcome) = worker.try_recv() {
-            if outcome.id == *list_request {
-                let effects = update(state, outcome.action);
-                dispatch_effects(effects, worker, config, list_request);
-            }
+            let effects = update(state, outcome.action);
+            dispatch_effects(effects, worker, config);
         }
 
         terminal.draw(|frame| view::render(frame, state))?;
@@ -88,10 +75,10 @@ fn main_loop(
         if event::poll(Duration::from_millis(200))?
             && let Event::Key(key) = event::read()?
             && key.kind == KeyEventKind::Press
-            && let Some(action) = map_key(key)
+            && let Some(action) = map_key(state, key)
         {
             let effects = update(state, action);
-            dispatch_effects(effects, worker, config, list_request);
+            dispatch_effects(effects, worker, config);
         }
 
         if state.should_quit {
@@ -102,32 +89,51 @@ fn main_loop(
     Ok(())
 }
 
-fn dispatch_effects(
-    effects: Vec<Effect>,
-    worker: &Worker,
-    config: &Config,
-    list_request: &mut RequestId,
-) {
-    // Phase 0 emits at most one effect per update. Under that invariant, tracking
-    // only the last request id is correct. Revisit list_request tracking once
-    // update() can emit fetch effects in later phases.
-    debug_assert!(
-        effects.len() <= 1,
-        "Phase 0 expects at most one effect per update; revisit list_request tracking"
-    );
+fn dispatch_effects(effects: Vec<Effect>, worker: &Worker, config: &Config) {
     for effect in effects {
-        let request_id = Worker::next_request_id();
-        *list_request = request_id;
-        worker.submit(effect, config.clone(), request_id);
+        worker.submit(effect, config.clone());
     }
 }
 
-fn map_key(key: KeyEvent) -> Option<Action> {
+fn map_key(state: &AppState, key: KeyEvent) -> Option<Action> {
+    use crate::tui::v2::resource::Kind;
+
+    let on_detail = matches!(state.nav.top(), View::ResourceDetail { .. });
+
+    if state.list.filtering && !on_detail {
+        return match key.code {
+            KeyCode::Char(c) => Some(Action::FilterInput(c)),
+            KeyCode::Backspace => Some(Action::FilterBackspace),
+            KeyCode::Enter => Some(Action::FilterApply),
+            KeyCode::Esc => Some(Action::FilterClear),
+            _ => None,
+        };
+    }
+
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => Some(Action::CursorDown),
         KeyCode::Up | KeyCode::Char('k') => Some(Action::CursorUp),
         KeyCode::Esc => Some(Action::Back),
         KeyCode::Char('q') => Some(Action::Quit),
+        KeyCode::Enter => Some(if on_detail {
+            Action::Back
+        } else {
+            Action::Open
+        }),
+        KeyCode::Char('/') if !on_detail => Some(Action::FilterStart),
+        KeyCode::Char(c @ '1'..='5') => {
+            Kind::from_index((c as u8 - b'1') as usize).map(Action::SwitchKind)
+        }
+        KeyCode::Tab => {
+            let n = Kind::all().len();
+            let next = (state.list.kind.index() + 1) % n;
+            Kind::from_index(next).map(Action::SwitchKind)
+        }
+        KeyCode::BackTab => {
+            let n = Kind::all().len();
+            let prev = (state.list.kind.index() + n - 1) % n;
+            Kind::from_index(prev).map(Action::SwitchKind)
+        }
         _ => None,
     }
 }
@@ -138,35 +144,112 @@ mod tests {
     use crate::tui::v2::action::Action;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+    fn list_state() -> crate::tui::v2::state::AppState {
+        let ctx = crate::tui::v2::context::Context {
+            profile: "w".into(),
+            workspace: "w".into(),
+            user: "u".into(),
+        };
+        crate::tui::v2::state::AppState::new(ctx)
+    }
+
     fn k(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
     #[test]
     fn arrows_and_vim_keys_map_to_cursor() {
+        let s = list_state();
         assert!(matches!(
-            map_key(k(KeyCode::Down)),
+            map_key(&s, k(KeyCode::Down)),
             Some(Action::CursorDown)
         ));
         assert!(matches!(
-            map_key(k(KeyCode::Char('j'))),
+            map_key(&s, k(KeyCode::Char('j'))),
             Some(Action::CursorDown)
         ));
-        assert!(matches!(map_key(k(KeyCode::Up)), Some(Action::CursorUp)));
         assert!(matches!(
-            map_key(k(KeyCode::Char('k'))),
+            map_key(&s, k(KeyCode::Up)),
+            Some(Action::CursorUp)
+        ));
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('k'))),
             Some(Action::CursorUp)
         ));
     }
 
     #[test]
     fn q_quits_esc_is_back() {
-        assert!(matches!(map_key(k(KeyCode::Char('q'))), Some(Action::Quit)));
-        assert!(matches!(map_key(k(KeyCode::Esc)), Some(Action::Back)));
+        let s = list_state();
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('q'))),
+            Some(Action::Quit)
+        ));
+        assert!(matches!(map_key(&s, k(KeyCode::Esc)), Some(Action::Back)));
+    }
+
+    #[test]
+    fn number_keys_switch_kind() {
+        use crate::tui::v2::resource::Kind;
+
+        let s = list_state();
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('1'))),
+            Some(Action::SwitchKind(Kind::Flow))
+        ));
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('3'))),
+            Some(Action::SwitchKind(Kind::Job))
+        ));
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('5'))),
+            Some(Action::SwitchKind(Kind::Workspace))
+        ));
+        assert!(map_key(&s, k(KeyCode::Char('6'))).is_none());
+    }
+
+    #[test]
+    fn enter_opens_on_list() {
+        let s = list_state();
+        assert!(matches!(map_key(&s, k(KeyCode::Enter)), Some(Action::Open)));
+    }
+
+    #[test]
+    fn tab_cycles_kind() {
+        use crate::tui::v2::resource::Kind;
+
+        let s = list_state();
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Tab)),
+            Some(Action::SwitchKind(Kind::Connection))
+        ));
+        assert!(matches!(
+            map_key(&s, k(KeyCode::BackTab)),
+            Some(Action::SwitchKind(Kind::Workspace))
+        ));
+    }
+
+    #[test]
+    fn slash_starts_filter_then_typing_feeds_it() {
+        let mut s = list_state();
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('/'))),
+            Some(Action::FilterStart)
+        ));
+        s.list.filtering = true;
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('x'))),
+            Some(Action::FilterInput('x'))
+        ));
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Enter)),
+            Some(Action::FilterApply)
+        ));
     }
 
     #[test]
     fn unmapped_key_is_none() {
-        assert!(map_key(k(KeyCode::Char('z'))).is_none());
+        let s = list_state();
+        assert!(map_key(&s, k(KeyCode::Char('z'))).is_none());
     }
 }
