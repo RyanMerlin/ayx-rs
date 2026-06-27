@@ -10,6 +10,7 @@ use crate::tui::v2::state::AppState;
 mod detail;
 mod footer;
 mod header;
+mod help;
 mod list;
 mod palette;
 
@@ -29,6 +30,7 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     }
     footer::render(frame, state, chunks[2]);
     palette::render(frame, state);
+    help::render(frame, state);
 }
 
 #[cfg(test)]
