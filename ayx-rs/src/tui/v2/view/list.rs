@@ -28,7 +28,8 @@ fn tone_style(tone: StatusTone) -> Style {
 fn render_table(frame: &mut Frame, state: &AppState, area: Rect) {
     let imp = kind_impl(state.list.kind);
     let visible = state.list.visible();
-    let title = if state.list.filter.is_empty() {
+    let term = state.list.filter.value();
+    let title = if term.is_empty() {
         format!(" {} · {} ", state.list.kind.name(), state.list.rows.len())
     } else {
         format!(
@@ -36,7 +37,7 @@ fn render_table(frame: &mut Frame, state: &AppState, area: Rect) {
             state.list.kind.name(),
             visible.len(),
             state.list.rows.len(),
-            state.list.filter,
+            term,
             if state.list.filtering { "▏" } else { "" }
         )
     };

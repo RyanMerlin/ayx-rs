@@ -27,6 +27,10 @@ pub fn render(frame: &mut Frame, state: &AppState, area: Rect) {
                 label("Scroll  "),
                 key(" ↵/⎋ "),
                 label("Back  "),
+                key(" ^K "),
+                label("Palette  "),
+                key(" ? "),
+                label("Help  "),
                 key(" q "),
                 label("Quit"),
             ]),
@@ -42,6 +46,10 @@ pub fn render(frame: &mut Frame, state: &AppState, area: Rect) {
                 spans.push(label("Filter  "));
                 spans.push(key(" 1-5/⇥ "));
                 spans.push(label("Switch  "));
+                spans.push(key(" ^K "));
+                spans.push(label("Palette  "));
+                spans.push(key(" ? "));
+                spans.push(label("Help  "));
                 spans.push(key(" q "));
                 spans.push(label("Quit"));
                 Line::from(spans)
@@ -96,6 +104,8 @@ mod tests {
         assert!(txt.contains("Open"));
         assert!(txt.contains("Filter"));
         assert!(txt.contains("Switch"));
+        assert!(txt.contains("Palette"));
+        assert!(txt.contains("Help"));
     }
 
     #[test]
@@ -133,5 +143,6 @@ mod tests {
         let txt = text_for(&s);
         assert!(txt.contains("Back"));
         assert!(txt.contains("Scroll"));
+        assert!(txt.contains("Palette"));
     }
 }

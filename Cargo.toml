@@ -33,6 +33,7 @@ keyring-core = "1"
 lzf = "1"
 maud = "0.27"
 mime_guess = "2"
+nucleo-matcher = "0.3"
 ratatui = "0.30"
 regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "cookies", "form", "json", "rustls", "multipart"] }
@@ -48,6 +49,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
 tower = "0.5"
 tower-http = { version = "0.7", features = ["trace", "compression-gzip"] }
+tui-input = { version = "0.11", default-features = false }
 rust-embed = "8"
 url = "2"
 walkdir = "2"

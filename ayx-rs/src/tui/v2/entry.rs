@@ -12,6 +12,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use tui_input::InputRequest;
 
 use crate::tui::store::default_config_with_profile;
 use crate::tui::v2::action::{Action, initial_load_effect, update};
@@ -95,22 +96,71 @@ fn dispatch_effects(effects: Vec<Effect>, worker: &Worker, config: &Config) {
     }
 }
 
+/// Map a key to a tui-input request, using only the pure (backend-agnostic)
+/// `InputRequest` API so no crossterm version coupling is introduced. Returns
+/// None for keys that are not text-editing input. Ctrl/Alt+char is NOT an insert.
+fn key_to_input_request(key: KeyEvent) -> Option<InputRequest> {
+    use crossterm::event::KeyModifiers;
+
+    match key.code {
+        KeyCode::Char(c)
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            Some(InputRequest::InsertChar(c))
+        }
+        KeyCode::Backspace => Some(InputRequest::DeletePrevChar),
+        KeyCode::Delete => Some(InputRequest::DeleteNextChar),
+        KeyCode::Left => Some(InputRequest::GoToPrevChar),
+        KeyCode::Right => Some(InputRequest::GoToNextChar),
+        KeyCode::Home => Some(InputRequest::GoToStart),
+        KeyCode::End => Some(InputRequest::GoToEnd),
+        _ => None,
+    }
+}
+
 fn map_key(state: &AppState, key: KeyEvent) -> Option<Action> {
+    use crate::tui::v2::nav::View;
     use crate::tui::v2::resource::Kind;
+    use crossterm::event::KeyModifiers;
 
-    let on_detail = matches!(state.nav.top(), View::ResourceDetail { .. });
-
-    if state.list.filtering && !on_detail {
+    // 1) Palette is modal - it captures everything while open.
+    if state.palette.open {
         return match key.code {
-            KeyCode::Char(c) => Some(Action::FilterInput(c)),
-            KeyCode::Backspace => Some(Action::FilterBackspace),
-            KeyCode::Enter => Some(Action::FilterApply),
-            KeyCode::Esc => Some(Action::FilterClear),
-            _ => None,
+            KeyCode::Esc => Some(Action::PaletteClose),
+            KeyCode::Enter => Some(Action::PaletteActivate),
+            KeyCode::Down => Some(Action::PaletteDown),
+            KeyCode::Up => Some(Action::PaletteUp),
+            _ => key_to_input_request(key).map(Action::PaletteEdit),
         };
     }
 
+    // 2) Help overlay - any key dismisses it.
+    if state.help_open {
+        return Some(Action::HelpClose);
+    }
+
+    // 3) Ctrl+K opens the palette from anywhere else.
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('k') | KeyCode::Char('K'))
+    {
+        return Some(Action::PaletteOpen);
+    }
+
+    let on_detail = matches!(state.nav.top(), View::ResourceDetail { .. });
+
+    // 4) Filter input mode (list only).
+    if state.list.filtering && !on_detail {
+        return match key.code {
+            KeyCode::Enter => Some(Action::FilterApply),
+            KeyCode::Esc => Some(Action::FilterClear),
+            _ => key_to_input_request(key).map(Action::FilterEdit),
+        };
+    }
+
+    // 5) Normal bindings.
     match key.code {
+        KeyCode::Char('?') => Some(Action::HelpToggle),
         KeyCode::Down | KeyCode::Char('j') => Some(Action::CursorDown),
         KeyCode::Up | KeyCode::Char('k') => Some(Action::CursorUp),
         KeyCode::Esc => Some(Action::Back),
@@ -126,13 +176,11 @@ fn map_key(state: &AppState, key: KeyEvent) -> Option<Action> {
         }
         KeyCode::Tab => {
             let n = Kind::all().len();
-            let next = (state.list.kind.index() + 1) % n;
-            Kind::from_index(next).map(Action::SwitchKind)
+            Kind::from_index((state.list.kind.index() + 1) % n).map(Action::SwitchKind)
         }
         KeyCode::BackTab => {
             let n = Kind::all().len();
-            let prev = (state.list.kind.index() + n - 1) % n;
-            Kind::from_index(prev).map(Action::SwitchKind)
+            Kind::from_index((state.list.kind.index() + n - 1) % n).map(Action::SwitchKind)
         }
         _ => None,
     }
@@ -157,6 +205,10 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
+    fn kc(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
     #[test]
     fn arrows_and_vim_keys_map_to_cursor() {
         let s = list_state();
@@ -175,6 +227,15 @@ mod tests {
         assert!(matches!(
             map_key(&s, k(KeyCode::Char('k'))),
             Some(Action::CursorUp)
+        ));
+    }
+
+    #[test]
+    fn ctrl_k_opens_palette() {
+        let s = list_state();
+        assert!(matches!(
+            map_key(&s, kc(KeyCode::Char('k'))),
+            Some(Action::PaletteOpen)
         ));
     }
 
@@ -231,6 +292,8 @@ mod tests {
 
     #[test]
     fn slash_starts_filter_then_typing_feeds_it() {
+        use tui_input::InputRequest;
+
         let mut s = list_state();
         assert!(matches!(
             map_key(&s, k(KeyCode::Char('/'))),
@@ -239,11 +302,57 @@ mod tests {
         s.list.filtering = true;
         assert!(matches!(
             map_key(&s, k(KeyCode::Char('x'))),
-            Some(Action::FilterInput('x'))
+            Some(Action::FilterEdit(InputRequest::InsertChar('x')))
         ));
         assert!(matches!(
             map_key(&s, k(KeyCode::Enter)),
             Some(Action::FilterApply)
+        ));
+    }
+
+    #[test]
+    fn palette_open_captures_keys() {
+        use tui_input::InputRequest;
+
+        let mut s = list_state();
+        s.palette.open = true;
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Esc)),
+            Some(Action::PaletteClose)
+        ));
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Enter)),
+            Some(Action::PaletteActivate)
+        ));
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Down)),
+            Some(Action::PaletteDown)
+        ));
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Up)),
+            Some(Action::PaletteUp)
+        ));
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('f'))),
+            Some(Action::PaletteEdit(InputRequest::InsertChar('f')))
+        ));
+    }
+
+    #[test]
+    fn question_mark_toggles_help_and_help_captures() {
+        let mut s = list_state();
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('?'))),
+            Some(Action::HelpToggle)
+        ));
+        s.help_open = true;
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Esc)),
+            Some(Action::HelpClose)
+        ));
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('x'))),
+            Some(Action::HelpClose)
         ));
     }
 

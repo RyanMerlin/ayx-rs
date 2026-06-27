@@ -3,10 +3,12 @@
 //! worker to run. Pure-ish: no I/O here.
 use crate::tui::v2::effect::Effect;
 use crate::tui::v2::nav::{NavStack, View};
+use crate::tui::v2::palette::{self, PaletteAction};
 use crate::tui::v2::resource::kind_impl;
 use crate::tui::v2::resource::{Kind, Row};
 use crate::tui::v2::state::{AppState, DetailView, ListView};
 use serde_json::Value;
+use tui_input::InputRequest;
 
 #[derive(Debug, Clone)]
 pub enum Action {
@@ -14,9 +16,16 @@ pub enum Action {
     CursorUp,
     SwitchKind(Kind),
     Open,
+    PaletteOpen,
+    PaletteClose,
+    PaletteEdit(InputRequest),
+    PaletteUp,
+    PaletteDown,
+    PaletteActivate,
+    HelpToggle,
+    HelpClose,
     FilterStart,
-    FilterInput(char),
-    FilterBackspace,
+    FilterEdit(InputRequest),
     FilterApply,
     FilterClear,
     Back,
@@ -31,6 +40,51 @@ pub enum Action {
 pub(crate) fn mint_token(state: &mut AppState) -> u64 {
     state.req_seq += 1;
     state.req_seq
+}
+
+/// Switch the root list to `kind` (reset nav + list, fetch). Shared by the
+/// SwitchKind action and palette activation.
+pub(crate) fn do_switch_kind(state: &mut AppState, kind: Kind) -> Vec<Effect> {
+    if state.list.kind == kind && matches!(state.nav.top(), View::ResourceList { .. }) {
+        return Vec::new();
+    }
+
+    state.nav = NavStack::new(View::ResourceList { kind });
+    state.list = ListView::new(kind);
+    state.detail = None;
+    let token = mint_token(state);
+    state.list.token = token;
+    vec![Effect::FetchList { kind, token }]
+}
+
+/// Drill into `id` of `kind` (push detail view + fetch). Shared by the Open
+/// action and palette activation. No-op if the kind has no detail endpoint or
+/// id is empty.
+pub(crate) fn do_open(state: &mut AppState, kind: Kind, id: String, title: String) -> Vec<Effect> {
+    if kind_impl(kind).detail_endpoint().is_none() || id.is_empty() {
+        return Vec::new();
+    }
+
+    state.nav.push(View::ResourceDetail {
+        kind,
+        id: id.clone(),
+        title: title.clone(),
+    });
+    let token = mint_token(state);
+    state.detail = Some(DetailView::new(kind, id.clone(), title, token));
+    vec![Effect::FetchDetail { kind, id, token }]
+}
+
+/// Open an item that belongs to `kind`. In Phase 3 palette items always come
+/// from the current list, so this is just `do_open`; a later phase may first
+/// switch the list when the item is from another kind.
+fn do_switch_kind_if_needed_then_open(
+    state: &mut AppState,
+    kind: Kind,
+    id: String,
+    title: String,
+) -> Vec<Effect> {
+    do_open(state, kind, id, title)
 }
 
 pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
@@ -49,57 +103,87 @@ pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
             }
             Vec::new()
         }
-        Action::SwitchKind(kind) => {
-            if state.list.kind == kind && matches!(state.nav.top(), View::ResourceList { .. }) {
-                return Vec::new();
-            }
-
-            state.nav = NavStack::new(View::ResourceList { kind });
-            state.list = ListView::new(kind);
-            state.detail = None;
-            let token = mint_token(state);
-            state.list.token = token;
-            vec![Effect::FetchList { kind, token }]
-        }
+        Action::SwitchKind(kind) => do_switch_kind(state, kind),
         Action::Open => {
             let kind = state.list.kind;
-            if kind_impl(kind).detail_endpoint().is_none() {
-                return Vec::new();
-            }
-
             let Some(row) = state.list.selected() else {
                 return Vec::new();
             };
             let id = row.id.clone();
-            if id.is_empty() {
-                return Vec::new();
-            }
             let title = row
                 .cells
                 .first()
                 .map(|c| c.text.clone())
                 .unwrap_or_else(|| id.clone());
-
-            state.nav.push(View::ResourceDetail {
-                kind,
-                id: id.clone(),
-                title: title.clone(),
-            });
-            let token = mint_token(state);
-            state.detail = Some(DetailView::new(kind, id.clone(), title, token));
-            vec![Effect::FetchDetail { kind, id, token }]
+            do_open(state, kind, id, title)
+        }
+        Action::PaletteOpen => {
+            state.help_open = false;
+            // Leaving filter-edit mode — otherwise `filtering` could survive a
+            // palette-driven drill and silently capture keys back on the list.
+            state.list.filtering = false;
+            state.palette.open = true;
+            state.palette.input = tui_input::Input::default();
+            state.palette.entries = palette::build_entries(state);
+            state.palette.ranked = palette::rank("", &state.palette.entries);
+            state.palette.cursor = 0;
+            Vec::new()
+        }
+        Action::PaletteClose => {
+            state.palette.open = false;
+            Vec::new()
+        }
+        Action::PaletteEdit(req) => {
+            state.palette.input.handle(req);
+            let query = state.palette.input.value().to_string();
+            state.palette.ranked = palette::rank(&query, &state.palette.entries);
+            if state.palette.cursor >= state.palette.ranked.len() {
+                state.palette.cursor = state.palette.ranked.len().saturating_sub(1);
+            }
+            Vec::new()
+        }
+        Action::PaletteUp => {
+            state.palette.cursor = state.palette.cursor.saturating_sub(1);
+            Vec::new()
+        }
+        Action::PaletteDown => {
+            if !state.palette.ranked.is_empty()
+                && state.palette.cursor + 1 < state.palette.ranked.len()
+            {
+                state.palette.cursor += 1;
+            }
+            Vec::new()
+        }
+        Action::PaletteActivate => {
+            let action = state
+                .palette
+                .ranked
+                .get(state.palette.cursor)
+                .and_then(|&index| state.palette.entries.get(index))
+                .map(|entry| entry.action.clone());
+            state.palette.open = false;
+            match action {
+                Some(PaletteAction::SwitchKind(kind)) => do_switch_kind(state, kind),
+                Some(PaletteAction::OpenItem { kind, id, title }) => {
+                    do_switch_kind_if_needed_then_open(state, kind, id, title)
+                }
+                None => Vec::new(),
+            }
+        }
+        Action::HelpToggle => {
+            state.help_open = !state.help_open;
+            Vec::new()
+        }
+        Action::HelpClose => {
+            state.help_open = false;
+            Vec::new()
         }
         Action::FilterStart => {
             state.list.filtering = true;
             Vec::new()
         }
-        Action::FilterInput(c) => {
-            state.list.filter.push(c);
-            state.list.cursor = 0;
-            Vec::new()
-        }
-        Action::FilterBackspace => {
-            state.list.filter.pop();
+        Action::FilterEdit(req) => {
+            state.list.filter.handle(req);
             state.list.cursor = 0;
             Vec::new()
         }
@@ -108,7 +192,7 @@ pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
             Vec::new()
         }
         Action::FilterClear => {
-            state.list.filter.clear();
+            state.list.filter = tui_input::Input::default();
             state.list.filtering = false;
             state.list.cursor = 0;
             Vec::new()
@@ -132,6 +216,17 @@ pub fn update(state: &mut AppState, action: Action) -> Vec<Effect> {
                 let visible_len = state.list.visible().len();
                 if state.list.cursor >= visible_len {
                     state.list.cursor = visible_len.saturating_sub(1);
+                }
+                // If the palette is open over this list (e.g. opened before the
+                // initial load returned), refresh its entries so freshly-loaded
+                // rows become Open items instead of going stale.
+                if state.palette.open {
+                    state.palette.entries = palette::build_entries(state);
+                    let query = state.palette.input.value().to_string();
+                    state.palette.ranked = palette::rank(&query, &state.palette.entries);
+                    if state.palette.cursor >= state.palette.ranked.len() {
+                        state.palette.cursor = state.palette.ranked.len().saturating_sub(1);
+                    }
                 }
             }
             Vec::new()
@@ -600,10 +695,11 @@ mod tests {
     }
 
     #[test]
-    fn filter_flow_narrows_and_resets_cursor() {
+    fn filter_edit_narrows_and_resets_cursor() {
+        use tui_input::InputRequest;
+
         let mut s = test_state();
         let _ = initial_load_effect(&mut s);
-        let tok = s.list.token;
         s.list.rows = (0..5)
             .map(|i| crate::tui::v2::resource::Row {
                 id: format!("fl_{i}"),
@@ -611,20 +707,132 @@ mod tests {
             })
             .collect();
         s.list.loading = false;
-        let _ = tok;
         update(&mut s, Action::CursorDown);
         update(&mut s, Action::FilterStart);
         assert!(s.list.filtering);
-        update(&mut s, Action::FilterInput('3'));
-        assert_eq!(s.list.filter, "3");
+        update(&mut s, Action::FilterEdit(InputRequest::InsertChar('3')));
+        assert_eq!(s.list.filter.value(), "3");
         assert_eq!(s.list.cursor, 0, "cursor resets when filter changes");
         assert_eq!(s.list.visible().len(), 1);
         update(&mut s, Action::FilterApply);
         assert!(!s.list.filtering);
-        assert_eq!(s.list.filter, "3", "apply keeps the term");
+        assert_eq!(s.list.filter.value(), "3", "apply keeps the term");
         update(&mut s, Action::FilterClear);
-        assert!(s.list.filter.is_empty());
+        assert!(s.list.filter.value().is_empty());
         assert!(!s.list.filtering);
+    }
+
+    #[test]
+    fn palette_open_builds_entries_and_ranks_all() {
+        let mut s = test_state();
+        let _ = initial_load_effect(&mut s);
+        let token = s.list.token;
+        update(
+            &mut s,
+            Action::ListLoaded {
+                token,
+                rows: rows(2),
+            },
+        );
+        update(&mut s, Action::PaletteOpen);
+        assert!(s.palette.open);
+        assert!(!s.palette.entries.is_empty());
+        assert_eq!(s.palette.ranked.len(), s.palette.entries.len());
+        assert_eq!(s.palette.cursor, 0);
+    }
+
+    #[test]
+    fn palette_edit_reranks_and_clamps_cursor() {
+        use tui_input::InputRequest;
+
+        let mut s = test_state();
+        update(&mut s, Action::PaletteOpen);
+        update(&mut s, Action::PaletteEdit(InputRequest::InsertChar('z')));
+        update(&mut s, Action::PaletteEdit(InputRequest::InsertChar('z')));
+        assert!(s.palette.ranked.is_empty());
+        assert_eq!(s.palette.cursor, 0);
+    }
+
+    #[test]
+    fn palette_activate_switch_kind_resets_list_and_closes() {
+        use crate::tui::v2::palette::PaletteAction;
+        use crate::tui::v2::resource::Kind;
+
+        let mut s = test_state();
+        update(&mut s, Action::PaletteOpen);
+        let job_idx = s
+            .palette
+            .entries
+            .iter()
+            .position(|e| matches!(e.action, PaletteAction::SwitchKind(Kind::Job)))
+            .unwrap();
+        s.palette.cursor = s.palette.ranked.iter().position(|&i| i == job_idx).unwrap();
+        let effects = update(&mut s, Action::PaletteActivate);
+        assert!(!s.palette.open);
+        assert_eq!(s.list.kind, Kind::Job);
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::FetchList {
+                kind: Kind::Job,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn palette_close_and_help_toggle() {
+        let mut s = test_state();
+        update(&mut s, Action::PaletteOpen);
+        update(&mut s, Action::PaletteClose);
+        assert!(!s.palette.open);
+        update(&mut s, Action::HelpToggle);
+        assert!(s.help_open);
+        update(&mut s, Action::HelpClose);
+        assert!(!s.help_open);
+    }
+
+    #[test]
+    fn palette_open_clears_filtering() {
+        // Opening the palette must drop filter-edit mode so it can't survive a
+        // palette-driven drill and silently capture keys back on the list.
+        let mut s = test_state();
+        s.list.filtering = true;
+        update(&mut s, Action::PaletteOpen);
+        assert!(!s.list.filtering);
+    }
+
+    #[test]
+    fn list_loaded_refreshes_open_palette() {
+        use crate::tui::v2::palette::PaletteCategory;
+        let mut s = test_state(); // Flow list, empty
+        let _ = initial_load_effect(&mut s);
+        let tok = s.list.token;
+        update(&mut s, Action::PaletteOpen);
+        // Palette opened over an empty list: 5 resources, 0 items.
+        assert_eq!(
+            s.palette
+                .entries
+                .iter()
+                .filter(|e| matches!(e.category, PaletteCategory::Item))
+                .count(),
+            0
+        );
+        update(
+            &mut s,
+            Action::ListLoaded {
+                token: tok,
+                rows: rows(2),
+            },
+        );
+        // Newly-loaded rows now appear as Open items in the live palette.
+        assert_eq!(
+            s.palette
+                .entries
+                .iter()
+                .filter(|e| matches!(e.category, PaletteCategory::Item))
+                .count(),
+            2
+        );
     }
 
     #[test]
