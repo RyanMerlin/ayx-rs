@@ -9,6 +9,7 @@ pub mod action;
 pub mod context;
 pub mod effect;
 pub mod nav;
+pub mod palette;
 pub mod resource;
 pub mod state;
 pub mod view;
