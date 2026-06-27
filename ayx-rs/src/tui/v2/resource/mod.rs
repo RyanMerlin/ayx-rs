@@ -1,6 +1,6 @@
 //! Resource model: the k9s engine. Each browsable asset implements
 //! `ResourceKind`, so the list/detail views and effect executor are written
-//! once and work for every asset. Phase 0 ships `Kind::Flow` only.
+//! once and work for every asset.
 use serde_json::Value;
 
 pub mod connection;
@@ -12,17 +12,41 @@ pub mod workspace;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Flow,
+    Connection,
+    Job,
+    Person,
+    Workspace,
 }
 
 impl Kind {
     pub fn name(self) -> &'static str {
         match self {
             Kind::Flow => "flows",
+            Kind::Connection => "connections",
+            Kind::Job => "jobs",
+            Kind::Person => "people",
+            Kind::Workspace => "workspaces",
+        }
+    }
+
+    pub fn singular(self) -> &'static str {
+        match self {
+            Kind::Flow => "flow",
+            Kind::Connection => "connection",
+            Kind::Job => "job",
+            Kind::Person => "person",
+            Kind::Workspace => "workspace",
         }
     }
 
     pub fn all() -> &'static [Kind] {
-        &[Kind::Flow]
+        &[
+            Kind::Flow,
+            Kind::Connection,
+            Kind::Job,
+            Kind::Person,
+            Kind::Workspace,
+        ]
     }
 }
 
@@ -101,6 +125,10 @@ pub trait ResourceKind: Sync {
 pub fn kind_impl(kind: Kind) -> &'static dyn ResourceKind {
     match kind {
         Kind::Flow => &flow::FlowKind,
+        Kind::Connection => &connection::ConnectionKind,
+        Kind::Job => &job::JobKind,
+        Kind::Person => &person::PersonKind,
+        Kind::Workspace => &workspace::WorkspaceKind,
     }
 }
 
@@ -175,5 +203,25 @@ mod tests {
     fn date_only_strips_time() {
         assert_eq!(date_only("2026-06-20T10:00:00Z"), "2026-06-20");
         assert_eq!(date_only("not-a-date"), "not-a-date");
+    }
+
+    #[test]
+    fn all_five_kinds_present_and_named() {
+        let all = Kind::all();
+        assert_eq!(all.len(), 5);
+        assert_eq!(Kind::Flow.name(), "flows");
+        assert_eq!(Kind::Connection.name(), "connections");
+        assert_eq!(Kind::Job.name(), "jobs");
+        assert_eq!(Kind::Person.name(), "people");
+        assert_eq!(Kind::Workspace.name(), "workspaces");
+        assert_eq!(Kind::Person.singular(), "person");
+        assert_eq!(Kind::Workspace.singular(), "workspace");
+    }
+
+    #[test]
+    fn registry_resolves_every_kind() {
+        for &k in Kind::all() {
+            assert!(!kind_impl(k).columns().is_empty(), "{k:?} has no columns");
+        }
     }
 }
