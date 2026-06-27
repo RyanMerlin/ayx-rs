@@ -155,6 +155,11 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
+    env:
+      # Mirror ci.yml's Windows test isolation (#61): force inline secrets so the
+      # secret round-trip tests don't contaminate via the shared Windows
+      # Credential Manager (keyring) and flake under parallel execution.
+      AYX_FORCE_INLINE_SECRETS: "1"
     steps:
       - uses: actions/checkout@v7
       - name: Install Rust
