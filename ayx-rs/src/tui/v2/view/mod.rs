@@ -76,7 +76,7 @@ mod tests {
     fn list_shows_flow_row_and_footer_hint() {
         let text = rendered_text(&state_with_rows());
         assert!(text.contains("ETL Pipeline"));
-        assert!(text.contains("Palette"));
+        assert!(text.contains("Switch"));
     }
 
     #[test]
