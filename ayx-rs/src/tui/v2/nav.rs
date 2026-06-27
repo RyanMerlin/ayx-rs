@@ -12,6 +12,12 @@ pub enum View {
         id: String,
         title: String,
     },
+    ScopedList {
+        child_kind: Kind,
+        parent_kind: Kind,
+        parent_id: String,
+        parent_title: String,
+    },
 }
 
 impl View {
@@ -19,6 +25,7 @@ impl View {
         match self {
             View::ResourceList { kind } => kind.name().to_string(),
             View::ResourceDetail { title, .. } => title.clone(),
+            View::ScopedList { child_kind, .. } => child_kind.name().to_string(),
         }
     }
 }
@@ -95,5 +102,22 @@ mod tests {
             title: "ETL Pipeline".into(),
         });
         assert_eq!(nav.breadcrumb(), "flows › ETL Pipeline");
+    }
+
+    #[test]
+    fn scoped_list_crumb_is_child_kind_name() {
+        let mut nav = NavStack::new(View::ResourceList { kind: Kind::Flow });
+        nav.push(View::ResourceDetail {
+            kind: Kind::Flow,
+            id: "fl_1".into(),
+            title: "ETL Pipeline".into(),
+        });
+        nav.push(View::ScopedList {
+            child_kind: Kind::Job,
+            parent_kind: Kind::Flow,
+            parent_id: "fl_1".into(),
+            parent_title: "ETL Pipeline".into(),
+        });
+        assert_eq!(nav.breadcrumb(), "flows › ETL Pipeline › jobs");
     }
 }

@@ -25,7 +25,9 @@ pub fn render(frame: &mut Frame, state: &AppState) {
 
     header::render(frame, state, chunks[0]);
     match state.nav.top() {
-        View::ResourceList { .. } => list::render(frame, state, chunks[1]),
+        View::ResourceList { .. } | View::ScopedList { .. } => {
+            list::render(frame, state, chunks[1])
+        }
         View::ResourceDetail { .. } => detail::render(frame, state, chunks[1]),
     }
     footer::render(frame, state, chunks[2]);

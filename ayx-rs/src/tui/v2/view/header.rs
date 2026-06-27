@@ -28,7 +28,7 @@ pub fn render(frame: &mut Frame, state: &AppState, area: Rect) {
         View::ResourceList { .. } => {
             frame.render_widget(Paragraph::new(tabs_line(state.list.kind)), rows[1]);
         }
-        View::ResourceDetail { .. } => {
+        View::ResourceDetail { .. } | View::ScopedList { .. } => {
             let crumb = Line::from(vec![
                 Span::styled(" ", theme::dim()),
                 Span::styled(state.nav.breadcrumb(), theme::dim()),
@@ -90,5 +90,30 @@ mod tests {
         assert!(txt.contains("people"));
         assert!(txt.contains("workspaces"));
         let _ = Kind::Flow;
+    }
+
+    #[test]
+    fn scoped_list_shows_breadcrumb_not_tabs() {
+        let ctx = Context {
+            profile: "w".into(),
+            workspace: "w".into(),
+            user: "u".into(),
+        };
+        let mut s = AppState::new(ctx);
+        s.list = crate::tui::v2::state::ListView::new(Kind::Job);
+        s.nav.push(crate::tui::v2::nav::View::ResourceDetail {
+            kind: Kind::Flow,
+            id: "fl_1".into(),
+            title: "ETL Pipeline".into(),
+        });
+        s.nav.push(crate::tui::v2::nav::View::ScopedList {
+            child_kind: Kind::Job,
+            parent_kind: Kind::Flow,
+            parent_id: "fl_1".into(),
+            parent_title: "ETL Pipeline".into(),
+        });
+        let txt = text_for(&s);
+        assert!(txt.contains("ETL Pipeline"));
+        assert!(txt.contains("jobs"));
     }
 }
