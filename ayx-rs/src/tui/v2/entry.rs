@@ -108,6 +108,13 @@ fn dispatch_effects(
     config: &Config,
     list_request: &mut RequestId,
 ) {
+    // Phase 0 emits at most one effect per update. Under that invariant, tracking
+    // only the last request id is correct. Revisit list_request tracking once
+    // update() can emit fetch effects in later phases.
+    debug_assert!(
+        effects.len() <= 1,
+        "Phase 0 expects at most one effect per update; revisit list_request tracking"
+    );
     for effect in effects {
         let request_id = Worker::next_request_id();
         *list_request = request_id;
