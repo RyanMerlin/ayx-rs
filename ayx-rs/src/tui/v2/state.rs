@@ -1,6 +1,7 @@
 //! Application state. Pure data — no I/O, no rendering.
 use crate::tui::v2::context::Context;
 use crate::tui::v2::nav::{NavStack, View};
+use crate::tui::v2::palette::PaletteState;
 use crate::tui::v2::resource::{Kind, Row};
 use serde_json::Value;
 use tui_input::Input;
@@ -106,6 +107,8 @@ pub struct AppState {
     pub nav: NavStack,
     pub list: ListView,
     pub detail: Option<DetailView>,
+    pub palette: PaletteState,
+    pub help_open: bool,
     pub should_quit: bool,
     pub req_seq: u64,
 }
@@ -117,6 +120,8 @@ impl AppState {
             nav: NavStack::new(View::ResourceList { kind: Kind::Flow }),
             list: ListView::new(Kind::Flow),
             detail: None,
+            palette: PaletteState::default(),
+            help_open: false,
             should_quit: false,
             req_seq: 0,
         }

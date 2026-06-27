@@ -31,7 +31,7 @@ pub struct PaletteEntry {
     pub action: PaletteAction,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct PaletteState {
     pub open: bool,
     pub input: Input,
