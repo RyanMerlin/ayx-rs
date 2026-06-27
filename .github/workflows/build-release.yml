@@ -59,7 +59,7 @@ jobs:
           cp README.md "$package_root/"
           cp scripts/install.sh "$package_root/"
           tar -czf "${artifact_dir}/ayx-x86_64-unknown-linux-gnu.tar.gz" -C "$package_root" .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ayx-x86_64-unknown-linux-gnu
           path: dist/ayx-x86_64-unknown-linux-gnu.tar.gz
@@ -148,7 +148,7 @@ jobs:
           cp README.md "$package_root/"
           cp scripts/install.sh "$package_root/"
           tar -czf "${artifact_dir}/ayx-${{ matrix.target }}.tar.gz" -C "$package_root" .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ayx-${{ matrix.target }}
           path: dist/ayx-${{ matrix.target }}.tar.gz
@@ -198,7 +198,7 @@ jobs:
           Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'scripts/install.ps1') $packageRoot
           $zipPath = Join-Path $artifactDir 'ayx-x86_64-pc-windows-msvc.zip'
           Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath $zipPath -Force
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ayx-x86_64-pc-windows-msvc
           path: dist/ayx-x86_64-pc-windows-msvc.zip
@@ -222,7 +222,7 @@ jobs:
           find . -maxdepth 2 -path './target' -prune -o -name 'ayx.json' -type f -exec cp {} sbom/ \;
           test -n "$(find sbom -maxdepth 1 -type f -name '*.json' -print -quit)"
           ls -la sbom/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ayx-sbom
           path: sbom/
@@ -245,7 +245,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
       - name: Flatten release artifacts and generate checksums
@@ -299,7 +299,7 @@ jobs:
       # the same verifiable provenance via the sigstore .sigstore bundles.
       - name: Attest build provenance for every release artifact
         continue-on-error: true
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             release/ayx-x86_64-unknown-linux-gnu.tar.gz
@@ -308,7 +308,7 @@ jobs:
             release/ayx-x86_64-pc-windows-msvc.zip
             release/ayx-sbom.tar.gz
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             release/ayx-x86_64-unknown-linux-gnu.tar.gz
