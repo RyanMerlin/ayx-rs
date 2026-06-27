@@ -1,5 +1,8 @@
 //! Flow ResourceKind - maps `/v4/flows` list items to display rows.
-use super::{Cell, Column, ListEndpoint, ResourceKind, Row};
+use super::{
+    Cell, Column, DetailEndpoint, ListEndpoint, ResourceKind, Row, date_only, items_array,
+    str_field,
+};
 use serde_json::Value;
 
 pub struct FlowKind;
@@ -18,30 +21,6 @@ const FLOW_COLUMNS: &[Column] = &[
         width: 24,
     },
 ];
-
-/// One API list payloads wrap items under one of these keys depending on the
-/// endpoint/version. Try them in order (same heuristic the legacy browser uses).
-fn items_array(payload: &Value) -> Vec<Value> {
-    for key in ["data", "items", "results"] {
-        if let Some(arr) = payload.get(key).and_then(Value::as_array) {
-            return arr.clone();
-        }
-    }
-    if let Some(arr) = payload.as_array() {
-        return arr.clone();
-    }
-    Vec::new()
-}
-
-fn str_field<'a>(item: &'a Value, keys: &[&str]) -> Option<&'a str> {
-    keys.iter()
-        .find_map(|k| item.get(*k).and_then(Value::as_str))
-}
-
-/// `2026-06-20T10:00:00Z` -> `2026-06-20`; passthrough if not a timestamp.
-fn date_only(ts: &str) -> String {
-    ts.split('T').next().unwrap_or(ts).to_string()
-}
 
 impl ResourceKind for FlowKind {
     fn columns(&self) -> &'static [Column] {
@@ -74,6 +53,15 @@ impl ResourceKind for FlowKind {
             operation: "tui-flow-list",
             path: "/v4/flows",
         }
+    }
+
+    // Detail path verified against ayx-rs/src/cmd/one_flows.rs:277 ("/v4/flows/{id}").
+    fn detail_endpoint(&self) -> Option<DetailEndpoint> {
+        Some(DetailEndpoint {
+            surface: "flow",
+            operation: "tui-flow-detail",
+            path: "/v4/flows/{id}",
+        })
     }
 }
 
