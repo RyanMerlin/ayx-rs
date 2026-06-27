@@ -14,6 +14,8 @@ const KEYS: &[(&str, &str)] = &[
     ("⎋", "Back · close overlay"),
     ("/", "Filter the current list"),
     ("1–5 · ⇥", "Switch resource (Flows…Workspaces)"),
+    ("r", "On a flow: show its runs"),
+    ("f", "On a run: open its flow"),
     ("^K", "Command Palette"),
     ("?", "This help"),
     ("q", "Quit"),
