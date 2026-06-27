@@ -32,7 +32,10 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         .borders(Borders::ALL)
         .border_style(theme::border(true))
         .style(theme::panel())
-        .title(Span::styled(" Help — Keys ", theme::accent()));
+        .title(Span::styled(
+            format!(" Help — Keys · ayx v{} ", env!("CARGO_PKG_VERSION")),
+            theme::accent(),
+        ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -106,6 +109,17 @@ mod tests {
         assert!(txt.contains("Palette"));
         assert!(txt.contains("Filter"));
         assert!(txt.contains("Switch"));
+    }
+
+    #[test]
+    fn help_shows_compiled_version() {
+        // The version is the diagnostic for "am I on the right build" — it must
+        // be the crate version baked at compile time, not a hardcoded string.
+        let mut s = base();
+        s.help_open = true;
+        let txt = text_of(&s);
+        assert!(txt.contains("ayx v"));
+        assert!(txt.contains(env!("CARGO_PKG_VERSION")));
     }
 
     #[test]
