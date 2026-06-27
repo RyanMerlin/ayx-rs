@@ -6,6 +6,7 @@ use ratatui::widgets::Paragraph;
 
 use crate::tui::theme;
 use crate::tui::v2::nav::View;
+use crate::tui::v2::resource::kind_impl;
 use crate::tui::v2::state::AppState;
 
 pub fn render(frame: &mut Frame, state: &AppState, area: Rect) {
@@ -29,16 +30,22 @@ pub fn render(frame: &mut Frame, state: &AppState, area: Rect) {
                 key(" q "),
                 label("Quit"),
             ]),
-            View::ResourceList { .. } => Line::from(vec![
-                key(" ↵ "),
-                label("Open  "),
-                key(" / "),
-                label("Filter  "),
-                key(" 1-5/⇥ "),
-                label("Switch  "),
-                key(" q "),
-                label("Quit"),
-            ]),
+            View::ResourceList { .. } => {
+                // Only advertise Open when the current kind can actually drill in
+                // (Workspaces have no detail endpoint — don't promise a dead key).
+                let mut spans = Vec::new();
+                if kind_impl(state.list.kind).detail_endpoint().is_some() {
+                    spans.push(key(" ↵ "));
+                    spans.push(label("Open  "));
+                }
+                spans.push(key(" / "));
+                spans.push(label("Filter  "));
+                spans.push(key(" 1-5/⇥ "));
+                spans.push(label("Switch  "));
+                spans.push(key(" q "));
+                spans.push(label("Quit"));
+                Line::from(spans)
+            }
         }
     };
     frame.render_widget(Paragraph::new(hint).style(theme::panel()), area);
@@ -87,6 +94,20 @@ mod tests {
     fn list_footer_has_open_and_filter() {
         let txt = text_for(&base());
         assert!(txt.contains("Open"));
+        assert!(txt.contains("Filter"));
+        assert!(txt.contains("Switch"));
+    }
+
+    #[test]
+    fn list_footer_omits_open_when_kind_has_no_detail() {
+        // Workspaces have no detail endpoint — the footer must not promise Open.
+        let mut s = base();
+        s.list = crate::tui::v2::state::ListView::new(Kind::Workspace);
+        let txt = text_for(&s);
+        assert!(
+            !txt.contains("Open"),
+            "workspace list must not advertise Open"
+        );
         assert!(txt.contains("Filter"));
         assert!(txt.contains("Switch"));
     }

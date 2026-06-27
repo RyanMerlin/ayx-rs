@@ -2875,3 +2875,14 @@ Deferred to later phases (unchanged from the scope mapping): cross-asset drill
 - `Action::Open` relies on `map_key` routing Enter→Back when on a detail; add a
   defensive `if state.detail.is_some() { return; }` so the reducer is correct
   independent of the key layer (matters once the Phase-3 palette can emit `Open`).
+- **Serial-worker stale-request starvation** (codex adversarial review): the single
+  worker thread runs requests FIFO; switching kind / drilling while a slow request
+  is in flight makes the fresh view wait up to the 60s client timeout for the
+  now-irrelevant request. UI thread never blocks (no correctness bug) but it hurts
+  responsiveness. Later phase: small worker pool, or drop/cancel superseded
+  requests (the generation token already identifies them).
+
+**Adversarial-review fixes applied before merge** (codex pass, commit after final
+review): filter now uses Unicode `to_lowercase()` (was ASCII-only `to_ascii_*`); the
+list footer omits "↵ Open" for kinds with no detail endpoint (Workspaces) so it
+never advertises a dead key.

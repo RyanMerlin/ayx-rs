@@ -35,13 +35,13 @@ impl ListView {
             return self.rows.iter().collect();
         }
 
-        let needle = self.filter.to_ascii_lowercase();
+        let needle = self.filter.to_lowercase();
         self.rows
             .iter()
             .filter(|row| {
                 row.cells
                     .first()
-                    .map(|cell| cell.text.to_ascii_lowercase().contains(&needle))
+                    .map(|cell| cell.text.to_lowercase().contains(&needle))
                     .unwrap_or(false)
             })
             .collect()
