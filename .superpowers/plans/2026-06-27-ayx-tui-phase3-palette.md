@@ -1340,3 +1340,32 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 **3. Type consistency:** `PaletteState`/`PaletteEntry`/`PaletteCategory`/`PaletteAction`/`build_entries`/`rank` defined Task 3, consumed in Tasks 4 (reducer), 6 (render). `do_switch_kind`/`do_open` defined Task 4, reused by `SwitchKind`/`Open`/`PaletteActivate`. `FilterEdit(InputRequest)` defined Task 2, routed in Task 2/5. `key_to_input_request` defined Task 2, reused in Task 5. `AppState.palette`/`help_open` defined Task 4, read in Tasks 5/6/7. `tui_input::Input` filter field (Task 2) read by `visible()` and `view/list.rs`. Consistent.
 
 **Phasing note:** Delivers working software — `AYX_TUI_V2=1 ayx tui` gains a working Ctrl+K palette (resource + item entries), `?` help, and real cursor editing. Phase 4 (workspace switch) and Phase 5 (actions) extend `PaletteAction`/`build_entries` with new entry kinds; the palette engine is built to absorb them as data.
+
+## STATUS
+
+**Phase 3 (Palette & Discoverability) COMPLETE — 2026-06-27.** `AYX_TUI_V2=1 ayx tui`
+now has a `Ctrl+K` fuzzy command palette (nucleo-matcher; Resources + current-list
+Items), a `?` help overlay, and `tui-input` cursor editing for the `/` filter and
+the palette query. Single `crossterm v0.29.0` (tui-input crossterm backend OFF).
+Workspace suite 440/440, clippy clean.
+
+Built via subagent-driven-development: orchestrator did Task 1 (deps — needs
+network/lock); codex (gpt-5.4, high on Tasks 3-6) implemented Tasks 2-7; Claude
+(opus) reviewed + committed each. Final dual review: rust-reviewer(opus) APPROVE +
+codex adversarial (BUGS-FOUND:4). Fix wave applied before merge: (1) PaletteOpen
+clears `list.filtering` (filter-edit mode could survive a palette drill); (2)
+ListLoaded refreshes an open palette (stale entries if opened pre-load); (3) footer
+now advertises `^K Palette` / `? Help`. Adjudicated NOT bugs: `?` inserts into an
+active filter (correct text-input behavior, per rust-reviewer).
+
+**Manual live smoke (Task 8 Step 2): PENDING** — needs a TTY + authed workspace.
+
+**Follow-ups (non-blocking):**
+- Text inputs render the caret hard-coded at end, not at `input.visual_cursor()`
+  (filter + palette). Mid-string edits work; only the caret display is wrong. Use
+  `frame.set_cursor_position` or inject the caret at the cursor index.
+- `do_switch_kind_if_needed_then_open` is a pure pass-through seam for Phase 4
+  cross-kind palette items; inline or extend then.
+
+Deferred to later phases (unchanged): workspace-switch + action palette entries
+(Phase 4/5 extend `PaletteAction`/`build_entries`); cross-asset drill (Phase 2).
