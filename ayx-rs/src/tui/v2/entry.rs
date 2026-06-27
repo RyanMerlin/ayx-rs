@@ -148,6 +148,11 @@ fn map_key(state: &AppState, key: KeyEvent) -> Option<Action> {
     }
 
     let on_detail = matches!(state.nav.top(), View::ResourceDetail { .. });
+    let detail_kind = state
+        .detail
+        .as_ref()
+        .filter(|_| on_detail)
+        .map(|detail| detail.kind);
 
     // 4) Filter input mode (list only).
     if state.list.filtering && !on_detail {
@@ -160,6 +165,10 @@ fn map_key(state: &AppState, key: KeyEvent) -> Option<Action> {
 
     // 5) Normal bindings.
     match key.code {
+        KeyCode::Char('r') if matches!(detail_kind, Some(Kind::Flow)) => Some(Action::ShowRuns),
+        KeyCode::Char('f') if matches!(detail_kind, Some(Kind::Job)) => {
+            Some(Action::OpenParentFlow)
+        }
         KeyCode::Char('?') => Some(Action::HelpToggle),
         KeyCode::Down | KeyCode::Char('j') => Some(Action::CursorDown),
         KeyCode::Up | KeyCode::Char('k') => Some(Action::CursorUp),
@@ -207,6 +216,31 @@ mod tests {
 
     fn kc(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    fn detail_state(kind: crate::tui::v2::resource::Kind) -> AppState {
+        let ctx = crate::tui::v2::context::Context {
+            profile: "w".into(),
+            workspace: "w".into(),
+            user: "u".into(),
+        };
+        let mut state = crate::tui::v2::state::AppState::new(ctx);
+        state.nav.push(View::ResourceDetail {
+            kind,
+            id: "id-1".into(),
+            title: "detail".into(),
+        });
+        state.detail = Some(crate::tui::v2::state::DetailView {
+            kind,
+            id: "id-1".into(),
+            title: "detail".into(),
+            loading: false,
+            json: None,
+            error: None,
+            scroll: 0,
+            token: 1,
+        });
+        state
     }
 
     #[test]
@@ -273,6 +307,38 @@ mod tests {
     fn enter_opens_on_list() {
         let s = list_state();
         assert!(matches!(map_key(&s, k(KeyCode::Enter)), Some(Action::Open)));
+    }
+
+    #[test]
+    fn flow_detail_r_opens_runs() {
+        use crate::tui::v2::resource::Kind;
+
+        let s = detail_state(Kind::Flow);
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('r'))),
+            Some(Action::ShowRuns)
+        ));
+    }
+
+    #[test]
+    fn job_detail_f_opens_parent_flow() {
+        use crate::tui::v2::resource::Kind;
+
+        let s = detail_state(Kind::Job);
+        assert!(matches!(
+            map_key(&s, k(KeyCode::Char('f'))),
+            Some(Action::OpenParentFlow)
+        ));
+    }
+
+    #[test]
+    fn relation_keys_do_not_cross_wire() {
+        use crate::tui::v2::resource::Kind;
+
+        let flow = detail_state(Kind::Flow);
+        let job = detail_state(Kind::Job);
+        assert!(map_key(&flow, k(KeyCode::Char('f'))).is_none());
+        assert!(map_key(&job, k(KeyCode::Char('r'))).is_none());
     }
 
     #[test]
