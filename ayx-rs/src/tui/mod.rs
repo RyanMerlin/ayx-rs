@@ -28,6 +28,7 @@ mod one_browser;
 mod render_helpers;
 mod store;
 mod theme;
+mod v2;
 mod worker;
 
 pub fn run() -> Result<Envelope> {
