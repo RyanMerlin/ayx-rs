@@ -19,7 +19,7 @@ use crate::tui::v2::context::Context;
 use crate::tui::v2::effect::Effect;
 use crate::tui::v2::state::AppState;
 use crate::tui::v2::view;
-use crate::tui::v2::worker::{RequestId, Worker};
+use crate::tui::v2::worker::Worker;
 
 pub fn run() -> Result<Envelope> {
     let runtime_resolution = resolve_runtime_profile(None).map_err(anyhow::Error::from)?;
@@ -30,13 +30,8 @@ pub fn run() -> Result<Envelope> {
 
     let mut state = AppState::new(context);
     let worker = Worker::spawn();
-    let mut list_request = 0;
-    dispatch_effects(
-        vec![initial_load_effect(&state)],
-        &worker,
-        &config,
-        &mut list_request,
-    );
+    let first = initial_load_effect(&mut state);
+    worker.submit(first, config.clone());
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -51,13 +46,7 @@ pub fn run() -> Result<Envelope> {
         previous_hook(panic_info);
     }));
 
-    let result = main_loop(
-        &mut terminal,
-        &mut state,
-        &worker,
-        &config,
-        &mut list_request,
-    );
+    let result = main_loop(&mut terminal, &mut state, &worker, &config);
 
     drop(worker);
     let _ = disable_raw_mode();
@@ -73,14 +62,11 @@ fn main_loop(
     state: &mut AppState,
     worker: &Worker,
     config: &Config,
-    list_request: &mut RequestId,
 ) -> Result<()> {
     loop {
         while let Ok(outcome) = worker.try_recv() {
-            if outcome.id == *list_request {
-                let effects = update(state, outcome.action);
-                dispatch_effects(effects, worker, config, list_request);
-            }
+            let effects = update(state, outcome.action);
+            dispatch_effects(effects, worker, config);
         }
 
         terminal.draw(|frame| view::render(frame, state))?;
@@ -91,7 +77,7 @@ fn main_loop(
             && let Some(action) = map_key(key)
         {
             let effects = update(state, action);
-            dispatch_effects(effects, worker, config, list_request);
+            dispatch_effects(effects, worker, config);
         }
 
         if state.should_quit {
@@ -102,23 +88,9 @@ fn main_loop(
     Ok(())
 }
 
-fn dispatch_effects(
-    effects: Vec<Effect>,
-    worker: &Worker,
-    config: &Config,
-    list_request: &mut RequestId,
-) {
-    // Phase 0 emits at most one effect per update. Under that invariant, tracking
-    // only the last request id is correct. Revisit list_request tracking once
-    // update() can emit fetch effects in later phases.
-    debug_assert!(
-        effects.len() <= 1,
-        "Phase 0 expects at most one effect per update; revisit list_request tracking"
-    );
+fn dispatch_effects(effects: Vec<Effect>, worker: &Worker, config: &Config) {
     for effect in effects {
-        let request_id = Worker::next_request_id();
-        *list_request = request_id;
-        worker.submit(effect, config.clone(), request_id);
+        worker.submit(effect, config.clone());
     }
 }
 

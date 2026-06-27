@@ -1,7 +1,6 @@
 //! v2 worker: a single background thread that runs Effects off the UI thread
-//! and returns Actions. Mirrors the legacy `tui/worker.rs` discipline
-//! (monotonic RequestId, stale-result drop happens in the entry loop).
-use std::sync::atomic::{AtomicU64, Ordering};
+//! and returns Actions. Staleness is handled by the reducer via tokens carried
+//! on each Action, so the worker no longer tracks request ids.
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread::{self, JoinHandle};
 
@@ -12,21 +11,12 @@ use crate::tui::v2::action::Action;
 use crate::tui::v2::effect::Effect;
 use crate::tui::v2::resource::{Kind, Row, kind_impl};
 
-pub type RequestId = u64;
-
-fn next_id() -> RequestId {
-    static NEXT: AtomicU64 = AtomicU64::new(1);
-    NEXT.fetch_add(1, Ordering::Relaxed)
-}
-
 struct Job {
-    id: RequestId,
     effect: Effect,
     config: Config,
 }
 
 pub struct Outcome {
-    pub id: RequestId,
     pub action: Action,
 }
 
@@ -51,23 +41,19 @@ impl Worker {
         }
     }
 
-    pub fn submit(&self, effect: Effect, config: Config, id: RequestId) {
-        let _ = self.tx.send(Job { id, effect, config });
+    pub fn submit(&self, effect: Effect, config: Config) {
+        let _ = self.tx.send(Job { effect, config });
     }
 
     pub fn try_recv(&self) -> Result<Outcome, TryRecvError> {
         self.rx.try_recv()
-    }
-
-    pub fn next_request_id() -> RequestId {
-        next_id()
     }
 }
 
 fn worker_loop(rx: Receiver<Job>, tx: Sender<Outcome>) {
     while let Ok(job) = rx.recv() {
         let action = match job.effect {
-            Effect::FetchList { kind } => {
+            Effect::FetchList { kind, token } => {
                 let endpoint = kind_impl(kind).list_endpoint();
                 let payload = crate::one_api_live_request(
                     &job.config,
@@ -80,15 +66,15 @@ fn worker_loop(rx: Receiver<Job>, tx: Sender<Outcome>) {
                 )
                 .map(|env| env.data)
                 .map_err(|e| e.to_string());
-                list_payload_to_action(kind, payload)
+                list_payload_to_action(kind, token, payload)
             }
         };
-        let _ = tx.send(Outcome { id: job.id, action });
+        let _ = tx.send(Outcome { action });
     }
 }
 
 /// Pure mapping from a raw list payload (or error) to an Action. Unit-tested.
-pub fn list_payload_to_action(kind: Kind, payload: Result<Value, String>) -> Action {
+pub fn list_payload_to_action(kind: Kind, token: u64, payload: Result<Value, String>) -> Action {
     match payload {
         Ok(value) => {
             let imp = kind_impl(kind);
@@ -97,9 +83,9 @@ pub fn list_payload_to_action(kind: Kind, payload: Result<Value, String>) -> Act
                 .iter()
                 .map(|i| imp.row(i))
                 .collect();
-            Action::ListLoaded { kind, rows }
+            Action::ListLoaded { token, rows }
         }
-        Err(error) => Action::ListFailed { kind, error },
+        Err(error) => Action::ListFailed { token, error },
     }
 }
 
@@ -114,10 +100,9 @@ mod tests {
         let payload = Ok(json!({
             "data": [ { "id": "fl_1", "name": "ETL" }, { "id": "fl_2", "name": "Roll" } ]
         }));
-        let action = list_payload_to_action(Kind::Flow, payload);
-        match action {
-            Action::ListLoaded { kind, rows } => {
-                assert_eq!(kind, Kind::Flow);
+        match list_payload_to_action(Kind::Flow, 7, payload) {
+            Action::ListLoaded { token, rows } => {
+                assert_eq!(token, 7);
                 assert_eq!(rows.len(), 2);
                 assert_eq!(rows[0].cells[0].text, "ETL");
             }
@@ -127,9 +112,11 @@ mod tests {
 
     #[test]
     fn err_payload_maps_to_list_failed() {
-        let action = list_payload_to_action(Kind::Flow, Err("401 unauthorized".into()));
-        match action {
-            Action::ListFailed { error, .. } => assert!(error.contains("401")),
+        match list_payload_to_action(Kind::Flow, 7, Err("401 unauthorized".into())) {
+            Action::ListFailed { token, error } => {
+                assert_eq!(token, 7);
+                assert!(error.contains("401"));
+            }
             other => panic!("expected ListFailed, got {other:?}"),
         }
     }

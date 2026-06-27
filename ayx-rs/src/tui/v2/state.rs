@@ -10,6 +10,7 @@ pub struct ListView {
     pub cursor: usize,
     pub loading: bool,
     pub error: Option<String>,
+    pub token: u64,
 }
 
 impl ListView {
@@ -20,6 +21,7 @@ impl ListView {
             cursor: 0,
             loading: true,
             error: None,
+            token: 0,
         }
     }
 
@@ -44,6 +46,7 @@ pub struct AppState {
     pub nav: NavStack,
     pub list: ListView,
     pub should_quit: bool,
+    pub req_seq: u64,
 }
 
 impl AppState {
@@ -53,6 +56,7 @@ impl AppState {
             nav: NavStack::new(View::ResourceList { kind: Kind::Flow }),
             list: ListView::new(Kind::Flow),
             should_quit: false,
+            req_seq: 0,
         }
     }
 }
