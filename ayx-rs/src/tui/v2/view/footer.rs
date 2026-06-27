@@ -29,6 +29,16 @@ pub fn render(frame: &mut Frame, state: &AppState, area: Rect) {
             View::ResourceDetail { .. } => Line::from(vec![
                 key(" ↑↓ "),
                 label("Scroll  "),
+                match state.detail.as_ref().map(|d| d.kind) {
+                    Some(crate::tui::v2::resource::Kind::Flow) => key(" r "),
+                    Some(crate::tui::v2::resource::Kind::Job) => key(" f "),
+                    _ => key("   "),
+                },
+                match state.detail.as_ref().map(|d| d.kind) {
+                    Some(crate::tui::v2::resource::Kind::Flow) => label("Runs  "),
+                    Some(crate::tui::v2::resource::Kind::Job) => label("Flow  "),
+                    _ => label("      "),
+                },
                 key(" ↵/⎋ "),
                 label("Back  "),
                 key(" ^K "),
@@ -166,6 +176,33 @@ mod tests {
         assert!(txt.contains("Back"));
         assert!(txt.contains("Scroll"));
         assert!(txt.contains("Palette"));
+    }
+
+    #[test]
+    fn flow_detail_footer_has_runs_hint() {
+        let mut s = base();
+        s.nav.push(crate::tui::v2::nav::View::ResourceDetail {
+            kind: Kind::Flow,
+            id: "fl_1".into(),
+            title: "ETL".into(),
+        });
+        s.detail = Some(DetailView::new(Kind::Flow, "fl_1".into(), "ETL".into(), 1));
+        let txt = text_for(&s);
+        assert!(txt.contains("Runs"));
+        assert!(txt.contains("Back"));
+    }
+
+    #[test]
+    fn job_detail_footer_has_flow_hint() {
+        let mut s = base();
+        s.nav.push(crate::tui::v2::nav::View::ResourceDetail {
+            kind: Kind::Job,
+            id: "jg_1".into(),
+            title: "run".into(),
+        });
+        s.detail = Some(DetailView::new(Kind::Job, "jg_1".into(), "run".into(), 1));
+        let txt = text_for(&s);
+        assert!(txt.contains("Flow"));
     }
 
     #[test]
