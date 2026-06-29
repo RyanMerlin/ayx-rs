@@ -4066,10 +4066,11 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tui-input"
-version = "0.11.1"
+version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5d1733c47f1a217b7deff18730ff7ca4ecafc5771368f715ab072d679a36114"
+checksum = "0bd014a652e31cf25ea68d11b10a7b09549863449b19387505c9933f11eb05fa"
 dependencies = [
+ "unicode-segmentation",
  "unicode-width",
 ]
 
