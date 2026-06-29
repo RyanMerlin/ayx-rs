@@ -49,7 +49,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net"] }
 tower = "0.5"
 tower-http = { version = "0.7", features = ["trace", "compression-gzip"] }
-tui-input = { version = "0.11", default-features = false }
+tui-input = { version = "0.15", default-features = false }
 rust-embed = "8"
 url = "2"
 walkdir = "2"
