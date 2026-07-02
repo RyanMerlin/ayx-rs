@@ -305,6 +305,9 @@ pub fn run_onboarding(
         warnings.push(msg);
     }
 
+    println!("\nProfile '{}' saved.", config.profile_name);
+    let login = offer_login_now(&config, &resolved_path, environment)?;
+
     Ok(json!({
         "profile": resolved_path.display().to_string(),
         "saved": true,
@@ -314,6 +317,7 @@ pub fn run_onboarding(
         "secret_refs": secretize.refs.keys().collect::<Vec<_>>(),
         "inline_secret_fields": secretize.inline_fields,
         "warnings": warnings,
+        "login": login,
     }))
 }
 
@@ -934,6 +938,66 @@ pub(crate) fn parse_workspace_url(input: &str) -> ParsedWorkspaceUrl {
     out
 }
 
+/// After an interactive One onboard, optionally run the email-OTP login right
+/// away so the wizard ends with the user already connected (opt-in, defaults to
+/// no). Returns a small JSON record of what happened for the result envelope.
+///
+/// Only offered when the profile was written to the central store — so a
+/// `profile: None` login resolves back to this exact file — and a `workspace_gid`
+/// is present (the OIDC workspace handshake requires it). Otherwise we just point
+/// at the next command. A login failure is deliberately NOT fatal: the profile is
+/// already saved, so it is surfaced as guidance, not an onboarding error.
+fn offer_login_now(
+    config: &Config,
+    resolved_path: &Path,
+    environment: Option<&str>,
+) -> Result<Value> {
+    const NEXT_STEP: &str = "ayx one platform auth login";
+
+    let Some(one) = config.alteryx_one.as_ref() else {
+        return Ok(json!({ "offered": false, "reason": "no alteryx_one section" }));
+    };
+
+    // A `profile: None` login loads the active profile; that only maps back to
+    // what we just wrote when onboarding targeted the central store.
+    let is_central = default_profile_storage_path()
+        .map(|p| p == *resolved_path)
+        .unwrap_or(false);
+    if !is_central {
+        println!("Next: activate this profile, then connect with `{NEXT_STEP}`.");
+        return Ok(json!({ "offered": false, "reason": "non-central profile path" }));
+    }
+    if one.workspace_gid.as_deref().unwrap_or("").is_empty() {
+        println!(
+            "Next: add your workspace URL/id to this profile, then run `{NEXT_STEP}`.\n\
+             (The workspace id is required to complete sign-in.)"
+        );
+        return Ok(json!({ "offered": false, "reason": "missing workspace_gid" }));
+    }
+
+    println!(
+        "\nReady to connect. A one-time passcode will be emailed to {},",
+        one.account_email
+    );
+    println!("and you'll be asked for your workspace password.");
+    if !prompt_yes_no("Log in now", false, false)? {
+        println!("Skipped. Connect any time with `{NEXT_STEP}`.");
+        return Ok(json!({ "offered": true, "ran": false }));
+    }
+
+    match crate::cmd::one::run_active_profile_otp_login(environment) {
+        Ok(_) => {
+            println!("\nConnected. Verify any time with: ayx one platform workspace current");
+            Ok(json!({ "offered": true, "ran": true, "ok": true }))
+        }
+        Err(err) => {
+            println!("\nLogin didn't complete: {err}");
+            println!("Your profile is saved — retry with `{NEXT_STEP}`.");
+            Ok(json!({ "offered": true, "ran": true, "ok": false, "error": err.to_string() }))
+        }
+    }
+}
+
 fn update_or_create_one(
     existing: Option<AlteryxOneProfile>,
     account_email: String,
@@ -1362,34 +1426,30 @@ fn validate_connection_profile_for_onboarding(
 fn collect_onboarding_warnings(config: &Config) -> Vec<String> {
     let mut warnings = Vec::new();
 
-    if config
-        .server
-        .as_ref()
-        .is_none_or(|server| server.webapi_url.trim().is_empty())
-    {
-        warnings.push("server.webapi_url is missing".to_string());
-    }
-    if config
-        .server
-        .as_ref()
-        .is_none_or(|server| server.curator_api_key.trim().is_empty())
-    {
-        warnings.push("server.curator_api_key is missing".to_string());
-    }
-    if config
-        .server
-        .as_ref()
-        .is_none_or(|server| server.curator_api_secret.trim().is_empty())
-    {
-        warnings.push("server.curator_api_secret is missing".to_string());
-    }
-    if config
-        .mongo
-        .embedded
-        .as_ref()
-        .is_none_or(|embedded| embedded.runtime_settings_path.is_none())
-    {
-        warnings.push("mongo.embedded.runtime_settings_path is missing".to_string());
+    // Server + Mongo warnings only apply when the user is configuring Alteryx
+    // Server. A One-only profile (no `server` section) must not be nagged about
+    // Server/Mongo fields it will never use.
+    if let Some(server) = config.server.as_ref() {
+        if server.webapi_url.trim().is_empty() {
+            warnings.push("server.webapi_url is missing".to_string());
+        }
+        if server.curator_api_key.trim().is_empty() {
+            warnings.push("server.curator_api_key is missing".to_string());
+        }
+        if server.curator_api_secret.trim().is_empty() {
+            warnings.push("server.curator_api_secret is missing".to_string());
+        }
+        // The embedded-Mongo runtime settings only matter when Server actually
+        // uses the embedded backend.
+        if matches!(config.mongo.mode, MongoMode::Embedded)
+            && config
+                .mongo
+                .embedded
+                .as_ref()
+                .is_none_or(|embedded| embedded.runtime_settings_path.is_none())
+        {
+            warnings.push("mongo.embedded.runtime_settings_path is missing".to_string());
+        }
     }
 
     warnings
