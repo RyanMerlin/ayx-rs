@@ -117,3 +117,60 @@ fn onboard_saves_under_profile_name_and_sets_active() {
         "must not leave a split default.yaml"
     );
 }
+
+/// `AYX_PROFILE` set in the environment must not divert onboarding's save target
+/// or the profile the login is run against. Onboard saves/activates the named
+/// profile, and the login is dispatched with that name explicitly (not via the
+/// active/`AYX_PROFILE` resolution), so save-target and login-target can't split.
+#[test]
+fn ayx_profile_env_does_not_divert_onboard_or_login_target() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let script = format!(
+        "prod\nuser@example.com\nhttps://us1.alteryxcloud.com/auth-portal/workspaces/{REAL_GID}\nn\nn\n"
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .arg("onboard")
+        .env("AYX_CONFIG_HOME", home.path())
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .env("AYX_PROFILE", "some-other-profile")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn ayx onboard");
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(script.as_bytes())
+        .expect("write stdin");
+    let out = child.wait_with_output().expect("wait");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    assert!(
+        home.path().join("profiles/prod.yaml").exists(),
+        "onboard must save the named profile regardless of AYX_PROFILE; output:\n{combined}"
+    );
+    let state = std::fs::read_to_string(home.path().join("state.yaml")).expect("state.yaml");
+    assert!(
+        state.contains("active_profile: prod"),
+        "named profile must be activated regardless of AYX_PROFILE; state:\n{state}"
+    );
+    assert!(
+        !home
+            .path()
+            .join("profiles/some-other-profile.yaml")
+            .exists(),
+        "AYX_PROFILE must not cause a write to a different profile file"
+    );
+    assert!(
+        combined.contains("Log in now"),
+        "login should still be offered for the onboarded profile; output:\n{combined}"
+    );
+}

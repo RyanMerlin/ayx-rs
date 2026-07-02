@@ -1019,7 +1019,7 @@ fn offer_login_now(config: &Config, saved_path: &Path, environment: Option<&str>
         return Ok(json!({ "offered": true, "ran": false }));
     }
 
-    match crate::cmd::one::run_active_profile_otp_login(environment) {
+    match crate::cmd::one::run_otp_login(environment, Some(config.profile_name.clone())) {
         Ok(_) => {
             println!("\nConnected. Verify any time with: ayx one platform workspace current");
             Ok(json!({ "offered": true, "ran": true, "ok": true }))
