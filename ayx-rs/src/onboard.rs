@@ -82,6 +82,34 @@ pub fn run_onboarding(
     let account_email = prompt_text("Email address", email_default, None, true)?;
     config.alteryx_one = Some(update_or_create_one(config.alteryx_one, account_email));
 
+    // Alteryx One workspace: the workspace gid (a ULID) and region base URL both
+    // live in the workspace URL the user sees in their browser. Parsing them here
+    // means the email-OTP login (`ayx one platform auth login`) has everything it
+    // needs — the gid is required by the OIDC workspace handshake.
+    let gid_default = config
+        .alteryx_one
+        .as_ref()
+        .and_then(|one| one.workspace_gid.as_deref());
+    println!("Paste your Alteryx One workspace URL (from your browser's address bar),");
+    println!("e.g. https://us1.alteryxcloud.com/auth-portal/workspaces/01ABC…  — or just the");
+    println!("workspace id. Leave blank to skip (you can set it later at login).");
+    let workspace_input = prompt_text("Workspace URL or id", gid_default, None, false)?;
+    if !workspace_input.trim().is_empty() {
+        let parsed = parse_workspace_url(&workspace_input);
+        if let Some(one) = config.alteryx_one.as_mut() {
+            match &parsed.workspace_gid {
+                Some(gid) => one.workspace_gid = Some(gid.clone()),
+                None => println!(
+                    "Note: no workspace id found in that input. Set it later with \
+                     `ayx one platform auth login --workspace-gid <id>`."
+                ),
+            }
+            if let Some(base) = parsed.base_url {
+                one.base_url = Some(base);
+            }
+        }
+    }
+
     let configure_server =
         prompt_yes_no("Configure Alteryx Server", config.server.is_some(), true)?;
     if configure_server {
@@ -820,6 +848,92 @@ fn default_sql_connection(
     }
 }
 
+/// Base URL + workspace gid extracted from a pasted Alteryx One workspace URL.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct ParsedWorkspaceUrl {
+    pub base_url: Option<String>,
+    pub workspace_gid: Option<String>,
+}
+
+/// True for a canonical 26-char Crockford-base32 ULID — the shape of an Alteryx
+/// One workspace gid (e.g. `01KMGF85WTTEJZ397MW1RBD9ZB`). Case-insensitive;
+/// Crockford excludes I, L, O, and U.
+fn is_workspace_gid(token: &str) -> bool {
+    token.len() == 26
+        && token.bytes().all(|b| {
+            matches!(
+                b.to_ascii_uppercase(),
+                b'0'..=b'9'
+                    | b'A'..=b'H'
+                    | b'J'
+                    | b'K'
+                    | b'M'
+                    | b'N'
+                    | b'P'..=b'T'
+                    | b'V'..=b'Z'
+            )
+        })
+}
+
+/// Extract the `base_url` (scheme://authority) and `workspace_gid` (ULID) from a
+/// pasted Alteryx One workspace URL. Also accepts a bare gid. Best-effort: any
+/// field it cannot find is left `None` rather than erroring, so onboarding can
+/// fall back to prompting or defaults.
+///
+/// Handles the real console/auth-portal shapes, e.g.
+/// `https://us1.alteryxcloud.com/auth-portal/workspaces/<gid>?redirect_to=…`
+/// and `https://us1.alteryxcloud.com/?workspace=<name>&workspaceGid=<gid>`.
+pub(crate) fn parse_workspace_url(input: &str) -> ParsedWorkspaceUrl {
+    let trimmed = input.trim();
+    let mut out = ParsedWorkspaceUrl::default();
+    if trimmed.is_empty() {
+        return out;
+    }
+
+    // A bare gid, pasted on its own.
+    if is_workspace_gid(trimmed) {
+        out.workspace_gid = Some(trimmed.to_ascii_uppercase());
+        return out;
+    }
+
+    // base_url = scheme://authority (strip any path/query/fragment).
+    if let Some(scheme_end) = trimmed.find("://") {
+        let scheme = &trimmed[..scheme_end];
+        let after = &trimmed[scheme_end + 3..];
+        let authority = after
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or("")
+            .trim_end_matches('.');
+        if !scheme.is_empty() && !authority.is_empty() {
+            out.base_url = Some(format!("{scheme}://{authority}"));
+        }
+    }
+
+    // Prefer a gid that is explicitly labelled — either the `workspaceGid` query
+    // param or the path segment right after `workspaces` — then fall back to the
+    // first ULID-shaped token anywhere in the URL.
+    let tokens: Vec<&str> = trimmed
+        .split(['/', '?', '&', '#', '='])
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect();
+    for pair in tokens.windows(2) {
+        let (key, value) = (pair[0], pair[1]);
+        let labelled = key.eq_ignore_ascii_case("workspaces")
+            || key.eq_ignore_ascii_case("workspacegid")
+            || key.eq_ignore_ascii_case("workspace_gid");
+        if labelled && is_workspace_gid(value) {
+            out.workspace_gid = Some(value.to_ascii_uppercase());
+            return out;
+        }
+    }
+    if let Some(gid) = tokens.iter().find(|t| is_workspace_gid(t)) {
+        out.workspace_gid = Some(gid.to_ascii_uppercase());
+    }
+    out
+}
+
 fn update_or_create_one(
     existing: Option<AlteryxOneProfile>,
     account_email: String,
@@ -1315,6 +1429,76 @@ mod tests {
         SqlServerProfile, WorkspaceConfig, detect_secret_conflict, load_workspace_config,
     };
     use std::collections::HashMap;
+
+    const REAL_GID: &str = "01KMGF85WTTEJZ397MW1RBD9ZB";
+
+    #[test]
+    fn parses_auth_portal_workspace_url() {
+        let parsed = parse_workspace_url(&format!(
+            "https://us1.alteryxcloud.com/auth-portal/workspaces/{REAL_GID}?redirect_to=/token/x/resume"
+        ));
+        assert_eq!(
+            parsed.base_url.as_deref(),
+            Some("https://us1.alteryxcloud.com")
+        );
+        assert_eq!(parsed.workspace_gid.as_deref(), Some(REAL_GID));
+    }
+
+    #[test]
+    fn parses_workspace_gid_query_param() {
+        let parsed = parse_workspace_url(&format!(
+            "https://us1.alteryxcloud.com/?workspace=alteryx-fde&workspaceGid={REAL_GID}"
+        ));
+        assert_eq!(
+            parsed.base_url.as_deref(),
+            Some("https://us1.alteryxcloud.com")
+        );
+        assert_eq!(parsed.workspace_gid.as_deref(), Some(REAL_GID));
+    }
+
+    #[test]
+    fn accepts_bare_gid() {
+        let parsed = parse_workspace_url(REAL_GID);
+        assert_eq!(parsed.workspace_gid.as_deref(), Some(REAL_GID));
+        assert_eq!(parsed.base_url, None);
+    }
+
+    #[test]
+    fn lowercases_are_canonicalized_to_uppercase() {
+        let parsed = parse_workspace_url(&REAL_GID.to_ascii_lowercase());
+        assert_eq!(parsed.workspace_gid.as_deref(), Some(REAL_GID));
+    }
+
+    #[test]
+    fn preserves_non_us1_region_base_url() {
+        let parsed = parse_workspace_url(&format!(
+            "https://eu1.alteryxcloud.com/auth-portal/workspaces/{REAL_GID}"
+        ));
+        assert_eq!(
+            parsed.base_url.as_deref(),
+            Some("https://eu1.alteryxcloud.com")
+        );
+        assert_eq!(parsed.workspace_gid.as_deref(), Some(REAL_GID));
+    }
+
+    #[test]
+    fn no_gid_when_absent_but_still_gets_base_url() {
+        let parsed = parse_workspace_url("https://us1.alteryxcloud.com/home");
+        assert_eq!(
+            parsed.base_url.as_deref(),
+            Some("https://us1.alteryxcloud.com")
+        );
+        assert_eq!(parsed.workspace_gid, None);
+    }
+
+    #[test]
+    fn empty_and_junk_yield_nothing() {
+        assert_eq!(parse_workspace_url("   "), ParsedWorkspaceUrl::default());
+        // A 26-char token containing a Crockford-excluded letter (I) is not a gid.
+        let junk = "01KMGF85WTTEJZ397MW1RBD9ZI";
+        assert!(junk.contains('I') && junk.len() == 26);
+        assert_eq!(parse_workspace_url(junk), ParsedWorkspaceUrl::default());
+    }
 
     fn base_config() -> Config {
         Config {
