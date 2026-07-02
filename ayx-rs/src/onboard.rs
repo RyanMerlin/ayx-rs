@@ -13,7 +13,7 @@ use ayx_core::profile::{
     MongoProfile, ServerProfile, SqlServerConnectionProfile, SqlServerProfile, TlsConfig,
     WorkspaceConfig, canonical_profile_value, canonical_workspace_value,
     default_profile_storage_path, default_workspace_storage_path, detect_secret_conflict,
-    normalize_alteryx_base_url,
+    load_ayx_state, normalize_alteryx_base_url, profile_storage_path, save_ayx_state,
 };
 use ayx_core::secrets::{keyring_account, resolve_secret_ref, store_secret_with_fallback};
 use ayx_core::sensitive::write_sensitive_file;
@@ -297,19 +297,45 @@ pub fn run_onboarding(
     }
 
     let validation = summarize_onboarding_validation(&config);
-    let secretize = write_config_with_policy(&resolved_path, &config, InlineSecretPolicy::Allow)?;
+
+    // For the default central-store onboard, save under the profile's *name* and
+    // make it the active profile. This keeps three things pointed at one file:
+    // the file we just wrote, the active profile a bare command resolves, and the
+    // file `auth login` later writes its token into (`profile_storage_path` keyed
+    // by `profile_name`). Saving to the active/default file while `profile_name`
+    // differs would split the profile — a later login would persist the token to
+    // a *different* file, leaving the active profile unauthenticated.
+    let central = !workspace_mode && profile_path == Path::new("config.yaml");
+    let save_path = if central {
+        profile_storage_path(&config.profile_name).map_err(anyhow::Error::from)?
+    } else {
+        resolved_path.clone()
+    };
+    let secretize = write_config_with_policy(&save_path, &config, InlineSecretPolicy::Allow)?;
     let _ = secret_refs; // Preserved for API stability; refs come from secretize.
+    if central {
+        let mut state = load_ayx_state().unwrap_or_default();
+        state.active_profile = Some(config.profile_name.clone());
+        save_ayx_state(&state).map_err(anyhow::Error::from)?;
+    }
 
     let mut warnings = collect_onboarding_warnings(&config);
     if let Some(msg) = inline_secret_warning(&secretize.inline_fields) {
         warnings.push(msg);
     }
 
-    println!("\nProfile '{}' saved.", config.profile_name);
-    let login = offer_login_now(&config, &resolved_path, environment)?;
+    if central {
+        println!(
+            "\nProfile '{}' saved and set as active.",
+            config.profile_name
+        );
+    } else {
+        println!("\nProfile '{}' saved.", config.profile_name);
+    }
+    let login = offer_login_now(&config, &save_path, environment)?;
 
     Ok(json!({
-        "profile": resolved_path.display().to_string(),
+        "profile": save_path.display().to_string(),
         "saved": true,
         "mode": "interactive",
         "summary": summarize_config(&config),
@@ -861,10 +887,14 @@ pub(crate) struct ParsedWorkspaceUrl {
 
 /// True for a canonical 26-char Crockford-base32 ULID — the shape of an Alteryx
 /// One workspace gid (e.g. `01KMGF85WTTEJZ397MW1RBD9ZB`). Case-insensitive;
-/// Crockford excludes I, L, O, and U.
+/// Crockford excludes I, L, O, and U. The first character must be `0`–`7`: the
+/// 48-bit millisecond timestamp cannot fill the top two bits of the leading
+/// 5-bit group, so this cheaply rejects most random 26-char tokens.
 fn is_workspace_gid(token: &str) -> bool {
+    let bytes = token.as_bytes();
     token.len() == 26
-        && token.bytes().all(|b| {
+        && matches!(bytes[0], b'0'..=b'7')
+        && bytes.iter().all(|b| {
             matches!(
                 b.to_ascii_uppercase(),
                 b'0'..=b'9'
@@ -932,8 +962,16 @@ pub(crate) fn parse_workspace_url(input: &str) -> ParsedWorkspaceUrl {
             return out;
         }
     }
-    if let Some(gid) = tokens.iter().find(|t| is_workspace_gid(t)) {
-        out.workspace_gid = Some(gid.to_ascii_uppercase());
+    // Unlabelled fallback: only accept a gid when there is exactly ONE
+    // ULID-shaped token in the whole input, so an unrelated 26-char value
+    // elsewhere in the URL can never be mistaken for the workspace gid.
+    let ulids: Vec<&str> = tokens
+        .iter()
+        .copied()
+        .filter(|token| is_workspace_gid(token))
+        .collect();
+    if let [only] = ulids.as_slice() {
+        out.workspace_gid = Some(only.to_ascii_uppercase());
     }
     out
 }
@@ -947,25 +985,21 @@ pub(crate) fn parse_workspace_url(input: &str) -> ParsedWorkspaceUrl {
 /// is present (the OIDC workspace handshake requires it). Otherwise we just point
 /// at the next command. A login failure is deliberately NOT fatal: the profile is
 /// already saved, so it is surfaced as guidance, not an onboarding error.
-fn offer_login_now(
-    config: &Config,
-    resolved_path: &Path,
-    environment: Option<&str>,
-) -> Result<Value> {
+fn offer_login_now(config: &Config, saved_path: &Path, environment: Option<&str>) -> Result<Value> {
     const NEXT_STEP: &str = "ayx one platform auth login";
 
     let Some(one) = config.alteryx_one.as_ref() else {
         return Ok(json!({ "offered": false, "reason": "no alteryx_one section" }));
     };
 
-    // A `profile: None` login loads the active profile; that only maps back to
-    // what we just wrote when onboarding targeted the central store.
-    let is_central = default_profile_storage_path()
-        .map(|p| p == *resolved_path)
-        .unwrap_or(false);
-    if !is_central {
+    // Only auto-login when the file we just saved is exactly the file the login
+    // will both load (the now-active profile) and write its token back into
+    // (`profile_storage_path` keyed by `profile_name`). If they differ, a login
+    // would split the profile, so we point at the next step instead.
+    let login_target = profile_storage_path(&config.profile_name).ok();
+    if login_target.as_deref() != Some(saved_path) {
         println!("Next: activate this profile, then connect with `{NEXT_STEP}`.");
-        return Ok(json!({ "offered": false, "reason": "non-central profile path" }));
+        return Ok(json!({ "offered": false, "reason": "profile not in central store" }));
     }
     if one.workspace_gid.as_deref().unwrap_or("").is_empty() {
         println!(
@@ -1558,6 +1592,40 @@ mod tests {
         let junk = "01KMGF85WTTEJZ397MW1RBD9ZI";
         assert!(junk.contains('I') && junk.len() == 26);
         assert_eq!(parse_workspace_url(junk), ParsedWorkspaceUrl::default());
+    }
+
+    #[test]
+    fn rejects_ulid_with_out_of_range_first_char() {
+        // Crockford-valid alphabet and length, but first char '8' is out of the
+        // 0-7 ULID timestamp range — not a valid gid.
+        let bad = "81KMGF85WTTEJZ397MW1RBD9ZB";
+        assert!(!is_workspace_gid(bad));
+        assert_eq!(parse_workspace_url(bad), ParsedWorkspaceUrl::default());
+    }
+
+    #[test]
+    fn labelled_gid_wins_over_another_ulid_in_the_url() {
+        let other = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+        let parsed = parse_workspace_url(&format!(
+            "https://us1.alteryxcloud.com/x/{other}/auth-portal/workspaces/{REAL_GID}"
+        ));
+        assert_eq!(parsed.workspace_gid.as_deref(), Some(REAL_GID));
+    }
+
+    #[test]
+    fn ambiguous_unlabelled_multiple_ulids_yields_no_gid() {
+        let a = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+        let b = "01BX5ZZKBKACTAV9WEVGEMMVRZ";
+        let parsed = parse_workspace_url(&format!("https://us1.alteryxcloud.com/x/{a}/y/{b}"));
+        assert_eq!(
+            parsed.workspace_gid, None,
+            "must not guess between two unlabelled ULIDs"
+        );
+        // base_url is still recovered.
+        assert_eq!(
+            parsed.base_url.as_deref(),
+            Some("https://us1.alteryxcloud.com")
+        );
     }
 
     fn base_config() -> Config {

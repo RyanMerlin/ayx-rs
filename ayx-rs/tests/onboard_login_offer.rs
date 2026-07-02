@@ -8,20 +8,20 @@
 //! Spawn-based, so gated off Windows like `cli_smoke.rs`.
 #![cfg(not(windows))]
 
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use tempfile::TempDir;
 
 const REAL_GID: &str = "01KMGF85WTTEJZ397MW1RBD9ZB";
 
-/// Run `ayx onboard` with the given stdin script in a fresh config home.
-fn run_onboard(stdin: &str) -> String {
-    let home: TempDir = tempfile::tempdir().expect("tempdir");
+/// Run `ayx onboard` with the given stdin script against a specific config home.
+fn run_onboard_in(home: &Path, stdin: &str) -> String {
     let mut child = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .arg("onboard")
-        .env("AYX_CONFIG_HOME", home.path())
-        .env("HOME", home.path())
-        .env("XDG_CONFIG_HOME", home.path())
+        .env("AYX_CONFIG_HOME", home)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -38,6 +38,12 @@ fn run_onboard(stdin: &str) -> String {
     let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
     combined.push_str(&String::from_utf8_lossy(&out.stderr));
     combined
+}
+
+/// Run `ayx onboard` in a fresh throwaway config home.
+fn run_onboard(stdin: &str) -> String {
+    let home: TempDir = tempfile::tempdir().expect("tempdir");
+    run_onboard_in(home.path(), stdin)
 }
 
 #[test]
@@ -70,5 +76,44 @@ fn points_at_next_step_when_workspace_gid_absent() {
     assert!(
         !out.contains("Log in now"),
         "must not offer immediate login without a workspace_gid; output:\n{out}"
+    );
+}
+
+/// Regression guard for the profile-split bug: onboard must save the profile
+/// under its *name* and make it active, so a later `auth login` (which writes
+/// the token to `profile_storage_path(profile_name)`) targets the very same
+/// file. If onboard instead wrote to `default.yaml` while naming the profile
+/// `prod`, the token would land in a different file and split the profile.
+#[test]
+fn onboard_saves_under_profile_name_and_sets_active() {
+    let home = tempfile::tempdir().expect("tempdir");
+    // profile name "prod", email, workspace URL, no server, decline login.
+    let script = format!(
+        "prod\nuser@example.com\nhttps://us1.alteryxcloud.com/auth-portal/workspaces/{REAL_GID}\nn\nn\n"
+    );
+    let out = run_onboard_in(home.path(), &script);
+
+    // Saved under the profile name, and announced as active.
+    assert!(
+        home.path().join("profiles/prod.yaml").exists(),
+        "profile must be saved as profiles/prod.yaml; output:\n{out}"
+    );
+    assert!(
+        out.contains("set as active"),
+        "onboard must set the new profile active; output:\n{out}"
+    );
+
+    // Active profile in state matches the saved file — the login write target.
+    let state = std::fs::read_to_string(home.path().join("state.yaml")).expect("state.yaml");
+    assert!(
+        state.contains("active_profile: prod"),
+        "active_profile must be the onboarded profile; state:\n{state}"
+    );
+
+    // No split: onboard must not leave a stray `default.yaml` holding the config
+    // while the token would go elsewhere.
+    assert!(
+        !home.path().join("profiles/default.yaml").exists(),
+        "must not leave a split default.yaml"
     );
 }
