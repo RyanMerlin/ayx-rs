@@ -25,6 +25,37 @@ fn is_one_only_profile(config: &Config) -> bool {
     config.alteryx_one.is_some() && config.api.is_none()
 }
 
+/// Run the default email-OTP login for a named profile.
+///
+/// A thin entry point for `onboard`'s opt-in "log in now" step: it dispatches
+/// the same `one platform auth login` a user would run (default OTP flow, no
+/// flags), routing through the public platform dispatcher so `onboard` needs no
+/// visibility into the private `one_platform` module. The profile is passed
+/// explicitly (rather than relying on the active profile) so resolution is
+/// deterministic and cannot be diverted by `AYX_PROFILE`.
+pub(crate) fn run_otp_login(
+    environment: Option<&str>,
+    profile: Option<String>,
+) -> Result<Envelope> {
+    let runtime = crate::cmd::RuntimeCtx::new(environment);
+    let command = Some(crate::OnePlatformCommand::Auth {
+        command: crate::OnePlatformAuthCommand::Login {
+            profile,
+            client_id: None,
+            browser: false,
+            device: false,
+            refresh_token: None,
+            access_token: None,
+            token_endpoint: None,
+            workspace_id: None,
+            workspace_gid: None,
+        },
+    });
+    // apply/yes are irrelevant to login (it is neither a dry-runnable mutating
+    // One API call nor a destructive operation with a TTY confirm).
+    super::one_platform::execute(&runtime, false, false, command)
+}
+
 /// Borrow Cli's apply + yes for the TTY confirm prompts inside delete arms.
 pub struct Ctx<'a> {
     pub apply: bool,

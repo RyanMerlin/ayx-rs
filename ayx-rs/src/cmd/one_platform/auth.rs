@@ -89,12 +89,15 @@ fn login(
         .and_then(|o| o.effective_token_endpoint_url())
         .unwrap_or_else(|| "https://pingauth.alteryxcloud.com/as/token".to_string());
 
-    let client_id_val = config
+    // oauth_client_id is only consumed by the --browser (PKCE) and --device
+    // grants. The default email-OTP flow, and the --refresh-token/--access-token
+    // bypass paths, never use it. Resolve it lazily so a brand-new user can
+    // complete the default OTP login without first creating an OAuth client.
+    let client_id_opt = config
         .alteryx_one
         .as_ref()
         .and_then(|o| o.resolved_oauth_client_id())
-        .context("oauth_client_id is required — pass --client-id or set alteryx_one.oauth_client_id in your profile")?
-        .to_string();
+        .map(str::to_string);
 
     let (final_access_token, final_refresh_token) = if let Some(rt) = refresh_token_arg {
         // --- bypass: exchange a refresh token the caller already has ---
@@ -115,6 +118,10 @@ fn login(
         (at, None)
     } else if browser {
         // --- PKCE authorization-code flow ---
+        let client_id_val = client_id_opt.clone().context(
+            "oauth_client_id is required for the --browser flow — pass --client-id or set \
+             alteryx_one.oauth_client_id in your profile (the default email-OTP flow does not need it)",
+        )?;
         let pkce = generate_pkce_challenge();
         // 32-byte random state guards the callback against CSRF.
         let csrf_state = generate_random_state(32);
@@ -276,6 +283,10 @@ fn login(
         (result.access_token, None)
     } else {
         // --- Device authorization grant (--device flag) ---
+        let client_id_val = client_id_opt.clone().context(
+            "oauth_client_id is required for the --device flow — pass --client-id or set \
+             alteryx_one.oauth_client_id in your profile (the default email-OTP flow does not need it)",
+        )?;
         let device_auth_endpoint = token_endpoint
             .replace("/token", "/device_authorization")
             .replace("/as/token", "/as/device_authorization");
