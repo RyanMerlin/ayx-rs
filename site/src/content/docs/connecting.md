@@ -1,11 +1,11 @@
 ---
 title: Connecting to Alteryx One
-description: Point ayx at your Alteryx One workspace, and optionally Alteryx Server.
+description: Sign in to Alteryx One with a one-time passcode, and optionally connect Alteryx Server.
 sidebar:
   order: 2
 ---
 
-ayx talks to Alteryx One over its `/v4` REST API using an OAuth bearer token. The fastest way to set this up is the onboarding wizard — this page explains what it's asking for and how to confirm it worked.
+`ayx` talks to Alteryx One over its `/v4` REST API. First-time sign-in is an **email one-time passcode (OTP)** flow: you enter a 6-digit code emailed to you plus your workspace password, and `ayx` stores a **30-day token** in your profile and reuses it for every command after. There's no OAuth client to create and no token to paste by hand.
 
 ## The quick path
 
@@ -13,21 +13,39 @@ ayx talks to Alteryx One over its `/v4` REST API using an OAuth bearer token. Th
 ayx onboard
 ```
 
-The wizard prompts for your workspace and credentials, validates them as you go, and writes a profile. For unattended setup (CI), pass `--non-interactive` with the values supplied through the environment.
+The wizard collects your email and workspace URL and offers to log you in on the spot — see [Getting started](/getting-started/). Everything below is what it's doing under the hood, and how to sign in again when the token expires.
 
-When you log in (`auth login`) on a machine where no OS keyring backend is available, ayx warns that credentials will be stored inline in the config file (plaintext at rest). Configuring a keyring backend — such as the system keychain on macOS, `libsecret` on Linux, or Windows Credential Manager — eliminates plaintext storage and suppresses the warning.
+## Signing in
 
-## What you'll need
+```bash
+ayx one platform auth login
+```
+
+With no flags this runs the **email-OTP flow**:
+
+1. A 6-digit passcode is emailed to your account address.
+2. `ayx` prompts you for the passcode, then for your **workspace password**.
+3. On success it stores a 30-day token in the active profile.
+
+It reads three fields from your profile — your email (from the onboarding prompt) and your workspace id + region (parsed from the workspace URL you paste during onboarding):
 
 | Field | Where it comes from |
 |-------|---------------------|
-| `base_url` | Your Alteryx One region host, e.g. `https://us1.alteryxcloud.com` |
-| `account_email` | The account the credentials belong to |
-| `oauth_client_id` | An OAuth client created in Alteryx One |
-| `token_endpoint_url` | Usually `<base_url>/oauth/token` |
-| `access_token` | A bearer token — or let ayx mint one from the client credentials |
+| `account_email` | The address you sign in to Alteryx One with |
+| `workspace_gid` | The workspace id (a ULID) in your workspace URL — required by the sign-in handshake |
+| `base_url` | Your Alteryx One region host, e.g. `https://us1.alteryxcloud.com` (also read from the URL) |
 
-These map directly to the `alteryx_one:` block of your [profile](/configuration/). Any of them can also come from an environment variable, which is the usual approach for pipelines.
+If the token later expires, just run `ayx one platform auth login` again.
+
+### Other sign-in flows
+
+You usually won't need these, but they're there:
+
+- `ayx one platform auth login --device` — device-code grant: prints a URL and code to complete sign-in on any device.
+- `ayx one platform auth login --browser` — PKCE authorization-code flow in your browser.
+- `ayx one platform auth login --refresh-token <t>` / `--access-token <t>` — store tokens you already have, for CI.
+
+The `--browser` and `--device` flows use an OAuth client, so they need an `oauth_client_id` in your profile (or `--client-id`). The default email-OTP flow does not.
 
 ## Confirm it worked
 
@@ -36,18 +54,31 @@ ayx doctor auth     # checks the token path end to end
 ayx whoami          # shows the workspace you're connected to
 ```
 
-If `doctor auth` passes but a command later fails, it's almost always an expired token — refresh it and retry.
+If `doctor auth` passes but a command later fails with an auth error, your token has expired — run `ayx one platform auth login` again.
+
+## Multiple workspaces
+
+One profile can hold a separate token per workspace. Bind a login to a specific workspace, then switch which one is active:
+
+```bash
+ayx one platform auth login --workspace-id <id>   # store this workspace's token
+ayx one platform workspace switch --workspace-id <id>   # make it the active one
+```
+
+See [Profiles & configuration](/configuration/) for the full model.
 
 ## Auth-transport safety
 
 The email-OTP first-login flow is pure-HTTP (reqwest). There is no browser, Python, or Playwright dependency.
 
-During the OIDC flow, ayx applies two transport-level guards:
+During the OIDC flow, `ayx` applies two transport-level guards:
 
 - **Redirect-host allowlist.** The redirect follower only accepts the configured Alteryx domain and its subdomains. An off-domain redirect (e.g. to an unrelated host) is rejected with an error before any credential is sent.
 - **Interaction-id validation.** The OIDC interaction id is validated for shape (6–128 characters, restricted charset) before use. A malformed value from the server is rejected rather than forwarded.
 
 Response bodies are redacted in auth-flow error output so credential material does not appear in logs or terminal output.
+
+When you sign in on a machine where no OS keyring backend is available, `ayx` warns that credentials will be stored inline in the config file (plaintext at rest). Configuring a keyring backend — the system keychain on macOS, `libsecret` on Linux, or Windows Credential Manager — eliminates plaintext storage and suppresses the warning.
 
 ## Connecting to Alteryx Server (optional)
 
@@ -61,4 +92,4 @@ server:
     client_secret: <secret>
 ```
 
-The `ayx server` commands — status, diagnostics, upgrade planning, and more — then run against it.
+The `ayx server` commands — status, diagnostics, upgrade planning, and more — then run against it. `ayx onboard` can set this up interactively too.
