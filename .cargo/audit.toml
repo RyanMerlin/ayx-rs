@@ -4,4 +4,11 @@ ignore = [
     "RUSTSEC-2025-0052",
     # proc-macro-error 1.0.4 unmaintained (RUSTSEC-2024-0370) - transitive via maud_macros 0.26; no direct use.
     "RUSTSEC-2024-0370",
+    # quick-xml 0.38 XML-DoS advisories (RUSTSEC-2026-0194 / -0195) - reachable ONLY via
+    # self_update, which parses the GitHub Releases API (a trusted source) during `ayx update`.
+    # Both advisories require attacker-controlled XML, which does not apply to that path.
+    # self_update 0.44.0 (latest) pins quick-xml ^0.38, so no upstream fix is available yet;
+    # revisit when self_update relaxes the constraint.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
