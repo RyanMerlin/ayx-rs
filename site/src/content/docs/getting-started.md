@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-`ayx` is a single binary. Install it, point it at your Alteryx One workspace, and you're running commands in a couple of minutes.
+`ayx` is a single binary. Install it, run the setup wizard, and you're connected to your Alteryx One workspace in a couple of minutes.
 
 ## Install
 
@@ -31,23 +31,38 @@ ayx --version
 
 ## Connect
 
-Run the setup wizard. It creates a **profile** — your saved connection to an Alteryx One workspace — and validates each piece as you enter it.
+Run the setup wizard:
 
 ```bash
 ayx onboard
 ```
 
-You'll need your workspace URL and an OAuth client and token. [Profiles & configuration](/configuration/) covers exactly which fields go where.
+It asks for two things:
 
-Then check the whole path — config, auth, and connectivity — without changing anything on the server:
+- **Your email** — the account you sign in to Alteryx One with.
+- **Your workspace URL** — paste it straight from your browser's address bar while you're in the workspace, e.g. `https://us1.alteryxcloud.com/auth-portal/workspaces/01ABC…`. `ayx` reads your **workspace id** and **region** out of it. (You can also paste just the id, or leave it blank and add it later.)
+
+The wizard saves this as a **profile** — your named, reusable connection — and makes it active. It then offers to log you in right away:
+
+```text
+Ready to connect. A one-time passcode will be emailed to you@example.com,
+and you'll be asked for your workspace password.
+Log in now [y/N]:
+```
+
+Answer **y** and you'll be prompted for the **6-digit passcode** emailed to you and your **workspace password**. `ayx` completes the sign-in and stores a 30-day token in your profile. (Prefer to do it later? Answer **n** — the wizard prints the exact command to run when you're ready.)
+
+You won't need another passcode until the stored token expires (about 30 days); it's reused for every command in between.
+
+## Verify
+
+Check the whole path — config, auth, and connectivity — without changing anything on the server:
 
 ```bash
 ayx doctor
 ```
 
-## Your first command
-
-Confirm who you are and which workspace you're pointed at:
+Then confirm who you are and which workspace you're pointed at:
 
 ```bash
 ayx whoami
@@ -61,6 +76,7 @@ ayx --output json one platform workspace current
 
 ## Where to go next
 
+- **[Connecting to Alteryx One](/connecting/)** — the login flows in detail, and connecting Alteryx Server
 - **[Common tasks](/common-tasks/)** — copy-paste recipes for the things you'll do most
 - **[The safety model](/safety-model/)** — why nothing destructive runs without `--apply`
-- **[Profiles & configuration](/configuration/)** — multiple environments, tokens, and per-run overrides
+- **[Profiles & configuration](/configuration/)** — multiple workspaces, tokens, and per-run overrides
