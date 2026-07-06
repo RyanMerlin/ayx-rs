@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-06-23 15:04:20 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-06 12:54:30 UTC._
 
 This file is generated. Refresh it with:
 
@@ -10,7 +10,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 180
+- Commands: 177
 - Capabilities: 8
 
 ## Commands
@@ -181,9 +181,6 @@ cargo run -q -p xtask -- refresh-command-surface
 | one platform workspace save-configuration-v4 | `one/platform/workspace/save-configuration-v4` | mutating | yes | Update a One workspace configuration by id from JSON payload. |
 | one platform workspace save-current-configuration | `one/platform/workspace/save-current-configuration` | mutating | yes | Update the current One workspace configuration from JSON payload. |
 | one scheduling list | `one/scheduling/list` | read-only | no | List One schedules. |
-| one ui data list-datasets | `one/ui/data/list-datasets` | read-only | no | List available One datasets from the visual data page. |
-| one ui session status | `one/ui/session/status` | read-only | no | Report the experimental One visual interface session policy and reuse posture. |
-| one ui workflow inventory | `one/ui/workflow/inventory` | read-only | no | Inventory the experimental workflow page canvas, config pane, and results pane. |
 | one webhook-flow-task create | `one/webhook-flow-task/create` | mutating | yes | Create a webhook flow task from JSON payload. |
 | one webhook-flow-task delete | `one/webhook-flow-task/delete` | mutating | yes | Delete a webhook flow task. |
 | one webhook-flow-task detail | `one/webhook-flow-task/detail` | read-only | no | Inspect a webhook flow task. |
