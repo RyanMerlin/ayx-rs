@@ -610,7 +610,10 @@ fn catalog_run_smoke() {
     )
     .expect("write sample");
 
-    let payload = format!(r#"{{"workflow_path":"{}"}}"#, input.display());
+    // Build the payload with serde so the path is JSON-escaped. On Windows the
+    // tempdir path contains backslashes, which are invalid JSON escapes if
+    // interpolated raw.
+    let payload = serde_json::json!({ "workflow_path": input.to_string_lossy() }).to_string();
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([
             "--output",
