@@ -127,6 +127,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
             super::one_scheduling::execute(&runtime, command)?
         }
         Some(OneCommand::Billing { command }) => super::one_billing::execute(&runtime, command)?,
+        #[cfg(feature = "ui")]
         Some(OneCommand::Ui { command }) => super::one_ui::execute(&runtime, command)?,
         Some(OneCommand::AutoInsights { profile }) => {
             super::one_auto_insights::execute(&runtime, profile)?
