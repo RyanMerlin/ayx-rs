@@ -505,6 +505,7 @@ fn workflow_convert_cloud_smoke() {
     assert!(json.get("Nodes").is_some());
 }
 
+#[cfg(feature = "ui")]
 #[test]
 fn ui_help_renders() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
@@ -517,6 +518,23 @@ fn ui_help_renders() {
     assert!(stdout.contains("session"));
     assert!(stdout.contains("workflow"));
     assert!(stdout.contains("data"));
+}
+
+#[cfg(not(feature = "ui"))]
+#[test]
+fn ui_help_is_absent_without_feature() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "ui", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage: ayx one [OPTIONS] [COMMAND]"));
+    assert!(
+        stderr.contains("unexpected argument 'ui' found")
+            || stderr.contains("unrecognized subcommand 'ui'")
+    );
 }
 
 #[cfg(not(windows))]

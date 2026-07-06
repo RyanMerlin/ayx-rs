@@ -891,6 +891,7 @@ pub(crate) enum WorkflowCommand {
     },
 }
 
+#[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiCommand {
     Session {
@@ -919,6 +920,7 @@ pub(crate) enum UiCommand {
     },
 }
 
+#[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiSessionCommand {
     Status,
@@ -930,6 +932,7 @@ pub(crate) enum UiSessionCommand {
     Inventory,
 }
 
+#[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiWorkflowCommand {
     Open {
@@ -990,6 +993,7 @@ pub(crate) enum UiWorkflowCommand {
     },
 }
 
+#[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiDataCommand {
     ListDatasets {
@@ -1020,16 +1024,19 @@ pub(crate) enum UiDataCommand {
     },
 }
 
+#[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiLibraryCommand {
     Inventory,
 }
 
+#[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiSchedulesCommand {
     Inventory,
 }
 
+#[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiJobsCommand {
     Inventory,
@@ -1147,6 +1154,7 @@ pub(crate) enum OneCommand {
         #[command(subcommand)]
         command: Option<OneBillingCommand>,
     },
+    #[cfg(feature = "ui")]
     #[command(about = "Experimental Alteryx One visual interface surface")]
     Ui {
         #[command(subcommand)]
@@ -2621,6 +2629,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
             "Accepts a ready .yxzp or a directory that can be repackaged first.",
         ],
     },
+    #[cfg(feature = "ui")]
     CommandSpec {
         name: "one ui session status",
         path: "one/ui/session/status",
@@ -2634,6 +2643,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
             "Background pages are allowed for read-only validation and refresh work.",
         ],
     },
+    #[cfg(feature = "ui")]
     CommandSpec {
         name: "one ui workflow inventory",
         path: "one/ui/workflow/inventory",
@@ -2647,6 +2657,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
             "Future commands should reuse the same tab/page when the workflow is already open.",
         ],
     },
+    #[cfg(feature = "ui")]
     CommandSpec {
         name: "one ui data list-datasets",
         path: "one/ui/data/list-datasets",
@@ -6227,6 +6238,7 @@ fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
     ErrorCode::Internal
 }
 
+#[cfg(feature = "ui")]
 pub(crate) fn ui_command_envelope(page: &str, command: &str, data: Value) -> Value {
     json!({
         "page": page,

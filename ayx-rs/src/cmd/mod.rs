@@ -28,6 +28,7 @@ mod one_output_objects;
 mod one_plans;
 mod one_platform;
 mod one_scheduling;
+#[cfg(feature = "ui")]
 mod one_ui;
 mod one_webhook_flow_tasks;
 mod one_write_settings;
