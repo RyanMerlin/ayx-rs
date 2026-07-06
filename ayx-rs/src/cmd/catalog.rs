@@ -209,7 +209,7 @@ mod tests {
         assert!(names.contains(&"one connections list"));
         assert!(names.contains(&"one connections create"));
         assert!(names.contains(&"one connections dry-run"));
-        assert!(names.contains(&"one connections permissions"));
+        assert!(names.contains(&"one connections permissions list"));
         assert!(names.contains(&"one connections connector-metadata defaults"));
         assert!(names.contains(&"one connections connector-metadata detail"));
         assert!(names.contains(&"one connections connector-metadata publish-info"));
@@ -239,12 +239,12 @@ mod tests {
         assert!(names.contains(&"one platform api open-api-spec"));
         assert!(names.contains(&"one scheduling list"));
         assert!(names.contains(&"one billing current-account"));
-        assert!(names.contains(&"one platform token"));
+        assert!(names.contains(&"one platform token list"));
         assert!(names.contains(&"one platform token create"));
         assert!(names.contains(&"one platform token detail"));
         assert!(names.contains(&"one platform token delete"));
-        assert!(names.contains(&"one auto-insights status"));
-        assert!(names.contains(&"one desktop-exec status"));
+        assert!(names.contains(&"one auto-insights"));
+        assert!(names.contains(&"one desktop-exec"));
         assert!(!names.contains(&"one platform group"));
         assert!(!names.contains(&"one platform sso"));
         assert!(!names.contains(&"one platform audit"));
