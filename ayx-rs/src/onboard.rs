@@ -1522,6 +1522,7 @@ mod tests {
         MongoProfile, ServerApiProfile, ServerProfile, SqlServerConnectionProfile,
         SqlServerProfile, WorkspaceConfig, detect_secret_conflict, load_workspace_config,
     };
+    use ayx_core::secrets::install_test_keyring_store;
     use std::collections::HashMap;
 
     const REAL_GID: &str = "01KMGF85WTTEJZ397MW1RBD9ZB";
@@ -1813,7 +1814,7 @@ mod tests {
         // so the new token actually persists. This guards the login boundary.
         let _home = isolated_config_home();
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("default.yaml");
+        let path = temp.path().join("fresh-token-overwrite.yaml");
         std::fs::write(
             &path,
             "profile_name: logintest\n\
@@ -1884,7 +1885,7 @@ alteryx_one:
         // secretized on save, not written as bare plaintext YAML (red-team High #1).
         let _home = isolated_config_home();
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("default.yaml");
+        let path = temp.path().join("workspace-credential-fresh.yaml");
         std::fs::write(
             &path,
             r#"profile_name: wsfreshtest
@@ -1951,8 +1952,9 @@ alteryx_one:
         // Strengthen the login-rotation guarantee (red-team Medium): a rotated token
         // must actually PERSIST — resolve after the env var is gone — not merely
         // cause the old env: ref to disappear.
+        let _home = isolated_config_home();
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("default.yaml");
+        let path = temp.path().join("rotated-token-persist.yaml");
         std::fs::write(
             &path,
             r#"profile_name: rotatetest
@@ -1987,6 +1989,7 @@ alteryx_one:
     /// loader's active-profile overlay finds no host state to contaminate the
     /// fixture. nextest process-isolates each test, so the env mutation is safe.
     fn isolated_config_home() -> tempfile::TempDir {
+        install_test_keyring_store();
         let temp = tempfile::tempdir().unwrap();
         unsafe {
             std::env::set_var("AYX_CONFIG_HOME", temp.path());
@@ -2000,7 +2003,7 @@ alteryx_one:
         // client_secret to disk as plaintext (red-team High; the canonical
         // `server.api.client_secret` schema previously had no ref slot).
         let temp = isolated_config_home();
-        let path = temp.path().join("default.yaml");
+        let path = temp.path().join("server-api-sourced-secret.yaml");
         std::fs::write(
             &path,
             r#"profile_name: saprobe
@@ -2027,7 +2030,7 @@ server_api:
     #[test]
     fn api_sourced_server_secret_is_secretized_not_plaintext() {
         let temp = isolated_config_home();
-        let path = temp.path().join("default.yaml");
+        let path = temp.path().join("api-sourced-server-secret.yaml");
         std::fs::write(
             &path,
             r#"profile_name: apisrc
@@ -2065,7 +2068,7 @@ api:
     fn server_api_secret_round_trips_through_ref() {
         // Save (secretize) then reload — the resolved secret must survive.
         let temp = isolated_config_home();
-        let path = temp.path().join("default.yaml");
+        let path = temp.path().join("server-api-roundtrip.yaml");
         std::fs::write(
             &path,
             r#"profile_name: rtprobe
@@ -2134,7 +2137,7 @@ server_api:
         // account (via the server_api arm) and not create a second orphan account for
         // server.curator_api_secret.
         let temp = isolated_config_home();
-        let path = temp.path().join("default.yaml");
+        let path = temp.path().join("server-api-single-ref.yaml");
         std::fs::write(
             &path,
             r#"profile_name: satest
@@ -2173,10 +2176,6 @@ server_api:
         // cleanly, resolve the secret to the original value, and NOT produce a
         // separate `server.curator_api_secret` orphan keyring account alongside the
         // canonical `server.api.client_secret` account.
-        //
-        // With AYX_FORCE_INLINE_SECRETS the ref is `inline:<value>` rather than
-        // `keyring:...`, so the test is deterministic on headless CI.
-        unsafe { std::env::set_var("AYX_FORCE_INLINE_SECRETS", "1") };
         let _home = isolated_config_home();
         let path = _home.path().join("profiles").join("server-rt.yaml");
 
@@ -2194,7 +2193,6 @@ server_api:
 
         // Write (secretize): the plaintext must be replaced with a ref.
         let out = write_config_with_policy(&path, &cfg, InlineSecretPolicy::Allow).unwrap();
-        unsafe { std::env::remove_var("AYX_FORCE_INLINE_SECRETS") };
 
         let on_disk = std::fs::read_to_string(&path).unwrap();
         assert!(
@@ -2202,7 +2200,7 @@ server_api:
             "server-only secret must not be plaintext on disk:\n{on_disk}"
         );
         assert!(
-            on_disk.contains("client_secret_ref:"),
+            on_disk.contains("client_secret_ref: keyring:"),
             "server-only secret must be stored behind a ref:\n{on_disk}"
         );
 
@@ -2221,9 +2219,7 @@ server_api:
         );
 
         // Round-trip: reload and resolve.
-        unsafe { std::env::set_var("AYX_FORCE_INLINE_SECRETS", "1") };
         let reloaded = Config::load_from_path_with_environment(&path, None).unwrap();
-        unsafe { std::env::remove_var("AYX_FORCE_INLINE_SECRETS") };
 
         // After with_server_api_overrides, server.curator_api_secret is the synthesized view.
         // The test asserts that the secret resolves correctly from whatever canonical form was saved.
@@ -2468,6 +2464,7 @@ server_api:
     /// Build a WorkspaceConfig with two envs that share the same `profile_name`
     /// ("default") but hold different secrets.  Used by the collision test.
     fn workspace_two_envs_same_profile_name(
+        workspace_name: &str,
         prod_secret: &str,
         staging_secret: &str,
     ) -> WorkspaceConfig {
@@ -2480,7 +2477,7 @@ server_api:
             Config::load_from_path_with_environment(tmp.path(), None).unwrap()
         };
         WorkspaceConfig {
-            workspace_name: "myws".to_string(),
+            workspace_name: workspace_name.to_string(),
             active_environment: "prod".to_string(),
             environments: std::collections::HashMap::from([
                 ("prod".to_string(), make_env("default", prod_secret)),
@@ -2521,23 +2518,20 @@ server_api:
         // wins, silently discarding the first env's secret.
         //
         // After Task 5, the scope is `workspace_name.env_key`, so the two accounts
-        // become `keyring:myws.prod/...` and `keyring:myws.staging/...` — distinct.
+        // become `keyring:myws-collision.prod/...` and
+        // `keyring:myws-collision.staging/...` — distinct.
         //
         // We verify this by inspecting the secret refs written into the saved
         // workspace YAML: the two envs must hold DIFFERENT ref strings for their
         // access_token (not the same keyring account name).
         //
-        // Force inline so the test is deterministic on headless (no D-Bus) hosts;
-        // the ref format changes from `keyring:<account>` to `inline:<value>` but
-        // the key invariant — distinct refs per env — still holds and is verifiable.
-        unsafe { std::env::set_var("AYX_FORCE_INLINE_SECRETS", "1") };
         let _home = isolated_config_home();
         let tmp = tempfile::tempdir().unwrap();
-        let ws_path = tmp.path().join("ws.yaml");
+        let ws_path = tmp.path().join("workspace-collision.yaml");
         // Two envs both have profile_name="default" but distinct secrets.
-        let ws = workspace_two_envs_same_profile_name("prod-secret", "staging-secret");
+        let ws =
+            workspace_two_envs_same_profile_name("myws-collision", "prod-secret", "staging-secret");
         write_workspace_config(&ws_path, &ws).unwrap();
-        unsafe { std::env::remove_var("AYX_FORCE_INLINE_SECRETS") };
 
         // Load the secretized workspace and resolve both envs' secrets.
         let loaded = load_workspace_config(&ws_path).unwrap();
@@ -2586,21 +2580,21 @@ server_api:
         // Old (buggy) scope: keyring_account(profile_name, field)
         //   → `default/alteryx_one.access_token`
         // New (stable) scope: keyring_account("workspace_name.env_key", field)
-        //   → `myws.prod/alteryx_one.access_token`
+        //   → `myws-rekey.prod/alteryx_one.access_token`
         //
         // After Task 5, `write_workspace_config` must call `secret_scope` with
         // `format!("{ws_name}.{env_key}")`, not `config.profile_name`.  We verify
         // that the NEW derived account name encodes the workspace+env identity, not
         // the mutable profile_name, and differs from the old profile_name-scoped name.
         let old_account = keyring_account("default", "alteryx_one.access_token");
-        let new_account = new_scope_account("myws", "prod", "alteryx_one.access_token");
+        let new_account = new_scope_account("myws-rekey", "prod", "alteryx_one.access_token");
         assert_ne!(
             old_account, new_account,
             "new scope must differ from old profile_name scope; \
              old={old_account} new={new_account}"
         );
         assert!(
-            new_account.starts_with("myws.prod/"),
+            new_account.starts_with("myws-rekey.prod/"),
             "new account must start with `workspace_name.env_key/`; got {new_account}"
         );
         assert!(
@@ -2608,31 +2602,22 @@ server_api:
             "new account must NOT use the mutable profile_name as scope; got {new_account}"
         );
 
-        // Verify round-trip: write_workspace_config with forced inline uses the new
-        // scope in the written YAML ref string when keyring is available.  With
-        // AYX_FORCE_INLINE_SECRETS the refs are `inline:<value>` (not keyring
-        // accounts), but we can verify that `secretize_config` is called with the
-        // new scope by checking a keyring-available path writes the new account name.
-        // Since we cannot guarantee a keyring in CI, we verify indirectly through
-        // the forced-inline path: both envs must write distinct inline refs when the
-        // keyring is unavailable.
-        unsafe { std::env::set_var("AYX_FORCE_INLINE_SECRETS", "1") };
+        // Verify round-trip with the in-memory keyring store: the saved YAML must
+        // point at the new workspace+env-scoped accounts.
         let _home = isolated_config_home();
         let tmp = tempfile::tempdir().unwrap();
-        let ws_path = tmp.path().join("ws.yaml");
-        let ws = workspace_two_envs_same_profile_name("shh-prod", "shh-staging");
+        let ws_path = tmp.path().join("workspace-rekey.yaml");
+        let ws = workspace_two_envs_same_profile_name("myws-rekey", "shh-prod", "shh-staging");
         write_workspace_config(&ws_path, &ws).unwrap();
-        unsafe { std::env::remove_var("AYX_FORCE_INLINE_SECRETS") };
 
         let on_disk = std::fs::read_to_string(&ws_path).unwrap();
-        // Both secrets must appear (they're inline, not lost to last-writer-wins collision).
         assert!(
-            on_disk.contains("inline:shh-prod"),
-            "prod secret must be present in saved workspace; disk:\n{on_disk}"
+            on_disk.contains("keyring:myws-rekey.prod/alteryx_one.access_token"),
+            "prod env must point at the new workspace+env-scoped keyring account; disk:\n{on_disk}"
         );
         assert!(
-            on_disk.contains("inline:shh-staging"),
-            "staging secret must be present in saved workspace; disk:\n{on_disk}"
+            on_disk.contains("keyring:myws-rekey.staging/alteryx_one.access_token"),
+            "staging env must point at the new workspace+env-scoped keyring account; disk:\n{on_disk}"
         );
     }
 
@@ -2669,9 +2654,7 @@ server_api:
         // This is a genuine write-path guard: if `write_config_with_policy` were
         // reverted to use `config.profile_name` as scope, `scopes_used` would be
         // ["name-alpha"] for the first call and ["name-beta"] for the second —
-        // and the assertion below would FAIL.  The AYX_FORCE_INLINE_SECRETS flag
-        // is not load-bearing for this assertion (the scope is computed before any
-        // secret is stored), but we keep it to stay deterministic on headless CI.
+        // and the assertion below would FAIL.
         let _home = isolated_config_home();
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("myprofile.yaml");
@@ -2728,9 +2711,13 @@ server_api:
         // the SAME scope ("default") in `scopes_used` and the assertion would fail.
         let _home = isolated_config_home();
         let tmp = tempfile::tempdir().unwrap();
-        let ws_path = tmp.path().join("ws.yaml");
+        let ws_path = tmp.path().join("workspace-distinct-scopes.yaml");
         // Two envs both have profile_name="default" but distinct env_keys.
-        let ws = workspace_two_envs_same_profile_name("prod-secret", "staging-secret");
+        let ws = workspace_two_envs_same_profile_name(
+            "myws-distinct-scopes",
+            "prod-secret",
+            "staging-secret",
+        );
         let out = write_workspace_config(&ws_path, &ws).unwrap();
 
         // The writer must have used two DISTINCT scopes (one per env).
@@ -2752,10 +2739,12 @@ server_api:
 
         // Verify the scopes encode workspace_name.env_key, not profile_name.
         // (HashMap iteration order is non-deterministic, so check set membership.)
-        let expected_scopes: std::collections::HashSet<String> =
-            ["myws.prod".to_string(), "myws.staging".to_string()]
-                .into_iter()
-                .collect();
+        let expected_scopes: std::collections::HashSet<String> = [
+            "myws-distinct-scopes.prod".to_string(),
+            "myws-distinct-scopes.staging".to_string(),
+        ]
+        .into_iter()
+        .collect();
         let actual_scopes: std::collections::HashSet<String> =
             out.scopes_used.into_iter().collect();
         assert_eq!(
@@ -2765,8 +2754,9 @@ server_api:
 
         // Sanity: distinctness at the keyring_account level (complements the scope
         // check above without requiring a live keyring).
-        let prod_account = keyring_account("myws.prod", "alteryx_one.access_token");
-        let staging_account = keyring_account("myws.staging", "alteryx_one.access_token");
+        let prod_account = keyring_account("myws-distinct-scopes.prod", "alteryx_one.access_token");
+        let staging_account =
+            keyring_account("myws-distinct-scopes.staging", "alteryx_one.access_token");
         let old_shared_account = keyring_account("default", "alteryx_one.access_token");
         assert_ne!(
             prod_account, staging_account,

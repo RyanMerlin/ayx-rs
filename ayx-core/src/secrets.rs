@@ -29,6 +29,9 @@ fn env_truthy(name: &str) -> bool {
 pub fn ensure_keyring_store() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
+        if keyring_core::get_default_store().is_some() {
+            return;
+        }
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         if let Ok(store) = zbus_secret_service_keyring_store::Store::new() {
             keyring_core::set_default_store(store);
@@ -41,6 +44,20 @@ pub fn ensure_keyring_store() {
         if let Ok(store) = windows_native_keyring_store::Store::new() {
             keyring_core::set_default_store(store);
         }
+    });
+}
+
+/// Install a process-local in-memory keyring store for tests.
+///
+/// The mock store is process-global inside keyring-core, so tests must call this
+/// before any keyring operation. The installation is idempotent and safe to race.
+#[cfg(any(test, feature = "test-inline-forcing"))]
+pub fn install_test_keyring_store() {
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        keyring_core::set_default_store(
+            keyring_core::mock::Store::new().expect("mock keyring store should initialize"),
+        );
     });
 }
 
@@ -182,16 +199,25 @@ mod tests {
     }
 
     #[test]
-    fn keyring_ref_never_panics_or_fabricates() {
-        // Exercises the keyring-core runtime store registration. Whether the host
-        // has a Secret Service backend or not, the result must be `Ok(None)` for a
-        // missing entry — headless hosts (CI) now return `Ok(None)` via the
-        // `NoDefaultStore` path rather than hard-erroring. `Err(_)` is still
-        // accepted as a safety valve for unexpected backend failures.
-        match resolve_secret_ref("keyring:ayx-core-nonexistent-test-account") {
-            Ok(None) => {}
-            Ok(Some(_)) => panic!("must not fabricate a secret for a missing keyring entry"),
-            Err(_) => {}
-        }
+    fn missing_keyring_ref_resolves_none_with_test_store() {
+        install_test_keyring_store();
+        assert_eq!(
+            resolve_secret_ref("keyring:ayx-core-missing-test-account")
+                .expect("missing mock-store entry should not error"),
+            None
+        );
+    }
+
+    #[test]
+    fn keyring_secret_round_trips_through_test_store() {
+        install_test_keyring_store();
+        let account = "ayx-core-keyring-roundtrip-test-account";
+        let reference = store_keyring_secret(account, "roundtrip-secret")
+            .expect("mock store should accept the secret");
+        assert_eq!(reference, format!("keyring:{account}"));
+        assert_eq!(
+            resolve_secret_ref(&reference).expect("mock-store ref should resolve"),
+            Some("roundtrip-secret".to_string())
+        );
     }
 }

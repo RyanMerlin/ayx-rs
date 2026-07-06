@@ -3044,11 +3044,7 @@ mod tests {
     #[test]
     fn runtime_profile_loader_supports_legacy_profile_shape_without_top_level_mongo() {
         let _lock = test_env_lock();
-        // Register an in-memory keyring so the loader's secret-ref resolution is
-        // hermetic: CI runners are headless (no Secret Service / D-Bus / keychain),
-        // so without a store `Entry::new` fails and the load errors. With the mock
-        // store present, the unset entries resolve to `None` and the profile loads.
-        keyring_core::set_default_store(keyring_core::mock::Store::new().unwrap());
+        crate::secrets::install_test_keyring_store();
         let temp = tempfile::tempdir().unwrap();
         let config_home = temp.path().join("ayx-home");
         let profiles_dir = config_home.join("profiles");
