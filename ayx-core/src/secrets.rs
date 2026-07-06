@@ -58,6 +58,12 @@ pub fn install_test_keyring_store() {
         keyring_core::set_default_store(
             keyring_core::mock::Store::new().expect("mock keyring store should initialize"),
         );
+        // SAFETY: Tests that call this helper explicitly want the process-local
+        // mock keyring to win over AYX_FORCE_INLINE_SECRETS. nextest runs each
+        // test in its own process, and this mutation happens once at startup.
+        unsafe {
+            env::remove_var("AYX_FORCE_INLINE_SECRETS");
+        }
     });
 }
 

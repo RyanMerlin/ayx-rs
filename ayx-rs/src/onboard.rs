@@ -2269,7 +2269,10 @@ server_api:
         unsafe {
             std::env::set_var("AYX_FORCE_INLINE_SECRETS", "1");
         }
-        let _home = isolated_config_home();
+        let _home = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::set_var("AYX_CONFIG_HOME", _home.path());
+        }
         let ws = workspace_with_one_env_secret("shh");
         let tmp = tempfile::tempdir().unwrap();
         let ws_path = tmp.path().join("ws.yaml");
