@@ -405,6 +405,39 @@ const FLOW_ENDPOINTS: &[EndpointSpec] = &[
     },
 ];
 
+const DATASET_ENDPOINTS: &[EndpointSpec] = &[
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/datasetLibrary",
+        command: "one datasets list",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/datasetLibrary/count",
+        command: "one datasets count",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/wrangledDatasets",
+        command: "one datasets wrangled list",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/wrangledDatasets/count",
+        command: "one datasets wrangled count",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/wrangledDatasets/{id}",
+        command: "one datasets wrangled detail",
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/importedDatasets/{id}",
+        command: "one datasets imported detail",
+    },
+];
+
 const JOB_GROUP_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
@@ -681,6 +714,15 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             "Connection lifecycle, dry-run, status, and permissions commands are wired.",
             "Connector metadata defaults, current values, and overrides are wired for JDBC behavior control.",
             "Credential-backend specifics remain encoded in the API payloads rather than a local domain model.",
+        ],
+    },
+    SurfaceSpec {
+        name: "dataset",
+        status: "partial",
+        endpoints: DATASET_ENDPOINTS,
+        notes: &[
+            "Dataset library list/count plus wrangled and imported dataset detail reads are wired.",
+            "Mutating dataset lifecycle operations remain documented-only in this first cut.",
         ],
     },
     SurfaceSpec {

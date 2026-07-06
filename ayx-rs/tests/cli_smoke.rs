@@ -293,6 +293,33 @@ fn one_connections_help_renders_surface_groups() {
 }
 
 #[test]
+fn one_datasets_help_renders_surface_groups() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "datasets", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("wrangled"));
+    assert!(stdout.contains("imported"));
+    assert!(stdout.contains("Count datasets in the user-facing One dataset library"));
+}
+
+#[test]
+fn one_datasets_wrangled_detail_help_renders_flag_and_positional_id() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "datasets", "wrangled", "detail", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--wrangled-id"));
+    assert!(stdout.contains("[ID]"));
+}
+
+#[test]
 fn one_connections_connector_metadata_overrides_create_help_renders_connector_arg() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([

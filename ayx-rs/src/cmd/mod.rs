@@ -20,6 +20,7 @@ pub mod one;
 mod one_auto_insights;
 mod one_billing;
 mod one_connections;
+pub mod one_datasets;
 mod one_desktop_exec;
 mod one_doctor;
 mod one_flows;

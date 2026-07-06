@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-06 12:54:30 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-06 13:26:42 UTC._
 
 This file is generated. Refresh it with:
 
@@ -10,7 +10,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 177
+- Commands: 183
 - Capabilities: 8
 
 ## Commands
@@ -79,6 +79,12 @@ cargo run -q -p xtask -- refresh-command-surface
 | one connections permissions detail | `one/connections/permissions/detail` | read-only | no | Inspect a One connection permission by subject id. |
 | one connections status | `one/connections/status` | read-only | no | Inspect connection status. |
 | one connections update | `one/connections/update` | mutating | yes | Update a One connection from JSON payload. |
+| one datasets count | `one/datasets/count` | read-only | no | Count datasets in the One dataset library. |
+| one datasets imported detail | `one/datasets/imported/detail` | read-only | no | Inspect a One imported dataset by id. |
+| one datasets list | `one/datasets/list` | read-only | no | List datasets in the One dataset library. |
+| one datasets wrangled count | `one/datasets/wrangled/count` | read-only | no | Count One wrangled datasets. |
+| one datasets wrangled detail | `one/datasets/wrangled/detail` | read-only | no | Inspect a One wrangled dataset by id. |
+| one datasets wrangled list | `one/datasets/wrangled/list` | read-only | no | List One wrangled datasets. |
 | one desktop-exec status | `one/desktop-exec/status` | read-only | no | Summarize the Alteryx One desktop execution posture. |
 | one doctor auth | `one/doctor/auth` | read-only | no | Run the One auth doctor workflow. |
 | one doctor billing | `one/doctor/billing` | read-only | no | Run the One billing doctor workflow. |
