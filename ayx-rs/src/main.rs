@@ -1126,6 +1126,11 @@ pub(crate) enum OneCommand {
         #[command(subcommand)]
         command: Option<OneFlowsCommand>,
     },
+    #[command(about = "Read datasets from the Alteryx One dataset APIs")]
+    Datasets {
+        #[command(subcommand)]
+        command: Option<OneDatasetsCommand>,
+    },
     Connections {
         #[command(subcommand)]
         command: Option<OneConnectionsCommand>,
@@ -1744,6 +1749,74 @@ pub(crate) enum OneFlowsCommand {
         profile: Option<String>,
         #[arg(long)]
         flow_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum OneDatasetsCommand {
+    /// List datasets in the user-facing One dataset library.
+    List {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        offset: Option<u32>,
+    },
+    /// Count datasets in the user-facing One dataset library.
+    Count {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Read wrangled-dataset resources.
+    Wrangled {
+        #[command(subcommand)]
+        command: Option<OneDatasetsWrangledCommand>,
+    },
+    /// Read imported-dataset resources.
+    Imported {
+        #[command(subcommand)]
+        command: Option<OneDatasetsImportedCommand>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum OneDatasetsWrangledCommand {
+    /// List wrangled datasets.
+    List {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        offset: Option<u32>,
+    },
+    /// Count wrangled datasets.
+    Count {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Inspect a wrangled dataset by id.
+    Detail {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        wrangled_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum OneDatasetsImportedCommand {
+    /// Inspect an imported dataset by id.
+    Detail {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        imported_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: Option<String>,
     },
 }
 
@@ -3501,6 +3574,66 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/flows/{id}/package/dryRun in the One API docs."],
+    },
+    CommandSpec {
+        name: "one datasets list",
+        path: "one/datasets/list",
+        summary: "List datasets in the One dataset library.",
+        output: "one datasets list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to GET /v4/datasetLibrary in the One API docs."],
+    },
+    CommandSpec {
+        name: "one datasets count",
+        path: "one/datasets/count",
+        summary: "Count datasets in the One dataset library.",
+        output: "one datasets count envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to GET /v4/datasetLibrary/count in the One API docs."],
+    },
+    CommandSpec {
+        name: "one datasets wrangled list",
+        path: "one/datasets/wrangled/list",
+        summary: "List One wrangled datasets.",
+        output: "one datasets wrangled list envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to GET /v4/wrangledDatasets in the One API docs."],
+    },
+    CommandSpec {
+        name: "one datasets wrangled count",
+        path: "one/datasets/wrangled/count",
+        summary: "Count One wrangled datasets.",
+        output: "one datasets wrangled count envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to GET /v4/wrangledDatasets/count in the One API docs."],
+    },
+    CommandSpec {
+        name: "one datasets wrangled detail",
+        path: "one/datasets/wrangled/detail",
+        summary: "Inspect a One wrangled dataset by id.",
+        output: "one datasets wrangled detail envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to GET /v4/wrangledDatasets/{id} in the One API docs."],
+    },
+    CommandSpec {
+        name: "one datasets imported detail",
+        path: "one/datasets/imported/detail",
+        summary: "Inspect a One imported dataset by id.",
+        output: "one datasets imported detail envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &["Maps to GET /v4/importedDatasets/{id} in the One API docs."],
     },
     CommandSpec {
         name: "one connections list",

@@ -76,7 +76,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
     }
     Ok(match command {
         None => Envelope::ok(
-            "one commands available: platform, plans, scheduling, billing, auto-insights, desktop-exec",
+            "one commands available: platform, plans, flows, datasets, connections, scheduling, billing, auto-insights, desktop-exec",
         ),
         Some(OneCommand::Doctor { command }) => super::one_doctor::execute(&runtime, command)?,
         Some(OneCommand::Platform { command }) => {
@@ -117,6 +117,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
         Some(OneCommand::Connections { command }) => {
             super::one_connections::execute(&runtime, cli.apply, cli.yes, command)?
         }
+        Some(OneCommand::Datasets { command }) => super::one_datasets::execute(&runtime, command)?,
         Some(OneCommand::Flows { command }) => {
             super::one_flows::execute(&runtime, cli.apply, cli.yes, command)?
         }
