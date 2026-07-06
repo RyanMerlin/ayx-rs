@@ -20,10 +20,12 @@ use serde_json::{Value, json};
 use url::form_urlencoded::Serializer;
 const ONE_API_BASE_URL: &str = "https://us1.alteryxcloud.com";
 
+mod coverage;
 pub mod email_otp;
 mod inventory;
 pub mod types;
 
+pub use coverage::{CoverageReport, MissingEndpoint, StaleEndpoint, coverage};
 pub use email_otp::{OtpAuthResult, email_otp_login};
 
 thread_local! {
@@ -423,7 +425,9 @@ fn one_transport_failure_envelope(
     )
 }
 
-pub use inventory::{inventory_endpoints, one_surface_inventory_envelope};
+pub use inventory::{
+    inventory_endpoints, inventory_endpoints_full, one_surface_inventory_envelope,
+};
 
 pub fn api_status_envelope(config: &Config, product: &str) -> Result<Envelope> {
     let api = config
