@@ -1,12 +1,10 @@
 //! CLI smoke tests that spawn the compiled `ayx` binary.
 //!
-//! The whole suite is gated off Windows: on GitHub `windows-latest` runners the
-//! binary-spawn invocations exit non-zero for reasons that don't reproduce on a
-//! real Windows install and don't affect Linux/macOS CI (both pass cleanly).
-//! Windows CI still compiles the workspace and runs every non-spawn test
-//! (ayx-core unit tests, etc.). Remove this gate once the windows-runner
-//! binary-spawn quirk is bisected.
-#![cfg(not(windows))]
+//! Runs on all platforms, including Windows. These spawn invocations previously
+//! aborted on `windows-latest` with `STATUS_STACK_OVERFLOW` (0xC00000FD) because
+//! clap builds the deep command tree on the 1 MiB MSVC main-thread stack during
+//! `Cli::parse()`. The `ayx-rs` build script now reserves a 16 MiB main-thread
+//! stack on Windows, so the whole suite runs everywhere (issue #59 Part 2).
 
 use std::fs;
 use std::process::Command;
@@ -118,11 +116,6 @@ fn ayx_apply_is_global_flag() {
     assert!(stdout.contains("--all"));
 }
 
-// Windows runners exit non-zero on these binary-spawn smoke tests for reasons
-// that don't reproduce locally and don't affect Linux/macOS CI (which both
-// pass cleanly). Skipped on cfg(windows) until we have time to bisect; the
-// behavior itself works manually on a Windows install.
-#[cfg(not(windows))]
 #[test]
 fn completions_command_emits_script() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
@@ -497,7 +490,6 @@ fn workflow_yxdb_help_renders() {
     assert!(stdout.contains("--csv"));
 }
 
-#[cfg(not(windows))]
 #[test]
 fn workflow_convert_cloud_smoke() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -557,14 +549,15 @@ fn ui_help_is_absent_without_feature() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Usage: ayx one [OPTIONS] [COMMAND]"));
+    // clap renders the bin name from argv[0]'s file name — `ayx.exe` on Windows,
+    // `ayx` elsewhere — so match the platform-invariant tail of the usage line.
+    assert!(stderr.contains("one [OPTIONS] [COMMAND]"));
     assert!(
         stderr.contains("unexpected argument 'ui' found")
             || stderr.contains("unrecognized subcommand 'ui'")
     );
 }
 
-#[cfg(not(windows))]
 #[test]
 fn catalog_list_tag_smoke() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
@@ -589,7 +582,6 @@ fn catalog_list_tag_smoke() {
     }));
 }
 
-#[cfg(not(windows))]
 #[test]
 fn catalog_describe_capability_smoke() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
@@ -610,7 +602,6 @@ fn catalog_describe_capability_smoke() {
     assert_eq!(json["data"]["id"], "designer.workflow.context");
 }
 
-#[cfg(not(windows))]
 #[test]
 fn catalog_run_smoke() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -621,7 +612,10 @@ fn catalog_run_smoke() {
     )
     .expect("write sample");
 
-    let payload = format!(r#"{{"workflow_path":"{}"}}"#, input.display());
+    // Build the payload with serde so the path is JSON-escaped. On Windows the
+    // tempdir path contains backslashes, which are invalid JSON escapes if
+    // interpolated raw.
+    let payload = serde_json::json!({ "workflow_path": input.to_string_lossy() }).to_string();
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([
             "--output",
@@ -734,7 +728,6 @@ fn tools_workspace_init_help_shows_output_file() {
 
 /// Functional smoke: `tools workspace init --output-file <tmp>` must exit 0
 /// and write the file. This exercises the actual command, not just --help.
-#[cfg(not(windows))]
 #[test]
 fn tools_workspace_init_creates_output_file() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -770,7 +763,6 @@ fn tools_workspace_init_creates_output_file() {
 /// Functional smoke: `server system-info --output-file <tmp>` with global `--output json`.
 /// This command reads from the local runtime settings; it may fail if no Alteryx Server
 /// is present, but it MUST NOT panic.
-#[cfg(not(windows))]
 #[test]
 fn server_system_info_with_output_file_no_clap_panic_functional() {
     let dir = tempfile::tempdir().expect("tempdir");

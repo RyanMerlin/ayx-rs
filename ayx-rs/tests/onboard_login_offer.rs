@@ -5,8 +5,8 @@
 //! immediate login or points at the next command. They never answer "yes" to
 //! the login prompt, so no network call or OTP flow is ever triggered.
 //!
-//! Spawn-based, so gated off Windows like `cli_smoke.rs`.
-#![cfg(not(windows))]
+//! Spawn-based; runs on all platforms now that the `ayx-rs` build script
+//! reserves a 16 MiB main-thread stack on Windows (issue #59 Part 2).
 
 use std::path::Path;
 use std::process::{Command, Stdio};

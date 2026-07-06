@@ -14,8 +14,8 @@
 //! fail *before any network call*, so the suite is hermetic and never hangs on
 //! stdin (stdin is closed).
 //!
-//! Spawn-based, so gated off Windows like the rest of `cli_smoke.rs`.
-#![cfg(not(windows))]
+//! Spawn-based; runs on all platforms now that the `ayx-rs` build script
+//! reserves a 16 MiB main-thread stack on Windows (issue #59 Part 2).
 
 use std::fs;
 use std::process::{Command, Stdio};
