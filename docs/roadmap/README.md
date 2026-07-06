@@ -29,6 +29,7 @@ letting stale notes accumulate.
 - [Runtime resolver and orchestration](runtime-and-orchestration.md)
 - [API surface and observability](api-surface-and-observability.md)
 - [Workspace hardening](workspace-hardening.md)
+- [Command surface coverage and gaps](command-surface-coverage.md)
 
 ## Relationship To Other Docs
 
