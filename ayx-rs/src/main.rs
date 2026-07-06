@@ -6380,20 +6380,10 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let output = cli.output.clone();
 
-    let run = || execute(cli);
-    #[cfg(windows)]
-    // Some One/profile flows deserialize deeply enough on Windows that the
-    // default main-thread stack can overflow. Run the command dispatch on a
-    // larger worker stack to keep those paths stable.
-    let result = std::thread::Builder::new()
-        .name("ayx-command".to_string())
-        .stack_size(16 * 1024 * 1024)
-        .spawn(run)
-        .expect("failed to spawn command thread")
-        .join()
-        .unwrap_or_else(|_| Err(anyhow!("command thread panicked")));
-    #[cfg(not(windows))]
-    let result = run();
+    // Dispatch runs on the main thread. On Windows, build.rs reserves a 16 MiB
+    // main-thread stack (/STACK) so the deep clap parse can't overflow the 1 MiB
+    // MSVC default — see ayx-rs/build.rs and issue #59. No worker thread needed.
+    let result = execute(cli);
 
     match result {
         Ok(envelope) => {
