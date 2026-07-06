@@ -792,3 +792,67 @@ fn server_system_info_with_output_file_no_clap_panic_functional() {
     // The command may exit non-zero if runtime-settings.xml is absent, but that
     // is an application-level error, not a panic. We only assert no panic here.
 }
+
+#[test]
+fn one_api_group_help_lists_spec_and_coverage() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "api", "--help"])
+        .output()
+        .expect("ayx binary should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("open-api-spec"));
+    assert!(stdout.contains("coverage"));
+}
+
+#[test]
+fn hidden_platform_api_alias_still_parses() {
+    // Deprecated path must still work (help renders, exit 0).
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "platform", "api", "open-api-spec", "--help"])
+        .output()
+        .expect("ayx binary should run");
+    assert!(output.status.success());
+}
+
+#[test]
+fn coverage_from_spec_file_reports_missing() {
+    let fixture = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/one-openapi-min.json"
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "--output", "json", "one", "api", "coverage", "--spec", fixture,
+        ])
+        .output()
+        .expect("ayx binary should run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+    let missing = json["data"]["missing"].as_array().expect("missing array");
+    assert!(
+        missing
+            .iter()
+            .any(|m| m["path"] == "/v4/importedDatasets" && m["method"] == "POST")
+    );
+}
+
+#[test]
+fn coverage_check_flag_exits_nonzero_when_missing() {
+    let fixture = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/one-openapi-min.json"
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "api", "coverage", "--spec", fixture, "--check"])
+        .output()
+        .expect("ayx binary should run");
+    assert!(
+        !output.status.success(),
+        "--check must fail when endpoints are missing"
+    );
+}

@@ -5,7 +5,6 @@ use ayx_one_api::one_api_live_request;
 
 use crate::{OnePlatformCommand, cmd::RuntimeCtx};
 
-mod api;
 mod auth;
 mod person;
 mod role;
@@ -22,7 +21,9 @@ pub(crate) fn execute(
         None => Envelope::ok(
             "one platform commands available: api, auth, status, inventory, workspace, role, user, token, person",
         ),
-        Some(OnePlatformCommand::Api { command }) => api::execute(runtime, command)?,
+        Some(OnePlatformCommand::Api { command }) => {
+            crate::cmd::one_api::execute(runtime, Some(command))?
+        }
         Some(OnePlatformCommand::Auth { command }) => auth::execute(runtime, command)?,
         Some(OnePlatformCommand::Status { profile }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;

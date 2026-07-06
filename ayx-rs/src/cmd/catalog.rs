@@ -161,7 +161,7 @@ mod tests {
         assert!(names.contains(&"one platform person delete"));
         assert!(names.contains(&"one platform person update-password"));
         assert!(names.contains(&"one platform person password-reset-request"));
-        assert!(names.contains(&"one platform api status"));
+        assert!(names.contains(&"one api status"));
         assert!(names.contains(&"one platform auth status"));
         assert!(names.contains(&"one platform workspace current"));
         assert!(names.contains(&"one platform workspace list"));
@@ -236,7 +236,8 @@ mod tests {
         assert!(names.contains(&"one write-setting detail"));
         assert!(names.contains(&"one write-setting update"));
         assert!(names.contains(&"one write-setting delete"));
-        assert!(names.contains(&"one platform api open-api-spec"));
+        assert!(names.contains(&"one api open-api-spec"));
+        assert!(names.contains(&"one api coverage"));
         assert!(names.contains(&"one scheduling list"));
         assert!(names.contains(&"one billing current-account"));
         assert!(names.contains(&"one platform token list"));

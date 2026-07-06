@@ -981,6 +981,17 @@ pub fn inventory_endpoints() -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+/// Like [`inventory_endpoints`] but also returns the wired command name.
+pub fn inventory_endpoints_full() -> Vec<(&'static str, &'static str, &'static str)> {
+    SURFACES
+        .iter()
+        .chain(PARTIAL_SURFACES.iter())
+        .chain(DOCUMENTED_ONLY_SURFACES.iter())
+        .chain(DEFERRED_SURFACES.iter())
+        .flat_map(|s| s.endpoints.iter().map(|e| (e.method, e.path, e.command)))
+        .collect()
+}
+
 pub fn one_surface_inventory_envelope(config: &Config) -> Result<Envelope> {
     let implemented = SURFACES
         .iter()

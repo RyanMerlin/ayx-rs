@@ -1106,6 +1106,11 @@ pub(crate) enum OneCommand {
         #[command(subcommand)]
         command: Option<OnePlatformCommand>,
     },
+    /// Alteryx One API introspection (spec + coverage).
+    Api {
+        #[command(subcommand)]
+        command: Option<OneApiCommand>,
+    },
     Doctor {
         #[command(subcommand)]
         command: Option<OneDoctorCommand>,
@@ -1177,9 +1182,11 @@ pub(crate) enum OneCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OnePlatformCommand {
+    /// Deprecated: moved to `one api`. Kept as a hidden compatibility alias.
+    #[command(hide = true)]
     Api {
         #[command(subcommand)]
-        command: OnePlatformApiCommand,
+        command: OneApiCommand,
     },
     Auth {
         #[command(subcommand)]
@@ -1410,7 +1417,7 @@ pub(crate) enum OneRoleCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub(crate) enum OnePlatformApiCommand {
+pub(crate) enum OneApiCommand {
     Status {
         #[arg(long)]
         profile: Option<String>,
@@ -1422,6 +1429,17 @@ pub(crate) enum OnePlatformApiCommand {
     OpenApiSpec {
         #[arg(long)]
         profile: Option<String>,
+    },
+    /// Diff the live One OpenAPI spec against the wired-command inventory.
+    Coverage {
+        #[arg(long)]
+        profile: Option<String>,
+        /// Diff a saved OpenAPI spec JSON file instead of fetching live.
+        #[arg(long, value_name = "FILE")]
+        spec: Option<std::path::PathBuf>,
+        /// Exit non-zero if any endpoint is missing (CI regression gate).
+        #[arg(long)]
+        check: bool,
     },
 }
 
@@ -3304,40 +3322,53 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Wraps billing account and usage export checks."],
     },
     CommandSpec {
-        name: "one platform api status",
-        path: "one/platform/api/status",
-        summary: "Summarize the Alteryx One platform API posture.",
-        output: "one platform api status envelope",
+        name: "one api status",
+        path: "one/api/status",
+        summary: "Summarize the Alteryx One API posture.",
+        output: "one api status envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
         notes: &[
-            "Use this to inspect platform API posture before diagnostics.",
+            "Use this to inspect One API posture before diagnostics.",
             "Treat this as the One managed IAM posture check.",
         ],
     },
     CommandSpec {
-        name: "one platform api diagnose",
-        path: "one/platform/api/diagnose",
-        summary: "Validate One platform API reachability and auth posture.",
-        output: "one platform api diagnostic envelope",
+        name: "one api diagnose",
+        path: "one/api/diagnose",
+        summary: "Validate Alteryx One API reachability and auth posture.",
+        output: "one api diagnostic envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
         notes: &[
-            "Use before future platform API call-style workflows.",
+            "Use before future One API call-style workflows.",
             "Route workflow guidance through the orchestration layer once the symptom is known.",
         ],
     },
     CommandSpec {
-        name: "one platform api open-api-spec",
-        path: "one/platform/api/open-api-spec",
-        summary: "Fetch the One platform OpenAPI specification.",
-        output: "one platform api open-api-spec envelope",
+        name: "one api open-api-spec",
+        path: "one/api/open-api-spec",
+        summary: "Fetch the Alteryx One OpenAPI specification.",
+        output: "one api open-api-spec envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/open-api-spec in the One API docs."],
+    },
+    CommandSpec {
+        name: "one api coverage",
+        path: "one/api/coverage",
+        summary: "Diff the live One OpenAPI spec against wired commands (covered/missing/stale).",
+        output: "one api coverage envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &[
+            "Fetches GET /v4/open-api-spec (or --spec <file>) and diffs it against the ayx-one-api inventory.",
+            "--check exits non-zero when endpoints are missing.",
+        ],
     },
     CommandSpec {
         name: "one plans status",
