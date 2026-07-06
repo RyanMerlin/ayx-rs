@@ -17,6 +17,7 @@ pub mod confirm;
 pub mod discover;
 pub mod mongo;
 pub mod one;
+mod one_api;
 mod one_auto_insights;
 mod one_billing;
 mod one_connections;

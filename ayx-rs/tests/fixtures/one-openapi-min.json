@@ -1,0 +1,8 @@
+{
+  "openapi": "3.0.0",
+  "servers": [{ "url": "https://example/" }],
+  "paths": {
+    "/v4/flows/{flowId}": { "get": { "summary": "Get a flow" } },
+    "/v4/importedDatasets": { "post": { "summary": "Upload an imported dataset", "operationId": "createImportedDataset" } }
+  }
+}

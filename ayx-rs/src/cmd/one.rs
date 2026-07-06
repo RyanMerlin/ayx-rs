@@ -82,6 +82,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
         Some(OneCommand::Platform { command }) => {
             super::one_platform::execute(&runtime, cli.apply, cli.yes, command)?
         }
+        Some(OneCommand::Api { command }) => super::one_api::execute(&runtime, command)?,
         Some(OneCommand::JobGroups { command }) => {
             super::one_job_groups::execute(&runtime, command)?
         }

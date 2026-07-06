@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-06 13:39:11 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-06 15:50:06 UTC._
 
 This file is generated. Refresh it with:
 
@@ -10,7 +10,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 208
+- Commands: 209
 - Capabilities: 8
 
 ## Commands
@@ -59,6 +59,10 @@ cargo run -q -p xtask -- refresh-command-surface
 
 | Name | Path | Safety | Mutating | Summary |
 | --- | --- | --- | --- | --- |
+| one api coverage | `one/api/coverage` | read-only | no | Diff the live One OpenAPI spec against wired commands (covered/missing/stale). |
+| one api diagnose | `one/api/diagnose` | read-only | no | Validate Alteryx One API reachability and auth posture. |
+| one api open-api-spec | `one/api/open-api-spec` | read-only | no | Fetch the Alteryx One OpenAPI specification. |
+| one api status | `one/api/status` | read-only | no | Summarize the Alteryx One API posture. |
 | one auto-insights | `one/auto-insights` | read-only | no | Validate Alteryx One Auto Insights reachability and auth posture. |
 | one billing current-account | `one/billing/current-account` | read-only | no | Inspect the current One billing account. |
 | one billing usage-export | `one/billing/usage-export` | read-only | no | Export One billing usage data. |
@@ -161,9 +165,6 @@ cargo run -q -p xtask -- refresh-command-surface
 | one plans share | `one/plans/share` | mutating | yes | Share a One plan from JSON payload. |
 | one plans status | `one/plans/status` | read-only | no | Summarize the Alteryx One plans posture. |
 | one plans update | `one/plans/update` | mutating | yes | Update a One plan from JSON payload. |
-| one platform api diagnose | `one/platform/api/diagnose` | read-only | no | Validate One platform API reachability and auth posture. |
-| one platform api open-api-spec | `one/platform/api/open-api-spec` | read-only | no | Fetch the One platform OpenAPI specification. |
-| one platform api status | `one/platform/api/status` | read-only | no | Summarize the Alteryx One platform API posture. |
 | one platform auth diagnose | `one/platform/auth/diagnose` | read-only | no | Validate One API token reachability and workspace scope. |
 | one platform auth status | `one/platform/auth/status` | read-only | no | Summarize One API token posture for managed IAM. |
 | one platform inventory | `one/platform/inventory` | read-only | no | Summarize the current One API surface registry. |
