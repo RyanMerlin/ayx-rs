@@ -54,7 +54,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: echo 'AYX_FORCE_INLINE_SECRETS=1' >> $GITHUB_ENV
-      - run: cargo nextest run --workspace --no-fail-fast
+      - run: cargo nextest run --workspace
 
   docs:
     name: Docs

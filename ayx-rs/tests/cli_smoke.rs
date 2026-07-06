@@ -549,7 +549,9 @@ fn ui_help_is_absent_without_feature() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Usage: ayx one [OPTIONS] [COMMAND]"));
+    // clap renders the bin name from argv[0]'s file name — `ayx.exe` on Windows,
+    // `ayx` elsewhere — so match the platform-invariant tail of the usage line.
+    assert!(stderr.contains("one [OPTIONS] [COMMAND]"));
     assert!(
         stderr.contains("unexpected argument 'ui' found")
             || stderr.contains("unrecognized subcommand 'ui'")
