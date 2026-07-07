@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`ayx update` failed to extract release archives on every platform.**
+  `self_update` was pulled with default features only, which include no archive
+  backend, so self-update aborted with `ArchiveNotEnabled` — `.zip` on Windows
+  (`Archive extension 'zip' not supported`) and equally `.tar.gz` on
+  Linux/macOS. Enable `archive-tar` + `compression-flate2` (for the `.tar.gz`
+  assets) and `archive-zip` + `compression-zip-deflate` (for the Windows
+  `Compress-Archive` `.zip`). Note: upgrading *into* the first build that
+  carries this fix still needs a one-time manual download, since the currently
+  installed binary is the one that can't extract.
+
 ### Dependencies
 
 - **`ayx-one-api`: `getrandom` 0.2 → 0.4.** The two CSPRNG helpers
