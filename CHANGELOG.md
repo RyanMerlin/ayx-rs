@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`ayx update` still failed after v0.12.1 on Linux/macOS** with
+  `Could not find the required path in the archive: "ayx"`. The `.tar.gz`
+  packaging used `tar -C "$root" .`, naming every member `./ayx`; self_update
+  matches the archive entry against `ayx` with an exact `Path` compare, and
+  `./ayx != ayx`. Package members explicitly so the binary is at `ayx`. (Windows
+  `.zip` stores `ayx.exe` at the root already, so it was fixed by v0.12.1.)
+
 ## 0.12.1 — 2026-07-07
 
 ### Fixed
