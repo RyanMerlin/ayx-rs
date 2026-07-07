@@ -1,0 +1,87 @@
+name: Live Smoke (Alteryx One)
+
+# Exercises the ayx-rs live-smoke suite against a real Alteryx One tenant.
+# Dormant until the AYX_ONE_* secrets are configured on the repo: with no
+# access-token secret the job skips cleanly (green). Once secrets exist, the
+# nightly run authenticates and the token-liveness gate
+# (live_smoke_requires_a_live_token) goes RED when the PAT has expired — that
+# red run is the signal to rotate it via `ayx one platform auth login`.
+
+on:
+  schedule:
+    - cron: "0 8 * * *" # 02:00 America/Denver (MDT) — nightly token-liveness + API smoke
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  live-smoke:
+    name: Live smoke (${{ vars.AYX_ONE_REGION || 'us1' }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check credentials
+        id: creds
+        env:
+          AYX_ONE_API_ACCESS_TOKEN: ${{ secrets.AYX_ONE_API_ACCESS_TOKEN }}
+        run: |
+          if [ -z "${AYX_ONE_API_ACCESS_TOKEN}" ]; then
+            echo "No AYX_ONE_API_ACCESS_TOKEN secret configured; skipping live smoke." >> "$GITHUB_STEP_SUMMARY"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.creds.outputs.configured == 'true'
+        uses: actions/checkout@v7
+
+      - name: Rust toolchain
+        if: steps.creds.outputs.configured == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache
+        if: steps.creds.outputs.configured == 'true'
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-nextest
+        if: steps.creds.outputs.configured == 'true'
+        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2.82.9
+        with:
+          tool: cargo-nextest
+
+      - name: Materialize .env from secrets
+        if: steps.creds.outputs.configured == 'true'
+        env:
+          AYX_ONE_API_ACCESS_TOKEN: ${{ secrets.AYX_ONE_API_ACCESS_TOKEN }}
+          AYX_ONE_API_REFRESH_TOKEN: ${{ secrets.AYX_ONE_API_REFRESH_TOKEN }}
+          AYX_ACCOUNT_EMAIL: ${{ secrets.AYX_ACCOUNT_EMAIL }}
+          AYX_ONE_OAUTH_CLIENT_ID: ${{ secrets.AYX_ONE_OAUTH_CLIENT_ID }}
+          AYX_ONE_TOKEN_ENDPOINT_URL: ${{ secrets.AYX_ONE_TOKEN_ENDPOINT_URL }}
+          AYX_ONE_BASE_URL: ${{ secrets.AYX_ONE_BASE_URL }}
+        run: |
+          umask 077
+          {
+            printf 'AYX_ONE_API_ACCESS_TOKEN=%s\n' "${AYX_ONE_API_ACCESS_TOKEN}"
+            printf 'AYX_ONE_API_REFRESH_TOKEN=%s\n' "${AYX_ONE_API_REFRESH_TOKEN}"
+            printf 'AYX_ACCOUNT_EMAIL=%s\n' "${AYX_ACCOUNT_EMAIL}"
+            printf 'AYX_ONE_OAUTH_CLIENT_ID=%s\n' "${AYX_ONE_OAUTH_CLIENT_ID}"
+            printf 'AYX_ONE_TOKEN_ENDPOINT_URL=%s\n' "${AYX_ONE_TOKEN_ENDPOINT_URL}"
+          } > .env
+          if [ -n "${AYX_ONE_BASE_URL}" ]; then
+            printf 'AYX_ONE_BASE_URL=%s\n' "${AYX_ONE_BASE_URL}" >> .env
+          fi
+
+      - name: Run live smoke
+        if: steps.creds.outputs.configured == 'true'
+        env:
+          AYX_ONE_LIVE_SMOKE: "1"
+        run: cargo nextest run -p ayx-rs -E 'binary(one_live_smoke)'
+
+      - name: Scrub .env
+        if: always()
+        run: rm -f .env
