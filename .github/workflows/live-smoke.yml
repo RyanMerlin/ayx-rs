@@ -23,16 +23,11 @@ jobs:
   live-smoke:
     name: Live smoke (${{ vars.AYX_ONE_REGION || 'us1' }})
     runs-on: ubuntu-latest
-    env:
-      AYX_ONE_API_ACCESS_TOKEN: ${{ secrets.AYX_ONE_API_ACCESS_TOKEN }}
-      AYX_ONE_API_REFRESH_TOKEN: ${{ secrets.AYX_ONE_API_REFRESH_TOKEN }}
-      AYX_ACCOUNT_EMAIL: ${{ secrets.AYX_ACCOUNT_EMAIL }}
-      AYX_ONE_OAUTH_CLIENT_ID: ${{ secrets.AYX_ONE_OAUTH_CLIENT_ID }}
-      AYX_ONE_TOKEN_ENDPOINT_URL: ${{ secrets.AYX_ONE_TOKEN_ENDPOINT_URL }}
-      AYX_ONE_BASE_URL: ${{ secrets.AYX_ONE_BASE_URL }}
     steps:
       - name: Check credentials
         id: creds
+        env:
+          AYX_ONE_API_ACCESS_TOKEN: ${{ secrets.AYX_ONE_API_ACCESS_TOKEN }}
         run: |
           if [ -z "${AYX_ONE_API_ACCESS_TOKEN}" ]; then
             echo "No AYX_ONE_API_ACCESS_TOKEN secret configured; skipping live smoke." >> "$GITHUB_STEP_SUMMARY"
@@ -61,6 +56,13 @@ jobs:
 
       - name: Materialize .env from secrets
         if: steps.creds.outputs.configured == 'true'
+        env:
+          AYX_ONE_API_ACCESS_TOKEN: ${{ secrets.AYX_ONE_API_ACCESS_TOKEN }}
+          AYX_ONE_API_REFRESH_TOKEN: ${{ secrets.AYX_ONE_API_REFRESH_TOKEN }}
+          AYX_ACCOUNT_EMAIL: ${{ secrets.AYX_ACCOUNT_EMAIL }}
+          AYX_ONE_OAUTH_CLIENT_ID: ${{ secrets.AYX_ONE_OAUTH_CLIENT_ID }}
+          AYX_ONE_TOKEN_ENDPOINT_URL: ${{ secrets.AYX_ONE_TOKEN_ENDPOINT_URL }}
+          AYX_ONE_BASE_URL: ${{ secrets.AYX_ONE_BASE_URL }}
         run: |
           umask 077
           {

@@ -25,6 +25,23 @@ impl LiveSmokeContext {
         let temp = tempfile::tempdir().expect("tempdir");
         let config_home = temp.path();
         let env = repo_env_values();
+        // This constructor is only reached when the guard is enabled. Refuse to
+        // run against a dummy/partial profile: a missing live secret must fail
+        // loudly here rather than silently pass later via placeholder creds.
+        // (AYX_ONE_BASE_URL is intentionally optional — it defaults to us1.)
+        for key in [
+            "AYX_ONE_API_ACCESS_TOKEN",
+            "AYX_ONE_API_REFRESH_TOKEN",
+            "AYX_ONE_OAUTH_CLIENT_ID",
+            "AYX_ONE_TOKEN_ENDPOINT_URL",
+            "AYX_ACCOUNT_EMAIL",
+        ] {
+            assert!(
+                env.get(key).is_some_and(|value| !value.trim().is_empty()),
+                "AYX_ONE_LIVE_SMOKE is enabled but required live secret {key} is \
+                 missing/empty in .env — refusing to run against placeholder creds"
+            );
+        }
         fs::create_dir_all(config_home.join("profiles")).expect("profiles dir");
         fs::create_dir_all(config_home.join("workspaces")).expect("workspaces dir");
 
@@ -128,9 +145,28 @@ fn write_json_payload(payload: &str) -> tempfile::NamedTempFile {
     file
 }
 
+/// Read `.env` from the current dir or any ancestor.
+///
+/// nextest runs integration tests with the working directory set to the
+/// *package* dir (`ayx-rs/`), but the canonical `.env` lives at the workspace
+/// root. Walking up bounded levels lets a single root `.env` serve local runs
+/// from anywhere and lets CI materialize `.env` at the root it checks out into.
+fn read_dotenv_from_cwd_or_ancestors() -> Option<String> {
+    let mut dir = std::env::current_dir().ok()?;
+    for _ in 0..6 {
+        if let Ok(content) = fs::read_to_string(dir.join(".env")) {
+            return Some(content);
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    None
+}
+
 fn repo_env_values() -> HashMap<String, String> {
     let mut values = HashMap::new();
-    let Ok(content) = fs::read_to_string(".env") else {
+    let Some(content) = read_dotenv_from_cwd_or_ancestors() else {
         return values;
     };
 
@@ -433,11 +469,28 @@ fn live_smoke_requires_a_live_token() {
         return;
     }
 
+    // The command failed. A dead/expired token is the one failure this gate
+    // refuses to tolerate — surface it loudly with rotation instructions.
+    if live_auth_unavailable(&stderr) {
+        panic!(
+            "AYX_ONE_LIVE_SMOKE is enabled but the Alteryx One token is not live \
+             (auth_failed / refresh-token exchange failed). Rotate the PAT with \
+             `ayx one platform auth login` and refresh the CI secret.\nstderr:\n{stderr}"
+        );
+    }
+
+    // Positive allowlist: only an authorization / not-found error still proves
+    // the request reached the tenant *authenticated*, i.e. the token is live.
+    // Any other failure (network, TLS, 5xx, misconfig) cannot confirm liveness,
+    // so the gate must NOT pass on it — otherwise a transient error is a
+    // false green, defeating the whole point of the gate.
     assert!(
-        !live_auth_unavailable(&stderr),
-        "AYX_ONE_LIVE_SMOKE is enabled but the Alteryx One token is not live \
-         (auth_failed / refresh-token exchange failed). Rotate the PAT with \
-         `ayx one platform auth login` and refresh the CI secret.\nstderr:\n{stderr}"
+        stderr.contains("\"error_code\": \"permission_denied\"")
+            || stderr.contains("\"error_code\": \"not_found\""),
+        "live-token gate: could not confirm the token is live — the probe failed \
+         with an error that is neither a recognized auth failure nor an \
+         authenticated authz/not-found response. Investigate before trusting a \
+         green run.\nstderr:\n{stderr}"
     );
 }
 
