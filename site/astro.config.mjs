@@ -76,6 +76,7 @@ export default defineConfig({
                 'one/platform/roles',
               ],
             },
+            'one/datasets',
             'one/scheduling',
             'one/output-objects',
             'one/write-settings',
