@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Dependencies
+
+- **`ayx-one-api`: `getrandom` 0.2 → 0.4.** The two CSPRNG helpers
+  (`generate_pkce_challenge`, `generate_random_state`) move from the
+  0.3-removed `getrandom::getrandom` free function to `getrandom::fill`.
+  Behavior is unchanged — same OS entropy source, same fail-on-no-entropy
+  contract — and new characterization tests lock the 256-bit verifier, the S256
+  challenge relationship, and non-repetition. `ayx-one-api` now shares the
+  `getrandom` 0.4.2 already pulled by `tempfile`; `getrandom` 0.2 stays in the
+  tree only as a transitive dep of `secret-service`. Supersedes dependabot #57.
+
 ## 0.12.0 — 2026-07-07
 
 ### Added
