@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.12.1 — 2026-07-07
+
 ### Fixed
 
 - **`ayx update` failed to extract release archives on every platform.**
