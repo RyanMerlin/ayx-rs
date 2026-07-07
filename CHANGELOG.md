@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.12.2 — 2026-07-07
+
 ### Fixed
 
 - **`ayx update` still failed after v0.12.1 on Linux/macOS** with
