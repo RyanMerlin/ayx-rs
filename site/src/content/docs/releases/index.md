@@ -7,6 +7,30 @@ sidebar:
 
 Release notes for each tagged version of `ayx`. For current behavior, use the live docs above; for a specific binary, read the notes for that version.
 
+## v0.12.0
+
+**New command surfaces and a smoother first run.**
+
+- **Seamless Alteryx One onboarding.** `ayx onboard` parses a pasted workspace URL for its region and gid and offers to log in over email OTP immediately, so the wizard finishes connected. It also fixes a profile-split where the onboarded profile and the `auth login` token target could diverge.
+- **Yes/no prompt fix.** Onboarding prompts now honor the `[Y/n]` / `[y/N]` default they display — pressing Enter at "Configure Alteryx Server" (shown `[y/N]` on a fresh One onboard) skips Server config instead of silently entering it.
+- **`ayx one datasets`.** Read the One dataset library: `list`, `count`, `wrangled` (list/count/detail), and `imported` (detail).
+- **`ayx one api`.** OpenAPI-spec introspection, including `coverage` to diff the live spec against the wired command inventory.
+- **Visual interface browser (TUI v2).** A k9s-style resource browser with a `Ctrl+K` command palette and `?` help, behind `AYX_TUI_V2=1 ayx tui`.
+- **`one ui` gated off.** The experimental visual-interface command subtree is now behind a default-off cargo feature and is absent from the shipped binary.
+- **Windows.** A reserved 16 MiB main-thread stack and the Windows `cli_smoke` job; the redundant command-dispatch worker thread was removed.
+
+## v0.11.2
+
+**Windows release binary + TUI v2 preview.** The release pipeline now builds and publishes a signed Windows binary; the PowerShell quick-start previously 404'd because no Windows asset was shipped. A resource-browser TUI spine is available behind `AYX_TUI_V2=1 ayx tui`.
+
+## v0.11.1
+
+**`ayx secret prune`.** Removes keyring accounts orphaned by the v0.11.0 profile-name → file-stem scope migration. Dry-run by default; `--apply` to delete.
+
+## v0.11.0
+
+**Indirect secret storage (breaking on-disk format).** Config now stores secrets by reference (`client_secret_ref` / `curator_api_secret_ref`) in the OS keyring or an `env:` ref rather than inline. Existing plaintext configs load fine and migrate on the next save; older binaries cannot read the new `_ref` fields.
+
 ## v0.10.3
 
 **Dependency security bump.** `quinn-proto` was bumped from 0.11.14 to 0.11.15 to clear **RUSTSEC-2026-0185**, a remote memory-exhaustion / DoS advisory in a transitive HTTP/3 QUIC dependency. `quinn-proto` is not on the CLI's HTTP/1.1 request path, so this is a `Cargo.lock`-only change with no behavior impact, but it restores a green `cargo audit` gate.

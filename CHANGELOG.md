@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.12.0 — 2026-07-07
+
+### Added
+
+- **Seamless Alteryx One first-run onboarding** (`#74`): `ayx onboard` parses a
+  pasted workspace URL for its region and workspace gid and offers to run the
+  email-OTP login immediately, so the wizard ends with you connected. Includes
+  profile-split fixes so the onboarded profile is the one `auth login` writes its
+  token into.
+- **`ayx one datasets`** (`#82`): read the Alteryx One dataset library — `list`,
+  `count`, plus `wrangled` (list/count/detail) and `imported` (detail).
+- **`ayx one api`** (`#86`): One OpenAPI-spec introspection. `coverage` diffs the
+  live spec against the wired-command inventory to surface gaps; plus `status`,
+  `diagnose`, and `open-api-spec`.
+- **Visual interface browser (TUI v2)** (`#68`, `#69`): a k9s-style resource
+  browser (all five asset kinds, drill/filter/switch), a `Ctrl+K` command
+  palette, `?` help, and inline editing, behind `AYX_TUI_V2=1 ayx tui`.
+- **Install shadow warning** (`#67`): the installer warns when a different `ayx`
+  earlier on `PATH` would shadow the freshly installed binary (Windows).
+
+### Fixed
+
+- **Onboarding yes/no defaults** (`#87`): prompts now honor the `[Y/n]` / `[y/N]`
+  default they display. Pressing Enter at "Configure Alteryx Server" (shown as
+  `[y/N]` on a fresh One onboard) correctly skips Server configuration instead of
+  silently entering it and writing an empty server section.
+- **Windows** (`#84`, `#85`): reserve a 16 MiB main-thread stack and enable the
+  Windows `cli_smoke` job; remove the redundant command-dispatch worker thread.
+- **Keyring test isolation** (`#81`): keyring tests use an in-memory mock store,
+  so they no longer read or write the host OS keyring.
+
+### Changed
+
+- **`one ui` is gated behind a default-off cargo feature** (`#80`): the
+  experimental visual-interface subtree is absent from the shipped binary.
+- **Docs**: onboarding getting-started/connecting/configuration rewritten to the
+  OTP flow (`#75`); One command descriptions backfilled (`#83`); command-surface
+  coverage gaps captured (`#76`); README command tree reconciled with the shipped
+  surface — `one ui` removed, `one api` and `one datasets` added (`#87`).
+
+### Dependencies
+
+- Bump `cmov` 0.5.3 → 0.5.4 (`#79`), `tui-input` 0.11.1 → 0.15.3 (`#73`), and
+  `clap_complete`, `anyhow`, and `taiki-e/install-action` (`#71`, `#72`, `#77`,
+  `#78`).
+
 ## 0.11.2 — 2026-06-27
 
 ### Fixed
