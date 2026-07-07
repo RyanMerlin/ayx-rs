@@ -219,8 +219,15 @@ fn assert_known_live_failure(stderr: &str, allowed_needles: &[&str]) {
 }
 
 fn live_auth_unavailable(stderr: &str) -> bool {
+    // An expired/revoked token surfaces as an explicit auth_failed envelope OR
+    // as a failed OAuth refresh exchange. The live wording is
+    // `token request failed: refresh token request to '<url>' returned <status>`
+    // (error_code "internal"), so match the message prefixes rather than a
+    // single brittle substring — this is the canonical "rotate the PAT" signal.
     stderr.contains("\"error_code\": \"auth_failed\"")
         || stderr.contains("refresh token request returned error status")
+        || stderr.contains("refresh token request to")
+        || stderr.contains("token request failed")
 }
 
 fn json_value(stdout: &str) -> Option<Value> {
