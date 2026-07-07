@@ -110,10 +110,9 @@ pub fn run_onboarding(
         }
     }
 
-    let configure_server =
-        prompt_yes_no("Configure Alteryx Server", config.server.is_some(), true)?;
+    let configure_server = prompt_yes_no("Configure Alteryx Server", config.server.is_some())?;
     if configure_server {
-        let local_server = prompt_yes_no("Is the Server localhost", true, true)?;
+        let local_server = prompt_yes_no("Is the Server localhost", true)?;
         let mut server = config.server.take().unwrap_or_else(default_server);
         println!("Enter the bare Server base URL only.");
         println!("Do not include /webapi or /gallery. Example: http://10.1.1.1");
@@ -147,7 +146,6 @@ pub fn run_onboarding(
         server.verify_tls = Some(prompt_yes_no(
             "Verify TLS certificates",
             server.verify_tls(),
-            true,
         )?);
         config.server = Some(server);
     }
@@ -211,11 +209,8 @@ pub fn run_onboarding(
                     .managed
                     .take()
                     .unwrap_or_else(default_managed_mongo);
-                let use_url = prompt_yes_no(
-                    "Use a MongoDB URL connection string",
-                    managed.url.is_some(),
-                    false,
-                )?;
+                let use_url =
+                    prompt_yes_no("Use a MongoDB URL connection string", managed.url.is_some())?;
                 if use_url {
                     managed.url = Some(prompt_text(
                         "MongoDB URL",
@@ -246,7 +241,7 @@ pub fn run_onboarding(
                     "stored",
                     "AYX_MONGO_MANAGED_PASSWORD",
                 )?);
-                managed.tls.enabled = prompt_yes_no("Enable TLS", managed.tls.enabled, true)?;
+                managed.tls.enabled = prompt_yes_no("Enable TLS", managed.tls.enabled)?;
                 if managed.tls.enabled {
                     managed.tls.ca_path = prompt_optional_path(
                         "Mongo TLS CA path",
@@ -263,7 +258,6 @@ pub fn run_onboarding(
                     managed.tls.allow_invalid_hostnames = Some(prompt_yes_no(
                         "Allow invalid Mongo TLS hostnames",
                         managed.tls.allow_invalid_hostnames.unwrap_or(false),
-                        false,
                     )?);
                 }
                 config.mongo = MongoProfile {
@@ -1014,7 +1008,7 @@ fn offer_login_now(config: &Config, saved_path: &Path, environment: Option<&str>
         one.account_email
     );
     println!("and you'll be asked for your workspace password.");
-    if !prompt_yes_no("Log in now", false, false)? {
+    if !prompt_yes_no("Log in now", false)? {
         println!("Skipped. Connect any time with `{NEXT_STEP}`.");
         return Ok(json!({ "offered": true, "ran": false }));
     }
@@ -1138,22 +1132,18 @@ fn prompt_sql_connection(
     conn.integrated_security = Some(prompt_yes_no(
         &format!("{label} use integrated security"),
         conn.integrated_security.unwrap_or(!use_driver),
-        true,
     )?);
     conn.encrypt = Some(prompt_yes_no(
         &format!("{label} enable encryption"),
         conn.encrypt.unwrap_or(true),
-        true,
     )?);
     conn.trust_server_certificate = Some(prompt_yes_no(
         &format!("{label} trust server certificate"),
         conn.trust_server_certificate.unwrap_or(false),
-        false,
     )?);
     conn.multi_subnet_failover = Some(prompt_yes_no(
         &format!("{label} multi-subnet failover"),
         conn.multi_subnet_failover.unwrap_or(false),
-        false,
     )?);
     conn.connection_string = prompt_optional_text(
         &format!("{label} connection string"),
@@ -1351,8 +1341,13 @@ fn prompt_u16(prompt: &str, current: u16, default: u16) -> Result<u16> {
     }
 }
 
-fn prompt_yes_no(prompt: &str, current: bool, default: bool) -> Result<bool> {
-    let default_text = if current { "Y/n" } else { "y/N" };
+/// Prompt for a yes/no answer. `default` is the value returned when the user
+/// presses Enter, and it is also what the `[Y/n]`/`[y/N]` hint advertises — the
+/// two must stay in lockstep. (A prior signature carried a separate `current`
+/// value that drove only the hint while a hard-coded `default` drove the return,
+/// so the hint could advertise "No" while Enter answered "Yes".)
+fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
+    let default_text = if default { "Y/n" } else { "y/N" };
     loop {
         let input = prompt_raw(&format!("{} [{}]", prompt, default_text))?;
         let trimmed = input.trim().to_lowercase();

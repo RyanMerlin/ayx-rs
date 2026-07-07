@@ -79,6 +79,35 @@ fn points_at_next_step_when_workspace_gid_absent() {
     );
 }
 
+/// Regression guard for the yes/no default bug: the "Configure Alteryx Server"
+/// prompt renders `[y/N]` on a fresh onboard (no server configured), so pressing
+/// Enter must mean *No* and skip the entire Server flow. The wizard previously
+/// derived the `[y/N]` hint from the current value but returned a separate,
+/// hard-coded `default`, so Enter silently answered *Yes* and dropped the user
+/// into Server/Mongo configuration — the demo-critical One onboarding bug.
+#[test]
+fn enter_at_configure_server_defaults_to_no() {
+    // profile name (default), email, blank workspace URL, THEN a bare Enter at
+    // the "Configure Alteryx Server [y/N]" prompt.
+    let script = "\nuser@example.com\n\n\n";
+    let out = run_onboard(script);
+
+    // The prompt must advertise No as the default.
+    assert!(
+        out.contains("Configure Alteryx Server [y/N]"),
+        "server prompt must show [y/N] when no server is configured; output:\n{out}"
+    );
+    // Enter honored the advertised default: the Server flow was NOT entered.
+    assert!(
+        !out.contains("Is the Server localhost"),
+        "pressing Enter at [y/N] must skip Server config, not enter it; output:\n{out}"
+    );
+    assert!(
+        !out.contains("Storage backend:"),
+        "skipping Server must also skip the storage-backend flow; output:\n{out}"
+    );
+}
+
 /// Regression guard for the profile-split bug: onboard must save the profile
 /// under its *name* and make it active, so a later `auth login` (which writes
 /// the token to `profile_storage_path(profile_name)`) targets the very same
