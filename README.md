@@ -367,6 +367,11 @@ ayx
 |   |       |-- delete
 |   |       |-- update-password
 |   |       `-- password-reset-request
+|   |-- api                          One OpenAPI spec introspection and coverage
+|   |   |-- status
+|   |   |-- diagnose
+|   |   |-- open-api-spec
+|   |   `-- coverage
 |   |-- plans
 |   |   |-- list
 |   |   |-- create
@@ -400,6 +405,11 @@ ayx
 |   |   |-- import-dry-run
 |   |   |-- export
 |   |   `-- export-dry-run
+|   |-- datasets                     read datasets from the One dataset APIs
+|   |   |-- list
+|   |   |-- count
+|   |   |-- wrangled
+|   |   `-- imported
 |   |-- connections
 |   |   |-- list
 |   |   |-- count
@@ -467,35 +477,6 @@ ayx
 |   |-- billing
 |   |   |-- current-account
 |   |   `-- usage-export
-|   |-- ui                           experimental visual interface surface
-|   |   |-- session
-|   |   |   |-- status
-|   |   |   |-- ensure
-|   |   |   |-- attach
-|   |   |   `-- inventory
-|   |   |-- workflow
-|   |   |   |-- open
-|   |   |   |-- create
-|   |   |   |-- inventory
-|   |   |   |-- pane-config
-|   |   |   |-- pane-results
-|   |   |   |-- tool-list
-|   |   |   |-- tool-select
-|   |   |   |-- tool-inspect
-|   |   |   |-- graph-get
-|   |   |   `-- graph-put
-|   |   |-- data
-|   |   |   |-- list-datasets
-|   |   |   |-- dataset-detail
-|   |   |   |-- dataset-preview
-|   |   |   |-- upload
-|   |   |   `-- list-connections
-|   |   |-- library
-|   |   |   `-- inventory
-|   |   |-- schedules
-|   |   |   `-- inventory
-|   |   `-- jobs
-|   |       `-- inventory
 |   |-- auto-insights
 |   `-- desktop-exec
 |-- server                        Server API, logs, import, and lower-level helpers
