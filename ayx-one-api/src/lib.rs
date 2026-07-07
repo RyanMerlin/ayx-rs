@@ -1988,7 +1988,7 @@ pub fn generate_pkce_challenge() -> PkceChallenge {
     use sha2::{Digest, Sha256};
 
     let mut verifier_bytes = [0u8; 32];
-    getrandom::getrandom(&mut verifier_bytes)
+    getrandom::fill(&mut verifier_bytes)
         .expect("OS entropy source unavailable — cannot generate PKCE verifier");
     let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
     let digest = Sha256::digest(code_verifier.as_bytes());
@@ -2007,7 +2007,7 @@ pub fn generate_random_state(n: usize) -> String {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
     let mut bytes = vec![0u8; n];
-    getrandom::getrandom(&mut bytes)
+    getrandom::fill(&mut bytes)
         .expect("OS entropy source unavailable — cannot generate OAuth state");
     URL_SAFE_NO_PAD.encode(&bytes)
 }
@@ -2234,6 +2234,59 @@ mongo:
         }))
         .expect("response should format");
         assert_eq!(token, "Bearer fresh-token");
+    }
+
+    // Characterization tests for the CSPRNG helpers. They lock the observable
+    // behavior — output length/encoding, the PKCE S256 relationship, and that
+    // independent draws differ — so the getrandom 0.2 → 0.4 migration (which
+    // renames `getrandom::getrandom` to `getrandom::fill` under these functions)
+    // is shown to change nothing observable here. These are regression guards,
+    // not entropy assertions: `assert_ne!` catches a grossly broken backend
+    // (constant/all-zero output), but a unit test cannot prove full-buffer
+    // initialization or randomness quality — that is getrandom's contract.
+    #[test]
+    fn pkce_challenge_is_s256_of_a_256bit_random_verifier() {
+        use base64::Engine as _;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use sha2::{Digest, Sha256};
+
+        let a = generate_pkce_challenge();
+        // 32 random bytes → 43-char base64url (no padding).
+        assert_eq!(a.code_verifier.len(), 43, "verifier: {}", a.code_verifier);
+        let decoded = URL_SAFE_NO_PAD
+            .decode(a.code_verifier.as_bytes())
+            .expect("verifier is base64url");
+        assert_eq!(decoded.len(), 32, "verifier must be 256 bits");
+        // S256: challenge == base64url(SHA256(ascii(verifier))).
+        let expected = URL_SAFE_NO_PAD.encode(Sha256::digest(a.code_verifier.as_bytes()));
+        assert_eq!(
+            a.code_challenge, expected,
+            "challenge must be the S256 of the verifier"
+        );
+        // Independent draws must differ.
+        assert_ne!(
+            a.code_verifier,
+            generate_pkce_challenge().code_verifier,
+            "verifiers must be random"
+        );
+    }
+
+    #[test]
+    fn random_state_decodes_to_requested_length_and_varies() {
+        use base64::Engine as _;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+        for n in [16usize, 32] {
+            let decoded = URL_SAFE_NO_PAD
+                .decode(generate_random_state(n).as_bytes())
+                .expect("state is base64url");
+            assert_eq!(decoded.len(), n, "state must decode to n bytes");
+        }
+        assert_ne!(
+            generate_random_state(32),
+            generate_random_state(32),
+            "state must be random"
+        );
     }
 
     #[test]

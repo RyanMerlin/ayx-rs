@@ -10,7 +10,7 @@ anyhow.workspace = true
 ayx-core = { path = "../ayx-core" }
 base64.workspace = true
 chrono.workspace = true
-getrandom = "0.2"
+getrandom = "0.4"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
