@@ -55,7 +55,11 @@ impl LiveSmokeContext {
             },
             alteryx_one: Some(AlteryxOneProfile {
                 account_email: repo_env(&env, "AYX_ACCOUNT_EMAIL", "user@example.com"),
-                base_url: Some("https://us1.alteryxcloud.com".to_string()),
+                base_url: Some(repo_env(
+                    &env,
+                    "AYX_ONE_BASE_URL",
+                    "https://us1.alteryxcloud.com",
+                )),
                 oauth_client_id: Some(repo_env(&env, "AYX_ONE_OAUTH_CLIENT_ID", "client-id")),
                 client_secret: None,
                 client_secret_ref: None,
@@ -75,7 +79,7 @@ impl LiveSmokeContext {
             observability: None,
             server_api: None,
             api: Some(ApiProfile {
-                base_url: "https://us1.alteryxcloud.com".to_string(),
+                base_url: repo_env(&env, "AYX_ONE_BASE_URL", "https://us1.alteryxcloud.com"),
                 auth: ApiAuth {
                     mode: ApiAuthMode::Oauth2ClientCredentials,
                     pat: None,
@@ -397,6 +401,44 @@ macro_rules! live_page_boundary_case {
             assert_page_boundary(&stdout);
         }
     };
+}
+
+/// Hard liveness gate for the whole live-smoke suite.
+///
+/// Every other live case *tolerates* an unavailable token by returning green
+/// (see `live_auth_unavailable`) so one transient auth blip mid-run does not
+/// spam dozens of failures. That tolerance is only safe because THIS gate
+/// fails loud: when the suite is enabled (`AYX_ONE_LIVE_SMOKE=1`) but the
+/// configured token cannot authenticate, the run goes RED here instead of
+/// silently passing. A red gate is the signal to rotate the PAT
+/// (`ayx one platform auth login`) and refresh the CI secret.
+///
+/// The probe mirrors `one platform auth diagnose`, which hits
+/// `GET /v4/apiAccessTokens` to prove the token authenticates against the
+/// tenant. A dead/expired token surfaces as `auth_failed` or a refresh-token
+/// exchange error; any other failure (permission_denied / not_found) still
+/// proves the request reached the API authenticated, so the token is live.
+#[test]
+fn live_smoke_requires_a_live_token() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let (success, stdout, stderr) =
+        run_ayx_result(&["--output", "json", "one", "platform", "token"], &live);
+
+    if success {
+        assert_live_ok(&stdout);
+        return;
+    }
+
+    assert!(
+        !live_auth_unavailable(&stderr),
+        "AYX_ONE_LIVE_SMOKE is enabled but the Alteryx One token is not live \
+         (auth_failed / refresh-token exchange failed). Rotate the PAT with \
+         `ayx one platform auth login` and refresh the CI secret.\nstderr:\n{stderr}"
+    );
 }
 
 live_case!(
