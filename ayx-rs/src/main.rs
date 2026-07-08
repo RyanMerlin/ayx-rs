@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use clap::builder::styling::{Color, RgbColor, Style, Styles};
 use clap::{Parser, Subcommand};
 use reqwest::blocking::Client;
 use roxmltree::Document;
@@ -39,6 +40,14 @@ mod onboard;
 mod render;
 pub(crate) mod secret;
 mod tui;
+
+const ALTERYX_BLUE: Color = Color::Rgb(RgbColor(0, 103, 185));
+const ALTERYX_CYAN: Color = Color::Rgb(RgbColor(0, 169, 224));
+const AYX_STYLES: Styles = Styles::styled()
+    .header(Style::new().fg_color(Some(ALTERYX_BLUE)).bold())
+    .usage(Style::new().fg_color(Some(ALTERYX_BLUE)).bold())
+    .literal(Style::new().fg_color(Some(ALTERYX_CYAN)).bold())
+    .placeholder(Style::new().fg_color(Some(ALTERYX_CYAN)));
 
 fn decode_token_claims(access_token: &str) -> Option<Value> {
     let mut parts = access_token.split('.');
@@ -208,7 +217,8 @@ fn access_token_claim_summary(access_token: Option<&str>) -> Option<Value> {
                   config home so promotion-style workflows can switch environments cleanly. \
                   See `ayx <command> --help` for branch-specific help, `ayx discover` for the \
                   live CLI tree, and `ayx catalog list` for the machine-readable registry.",
-    disable_help_subcommand = true
+    disable_help_subcommand = true,
+    styles = AYX_STYLES
 )]
 struct Cli {
     #[arg(long, default_value = "text", global = true)]
@@ -259,10 +269,30 @@ impl Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    #[command(about = "Central profile registry and active profile management")]
+    Profile {
+        #[command(subcommand)]
+        command: ProfileCommand,
+    },
     #[command(about = "Alteryx One platform branch and API surface")]
     One {
         #[command(subcommand)]
         command: Option<OneCommand>,
+    },
+    #[command(about = "Cross-environment tools for environments.yaml source/target workflows")]
+    Tools {
+        #[command(subcommand)]
+        command: Option<ToolsCommand>,
+    },
+    #[command(about = "Keyring secret inspection and maintenance")]
+    Secret {
+        #[command(subcommand)]
+        command: SecretCommand,
+    },
+    #[command(about = "Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb")]
+    Workflow {
+        #[command(subcommand)]
+        command: Option<WorkflowCommand>,
     },
     #[command(
         about = "Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls"
@@ -281,16 +311,6 @@ enum Command {
         #[command(subcommand)]
         command: Option<SqlserverCommand>,
     },
-    #[command(about = "Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb")]
-    Workflow {
-        #[command(subcommand)]
-        command: Option<WorkflowCommand>,
-    },
-    #[command(about = "Cross-environment tools for environments.yaml source/target workflows")]
-    Tools {
-        #[command(subcommand)]
-        command: Option<ToolsCommand>,
-    },
     #[command(
         about = "Interactive first-run setup for config.yaml or environments.yaml with validation and secret reuse"
     )]
@@ -306,67 +326,10 @@ enum Command {
         about = "Interactive TUI for central profile selection, explicit file editing, One credentials, and connectivity checks"
     )]
     Tui,
-    #[command(about = "Central profile registry and active profile management")]
-    Profile {
-        #[command(subcommand)]
-        command: ProfileCommand,
-    },
-    #[command(about = "Keyring secret inspection and maintenance")]
-    Secret {
-        #[command(subcommand)]
-        command: SecretCommand,
-    },
-    #[command(about = "Progressive live discovery of the CLI tree")]
-    Discover {
-        #[arg(long)]
-        deep: bool,
-        #[arg(value_name = "PATH")]
-        path: Vec<String>,
-    },
-    #[command(about = "Run configuration, auth, network, and product health diagnostics")]
-    Doctor {
-        #[command(subcommand)]
-        command: Option<DoctorCommand>,
-        #[arg(long)]
-        fix: bool,
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    #[command(about = "Licensing portal branch and API surface")]
-    License {
-        #[command(subcommand)]
-        command: Option<LicenseCommand>,
-    },
-    #[command(about = "Self-update from GitHub releases")]
-    Update {
-        #[arg(long, default_value = "RyanMerlin")]
-        repo_owner: String,
-        #[arg(long, default_value = "ayx-rs")]
-        repo_name: String,
-        #[arg(long, default_value = "ayx")]
-        bin_name: String,
-        #[arg(long)]
-        target_version: Option<String>,
-        #[arg(long)]
-        skip_confirm: bool,
-    },
     #[command(about = "Machine-readable command registry")]
     Catalog {
         #[command(subcommand)]
         command: CatalogCommand,
-    },
-    #[command(about = "Generate shell completion scripts (bash, zsh, fish, powershell, elvish)")]
-    Completions {
-        #[arg(value_enum)]
-        shell: clap_complete::Shell,
-    },
-    #[command(
-        about = "Show active profile, account email, workspace, and environment in one shot."
-    )]
-    Whoami {
-        /// Override the central profile name. Defaults to `AYX_PROFILE` or the active profile.
-        #[arg(long)]
-        profile: Option<String>,
     },
     #[command(
         about = "Audit artifact management — list, sweep, retention. Audit files live under ${AYX_CONFIG_HOME}/audits/ by default."
@@ -387,12 +350,59 @@ enum Command {
         #[command(subcommand)]
         command: WorkflowsCommand,
     },
+    #[command(about = "Licensing portal branch and API surface")]
+    License {
+        #[command(subcommand)]
+        command: Option<LicenseCommand>,
+    },
+    #[command(
+        about = "Show active profile, account email, workspace, and environment in one shot."
+    )]
+    Whoami {
+        /// Override the central profile name. Defaults to `AYX_PROFILE` or the active profile.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    #[command(about = "Run configuration, auth, network, and product health diagnostics")]
+    Doctor {
+        #[command(subcommand)]
+        command: Option<DoctorCommand>,
+        #[arg(long)]
+        fix: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    #[command(about = "Self-update from GitHub releases")]
+    Update {
+        #[arg(long, default_value = "RyanMerlin")]
+        repo_owner: String,
+        #[arg(long, default_value = "ayx-rs")]
+        repo_name: String,
+        #[arg(long, default_value = "ayx")]
+        bin_name: String,
+        #[arg(long)]
+        target_version: Option<String>,
+        #[arg(long)]
+        skip_confirm: bool,
+    },
+    #[command(about = "Generate shell completion scripts (bash, zsh, fish, powershell, elvish)")]
+    Completions {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
     #[command(
         about = "Operational telemetry: running jobs, run history, top workflows/plans, errors, weekly run-counts"
     )]
     Telemetry {
         #[command(subcommand)]
         command: cmd::telemetry::TelemetryCommand,
+    },
+    #[command(about = "Progressive live discovery of the CLI tree")]
+    Discover {
+        #[arg(long)]
+        deep: bool,
+        #[arg(value_name = "PATH")]
+        path: Vec<String>,
     },
 }
 
@@ -573,9 +583,8 @@ enum DoctorCommand {
     One,
     Server,
     Mongo,
-    /// Run every applicable diagnostic in sequence and return one merged envelope.
-    /// Surfaces per-check status (ok / warn / fail / skipped); skipped indicates
-    /// the active profile doesn't have that surface configured.
+    /// Run every applicable diagnostic in sequence and return one merged envelope
+    /// with per-check status/summary fields plus an overall rollup.
     All,
 }
 
@@ -5876,11 +5885,20 @@ fn doctor_full_envelope(
     let one = doctor_one_envelope(profile, environment)?;
     let server = doctor_server_envelope(profile, environment)?;
     let mongo = doctor_mongo_envelope(profile, environment)?;
+    let overall = doctor_rollup_status([
+        doctor_status_from_data(&config.data),
+        doctor_status_from_data(&auth.data),
+        doctor_status_from_data(&network.data),
+        doctor_status_from_data(&one.data),
+        doctor_status_from_data(&server.data),
+        doctor_status_from_data(&mongo.data),
+    ]);
     Ok(Envelope::ok_with_data(
         "doctor completed",
         json!({
             "sequence": ["config", "auth", "network", "one", "server", "mongo"],
             "fix_applied": fix,
+            "overall": overall,
             "checks": {
                 "config": config.data,
                 "auth": auth.data,
@@ -5912,6 +5930,8 @@ fn doctor_config_envelope(profile: Option<&str>, fix: bool) -> Result<Envelope> 
     } else {
         ("missing", Vec::new())
     };
+    let (status, summary) =
+        doctor_config_status_summary(&resolution.selected_profile, shape, &inline_risks);
     Ok(Envelope::ok_with_data(
         "doctor config completed",
         json!({
@@ -5923,6 +5943,8 @@ fn doctor_config_envelope(profile: Option<&str>, fix: bool) -> Result<Envelope> 
             "shape": shape,
             "inline_secret_risks": inline_risks,
             "fix_applied": fix,
+            "status": status,
+            "summary": summary,
         }),
     ))
 }
@@ -5946,6 +5968,11 @@ pub(crate) fn doctor_config_envelope_from_path(profile: &Path, fix: bool) -> Res
     } else {
         ("missing", Vec::new())
     };
+    let label = Path::new(&resolution.resolved_path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("profile");
+    let (status, summary) = doctor_config_status_summary(label, shape, &inline_risks);
     Ok(Envelope::ok_with_data(
         "doctor config completed",
         json!({
@@ -5957,6 +5984,8 @@ pub(crate) fn doctor_config_envelope_from_path(profile: &Path, fix: bool) -> Res
             "shape": shape,
             "inline_secret_risks": inline_risks,
             "fix_applied": fix,
+            "status": status,
+            "summary": summary,
         }),
     ))
 }
@@ -5965,15 +5994,39 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
     let config = Config::load_runtime_profile_with_environment(profile, environment)?;
     let one = config.alteryx_one.as_ref();
     let server = config.server.as_ref();
+    let one_configured = one.is_some();
+    let one_access_token_present = one
+        .and_then(|v| v.access_token.as_ref())
+        .is_some_and(|v| !v.trim().is_empty());
+    let one_refresh_token_present = one
+        .and_then(|v| v.refresh_token.as_ref())
+        .is_some_and(|v| !v.trim().is_empty());
+    let one_oauth_client_id_present = one
+        .and_then(|v| v.oauth_client_id.as_ref())
+        .is_some_and(|v| !v.trim().is_empty());
+    let server_configured = server.is_some();
+    let server_api_key_present = server.is_some_and(|v| !v.curator_api_key.trim().is_empty());
+    let server_api_secret_present = server.is_some_and(|v| !v.curator_api_secret.trim().is_empty());
+    let (status, summary) = doctor_auth_status_summary(
+        one_configured,
+        one_access_token_present,
+        one_refresh_token_present,
+        one_oauth_client_id_present,
+        server_configured,
+        server_api_key_present,
+        server_api_secret_present,
+    );
     Ok(Envelope::ok_with_data(
         "doctor auth completed",
         json!({
             "profile": config.profile_name,
+            "status": status,
+            "summary": summary,
             "one": {
-                "configured": one.is_some(),
-                "access_token_present": one.and_then(|v| v.access_token.as_ref()).is_some_and(|v| !v.trim().is_empty()),
-                "refresh_token_present": one.and_then(|v| v.refresh_token.as_ref()).is_some_and(|v| !v.trim().is_empty()),
-                "oauth_client_id_present": one.and_then(|v| v.oauth_client_id.as_ref()).is_some_and(|v| !v.trim().is_empty()),
+                "configured": one_configured,
+                "access_token_present": one_access_token_present,
+                "refresh_token_present": one_refresh_token_present,
+                "oauth_client_id_present": one_oauth_client_id_present,
                 "access_token_source": secret_source(
                     one.and_then(|v| v.access_token_ref.as_ref()),
                     one.and_then(|v| v.access_token.as_deref()),
@@ -5984,9 +6037,9 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
                 ),
             },
             "server": {
-                "configured": server.is_some(),
-                "curator_api_key_present": server.is_some_and(|v| !v.curator_api_key.trim().is_empty()),
-                "curator_api_secret_present": server.is_some_and(|v| !v.curator_api_secret.trim().is_empty()),
+                "configured": server_configured,
+                "curator_api_key_present": server_api_key_present,
+                "curator_api_secret_present": server_api_secret_present,
                 "curator_api_secret_source": secret_source(
                     server.and_then(|v| v.curator_api_secret_ref.as_ref()),
                     server.map(|v| v.curator_api_secret.as_str()),
@@ -6003,15 +6056,39 @@ pub(crate) fn doctor_auth_envelope_from_path(
     let config = Config::load_from_path_with_environment(profile, environment)?;
     let one = config.alteryx_one.as_ref();
     let server = config.server.as_ref();
+    let one_configured = one.is_some();
+    let one_access_token_present = one
+        .and_then(|v| v.access_token.as_ref())
+        .is_some_and(|v| !v.trim().is_empty());
+    let one_refresh_token_present = one
+        .and_then(|v| v.refresh_token.as_ref())
+        .is_some_and(|v| !v.trim().is_empty());
+    let one_oauth_client_id_present = one
+        .and_then(|v| v.oauth_client_id.as_ref())
+        .is_some_and(|v| !v.trim().is_empty());
+    let server_configured = server.is_some();
+    let server_api_key_present = server.is_some_and(|v| !v.curator_api_key.trim().is_empty());
+    let server_api_secret_present = server.is_some_and(|v| !v.curator_api_secret.trim().is_empty());
+    let (status, summary) = doctor_auth_status_summary(
+        one_configured,
+        one_access_token_present,
+        one_refresh_token_present,
+        one_oauth_client_id_present,
+        server_configured,
+        server_api_key_present,
+        server_api_secret_present,
+    );
     Ok(Envelope::ok_with_data(
         "doctor auth completed",
         json!({
             "profile": config.profile_name,
+            "status": status,
+            "summary": summary,
             "one": {
-                "configured": one.is_some(),
-                "access_token_present": one.and_then(|v| v.access_token.as_ref()).is_some_and(|v| !v.trim().is_empty()),
-                "refresh_token_present": one.and_then(|v| v.refresh_token.as_ref()).is_some_and(|v| !v.trim().is_empty()),
-                "oauth_client_id_present": one.and_then(|v| v.oauth_client_id.as_ref()).is_some_and(|v| !v.trim().is_empty()),
+                "configured": one_configured,
+                "access_token_present": one_access_token_present,
+                "refresh_token_present": one_refresh_token_present,
+                "oauth_client_id_present": one_oauth_client_id_present,
                 "access_token_source": secret_source(
                     one.and_then(|v| v.access_token_ref.as_ref()),
                     one.and_then(|v| v.access_token.as_deref()),
@@ -6022,9 +6099,9 @@ pub(crate) fn doctor_auth_envelope_from_path(
                 ),
             },
             "server": {
-                "configured": server.is_some(),
-                "curator_api_key_present": server.is_some_and(|v| !v.curator_api_key.trim().is_empty()),
-                "curator_api_secret_present": server.is_some_and(|v| !v.curator_api_secret.trim().is_empty()),
+                "configured": server_configured,
+                "curator_api_key_present": server_api_key_present,
+                "curator_api_secret_present": server_api_secret_present,
                 "curator_api_secret_source": secret_source(
                     server.and_then(|v| v.curator_api_secret_ref.as_ref()),
                     server.map(|v| v.curator_api_secret.as_str()),
@@ -6036,21 +6113,30 @@ pub(crate) fn doctor_auth_envelope_from_path(
 
 fn doctor_network_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
     let config = Config::load_runtime_profile_with_environment(profile, environment)?;
+    let one_base_url = config
+        .alteryx_one
+        .as_ref()
+        .and_then(|v| v.normalized_base_url());
+    let one_token_endpoint = config.alteryx_one.as_ref().and_then(|v| {
+        let workspace_id = v.active_workspace_id();
+        v.effective_token_endpoint_url_for_workspace(workspace_id)
+    });
+    let server_base_url = config.server.as_ref().map(|v| v.webapi_url.clone());
+    let server_api_base_url = config.server_api.as_ref().map(|v| v.base_url.clone());
+    let one_configured = one_base_url.is_some() || one_token_endpoint.is_some();
+    let server_configured = server_base_url.is_some() || server_api_base_url.is_some();
+    let (status, summary) = doctor_network_status_summary(one_configured, server_configured);
     Ok(Envelope::ok_with_data(
         "doctor network completed",
         json!({
             "profile": config.profile_name,
+            "status": status,
+            "summary": summary,
             "targets": {
-                "one_base_url": config
-                    .alteryx_one
-                    .as_ref()
-                    .and_then(|v| v.normalized_base_url()),
-                "one_token_endpoint": config.alteryx_one.as_ref().and_then(|v| {
-                    let workspace_id = v.active_workspace_id();
-                    v.effective_token_endpoint_url_for_workspace(workspace_id)
-                }),
-                "server_base_url": config.server.as_ref().map(|v| v.webapi_url.clone()),
-                "server_api_base_url": config.server_api.as_ref().map(|v| v.base_url.clone()),
+                "one_base_url": one_base_url,
+                "one_token_endpoint": one_token_endpoint,
+                "server_base_url": server_base_url,
+                "server_api_base_url": server_api_base_url,
             },
             "notes": [
                 "Network checks currently validate configured endpoints rather than performing invasive probes",
@@ -6061,17 +6147,81 @@ fn doctor_network_envelope(profile: Option<&str>, environment: Option<&str>) -> 
 
 fn doctor_one_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
     let config = Config::load_runtime_profile_with_environment(profile, environment)?;
-    one_platform_auth_diagnose_envelope(&config)
+    if config.alteryx_one.is_none() {
+        return Ok(Envelope::ok_with_data(
+            "one platform auth diagnose",
+            json!({
+                "product": "one",
+                "surface": "platform",
+                "profile": config.profile_name,
+                "status": "skip",
+                "summary": "One not configured",
+            }),
+        ));
+    }
+
+    let mut envelope = one_platform_auth_diagnose_envelope(&config)?;
+    let access_token_present = envelope
+        .data
+        .get("access_token_present")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let refresh_token_present = envelope
+        .data
+        .get("refresh_token_present")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let oauth_client_id_present = envelope
+        .data
+        .get("oauth_client_id_present")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let diagnosis = envelope
+        .data
+        .get("diagnosis")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let (status, summary) = if diagnosis == "token present but workspace probe failed" {
+        ("fail", "One workspace probe failed".to_string())
+    } else if !access_token_present {
+        ("warn", "One access token missing".to_string())
+    } else if !refresh_token_present && !oauth_client_id_present {
+        (
+            "warn",
+            "One refresh token and client id missing".to_string(),
+        )
+    } else if !refresh_token_present {
+        ("warn", "One refresh token missing".to_string())
+    } else if !oauth_client_id_present {
+        ("warn", "One OAuth client id missing".to_string())
+    } else if diagnosis == "token present and workspace probe executed" {
+        ("ok", "One workspace probe succeeded".to_string())
+    } else {
+        ("warn", "One auth diagnostic incomplete".to_string())
+    };
+    if let Some(data) = envelope.data.as_object_mut() {
+        data.insert("status".to_string(), json!(status));
+        data.insert("summary".to_string(), json!(summary));
+    }
+    Ok(envelope)
 }
 
 fn doctor_server_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
     let config = Config::load_runtime_profile_with_environment(profile, environment)?;
     let server_ready = config.server.is_some() || config.server_api.is_some();
+    let status = if server_ready { "warn" } else { "skip" };
+    let summary = if server_ready {
+        "Server configured; live validation not run"
+    } else {
+        "Server not configured"
+    };
     Ok(Envelope::ok_with_data(
         "doctor server completed",
         json!({
             "profile": config.profile_name,
             "configured": server_ready,
+            "status": status,
+            "summary": summary,
             "server_url": config.server.as_ref().map(|v| v.webapi_url.clone()),
             "server_api_url": config.server_api.as_ref().map(|v| v.base_url.clone()),
             "recommendations": if server_ready {
@@ -6085,6 +6235,30 @@ fn doctor_server_envelope(profile: Option<&str>, environment: Option<&str>) -> R
 
 fn doctor_mongo_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
     let config = Config::load_runtime_profile_with_environment(profile, environment)?;
+    let managed_host_present = config
+        .mongo
+        .managed
+        .as_ref()
+        .and_then(|managed| managed.host.as_ref())
+        .is_some_and(|v| !v.trim().is_empty());
+    let managed_url_present = config
+        .mongo
+        .managed
+        .as_ref()
+        .and_then(|managed| managed.url.as_ref())
+        .is_some_and(|v| !v.trim().is_empty());
+    let (status, summary) = match config.mongo.mode {
+        ayx_core::profile::MongoMode::Embedded => {
+            ("ok", "Mongo embedded mode selected".to_string())
+        }
+        ayx_core::profile::MongoMode::Managed if !managed_host_present && !managed_url_present => {
+            ("warn", "Managed Mongo missing host/url".to_string())
+        }
+        ayx_core::profile::MongoMode::Managed => (
+            "warn",
+            "Managed Mongo configured; connection not verified".to_string(),
+        ),
+    };
     Ok(Envelope::ok_with_data(
         "doctor mongo completed",
         json!({
@@ -6095,10 +6269,120 @@ fn doctor_mongo_envelope(profile: Option<&str>, environment: Option<&str>) -> Re
             },
             "gallery_database": config.mongo.databases.gallery_name,
             "service_database": config.mongo.databases.service_name,
-            "managed_host_present": config.mongo.managed.as_ref().and_then(|managed| managed.host.as_ref()).is_some_and(|v| !v.trim().is_empty()),
-            "managed_url_present": config.mongo.managed.as_ref().and_then(|managed| managed.url.as_ref()).is_some_and(|v| !v.trim().is_empty()),
+            "managed_host_present": managed_host_present,
+            "managed_url_present": managed_url_present,
+            "status": status,
+            "summary": summary,
         }),
     ))
+}
+
+fn doctor_config_status_summary(
+    profile_label: &str,
+    shape: &str,
+    inline_risks: &[String],
+) -> (&'static str, String) {
+    if shape == "missing" {
+        ("fail", format!("profile '{profile_label}' missing"))
+    } else if !inline_risks.is_empty() {
+        (
+            "warn",
+            format!("profile '{profile_label}' resolved; inline secrets found"),
+        )
+    } else {
+        (
+            "ok",
+            format!("profile '{profile_label}' resolved; no inline secrets"),
+        )
+    }
+}
+
+fn doctor_auth_status_summary(
+    one_configured: bool,
+    one_access_token_present: bool,
+    one_refresh_token_present: bool,
+    one_oauth_client_id_present: bool,
+    server_configured: bool,
+    server_api_key_present: bool,
+    server_api_secret_present: bool,
+) -> (&'static str, String) {
+    if !one_configured && !server_configured {
+        return ("skip", "One and Server auth not configured".to_string());
+    }
+
+    let one_ready = !one_configured
+        || (one_access_token_present && one_refresh_token_present && one_oauth_client_id_present);
+    let server_ready = !server_configured || (server_api_key_present && server_api_secret_present);
+    if !one_ready || !server_ready {
+        let mut incomplete = Vec::new();
+        if one_configured && !one_ready {
+            incomplete.push("One");
+        }
+        if server_configured && !server_ready {
+            incomplete.push("Server");
+        }
+        return (
+            "warn",
+            format!("{} auth incomplete", incomplete.join(" and ")),
+        );
+    }
+
+    let summary = match (one_configured, server_configured) {
+        (true, true) => "One and Server auth configured",
+        (true, false) => "One auth configured",
+        (false, true) => "Server auth configured",
+        (false, false) => "One and Server auth not configured",
+    };
+    ("ok", summary.to_string())
+}
+
+fn doctor_network_status_summary(
+    one_configured: bool,
+    server_configured: bool,
+) -> (&'static str, String) {
+    match (one_configured, server_configured) {
+        (false, false) => ("skip", "No One or Server endpoints configured".to_string()),
+        (true, true) => (
+            "warn",
+            "One and Server endpoints configured; no live probes run".to_string(),
+        ),
+        (true, false) => (
+            "warn",
+            "One endpoints configured; no live probes run".to_string(),
+        ),
+        (false, true) => (
+            "warn",
+            "Server endpoints configured; no live probes run".to_string(),
+        ),
+    }
+}
+
+fn doctor_status_from_data(data: &Value) -> &str {
+    data.get("status").and_then(Value::as_str).unwrap_or("warn")
+}
+
+fn doctor_rollup_status(statuses: [&str; 6]) -> &'static str {
+    let mut best_rank = 0u8;
+    for status in statuses {
+        if status == "skip" {
+            continue;
+        }
+        let rank = match status {
+            "fail" => 3,
+            "warn" => 2,
+            "ok" => 1,
+            _ => 2,
+        };
+        if rank > best_rank {
+            best_rank = rank;
+        }
+    }
+    match best_rank {
+        3 => "fail",
+        2 => "warn",
+        1 => "ok",
+        _ => "skip",
+    }
 }
 
 fn collect_inline_secret_warnings(raw: &str) -> Vec<String> {
