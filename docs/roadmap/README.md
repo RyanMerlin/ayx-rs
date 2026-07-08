@@ -29,7 +29,8 @@ letting stale notes accumulate.
 - [Runtime resolver and orchestration](runtime-and-orchestration.md)
 - [API surface and observability](api-surface-and-observability.md)
 - [Workspace hardening](workspace-hardening.md)
-- [Command surface coverage and gaps](command-surface-coverage.md)
+- [Command surface coverage and gaps](command-surface-coverage.md) (mostly
+  delivered)
 
 ## Relationship To Other Docs
 
@@ -38,4 +39,3 @@ letting stale notes accumulate.
   near-generated surface references, not roadmap notes.
 - Historical handoff material should not be expanded in place. Archive it or
   replace it with a short ADR if the decision still matters.
-

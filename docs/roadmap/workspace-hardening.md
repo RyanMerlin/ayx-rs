@@ -10,15 +10,12 @@ Status: active
 
 ## Next Steps
 
-- Add preflight checks that resolve and record the active workspace.
-- Treat the workspace model as part of the evidence bundle, not an implicit
-  assumption.
-- Keep orchestration logic responsible for flow control, but expose
-  deterministic workspace validation primitives in `ayx-rs`.
+- Record the successful resolved workspace into the mutation envelope and the
+  shared API event log (the safety check is wired, but a successful preflight
+  is not persisted as evidence). Add workspace fields to the API event log.
 
 ## Exit Criteria
 
 - Mutating commands validate workspace identity before doing work.
 - Workspace drift is obvious in evidence and logs.
 - Operators can tell which workspace a run touched without guessing.
-

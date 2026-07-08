@@ -12,14 +12,12 @@ Status: active
 
 ## Next Steps
 
-- Add CLI helpers for listing, describing, and resolving tactics.
-- Define workflow metadata for inputs, outputs, and command sequences.
-- Emit structured evidence after each run so the agent can reason about
-  outcomes without reloading everything.
+- Add explicit workflow-level input/output schema fields to the registry
+  (today only id/title/summary/safety/tags/sequence/success-criteria and
+  inferred params exist).
 
 ## Exit Criteria
 
 - Tactics and workflows are machine-readable and lazily loaded.
 - Validation and rollback steps live beside the flow they protect.
 - The resolver can support end-to-end tasks without inventing a second model.
-
