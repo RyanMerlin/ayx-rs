@@ -12,8 +12,14 @@
 //! Convention: every renderer returns `String` and never panics. Unknown
 //! shapes fall back to `envelope.message`.
 
+use std::env;
+use std::io::IsTerminal;
+
 use ayx_core::envelope::Envelope;
+use clap::builder::styling::{AnsiColor, Color, RgbColor, Style};
 use serde_json::Value;
+
+const ALTERYX_BLUE: Color = Color::Rgb(RgbColor(0, 103, 185));
 
 /// Pretty-print an envelope for human reading at a terminal.
 ///
@@ -24,6 +30,9 @@ use serde_json::Value;
 /// - **Newline-joined** when data is a scalar array.
 /// - **Fallback** to `envelope.message` for anything else.
 pub fn render_text(envelope: &Envelope) -> String {
+    if is_doctor_shape(&envelope.data) {
+        return format_doctor(&envelope.data, color_enabled());
+    }
     let mut out = String::new();
     out.push_str(&envelope.message);
     if !envelope.message.is_empty() && !matches!(envelope.data, Value::Null) {
@@ -41,6 +50,130 @@ pub fn render_text(envelope: &Envelope) -> String {
         out.push_str("\n(more results available — use --all to fetch all, --max-pages N to cap)");
     }
     out
+}
+
+fn color_enabled() -> bool {
+    std::io::stdout().is_terminal() && env::var_os("NO_COLOR").is_none()
+}
+
+fn is_doctor_shape(data: &Value) -> bool {
+    data.get("checks").is_some_and(Value::is_object)
+        && data.get("sequence").is_some_and(Value::is_array)
+}
+
+fn paint(text: &str, style: Style, color: bool) -> String {
+    if color {
+        format!("{}{text}{}", style.render(), style.render_reset())
+    } else {
+        text.to_string()
+    }
+}
+
+fn doctor_status_visuals(status: &str) -> (&'static str, Style) {
+    match status {
+        "ok" => (
+            "✔",
+            Style::new()
+                .fg_color(Some(Color::Ansi(AnsiColor::Green)))
+                .bold(),
+        ),
+        "warn" => (
+            "⚠",
+            Style::new()
+                .fg_color(Some(Color::Ansi(AnsiColor::Yellow)))
+                .bold(),
+        ),
+        "fail" => (
+            "✘",
+            Style::new()
+                .fg_color(Some(Color::Ansi(AnsiColor::Red)))
+                .bold(),
+        ),
+        "skip" => (
+            "–",
+            Style::new()
+                .fg_color(Some(Color::Ansi(AnsiColor::BrightBlack)))
+                .dimmed(),
+        ),
+        _ => (
+            "?",
+            Style::new()
+                .fg_color(Some(Color::Ansi(AnsiColor::BrightBlack)))
+                .dimmed(),
+        ),
+    }
+}
+
+fn doctor_overall(data: &Value) -> String {
+    data.get("overall")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_uppercase()
+}
+
+fn doctor_fix_applied(data: &Value) -> bool {
+    data.get("fix_applied")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn doctor_check<'a>(data: &'a Value, name: &str) -> Option<&'a serde_json::Map<String, Value>> {
+    data.get("checks")
+        .and_then(Value::as_object)
+        .and_then(|checks| checks.get(name))
+        .and_then(Value::as_object)
+}
+
+fn doctor_sequence(data: &Value) -> Vec<&str> {
+    data.get("sequence")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flat_map(|items| items.iter())
+        .filter_map(Value::as_str)
+        .collect()
+}
+
+fn doctor_summary(check: Option<&serde_json::Map<String, Value>>) -> &str {
+    check
+        .and_then(|value| value.get("summary"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+}
+
+fn doctor_status(check: Option<&serde_json::Map<String, Value>>) -> &str {
+    check
+        .and_then(|value| value.get("status"))
+        .and_then(Value::as_str)
+        .unwrap_or("skip")
+}
+
+fn format_doctor(data: &Value, color: bool) -> String {
+    let sequence = doctor_sequence(data);
+    let name_width = sequence.iter().map(|name| name.len()).max().unwrap_or(0);
+    let header = format!("ayx doctor — {}", doctor_overall(data));
+    let mut lines = vec![paint(
+        &header,
+        Style::new().fg_color(Some(ALTERYX_BLUE)).bold(),
+        color,
+    )];
+
+    for name in sequence {
+        let check = doctor_check(data, name);
+        let status = doctor_status(check);
+        let summary = doctor_summary(check);
+        let (glyph, style) = doctor_status_visuals(status);
+        let glyph = paint(glyph, style, color);
+        let status = paint(&format!("{status:<4}"), style, color);
+        lines.push(format!(
+            "  {glyph} {name:<name_width$}   {status}   {summary}"
+        ));
+    }
+
+    if doctor_fix_applied(data) {
+        lines.push("  fixes applied: created missing config dirs/state".to_string());
+    }
+
+    lines.join("\n")
 }
 
 /// Pretty-print just the data payload. Used by both text and table modes.
@@ -376,5 +509,45 @@ mod tests {
         );
         let text = render_text(&env);
         assert!(text.contains('…'));
+    }
+
+    #[test]
+    fn doctor_renderer_is_plain_and_sequence_ordered() {
+        let data = json!({
+            "sequence": ["config", "auth", "network"],
+            "fix_applied": true,
+            "overall": "fail",
+            "checks": {
+                "config": {
+                    "status": "ok",
+                    "summary": "profile 'default' resolved; no inline secrets",
+                },
+                "auth": {
+                    "status": "skip",
+                    "summary": "One and Server auth not configured",
+                },
+                "network": {
+                    "status": "fail",
+                    "summary": "One workspace probe failed",
+                }
+            }
+        });
+
+        let text = format_doctor(&data, false);
+        let config_pos = text.find("config").unwrap();
+        let auth_pos = text.find("auth").unwrap();
+        let network_pos = text.find("network").unwrap();
+
+        assert!(text.contains("ayx doctor — FAIL"));
+        assert!(text.contains("ok"));
+        assert!(text.contains("skip"));
+        assert!(text.contains("fail"));
+        assert!(text.contains("profile 'default' resolved; no inline secrets"));
+        assert!(text.contains("One and Server auth not configured"));
+        assert!(text.contains("One workspace probe failed"));
+        assert!(text.contains("fixes applied: created missing config dirs/state"));
+        assert!(config_pos < auth_pos);
+        assert!(auth_pos < network_pos);
+        assert!(!text.contains('\u{1b}'));
     }
 }
