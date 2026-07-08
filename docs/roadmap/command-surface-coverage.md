@@ -44,7 +44,6 @@ Source of this audit: a live-tree run on `main` (`ayx discover one --deep`,
 
 - Broader `ayx one` hierarchy rework (dissolve `platform`, primitive-first
   top-level, `ayx one login`, positional IDs, flags-over-JSON) is a separate
-  in-flight design. See the Wyatt vault note
-  `Aria/Wyatt/projects/2026-07-05-ayx-one-cli-tree-current-proposed-cleanup.md`.
+  in-flight design.
 - CLI ergonomics framework (clap-native styled help, color, help groupings,
   error suggestions, completions) — see `discovery-and-catalog.md`.
