@@ -11,10 +11,12 @@ Status: active
 
 ## Next Steps
 
-- Keep the command catalog aligned with the live `clap` tree.
-- Expose richer command metadata for safety and agent-friendly discovery.
-- Avoid splitting the command surface into multiple canonical top-level
-  discovery models.
+- Add an automated parity check between the live `clap` tree and the static
+  `COMMAND_SPECS` catalog so `discover` and `catalog` cannot drift
+  independently.
+- Resolve the two-model split: `discover` (live tree) vs `catalog`
+  (`COMMAND_SPECS`) are still two canonical surfaces; decide the long-term
+  compatibility story.
 
 ## Exit Criteria
 
@@ -22,4 +24,3 @@ Status: active
   guesswork.
 - Discovery output and generated docs report the same surface truth.
 - Any deprecated helper commands have a compatibility story.
-

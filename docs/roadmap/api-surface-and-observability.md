@@ -11,14 +11,13 @@ Status: active
 
 ## Next Steps
 
-- Continue SAML-first diagnosis helpers for Server auth.
-- Keep shared HTTP/auth helpers internal to the product crates.
-- Standardize a single JSONL API event log across Server, License, and One.
-- Keep secrets, request bodies, and raw responses redacted by default.
+- Complete shared JSONL API logging for `license` commands (they still return
+  static envelopes and emit no `record_api_event`).
+- Move the generic license helpers out of `ayx-one-api` so HTTP/auth helper
+  placement is product-pure.
 
 ## Exit Criteria
 
 - Product-specific command trees stay cleanly separated.
 - API logging is consistent across products and opt-in where appropriate.
 - Transport retries, envelopes, and error reporting are handled once.
-

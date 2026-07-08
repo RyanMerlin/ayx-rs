@@ -12,14 +12,13 @@ Status: active
 
 ## Next Steps
 
-- Finish source/target workspace commands and validation examples.
-- Decide whether workspace generation stays only in onboarding or gets a
-  dedicated `workspace init` path.
-- Move support queries into a structured registry with parameterized templates.
+- Finish the source/target workflows: `tools workspace compare`,
+  `migrate-workflows`, and `check-dcm-connections` still return explicit
+  scaffolds rather than completed cross-environment logic. Add
+  validation-example coverage for them.
 
 ## Exit Criteria
 
 - Workspace-aware automation can resolve environments deterministically.
 - Query templates are reusable, safe by default, and easy to inspect.
 - Migration helpers are first-class CLI features rather than ad hoc scripts.
-

@@ -1,6 +1,6 @@
 # Command Surface Coverage And Gaps
 
-Status: active
+Status: mostly delivered
 
 ## Current Scope
 
@@ -10,51 +10,28 @@ Status: active
   schedule, output, job, webhook) must be first-class, not buried inside other
   nouns or experimental buckets.
 
-Source of the gaps below: a live-tree audit on `main` (`ayx discover one
---deep`, `ayx 0.11.2`, 2026-07-05), cross-checked against the code — not the
-generated `docs/command-surface.md`, which had drifted stale.
+Source of this audit: a live-tree run on `main` (`ayx discover one --deep`,
+`ayx 0.11.2`, 2026-07-05), cross-checked against the code, not the generated
+`docs/command-surface.md`, which had drifted stale.
 
-## Priority Gaps
+## Delivered
 
-### P1 — Missing `dataset` API primitive
-
-Datasets exist in the CLI only under the stubbed `one ui data` subtree; there
-is **no real `/v4` dataset command** in the API surface. Build first-class
-`one dataset` commands (list/show/…) against the One API. A core building
-block is currently unreachable through the real (non-stub) surface.
-
-### P1 — Description backfill (~25 commands have no `about`/registry text)
-
-World-class help requires every command to carry a description. Commands with
-no description in code today:
-
-- `scheduling`: detail, enable, disable, count
-- `plans`: detail, count, export, import, permissions, run-parameters, schedules
-- `platform workspace`: switch, invite-users, remove-user, suspend-users,
-  unsuspend-users, transfer, transfer-assets
-- `platform role`: assign, unassign
-- `platform token`: list
-- `flows`: permissions-get
-- `connections permissions`: list
-- `billing`: usage-export
-- top-level `one`: status, inventory, auto-insights, desktop-exec
-- `webhook-flow-tasks`: test
-
-### P2 — `one ui` subtree is all stubs
-
-Every `one ui` leaf (session/workflow/data/library/schedules/jobs) returns a
-hardcoded placeholder envelope; there is no browser automation wired
-(`grep -rl playwright` = 0 matches). Decide the disposition: implement it, or
-**feature-gate it behind a cargo feature (default-off)** so default builds
-exclude the experimental surface and any future browser-automation deps live
-behind that same feature.
+- `one dataset` is a real `/v4` primitive, not a stub under `one ui data`.
+- The `one ui` subtree is feature-gated behind the `ui` cargo feature and
+  stays default-off.
+- Every command named in the old gap list now carries a description via the
+  in-binary `COMMAND_SPECS` registry.
 
 ## Next Steps
 
-- Land P1 dataset commands and the description backfill first; then resolve P2
-  (implement vs feature-gate the `ui` subtree).
-- Regenerate `docs/command-surface.md` and shell completions after each surface
-  change so the generated references stay in sync with the live tree.
+- A few top-level `one` commands still lack a clap `#[command(about=...)]`
+  help line (e.g. `status`, `inventory`, `auto-insights`, `desktop-exec`) even
+  though the registry has summaries. Fold this into the in-flight
+  primitive-first `one` hierarchy rework rather than editing the current tree.
+- Dataset coverage is a primitive now but not the full dataset API surface
+  (e.g. `POST /v4/importedDatasets` is still uncovered).
+- Add shell-completion freshness automation alongside the existing
+  `docs/command-surface.md` `xtask refresh-command-surface --check` gate.
 
 ## Exit Criteria
 

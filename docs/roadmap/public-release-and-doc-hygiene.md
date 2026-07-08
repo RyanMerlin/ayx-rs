@@ -12,15 +12,13 @@ Status: active
 
 ## Next Steps
 
-- Move any remaining inline-secret guidance toward environment variables or
-  native keychain storage.
-- Keep `config.yaml`, examples, workflows, and install scripts free of private
-  references.
-- Keep the public release checklist in sync with the release workflow.
+- Decide whether the workspace template writer should stop emitting editable
+  placeholder secrets and move fully to env/keyring-first guidance.
+- Refresh `docs/public-release-checklist.md` so its required-status-check list
+  matches current CI (adds Windows tests, Docs, and workflow lint).
 
 ## Exit Criteria
 
 - No docs or scripts point to private or retired distribution channels.
 - Public release checks are documented and repeatable.
 - Sanitization sweeps stay green before release cuts.
-
