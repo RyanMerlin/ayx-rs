@@ -29,3 +29,7 @@ backups/
 site/node_modules/
 site/dist/
 site/.astro/
+
+# Internal planning scaffolding and the retired Docusaurus site (kept local, not public)
+.superpowers/
+docs-site/
