@@ -880,7 +880,7 @@ pub(crate) struct ParsedWorkspaceUrl {
 }
 
 /// True for a canonical 26-char Crockford-base32 ULID — the shape of an Alteryx
-/// One workspace gid (e.g. `01KMGF85WTTEJZ397MW1RBD9ZB`). Case-insensitive;
+/// One workspace gid (e.g. `01ARZ3NDEKTSV4RRFFQ69G5FAV`). Case-insensitive;
 /// Crockford excludes I, L, O, and U. The first character must be `0`–`7`: the
 /// 48-bit millisecond timestamp cannot fill the top two bits of the leading
 /// 5-bit group, so this cheaply rejects most random 26-char tokens.
@@ -1520,55 +1520,55 @@ mod tests {
     use ayx_core::secrets::install_test_keyring_store;
     use std::collections::HashMap;
 
-    const REAL_GID: &str = "01KMGF85WTTEJZ397MW1RBD9ZB";
+    const SAMPLE_GID: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
     #[test]
     fn parses_auth_portal_workspace_url() {
         let parsed = parse_workspace_url(&format!(
-            "https://us1.alteryxcloud.com/auth-portal/workspaces/{REAL_GID}?redirect_to=/token/x/resume"
+            "https://us1.alteryxcloud.com/auth-portal/workspaces/{SAMPLE_GID}?redirect_to=/token/x/resume"
         ));
         assert_eq!(
             parsed.base_url.as_deref(),
             Some("https://us1.alteryxcloud.com")
         );
-        assert_eq!(parsed.workspace_gid.as_deref(), Some(REAL_GID));
+        assert_eq!(parsed.workspace_gid.as_deref(), Some(SAMPLE_GID));
     }
 
     #[test]
     fn parses_workspace_gid_query_param() {
         let parsed = parse_workspace_url(&format!(
-            "https://us1.alteryxcloud.com/?workspace=alteryx-fde&workspaceGid={REAL_GID}"
+            "https://us1.alteryxcloud.com/?workspace=example-workspace&workspaceGid={SAMPLE_GID}"
         ));
         assert_eq!(
             parsed.base_url.as_deref(),
             Some("https://us1.alteryxcloud.com")
         );
-        assert_eq!(parsed.workspace_gid.as_deref(), Some(REAL_GID));
+        assert_eq!(parsed.workspace_gid.as_deref(), Some(SAMPLE_GID));
     }
 
     #[test]
     fn accepts_bare_gid() {
-        let parsed = parse_workspace_url(REAL_GID);
-        assert_eq!(parsed.workspace_gid.as_deref(), Some(REAL_GID));
+        let parsed = parse_workspace_url(SAMPLE_GID);
+        assert_eq!(parsed.workspace_gid.as_deref(), Some(SAMPLE_GID));
         assert_eq!(parsed.base_url, None);
     }
 
     #[test]
     fn lowercases_are_canonicalized_to_uppercase() {
-        let parsed = parse_workspace_url(&REAL_GID.to_ascii_lowercase());
-        assert_eq!(parsed.workspace_gid.as_deref(), Some(REAL_GID));
+        let parsed = parse_workspace_url(&SAMPLE_GID.to_ascii_lowercase());
+        assert_eq!(parsed.workspace_gid.as_deref(), Some(SAMPLE_GID));
     }
 
     #[test]
     fn preserves_non_us1_region_base_url() {
         let parsed = parse_workspace_url(&format!(
-            "https://eu1.alteryxcloud.com/auth-portal/workspaces/{REAL_GID}"
+            "https://eu1.alteryxcloud.com/auth-portal/workspaces/{SAMPLE_GID}"
         ));
         assert_eq!(
             parsed.base_url.as_deref(),
             Some("https://eu1.alteryxcloud.com")
         );
-        assert_eq!(parsed.workspace_gid.as_deref(), Some(REAL_GID));
+        assert_eq!(parsed.workspace_gid.as_deref(), Some(SAMPLE_GID));
     }
 
     #[test]
@@ -1603,9 +1603,9 @@ mod tests {
     fn labelled_gid_wins_over_another_ulid_in_the_url() {
         let other = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
         let parsed = parse_workspace_url(&format!(
-            "https://us1.alteryxcloud.com/x/{other}/auth-portal/workspaces/{REAL_GID}"
+            "https://us1.alteryxcloud.com/x/{other}/auth-portal/workspaces/{SAMPLE_GID}"
         ));
-        assert_eq!(parsed.workspace_gid.as_deref(), Some(REAL_GID));
+        assert_eq!(parsed.workspace_gid.as_deref(), Some(SAMPLE_GID));
     }
 
     #[test]
@@ -1852,7 +1852,7 @@ alteryx_one:
   account_email: test@example.com
   base_url: https://us1.alteryxcloud.com
   workspace_credentials:
-    '91946':
+    '10000':
       access_token_ref: env:AYX_TEST_WS_TOKEN
 "#,
         )
@@ -1888,7 +1888,7 @@ alteryx_one:
   account_email: test@example.com
   base_url: https://us1.alteryxcloud.com
   workspace_credentials:
-    '91946':
+    '10000':
       access_token: fresh-ws-token
 "#,
         )

@@ -11,7 +11,7 @@ pub(crate) fn execute(
     Ok(match command {
         None => Envelope::ok(
             "one billing commands available: current-account, usage-export. \
-             Note: Billing API requires an enterprise-tier workspace — returns 404 on platform_packaging workspaces.",
+             Note: Billing API requires an enterprise-tier workspace — returns 404 on some workspace tiers.",
         ),
         Some(OneBillingCommand::CurrentAccount { profile }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;

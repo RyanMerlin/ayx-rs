@@ -51,7 +51,7 @@ mod tests {
             upgrade: None,
         };
         config.alteryx_one = Some(AlteryxOneProfile {
-            account_email: "ryan@alteryx.com".into(),
+            account_email: "user@example.com".into(),
             expected_workspace_id: Some("w_marketing".into()),
             workspace_credentials: BTreeMap::from([("w_marketing".into(), Default::default())]),
             ..Default::default()
@@ -60,7 +60,7 @@ mod tests {
         let ctx = Context::from_config(&config, Some("wyatt"));
         assert_eq!(ctx.profile, "wyatt");
         assert_eq!(ctx.workspace, "w_marketing");
-        assert_eq!(ctx.user, "ryan@alteryx.com");
+        assert_eq!(ctx.user, "user@example.com");
     }
 
     #[test]

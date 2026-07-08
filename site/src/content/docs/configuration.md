@@ -47,7 +47,7 @@ profile_name: my-profile
 alteryx_one:
   account_email: admin@example.com
   base_url: https://us1.alteryxcloud.com
-  workspace_gid: 01KMGF85WTTEJZ397MW1RBD9ZB
+  workspace_gid: 01ARZ3NDEKTSV4RRFFQ69G5FAV
   access_token_ref: keyring:my-profile/alteryx_one.access_token
 ```
 

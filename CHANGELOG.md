@@ -238,7 +238,7 @@ and covered by tests (288 total, up from 255).
 
 ### Documentation
 
-- Billing, plans, and scheduling help text notes enterprise-tier requirement; commands return 404 on `platform_packaging` workspaces.
+- Billing, plans, and scheduling help text notes enterprise-tier requirement; commands return 404 on non-enterprise workspace tiers.
 - `connector-metadata`: help text documents that connector enumeration (`list`) is not available via the v4 API; no `/v4/connectors` endpoint exists.
 
 ## 0.9.10 — 2026-06-20
