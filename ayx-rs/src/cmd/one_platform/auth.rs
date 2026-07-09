@@ -265,6 +265,9 @@ fn login(
         eprintln!("(Check your inbox for a 6-digit code)");
 
         let result = ayx_one_api::email_otp_login(&base_url, &email, &ws_gid, || {
+            use std::io::Write as _;
+            eprint!("Enter the 6-digit passcode: ");
+            let _ = std::io::stderr().flush();
             let mut line = String::new();
             std::io::stdin()
                 .read_line(&mut line)
