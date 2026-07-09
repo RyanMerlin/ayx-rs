@@ -32,17 +32,17 @@ ayx one platform status
 ayx one platform inventory
 ```
 
-Both commands accept `--profile <name>` to target a non-default environment and `--output json` (root flag, before the subcommand) for machine-readable output.
+Both commands accept `--profile <name>` to target a non-default environment and `--output json` for machine-readable output.
 
 ## JSON output
 
-Pass `--output json` as a root flag to get a structured envelope on stdout:
+Pass `--output json` to get a structured envelope on stdout. `--output` is a global flag, so it can appear before or after the subcommand:
 
 ```bash
 ayx --output json one platform status
 ```
 
-The envelope shape is `{ ok, message, timestamp_utc, data }`. Combine with `--verbose` to see progress on stderr without polluting stdout.
+The envelope shape is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`. Combine with `--verbose` to see progress on stderr without polluting stdout.
 
 ## Related
 

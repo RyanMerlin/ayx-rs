@@ -100,7 +100,7 @@ ayx one output-objects wrangle-to-python --output-object-id <id> --body '{"optio
 ayx --output json one output-objects list
 ```
 
-The envelope is `{ ok, message, timestamp_utc, data }`.
+The envelope is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`.
 
 ## Related
 

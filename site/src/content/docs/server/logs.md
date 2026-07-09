@@ -90,7 +90,7 @@ ayx --output json server server-logs parse-csv \
   --path "C:\ProgramData\Alteryx\Logs\AlteryxGallery.csv"
 ```
 
-Note: `--output json` is a root flag and must come before the subcommand.
+Note: `--output` is a global flag, so `--output json` can appear before or after the subcommand.
 
 ## Service and Gallery events
 
@@ -110,14 +110,14 @@ ayx server server-logs gallery-events \
 
 ## Machine-readable output
 
-Every command in this branch accepts `--output json` as a root flag:
+Every command in this branch accepts `--output json` as a global flag:
 
 ```sh
 ayx --output json server server-logs summary \
   --path "C:\ProgramData\Alteryx\Logs\AlteryxService.log"
 ```
 
-The envelope is always `{ ok, message, timestamp_utc, data }`.
+The envelope is always `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`.
 
 ## Related
 

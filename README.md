@@ -39,7 +39,7 @@ By default, `ayx` now resolves profiles from its central config home:
 
 The fastest path is onboarding:
 
-```powershell
+```bash
 ayx onboard
 ```
 
@@ -69,7 +69,7 @@ For multi-environment setups, use a central `environments.yaml` file with named 
 
 3. Run a first quick query:
 
-```powershell
+```bash
 ayx profile current
 ayx one platform workspace current
 ayx one flows list
@@ -78,7 +78,7 @@ ayx server api status
 
 4. Build from source if you want to hack on it locally:
 
-```powershell
+```bash
 cargo install --locked --path ayx-rs
 ```
 
@@ -86,7 +86,7 @@ cargo install --locked --path ayx-rs
 
 If you want the shortest path from zero to useful output, start with:
 
-```powershell
+```bash
 ayx one platform workspace current --output json
 ayx one connections list --output json
 ayx server api status --output json
@@ -269,291 +269,28 @@ For the One surface specifically, the live validation plan is documented in `doc
 
 The repository includes a `docs/fixtures/RuntimeSettings.xml` fixture for offline validation of embedded discovery paths.
 
-## Full Command Tree
+## Top-level Commands
 
-```text
-ayx
-|-- catalog                       command and capability discovery
-|   |-- list
-|   |-- describe
-|   `-- run
-|-- doctor                        configuration, auth, network, and product diagnostics
-|   |-- config
-|   |-- auth
-|   |-- network
-|   |-- one
-|   |-- server
-|   `-- mongo
-|-- license                       Licensing portal checks and API access
-|   |-- status
-|   |-- inventory
-|   `-- api
-|       |-- status
-|       `-- diagnose
-|-- mongo                         embedded and managed Mongo operations
-|   |-- status
-|   |-- inventory
-|   |-- backup
-|   |-- restore
-|   |-- query
-|   |-- mutate
-|   `-- doctor
-|-- onboard                       guided first-run profile setup
-|-- profile                       central profile registry and active profile management
-|   |-- list
-|   |-- current
-|   |-- show
-|   |-- use
-|   |-- path
-|   `-- migrate
-|-- one                           Alteryx One control plane and workflow surfaces
-|   |-- status
-|   |-- inventory
-|   |-- doctor
-|   |   |-- auth
-|   |   |-- discover
-|   |   |-- platform
-|   |   |-- plans
-|   |   |-- scheduling
-|   |   `-- billing
-|   |-- platform                  workspace, people, roles, tokens, and API utilities
-|   |   |-- status
-|   |   |-- inventory
-|   |   |-- api
-|   |   |   |-- status
-|   |   |   |-- diagnose
-|   |   |   `-- open-api-spec
-|   |   |-- auth
-|   |   |   |-- status
-|   |   |   `-- diagnose
-|   |   |-- workspace
-|   |   |   |-- list
-|   |   |   |-- current
-|   |   |   |-- current-configuration
-|   |   |   |-- configuration-v4
-|   |   |   |-- save-current-configuration
-|   |   |   |-- save-configuration-v4
-|   |   |   |-- configuration
-|   |   |   |-- configuration-schema
-|   |   |   |-- current-configuration-schema
-|   |   |   |-- delete-current-configuration
-|   |   |   |-- delete-configuration
-|   |   |   |-- people
-|   |   |   |-- admins
-|   |   |   |-- invite-users
-|   |   |   |-- remove-user
-|   |   |   |-- suspend-users
-|   |   |   |-- unsuspend-users
-|   |   |   |-- transfer
-|   |   |   `-- transfer-assets
-|   |   |-- role
-|   |   |   |-- list-assignments
-|   |   |   |-- assign
-|   |   |   `-- unassign
-|   |   |-- user
-|   |   |-- token
-|   |   |   |-- list
-|   |   |   |-- create
-|   |   |   |-- detail
-|   |   |   `-- delete
-|   |   `-- person
-|   |       |-- list
-|   |       |-- current
-|   |       |-- count
-|   |       |-- detail
-|   |       |-- create
-|   |       |-- update
-|   |       |-- patch
-|   |       |-- delete
-|   |       |-- update-password
-|   |       `-- password-reset-request
-|   |-- api                          One OpenAPI spec introspection and coverage
-|   |   |-- status
-|   |   |-- diagnose
-|   |   |-- open-api-spec
-|   |   `-- coverage
-|   |-- plans
-|   |   |-- list
-|   |   |-- create
-|   |   |-- detail
-|   |   |-- full
-|   |   |-- run
-|   |   |-- count
-|   |   |-- run-parameters
-|   |   |-- schedules
-|   |   |-- export
-|   |   |-- update
-|   |   |-- delete
-|   |   |-- share
-|   |   |-- import
-|   |   `-- permissions
-|   |       `-- remove
-|   |-- flows
-|   |   |-- list
-|   |   |-- count
-|   |   |-- create
-|   |   |-- detail
-|   |   |-- update
-|   |   |-- delete
-|   |   |-- copy
-|   |   |-- run
-|   |   |-- validate
-|   |   |-- parameters
-|   |   |-- inputs
-|   |   |-- outputs
-|   |   |-- import
-|   |   |-- import-dry-run
-|   |   |-- export
-|   |   `-- export-dry-run
-|   |-- datasets                     read datasets from the One dataset APIs
-|   |   |-- list
-|   |   |-- count
-|   |   |-- wrangled
-|   |   `-- imported
-|   |-- connections
-|   |   |-- list
-|   |   |-- count
-|   |   |-- create
-|   |   |-- dry-run
-|   |   |-- detail
-|   |   |-- status
-|   |   |-- update
-|   |   |-- delete
-|   |   |-- permissions
-|   |   |   |-- list
-|   |   |   |-- create
-|   |   |   |-- detail
-|   |   |   `-- delete
-|   |   `-- connector-metadata
-|   |       |-- defaults
-|   |       |-- detail
-|   |       |-- publish-info
-|   |       `-- overrides
-|   |           |-- list
-|   |           |-- create
-|   |           `-- delete
-|   |-- job-groups                    run artifacts, publish, pdf results, and execution support
-|   |   |-- list
-|   |   |-- count
-|   |   |-- run
-|   |   |-- publish
-|   |   |-- detail
-|   |   |-- cancel
-|   |   |-- status
-|   |   |-- inputs
-|   |   |-- outputs
-|   |   |-- jobs
-|   |   |-- publications
-|   |   |-- profile
-|   |   |-- profile-results
-|   |   `-- pdf-results
-|   |-- output-objects               flow output and wrangling surfaces
-|   |   |-- list
-|   |   |-- count
-|   |   |-- create
-|   |   |-- detail
-|   |   |-- update
-|   |   |-- delete
-|   |   |-- inputs
-|   |   `-- wrangle-to-python
-|   |-- webhook-flow-tasks           webhook task lifecycle
-|   |   |-- create
-|   |   |-- detail
-|   |   |-- delete
-|   |   `-- test
-|   |-- write-settings               runtime write-setting helpers
-|   |   |-- list
-|   |   |-- count
-|   |   |-- create
-|   |   |-- detail
-|   |   |-- update
-|   |   `-- delete
-|   |-- scheduling
-|   |   |-- list
-|   |   |-- detail
-|   |   |-- enable
-|   |   |-- disable
-|   |   `-- count
-|   |-- billing
-|   |   |-- current-account
-|   |   `-- usage-export
-|   |-- auto-insights
-|   `-- desktop-exec
-|-- server                        Server API, logs, import, and lower-level helpers
-|   |-- api
-|   |   |-- status
-|   |   |-- diagnose
-|   |   |-- import-swagger
-|   |   `-- call
-|   |-- system-info
-|   |-- runtime-settings
-|   |-- ayx-paths
-|   |-- server-logs
-|   |   |-- discover
-|   |   |-- inventory
-|   |   |-- summary
-|   |   |-- context
-|   |   |-- parse-csv
-|   |   |-- service-events
-|   |   |-- gallery-events
-|   |   |-- tail
-|   |   `-- recent
-|   |-- diagnose
-|   |   |-- startup
-|   |   |-- logs
-|   |   |-- network
-|   |   |-- tls
-|   |   `-- runtime-settings
-|   |-- auth
-|   |   |-- status
-|   |   |-- diagnose
-|   |   |   |-- saml
-|   |   |   |-- saml-logs
-|   |   |   |-- certificate
-|   |   |   `-- ad-legacy
-|   |   `-- simulate
-|   |       `-- saml
-|   |-- doctor
-|   |   |-- startup
-|   |   |-- logs
-|   |   |-- network
-|   |   `-- runtime-settings
-|   |-- upgrade
-|   |   |-- path
-|   |   |-- precheck
-|   |   |-- backup
-|   |   |-- plan
-|   |   |-- apply
-|   |   |-- postcheck
-|   |   `-- bundle
-|   |-- backup-plan
-|   `-- backup
-|-- sqlserver                     SQL Server prechecks and migration planning
-|   |-- status
-|   |-- inventory
-|   |-- precheck
-|   |-- validate-strings
-|   |-- connection-string
-|   |-- migrate
-|   `-- prepare
-|-- tools                         workspace-aware source/target workflows
-|   `-- workspace
-|       |-- init
-|       |-- resolve
-|       |-- compare
-|       |-- migrate-workflows
-|       `-- check-dcm-connections
-|-- update                        self-update from GitHub releases
-`-- workflow                      local XML/package tooling for Desktop artifacts
-    |-- inspect
-    |-- unpack
-    |-- validate
-    |-- replace
-    |-- repackage
-    |-- migrate
-    |-- recurse
-    |-- scan
-    |-- convert-cloud
-    |-- publish
-    `-- yxdb
-```
+- `profile` — central profile registry and active profile management
+- `one` — Alteryx One platform branch and API surface
+- `tools` — cross-environment tools for `environments.yaml` source/target workflows
+- `secret` — keyring secret inspection and maintenance
+- `workflow` — workflow package and XML tooling for `.yxmd`, `.yxmc`, `.yxzp`, and `.yxdb`
+- `server` — Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls
+- `mongo` — embedded and managed Mongo inventory, backup, restore, query, and doctor helpers
+- `sqlserver` — SQL Server status, prechecks, connection helpers, and migration planning
+- `onboard` — interactive first-run setup for `config.yaml` or `environments.yaml`
+- `tui` — interactive TUI for profile selection, editing, credentials, and connectivity checks
+- `catalog` — machine-readable command registry
+- `audit` — audit artifact management, retention, and cleanup
+- `tactics` — tactical registry with safety, validation, and rollback notes
+- `workflows` — workflow registry for higher-order skill chains
+- `license` — licensing portal branch and API surface
+- `whoami` — show the active profile, account email, workspace, and environment
+- `doctor` — configuration, auth, network, and product health diagnostics
+- `update` — self-update from GitHub releases
+- `completions` — generate shell completion scripts
+- `telemetry` — operational telemetry for jobs, workflows, plans, and errors
+- `discover` — progressive live discovery of the CLI tree
+
+For the full, always-current command tree, run `ayx discover --deep` or see the docs command reference / `docs/command-surface.md`.

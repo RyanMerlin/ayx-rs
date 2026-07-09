@@ -68,7 +68,7 @@ Then confirm who you are and which workspace you're pointed at:
 ayx whoami
 ```
 
-Want machine-readable output? Ask for JSON. One thing to know up front: `--output` is a top-level flag, so it goes **before** the command, not after.
+Want machine-readable output? Ask for JSON. `--output` is a global flag — it can appear anywhere on the command line, before or after the subcommand.
 
 ```bash
 ayx --output json one platform workspace current

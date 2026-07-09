@@ -8,10 +8,10 @@ For the live command tree, use:
 
 - `ayx --help`
 - `ayx <group> --help`
+- `ayx discover --deep`
 - `ayx catalog list`
 - `ayx catalog describe <command-or-capability>`
 - `docs/command-surface.md` after running `cargo run -q -p xtask -- refresh-command-surface`
-- `README.md`
 
 ## Product Identity
 
@@ -57,6 +57,8 @@ Legacy YAML import remains supported through:
 
 - `--output text`
 - `--output json`
+- `--output yaml`
+- `--output table`
 
 Structured responses use a consistent envelope model. The top-level contract is:
 
@@ -64,6 +66,11 @@ Structured responses use a consistent envelope model. The top-level contract is:
 - `message`
 - `timestamp_utc`
 - `data`
+- `error_code` on failures (`snake_case`: `config_missing`, `auth_failed`, `permission_denied`, `not_found`, `validation`, `conflict`, `rate_limited`, `network`, `upstream`, `workspace_mismatch`, `internal`)
+
+Successful envelopes are written to stdout. Error envelopes are written to
+stderr. JSON is the primary automation target; `yaml` and `table` are also
+supported output formats when an operator wants an alternate presentation.
 
 Commands may also emit artifact paths, warnings, or audit metadata inside the
 envelope payload.
@@ -101,7 +108,7 @@ inline plaintext config.
 
 ## Command Families
 
-The CLI is product-first. The stable top-level families are:
+The CLI is product-first. The stable top-level commands and families are:
 
 - `catalog`
 - `doctor`
@@ -111,10 +118,19 @@ The CLI is product-first. The stable top-level families are:
 - `profile`
 - `one`
 - `server`
+- `secret`
+- `audit`
+- `tactics`
+- `workflows`
+- `telemetry`
+- `whoami`
 - `workflow`
 - `tools`
+- `sqlserver`
 - `update`
 - `tui`
+- `completions`
+- `discover`
 
 The exact leaf inventory can expand, but the design rules are stable:
 

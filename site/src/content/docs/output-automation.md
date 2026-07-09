@@ -9,7 +9,7 @@ ayx is built to be driven by scripts and agents, not just typed at a prompt. Two
 
 ## JSON output
 
-Add `--output json` for machine-readable output. It's a top-level flag, so it comes **before** the command:
+Add `--output json` for machine-readable output. It's a global flag, so it can appear before or after the subcommand:
 
 ```bash
 ayx --output json one flows list
@@ -26,7 +26,7 @@ Every JSON response uses the same envelope:
 }
 ```
 
-Branch on `ok`, read `data` for the result. Errors use the same shape with `ok: false`, so your parsing never has to change.
+Branch on `ok`, read `data` for the result. Failures use the same shape with `ok: false`, add an `error_code`, and are written to stderr instead of stdout.
 
 ## Dry-run by default
 

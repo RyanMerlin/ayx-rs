@@ -32,7 +32,7 @@ ayx one flows export --flow-id <flow-id> --output-file <path/to/file> --apply
 
 `--output-file` is required for `export` and specifies the local file path to write. The resulting file can be committed to version control or passed directly to `import` on a target environment.
 
-> **Note:** The file path flag is `--output-file`, not `--output`. The global `--output` flag (placed before the subcommand, e.g. `ayx --output json`) is reserved for selecting the text/json output format and is a separate argument.
+> **Note:** The file path flag is `--output-file`, not `--output`. The global `--output` flag (for example, `ayx --output json` or `ayx one flows list --output json`) is reserved for selecting the text/json/yaml/table output format and is a separate argument.
 
 ## Import
 

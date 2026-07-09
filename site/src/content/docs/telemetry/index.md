@@ -175,13 +175,13 @@ ayx telemetry workflows top --profile prod --all --max-pages 20
 
 ## JSON output
 
-All commands accept `--output json` as a root flag:
+All commands accept `--output json` as a global flag:
 
 ```sh
 ayx --output json telemetry summary --profile prod
 ```
 
-The envelope is always `{ ok, message, timestamp_utc, data }`.
+The envelope is always `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`.
 
 ## Related
 

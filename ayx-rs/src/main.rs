@@ -6904,7 +6904,7 @@ fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static s
             "Run 'ayx onboard' to set up a profile, or 'ayx doctor config' to inspect the current one.",
         ),
         AuthFailed => Some(
-            "Run 'ayx doctor auth' to inspect auth posture. Re-run 'ayx onboard' if tokens are stale.",
+            "Run 'ayx doctor auth' to inspect auth posture. Re-run 'ayx one platform auth login' if tokens are stale.",
         ),
         PermissionDenied => Some(
             "Check that the active profile's token has the required role/scope for this resource.",

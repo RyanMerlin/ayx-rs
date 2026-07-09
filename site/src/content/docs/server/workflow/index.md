@@ -191,7 +191,7 @@ Export to CSV:
 ayx workflow yxdb --input output.yxdb --csv output.csv
 ```
 
-For machine-readable output, use the root `--output json` flag:
+For machine-readable output, use the global `--output json` flag:
 
 ```sh
 ayx --output json workflow yxdb --input output.yxdb
@@ -199,7 +199,7 @@ ayx --output json workflow yxdb --input output.yxdb
 
 ## JSON output
 
-All commands accept `--output json` as a root flag:
+All commands accept `--output json` as a global flag:
 
 ```sh
 ayx --output json workflow inspect --input reports.yxzp

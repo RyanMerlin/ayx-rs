@@ -150,7 +150,7 @@ ayx tactics validate
 
 ## JSON output
 
-All commands accept `--output json` as a root flag:
+All commands accept `--output json` as a global flag:
 
 ```sh
 ayx --output json tactics list

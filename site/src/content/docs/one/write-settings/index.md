@@ -80,7 +80,7 @@ ayx one write-settings delete --write-setting-id <id> --apply --yes
 ayx --output json one write-settings list
 ```
 
-The envelope is `{ ok, message, timestamp_utc, data }`.
+The envelope is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`.
 
 ## Related
 

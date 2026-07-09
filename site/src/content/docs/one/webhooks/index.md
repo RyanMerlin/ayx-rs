@@ -70,7 +70,7 @@ ayx one webhook-flow-tasks delete --webhook-flow-task-id <id> --apply --yes
 ayx --output json one webhook-flow-tasks detail --webhook-flow-task-id <id>
 ```
 
-The envelope is `{ ok, message, timestamp_utc, data }`.
+The envelope is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`.
 
 ## Related
 
