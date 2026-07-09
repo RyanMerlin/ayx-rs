@@ -221,8 +221,15 @@ fn access_token_claim_summary(access_token: Option<&str>) -> Option<Value> {
     styles = AYX_STYLES
 )]
 struct Cli {
-    #[arg(long, default_value = "text", global = true)]
+    /// Output format for the result envelope.
+    #[arg(
+        long,
+        default_value = "text",
+        value_parser = ["text", "json", "yaml", "table"],
+        global = true
+    )]
     output: String,
+    /// Select a named environment from environments.yaml for this run.
     #[arg(long = "env", alias = "environment", global = true)]
     environment_flag: Option<String>,
     #[arg(value_name = "ENV", hide = true, last = true, global = true)]
@@ -537,6 +544,42 @@ mod tests {
         let cli = Cli::try_parse_from(["ayx", "one", "flows", "list", "--env", "prod"])
             .expect("parser should accept trailing --env");
         assert_eq!(cli.resolved_environment(), Some("prod"));
+    }
+
+    #[test]
+    fn missing_flag_errors_classify_as_validation() {
+        // A "--x-id is required" error must classify as Validation (not Internal)
+        // so the user gets the flag/`--help` hint instead of a fabricated
+        // transport diagnosis.
+        let err = anyhow::anyhow!("--flow-id is required");
+        assert!(matches!(classify_anyhow_error(&err), ErrorCode::Validation));
+    }
+
+    #[test]
+    fn upstream_5xx_wins_over_body_validation_phrase() {
+        // A 5xx whose body echoes a validation phrase is an upstream fault, not
+        // a client-side validation error — status code beats body keywords.
+        let err = anyhow::anyhow!("HTTP 500 from upstream: client_id is required");
+        assert!(matches!(classify_anyhow_error(&err), ErrorCode::Upstream));
+    }
+
+    #[test]
+    fn rejects_unknown_output_format() {
+        // A typo'd --output must be rejected by clap, not silently rendered as
+        // text with exit 0 (which would hand an agent unparseable output).
+        let parsed = Cli::try_parse_from(["ayx", "--output", "jsn", "profile", "current"]);
+        assert!(
+            parsed.is_err(),
+            "clap should reject an unknown --output value"
+        );
+    }
+
+    #[test]
+    fn accepts_known_output_formats() {
+        for fmt in ["text", "json", "yaml", "table"] {
+            let parsed = Cli::try_parse_from(["ayx", "--output", fmt, "profile", "current"]);
+            assert!(parsed.is_ok(), "clap should accept --output {fmt}");
+        }
     }
 }
 
@@ -6710,6 +6753,7 @@ fn main() -> Result<()> {
             } else {
                 eprint!("{rendered}");
                 eprintln!();
+                let _ = io::stdout().lock().flush();
                 let _ = io::stderr().lock().flush();
                 std::process::exit(exit_code_for_envelope(&envelope));
             }
@@ -6719,24 +6763,35 @@ fn main() -> Result<()> {
             let hint = hint_for_error_code(code);
             let mut data = json!({
                 "error": err.to_string(),
-                "transport": transport_error_summary(err.as_ref()),
                 "error_code": code.as_str(),
             });
+            // Only attach a transport diagnosis for genuine network/upstream
+            // failures. Attaching it unconditionally (e.g. to a missing-flag
+            // validation error) fabricates a transport problem the user never had.
+            if matches!(
+                code,
+                ayx_core::envelope::ErrorCode::Network | ayx_core::envelope::ErrorCode::Upstream
+            ) {
+                data["transport"] = serde_json::to_value(transport_error_summary(err.as_ref()))
+                    .unwrap_or(Value::Null);
+            }
             if let Some(h) = hint {
                 data["hint"] = Value::String(h.to_string());
             }
             let err_env = Envelope::err_coded(code, "command failed", data);
             // Errors always go to stderr; the format mirrors the success
-            // renderer so JSON consumers see the same envelope shape.
+            // renderer so JSON consumers see the same envelope shape. Exit
+            // non-zero via process::exit (like the ok=false branch) rather than
+            // returning Err, which would make the runtime print a second,
+            // non-JSON `Error: ...` line and corrupt the stderr envelope.
             eprint!(
                 "{}",
                 format_envelope(&err_env, &output).unwrap_or_else(|_| err_env.message.clone())
             );
             eprintln!();
-            if !matches!(output.as_str(), "json" | "yaml") {
-                eprintln!("{}", err);
-            }
-            Err(err)
+            let _ = io::stdout().lock().flush();
+            let _ = io::stderr().lock().flush();
+            std::process::exit(1);
         }
     }
 }
@@ -6745,9 +6800,6 @@ fn exit_code_for_envelope(envelope: &Envelope) -> i32 {
     if envelope.ok { 0 } else { 1 }
 }
 
-/// Render an envelope according to the requested output format. Returns a
-/// `Validation` error envelope-as-string for unknown formats so the
-/// failure surfaces uniformly via the outer error path.
 /// Input accepted by the shared profile loader shims. Runtime callers pass a
 /// central profile name while editor/onboarding callers pass an explicit file
 /// path.
@@ -6823,6 +6875,9 @@ where
     }
 }
 
+/// Render an envelope in the requested output format. `output` is constrained
+/// by clap (value_parser) to text/json/yaml/table, so the final arm handles
+/// text — the default and the explicit `text`.
 fn format_envelope(envelope: &Envelope, output: &str) -> Result<String> {
     match output {
         "json" => Ok(serde_json::to_string_pretty(envelope)?),
@@ -6933,19 +6988,23 @@ fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
     {
         return ErrorCode::Network;
     }
-    if chain.contains("validation")
-        || chain.contains("invalid value")
-        || chain.contains("invalid format")
-        || chain.contains("cannot be empty")
-    {
-        return ErrorCode::Validation;
-    }
+    // Status-code signals win over body-keyword heuristics: a 5xx whose body
+    // happens to contain a validation phrase (e.g. "client_id is required") is
+    // an upstream fault, not a client-side validation error.
     if chain.contains("500")
         || chain.contains("502")
         || chain.contains("503")
         || chain.contains("504")
     {
         return ErrorCode::Upstream;
+    }
+    if chain.contains("validation")
+        || chain.contains("invalid value")
+        || chain.contains("invalid format")
+        || chain.contains("cannot be empty")
+        || chain.contains("is required")
+    {
+        return ErrorCode::Validation;
     }
     ErrorCode::Internal
 }
