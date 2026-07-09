@@ -585,15 +585,17 @@ mod tests {
 
 #[derive(Subcommand, Debug)]
 enum ProfileCommand {
+    #[command(about = "List centrally managed profiles and show the active profile.")]
     List,
+    #[command(about = "Show the active central profile pointer.")]
     Current,
-    Show {
-        name: Option<String>,
-    },
-    Use {
-        name: String,
-    },
+    #[command(about = "Show the resolved central profile and configured sections")]
+    Show { name: Option<String> },
+    #[command(about = "Set the active central profile.")]
+    Use { name: String },
+    #[command(about = "Show central profile storage paths")]
     Path,
+    #[command(about = "Migrate a legacy profile into the central registry")]
     Migrate {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
@@ -620,11 +622,19 @@ enum SecretCommand {
 
 #[derive(Subcommand, Debug)]
 enum DoctorCommand {
+    #[command(
+        about = "Validate config home, active profile resolution, and inline secret posture."
+    )]
     Config,
+    #[command(about = "Check One and Server credential posture")]
     Auth,
+    #[command(about = "Check configured One and Server network targets")]
     Network,
+    #[command(about = "Check One auth and workspace probe posture")]
     One,
+    #[command(about = "Check Server configuration posture and next-step guidance")]
     Server,
+    #[command(about = "Check Mongo mode and managed connection posture")]
     Mongo,
     /// Run every applicable diagnostic in sequence and return one merged envelope
     /// with per-check status/summary fields plus an overall rollup.
@@ -633,14 +643,17 @@ enum DoctorCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum MongoCommand {
+    #[command(about = "Resolve the configured Mongo connection and database names.")]
     Status {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Generate an inventory plan for the Mongo-backed databases.")]
     Inventory {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Back up the Gallery and Service Mongo databases.")]
     Backup {
         #[arg(long)]
         profile: Option<String>,
@@ -651,6 +664,7 @@ pub(crate) enum MongoCommand {
         #[arg(long, default_value = "audits")]
         audit_dir: PathBuf,
     },
+    #[command(about = "Restore Mongo data from a backup input path.")]
     Restore {
         #[arg(long)]
         profile: Option<String>,
@@ -661,6 +675,7 @@ pub(crate) enum MongoCommand {
         #[arg(long, default_value = "audits")]
         audit_dir: PathBuf,
     },
+    #[command(about = "Run a read-only Mongo query against a Server collection.")]
     Query {
         #[arg(long)]
         profile: Option<String>,
@@ -683,6 +698,7 @@ pub(crate) enum MongoCommand {
         #[arg(long)]
         template: Option<String>,
     },
+    #[command(about = "Apply a guarded Mongo update to a Server collection")]
     Mutate {
         #[arg(long)]
         profile: Option<String>,
@@ -703,6 +719,7 @@ pub(crate) enum MongoCommand {
         #[arg(long)]
         accept_mutation_risk: bool,
     },
+    #[command(about = "Run the default support query suite across critical Mongo collections.")]
     Doctor {
         #[arg(long)]
         profile: Option<String>,
@@ -711,10 +728,12 @@ pub(crate) enum MongoCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerCommand {
+    #[command(about = "Server API status, diagnostics, and OpenAPI-driven calls")]
     Api {
         #[command(subcommand)]
         command: ServerApiCommand,
     },
+    #[command(about = "Capture host system information to JSON")]
     SystemInfo {
         #[arg(
             long = "output-file",
@@ -723,25 +742,31 @@ pub(crate) enum ServerCommand {
         )]
         output_file: PathBuf,
     },
+    #[command(about = "Summarize RuntimeSettings.xml and export JSON")]
     RuntimeSettings {
         #[arg(long, default_value = DEFAULT_RUNTIME_SETTINGS_PATH)]
         path: PathBuf,
         #[arg(long = "output-file", value_name = "FILE")]
         output_file: Option<PathBuf>,
     },
+    #[command(about = "Show common Alteryx Server filesystem paths")]
     AyxPaths,
+    #[command(about = "Discover, summarize, and parse Server logs")]
     ServerLogs {
         #[command(subcommand)]
         command: ServerLogsCommand,
     },
+    #[command(about = "Run targeted Server diagnostics")]
     Diagnose {
         #[command(subcommand)]
         command: ServerDiagnoseCommand,
     },
+    #[command(about = "Server SSO/SAML auth diagnosis and simulation")]
     Auth {
         #[command(subcommand)]
         command: ServerAuthCommand,
     },
+    #[command(about = "Guided Server troubleshooting workflows")]
     Doctor {
         #[command(subcommand)]
         command: ServerDoctorCommand,
@@ -750,10 +775,12 @@ pub(crate) enum ServerCommand {
         #[command(subcommand)]
         command: UpgradeCommand,
     },
+    #[command(about = "Generate a Server backup file plan")]
     BackupPlan {
         #[arg(long)]
         backup_dir: PathBuf,
     },
+    #[command(about = "Run or simulate a full Server backup")]
     Backup {
         #[arg(long)]
         profile: Option<String>,
@@ -768,24 +795,29 @@ pub(crate) enum ServerCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum SqlserverCommand {
+    #[command(about = "Summarize configured SQL Server connection posture")]
     Status {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Summarize SQL Server inventory and database posture")]
     Inventory {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Run SQL Server migration prechecks")]
     Precheck {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long)]
         collation: Option<String>,
     },
+    #[command(about = "Validate configured SQL Server connection strings")]
     ValidateStrings {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Generate a SQL Server connection string")]
     ConnectionString {
         #[arg(long)]
         profile: Option<String>,
@@ -806,6 +838,7 @@ pub(crate) enum SqlserverCommand {
         #[arg(long)]
         multi_subnet_failover: bool,
     },
+    #[command(about = "Generate a SQL Server migration plan")]
     Migrate {
         #[arg(long)]
         profile: Option<String>,
@@ -814,6 +847,7 @@ pub(crate) enum SqlserverCommand {
         #[arg(long)]
         dry_run: bool,
     },
+    #[command(about = "Generate SQL Server migration preparation guidance")]
     Prepare {
         #[arg(long)]
         profile: Option<String>,
@@ -826,20 +860,24 @@ pub(crate) enum SqlserverCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum WorkflowCommand {
+    #[command(about = "Inspect Alteryx workflow, macro, package, or data artifacts.")]
     Inspect {
         #[arg(long)]
         input: PathBuf,
     },
+    #[command(about = "Unpack a .yxzp workflow package.")]
     Unpack {
         #[arg(long)]
         input: PathBuf,
         #[arg(long)]
         output_dir: PathBuf,
     },
+    #[command(about = "Validate workflow and macro XML structures.")]
     Validate {
         #[arg(long)]
         input: PathBuf,
     },
+    #[command(about = "Find and replace text in workflow XML or packages.")]
     Replace {
         #[arg(long)]
         input: PathBuf,
@@ -852,12 +890,14 @@ pub(crate) enum WorkflowCommand {
         #[arg(long)]
         validate: bool,
     },
+    #[command(about = "Rebuild a .yxzp package from a directory tree.")]
     Repackage {
         #[arg(long)]
         input_dir: PathBuf,
         #[arg(long = "output-path")]
         output_path: PathBuf,
     },
+    #[command(about = "Recursively apply XML replacement rules across workflow artifacts.")]
     Recurse {
         #[arg(long)]
         input: PathBuf,
@@ -872,6 +912,7 @@ pub(crate) enum WorkflowCommand {
         #[arg(long)]
         validate: bool,
     },
+    #[command(about = "Preflight scan workflow artifacts for rule matches without rewriting.")]
     Scan {
         #[arg(long)]
         input: PathBuf,
@@ -882,6 +923,7 @@ pub(crate) enum WorkflowCommand {
         #[arg(long = "replace")]
         replace: Vec<String>,
     },
+    #[command(about = "Convert a desktop workflow into cloud JSON")]
     ConvertCloud {
         #[arg(long)]
         input: PathBuf,
@@ -890,6 +932,7 @@ pub(crate) enum WorkflowCommand {
         #[arg(long, default_value_t = false)]
         fail_on_unsupported: bool,
     },
+    #[command(about = "Republish a workflow package through the Server API.")]
     Publish {
         #[arg(long)]
         profile: Option<String>,
@@ -920,6 +963,7 @@ pub(crate) enum WorkflowCommand {
         #[arg(long, default_value_t = false)]
         bypass_workflow_version_check: bool,
     },
+    #[command(about = "Perform an end-to-end workflow XML migration pass.")]
     Migrate {
         #[arg(long)]
         input: PathBuf,
@@ -1096,6 +1140,7 @@ pub(crate) enum UiJobsCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ToolsCommand {
+    #[command(about = "Cross-environment workspace scaffolding and comparison")]
     Workspace {
         #[command(subcommand)]
         command: Option<ToolsWorkspaceCommand>,
@@ -1104,6 +1149,7 @@ pub(crate) enum ToolsCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ToolsWorkspaceCommand {
+    #[command(about = "Write an environments.yaml workspace template")]
     Init {
         #[arg(
             long = "output-file",
@@ -1118,6 +1164,7 @@ pub(crate) enum ToolsWorkspaceCommand {
         #[arg(long, default_value = "prod")]
         target_environment: String,
     },
+    #[command(about = "Resolve source and target environments from a workspace")]
     Resolve {
         #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
@@ -1126,6 +1173,7 @@ pub(crate) enum ToolsWorkspaceCommand {
         #[arg(long)]
         target: String,
     },
+    #[command(about = "Compare source and target workspace profiles")]
     Compare {
         #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
@@ -1134,6 +1182,7 @@ pub(crate) enum ToolsWorkspaceCommand {
         #[arg(long)]
         target: String,
     },
+    #[command(about = "Scaffold cross-environment workflow migration")]
     MigrateWorkflows {
         #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
@@ -1142,6 +1191,7 @@ pub(crate) enum ToolsWorkspaceCommand {
         #[arg(long)]
         target: String,
     },
+    #[command(about = "Scaffold cross-environment DCM connection checks")]
     CheckDcmConnections {
         #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
@@ -2441,14 +2491,17 @@ pub(crate) enum OneDoctorCommand {
 
 #[derive(Subcommand, Debug)]
 enum LicenseCommand {
+    #[command(about = "Licensing portal API status and diagnostics")]
     Api {
         #[command(subcommand)]
         command: LicenseApiCommand,
     },
+    #[command(about = "Summarize the Licensing branch posture.")]
     Status {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Summarize Licensing branch inventory candidates.")]
     Inventory {
         #[arg(long)]
         profile: Option<String>,
@@ -2457,10 +2510,12 @@ enum LicenseCommand {
 
 #[derive(Subcommand, Debug)]
 enum LicenseApiCommand {
+    #[command(about = "Summarize the Licensing portal API posture.")]
     Status {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Validate Licensing API reachability and auth posture.")]
     Diagnose {
         #[arg(long)]
         profile: Option<String>,
@@ -2469,17 +2524,20 @@ enum LicenseApiCommand {
 
 #[derive(Subcommand, Debug)]
 enum CatalogCommand {
+    #[command(about = "List machine-readable command metadata.")]
     List {
         #[arg(long)]
         tag: Option<String>,
         #[arg(long, default_value = "compact")]
         format: String,
     },
+    #[command(about = "Describe a single command in the catalog.")]
     Describe {
         target: Option<String>,
         #[arg(long)]
         command: Option<String>,
     },
+    #[command(about = "Run a registered capability with JSON input")]
     Run {
         capability: String,
         #[arg(long = "json")]
@@ -4774,18 +4832,22 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerLogsCommand {
+    #[command(about = "Discover Server log locations from the active profile")]
     Discover {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Inventory known Server log files and metadata")]
     Inventory {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Summarize a Server log file")]
     Summary {
         #[arg(long)]
         path: PathBuf,
     },
+    #[command(about = "Extract matching context from a Server log file")]
     Context {
         #[arg(long)]
         path: PathBuf,
@@ -4796,24 +4858,29 @@ pub(crate) enum ServerLogsCommand {
         #[arg(long, default_value_t = 25)]
         after: usize,
     },
+    #[command(about = "Parse a Gallery log CSV export")]
     ParseCsv {
         #[arg(long)]
         path: PathBuf,
     },
+    #[command(about = "Parse Service log events from a log file")]
     ServiceEvents {
         #[arg(long)]
         path: PathBuf,
     },
+    #[command(about = "Parse Gallery log events from a log file")]
     GalleryEvents {
         #[arg(long)]
         path: PathBuf,
     },
+    #[command(about = "Read the tail of a Server log file")]
     Tail {
         #[arg(long)]
         path: PathBuf,
         #[arg(long, default_value_t = 100)]
         lines: usize,
     },
+    #[command(about = "List recent Server log candidates")]
     Recent {
         #[arg(long)]
         profile: Option<String>,
@@ -4824,6 +4891,7 @@ pub(crate) enum ServerLogsCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerDiagnoseCommand {
+    #[command(about = "Run a guided startup failure diagnosis.")]
     Startup {
         #[arg(long)]
         profile: Option<String>,
@@ -4832,18 +4900,22 @@ pub(crate) enum ServerDiagnoseCommand {
         #[arg(long)]
         log_file: Option<PathBuf>,
     },
+    #[command(about = "Inspect Server log sources and triage targets")]
     Logs {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Inspect Server network and connectivity checks")]
     Network {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Inspect TLS, certificate, and proxy-related Server checks.")]
     Tls {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Inspect Server runtime settings and Mongo config")]
     RuntimeSettings {
         #[arg(long)]
         profile: Option<String>,
@@ -4852,14 +4924,17 @@ pub(crate) enum ServerDiagnoseCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerAuthCommand {
+    #[command(about = "Summarize Server authentication configuration.")]
     Status {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Inspect Server auth configuration and failure signals")]
     Diagnose {
         #[command(subcommand)]
         command: ServerAuthDiagnoseCommand,
     },
+    #[command(about = "Simulate Server SAML authentication flows")]
     Simulate {
         #[command(subcommand)]
         command: ServerAuthSimulateCommand,
@@ -4868,6 +4943,7 @@ pub(crate) enum ServerAuthCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerAuthDiagnoseCommand {
+    #[command(about = "Inspect SAML configuration, metadata, and callback alignment.")]
     Saml {
         #[arg(long)]
         profile: Option<String>,
@@ -4880,18 +4956,21 @@ pub(crate) enum ServerAuthDiagnoseCommand {
         #[arg(long)]
         issuer: Option<String>,
     },
+    #[command(about = "Collect and summarize SAML login logs.")]
     SamlLogs {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, default_value_t = 7)]
         days: i64,
     },
+    #[command(about = "Inspect certificate posture for SAML auth.")]
     Certificate {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long)]
         certificate_file: Option<PathBuf>,
     },
+    #[command(about = "Inspect legacy Active Directory auth support signals.")]
     AdLegacy {
         #[arg(long)]
         profile: Option<String>,
@@ -4904,6 +4983,7 @@ pub(crate) enum ServerAuthDiagnoseCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerAuthSimulateCommand {
+    #[command(about = "Simulate a SAML auth flow using metadata and expected endpoints.")]
     Saml {
         #[arg(long)]
         profile: Option<String>,
@@ -4926,6 +5006,7 @@ pub(crate) enum ServerAuthSimulateCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerDoctorCommand {
+    #[command(about = "Run a guided startup doctor workflow.")]
     Startup {
         #[arg(long)]
         profile: Option<String>,
@@ -4934,14 +5015,17 @@ pub(crate) enum ServerDoctorCommand {
         #[arg(long)]
         log_file: Option<PathBuf>,
     },
+    #[command(about = "Guide Server log-family triage and next steps")]
     Logs {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Guide Server network troubleshooting checks")]
     Network {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Guide Server runtime settings validation")]
     RuntimeSettings {
         #[arg(long)]
         profile: Option<String>,
@@ -4950,14 +5034,17 @@ pub(crate) enum ServerDoctorCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ServerApiCommand {
+    #[command(about = "Summarize Server API credentials and base URL posture.")]
     Status {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Validate token acquisition and API reachability for Server.")]
     Diagnose {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(about = "Download and cache the Server OpenAPI document.")]
     ImportSwagger {
         #[arg(long)]
         profile: Option<String>,
@@ -4968,6 +5055,7 @@ pub(crate) enum ServerApiCommand {
         #[arg(long, default_value = ".omni/swagger")]
         cache_dir: PathBuf,
     },
+    #[command(about = "Invoke a Server API operation by operationId.")]
     Call {
         #[arg(long)]
         profile: Option<String>,
@@ -4989,6 +5077,7 @@ pub(crate) enum ServerApiCommand {
 #[derive(Subcommand, Debug)]
 #[command(about = "Server upgrade planning, backup, apply simulation, and postcheck helpers")]
 pub(crate) enum UpgradeCommand {
+    #[command(about = "Compute a supported Server upgrade path")]
     Path {
         #[arg(long)]
         from: String,
@@ -4997,6 +5086,7 @@ pub(crate) enum UpgradeCommand {
         #[arg(long, default_value = "embedded-mongo")]
         deployment: String,
     },
+    #[command(about = "Run a Server upgrade precheck")]
     Precheck {
         #[arg(long)]
         profile: Option<String>,
@@ -5007,6 +5097,7 @@ pub(crate) enum UpgradeCommand {
         #[arg(long, default_value = "embedded-mongo")]
         deployment: String,
     },
+    #[command(about = "Run a Server upgrade backup")]
     Backup {
         #[arg(long)]
         profile: Option<String>,
@@ -5015,6 +5106,7 @@ pub(crate) enum UpgradeCommand {
         #[arg(long, default_value = "upgrade-backup")]
         out: PathBuf,
     },
+    #[command(about = "Compute an upgrade path between versions.")]
     Plan {
         #[arg(long)]
         from: String,
@@ -5025,6 +5117,7 @@ pub(crate) enum UpgradeCommand {
         #[arg(long, default_value = "embedded-mongo")]
         deployment: String,
     },
+    #[command(about = "Run or simulate an upgrade manifest")]
     Apply {
         #[arg(long)]
         manifest: PathBuf,
@@ -5033,6 +5126,7 @@ pub(crate) enum UpgradeCommand {
         #[arg(long)]
         yes: bool,
     },
+    #[command(about = "Run a Server upgrade postcheck")]
     Postcheck {
         #[arg(long)]
         profile: Option<String>,
@@ -5041,6 +5135,7 @@ pub(crate) enum UpgradeCommand {
         #[arg(long, default_value = "upgrade-postcheck")]
         out: PathBuf,
     },
+    #[command(about = "Bundle upgrade artifacts into a package")]
     Bundle {
         #[arg(long)]
         input: PathBuf,
