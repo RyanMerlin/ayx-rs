@@ -3060,7 +3060,7 @@ mod tests {
         let legacy_profile = r#"
 profile_name: local-dev
 alteryx_one:
-  account_email: ryan.merlin@alteryx.com
+  account_email: user@example.com
   base_url: https://us1.alteryxcloud.com
   oauth_client_id: client-id
   token_endpoint_url: https://pingauth.alteryxcloud.com/as
@@ -3174,7 +3174,7 @@ sqlserver:
                 .alteryx_one
                 .as_ref()
                 .map(|one| one.account_email.as_str()),
-            Some("ryan.merlin@alteryx.com")
+            Some("user@example.com")
         );
     }
 

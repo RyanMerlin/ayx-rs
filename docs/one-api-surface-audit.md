@@ -1,9 +1,9 @@
-# Alteryx One API Surface Audit — `alteryx-fde`
+# Alteryx One API Surface Audit
 
 **Date:** 2026-06-22  
-**Tested with:** `ayx` v0.9.11 → v0.10.0, PAT via pure-HTTP OTP login, workspace `alteryx-fde` (id=91946, tier=platform_packaging)
+**Tested with:** `ayx` v0.9.11 → v0.10.0, PAT via pure-HTTP OTP login, workspace `example-workspace`
 
-Full test notes in `docs/HANDOFF-pure-http-auth.md`. Per-endpoint status in `docs/one-live-validation.md`.
+Per-endpoint status in `docs/one-live-validation.md`.
 
 > **Status (v0.10.2):** all five phases complete. The security + correctness red-team of the
 > auth flow and surface work is fully closed — the deferred M2/M3 transport items (redirect-host
@@ -30,7 +30,7 @@ These are all in ayx-rs Rust code only. Fast, low-risk.
   `--workspace-id` is now `Option<String>` on `invite-users`, `remove-user`, `suspend-users`, `unsuspend-users`, `transfer`, `transfer-assets`. Defaults to `workspace_gid` from the active profile when not supplied.
 
 - [x] **`ayx one doctor` / dead-route help text** — DONE v0.9.12 (partial)  
-  Billing, plans, and scheduling `None` help arms now include "Note: requires enterprise tier — returns 404 on platform_packaging workspaces." Full runtime 404 detection deferred to Phase 4.
+  Billing, plans, and scheduling `None` help arms now include "Note: requires enterprise tier — returns 404 on some workspace tiers." Full runtime 404 detection deferred to Phase 4.
 
 ---
 
@@ -49,7 +49,7 @@ These require new subcommands or corrected endpoint targets.
   `admins` → `GET /v4/people?role=admin`. Both `/v4/workspaces/{id}/people` and `/v4/workspaces/{id}/admins` are confirmed non-existent routes.
 
 - [x] **`job-groups` — `name=None` on all entries** — DONE v0.9.13  
-  `ayx one job-groups list` now post-processes the response: when `name` is null, synthesizes a display name from `flowRun.flowId` (`flow-{flowId}`) or falls back to `job-{id}`. The API returns no job-groups in the `alteryx-fde` workspace currently so this was implemented based on the known item shape from the prior audit session.
+  `ayx one job-groups list` now post-processes the response: when `name` is null, synthesizes a display name from `flowRun.flowId` (`flow-{flowId}`) or falls back to `job-{id}`. The API returns no job-groups in the `example-workspace` workspace currently so this was implemented based on the known item shape from the prior audit session.
 
 ---
 
@@ -70,12 +70,12 @@ Connection create is broken in practice because the required body schema is undi
 
 ## Phase 4 — Dead Routes (Tier-Gated Surfaces)
 
-All of these return `RouteNotFoundException` on `platform_packaging` tier. Validate against an enterprise workspace before deciding whether these are bugs in ayx-rs endpoint templates or genuinely tier-gated features.
+All of these return `RouteNotFoundException` on the test workspace. Validate against an enterprise workspace before deciding whether these are bugs in ayx-rs endpoint templates or genuinely tier-gated features.
 
 - [ ] **Billing surface — `/billing/v1/`**  
   - `billing current-account` → 404: `/billing/v1/my/billing-accounts/current`  
   - `billing usage-export` → 404: `/billing/v1/usage/export`  
-  Action: confirm if these endpoints exist on enterprise tier. If tier-gated, emit a clean error: "Billing API is not available on this workspace tier (platform_packaging)." If the URL pattern is wrong, fix the endpoint template.
+  Action: confirm if these endpoints exist on enterprise tier. If tier-gated, emit a clean error: "Billing API is not available on this workspace tier." If the URL pattern is wrong, fix the endpoint template.
 
 - [ ] **Plans surface — `/plans/v1/`**  
   - `plans list/count/create/detail/run/...` → all 404: `/plans/v1/plans`  
@@ -89,7 +89,7 @@ All of these return `RouteNotFoundException` on `platform_packaging` tier. Valid
 
 ## Phase 5 — Untested (Needs Fixtures or Real Content)
 
-Probed live against `alteryx-fde` 2026-06-22. Full per-endpoint status in `docs/one-live-validation.md`.
+Probed live against `example-workspace` 2026-06-22. Full per-endpoint status in `docs/one-live-validation.md`.
 
 **Biggest finding — 4 commands panicked (FIXED v0.9.14):** `flows export`, `server system-info`,
 `server runtime-settings`, and `tools workspace init` each defined a local `--output <PathBuf>` arg
@@ -107,7 +107,7 @@ panicked at runtime on every call. All four renamed their file arg to `--output-
 - [~] **`connections update/delete/status`** — need a test connection, which needs valid credentials (see Phase 3 partial).
 - [x] **`connections dry-run`** — `POST /v4/connections/dryRun` returns `AccessControlException` (403) via PAT. Endpoint exists but PAT lacks scope.
 - [~] **`output-objects create` / `write-settings create`** — need a valid flow with output and a writable destination.
-- [x] **`webhook-flow-tasks create/test`** — `/v4/webhookFlowTasks` returns 404. Not present on `platform_packaging` tier. Documented as unavailable.
+- [x] **`webhook-flow-tasks create/test`** — `/v4/webhookFlowTasks` returns 404. Not present on the test workspace tier. Documented as unavailable.
 - [ ] **`platform workspace invite-users --apply`** — would send a real invite; intentionally not exercised.
 - [x] **`platform role list`** — `GET /v4/roles` returns `AccessControlException` (403) via PAT. Scope-gated.
 

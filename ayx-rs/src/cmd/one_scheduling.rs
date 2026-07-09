@@ -11,7 +11,7 @@ pub(crate) fn execute(
     Ok(match command {
         None => Envelope::ok(
             "one scheduling commands available: list, detail, enable, disable, count. \
-             Note: Scheduling API requires an enterprise-tier workspace — returns 404 on platform_packaging workspaces.",
+             Note: Scheduling API requires an enterprise-tier workspace — returns 404 on some workspace tiers.",
         ),
         Some(OneSchedulingCommand::List {
             profile,

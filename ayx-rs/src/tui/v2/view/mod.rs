@@ -45,7 +45,7 @@ mod tests {
         let ctx = Context {
             profile: "wyatt".into(),
             workspace: "w_marketing".into(),
-            user: "ryan@alteryx.com".into(),
+            user: "user@example.com".into(),
         };
         let mut s = AppState::new(ctx);
         s.list.loading = false;
@@ -73,7 +73,7 @@ mod tests {
         let text = rendered_text(&state_with_rows());
         assert!(text.contains("wyatt"));
         assert!(text.contains("w_marketing"));
-        assert!(text.contains("ryan@alteryx.com"));
+        assert!(text.contains("user@example.com"));
     }
 
     #[test]

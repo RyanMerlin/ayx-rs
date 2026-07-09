@@ -97,12 +97,12 @@ mod tests {
     fn row_prefers_id_then_workspace_id() {
         let item = json!({
             "workspaceId": "w_1", "workspaceName": "Marketing",
-            "ownerEmail": "ops@alteryx.com", "status": "active"
+            "ownerEmail": "owner@example.com", "status": "active"
         });
         let row = WorkspaceKind.row(&item);
         assert_eq!(row.id, "w_1");
         assert_eq!(row.cells[0].text, "Marketing");
-        assert_eq!(row.cells[1].text, "ops@alteryx.com");
+        assert_eq!(row.cells[1].text, "owner@example.com");
         assert_eq!(row.cells[2].text, "active");
         assert_eq!(row.cells[2].tone, StatusTone::Ok);
         assert_eq!(row.cells[3].text, "w_1");

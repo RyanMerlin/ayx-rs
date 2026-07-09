@@ -13,7 +13,7 @@ use std::process::{Command, Stdio};
 
 use tempfile::TempDir;
 
-const REAL_GID: &str = "01KMGF85WTTEJZ397MW1RBD9ZB";
+const SAMPLE_GID: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
 /// Run `ayx onboard` with the given stdin script against a specific config home.
 fn run_onboard_in(home: &Path, stdin: &str) -> String {
@@ -50,7 +50,7 @@ fn run_onboard(stdin: &str) -> String {
 fn offers_login_when_workspace_gid_is_present() {
     // profile name (default), email, workspace URL (with gid), no server, no login.
     let script = format!(
-        "\nuser@example.com\nhttps://us1.alteryxcloud.com/auth-portal/workspaces/{REAL_GID}\nn\nn\n"
+        "\nuser@example.com\nhttps://us1.alteryxcloud.com/auth-portal/workspaces/{SAMPLE_GID}\nn\nn\n"
     );
     let out = run_onboard(&script);
     assert!(
@@ -118,7 +118,7 @@ fn onboard_saves_under_profile_name_and_sets_active() {
     let home = tempfile::tempdir().expect("tempdir");
     // profile name "prod", email, workspace URL, no server, decline login.
     let script = format!(
-        "prod\nuser@example.com\nhttps://us1.alteryxcloud.com/auth-portal/workspaces/{REAL_GID}\nn\nn\n"
+        "prod\nuser@example.com\nhttps://us1.alteryxcloud.com/auth-portal/workspaces/{SAMPLE_GID}\nn\nn\n"
     );
     let out = run_onboard_in(home.path(), &script);
 
@@ -155,7 +155,7 @@ fn onboard_saves_under_profile_name_and_sets_active() {
 fn ayx_profile_env_does_not_divert_onboard_or_login_target() {
     let home = tempfile::tempdir().expect("tempdir");
     let script = format!(
-        "prod\nuser@example.com\nhttps://us1.alteryxcloud.com/auth-portal/workspaces/{REAL_GID}\nn\nn\n"
+        "prod\nuser@example.com\nhttps://us1.alteryxcloud.com/auth-portal/workspaces/{SAMPLE_GID}\nn\nn\n"
     );
     let mut child = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .arg("onboard")

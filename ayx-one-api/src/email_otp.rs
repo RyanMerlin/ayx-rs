@@ -210,7 +210,7 @@ where
 
 // ── Pure-HTTP flow helpers ──────────────────────────────────────────────────
 
-/// Resolve the workspace display name (e.g. "alteryx-fde") from its GID by
+/// Resolve the workspace display name (e.g. "example-workspace") from its GID by
 /// querying `/v4/auth/accounts`.  The workspace-entry URL needs the name.
 fn resolve_workspace_name(
     client: &Client,

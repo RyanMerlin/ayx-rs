@@ -7,7 +7,7 @@ sidebar:
 
 Schedules define when job groups run automatically in Alteryx One. You can list, inspect, enable, and disable them from the CLI. Mutating commands are dry-run by default — add `--apply` to commit.
 
-> **Enterprise tier required.** Scheduling endpoints return 404 on `platform_packaging` workspaces. Commands are present in all builds but will only succeed on enterprise-tier accounts.
+> **Enterprise tier required.** Scheduling endpoints return 404 on some workspace tiers. Commands are present in all builds but will only succeed on enterprise-tier accounts.
 
 ## Quick reference
 

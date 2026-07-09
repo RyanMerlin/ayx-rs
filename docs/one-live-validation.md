@@ -74,7 +74,7 @@ The current smoke harness lives in `ayx-rs/tests/one_live_smoke.rs` and already:
 
 ## Known Endpoint Status (as of v0.9.14)
 
-Live-verified against the `alteryx-fde` workspace (tier `platform_packaging`) on 2026-06-22.
+Live-verified against the test workspace on 2026-06-22.
 
 ### Working surfaces (validated_live)
 
@@ -121,9 +121,9 @@ broader OAuth scope at the `POST /v4/apiAccessTokens` mint step would be require
 
 | Endpoint | Command | Notes |
 |---|---|---|
-| `/v4/billing/*` | `billing *` | 404 on platform_packaging tier |
-| `/v4/plans/*` | `plans *` | 404 on platform_packaging tier |
-| `/v4/scheduling/*` | `scheduling *` | 404 on platform_packaging tier |
+| `/v4/billing/*` | `billing *` | 404 on the test workspace tier |
+| `/v4/plans/*` | `plans *` | 404 on the test workspace tier |
+| `/v4/scheduling/*` | `scheduling *` | 404 on the test workspace tier |
 
 ## Fixed panics (v0.9.14)
 

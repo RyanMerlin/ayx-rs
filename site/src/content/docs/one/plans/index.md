@@ -9,7 +9,7 @@ Plans in Alteryx One group flows into a single orchestrated unit that can be run
 
 Mutating commands are dry-run by default — add `--apply` to commit.
 
-> **Enterprise tier required.** Plans endpoints return 404 on `platform_packaging` workspaces. Commands are present in all builds but will only succeed on enterprise-tier accounts.
+> **Enterprise tier required.** Plans endpoints return 404 on some workspace tiers. Commands are present in all builds but will only succeed on enterprise-tier accounts.
 
 ## Quick reference
 

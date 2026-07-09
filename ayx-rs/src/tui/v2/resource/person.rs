@@ -101,11 +101,11 @@ mod tests {
 
     #[test]
     fn row_uses_full_name_and_email() {
-        let item = json!({ "id": "u_1", "fullName": "Ryan Merlin", "email": "ryan@alteryx.com" });
+        let item = json!({ "id": "u_1", "fullName": "Ryan Merlin", "email": "user@example.com" });
         let row = PersonKind.row(&item);
         assert_eq!(row.id, "u_1");
         assert_eq!(row.cells[0].text, "Ryan Merlin");
-        assert_eq!(row.cells[1].text, "ryan@alteryx.com");
+        assert_eq!(row.cells[1].text, "user@example.com");
         assert_eq!(row.cells[2].text, "active");
         assert_eq!(row.cells[2].tone, StatusTone::Neutral);
         assert_eq!(row.cells[3].text, "u_1");
