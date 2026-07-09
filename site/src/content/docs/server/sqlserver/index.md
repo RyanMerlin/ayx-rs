@@ -117,7 +117,7 @@ Both commands also accept `--dry-run` explicitly if you prefer to make the inten
 
 ## JSON output
 
-All commands accept `--output json` as a root flag:
+All commands accept `--output json` as a global flag:
 
 ```sh
 ayx --output json sqlserver status --profile prod

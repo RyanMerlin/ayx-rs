@@ -41,13 +41,13 @@ For non-interactive automation (CI pipelines, scripts), add `--yes` to suppress 
 
 ## JSON output
 
-Pass `--output json` before the subcommand for machine-readable output on stdout:
+Pass `--output json` for machine-readable output on stdout. `--output` is a global flag, so it can appear before or after the subcommand:
 
 ```bash
 ayx --output json one flows list
 ```
 
-The envelope is `{ ok, message, timestamp_utc, data }`. Combine with `--verbose` to get human-readable progress on stderr without polluting stdout.
+The envelope is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`. Combine with `--verbose` to get human-readable progress on stderr without polluting stdout.
 
 ## Targeting a specific environment
 

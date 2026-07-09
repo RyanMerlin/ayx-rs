@@ -86,7 +86,7 @@ The active workspace's token is used for every One command until you switch agai
 ayx --environment prod one flows list
 ```
 
-Like `--output`, `--environment` is a top-level flag, so it goes before the command.
+Like `--output`, `--environment` is a global flag, so it can appear before or after the subcommand.
 
 ## Settings from the environment
 

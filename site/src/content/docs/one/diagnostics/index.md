@@ -94,7 +94,7 @@ ayx --output json one status
 ayx --output json one inventory
 ```
 
-The envelope is `{ ok, message, timestamp_utc, data }`. Pipe to `jq` for scripting:
+The envelope is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`. Pipe to `jq` for scripting:
 
 ```bash
 ayx --output json one doctor auth | jq '.ok'

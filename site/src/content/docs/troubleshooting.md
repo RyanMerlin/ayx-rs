@@ -17,7 +17,7 @@ ayx doctor network  # just connectivity
 
 ## When an Alteryx One command fails
 
-If a One command fails, it's almost always the **token**, not the endpoint — the `/v4` API is reached directly, and an expired or stale bearer token is the usual cause. Refresh your token (or re-run `ayx onboard`), then confirm:
+If a One command fails, it's almost always the **token**, not the endpoint — the `/v4` API is reached directly, and an expired or stale bearer token is the usual cause. Refresh your token with `ayx one platform auth login`, then confirm:
 
 ```bash
 ayx doctor auth
