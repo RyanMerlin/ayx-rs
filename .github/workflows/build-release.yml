@@ -32,13 +32,13 @@ jobs:
         run: cargo fmt --check
         shell: bash
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
         shell: bash
       - name: Run tests
-        run: cargo nextest run --workspace
+        run: cargo nextest run --workspace --locked
         shell: bash
       - name: Build release
-        run: cargo build --release --target x86_64-unknown-linux-gnu
+        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
         shell: bash
       - name: Verify release binary
         shell: bash
@@ -97,13 +97,13 @@ jobs:
         run: cargo fmt --check
         shell: bash
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
         shell: bash
       - name: Run tests
-        run: cargo nextest run --workspace
+        run: cargo nextest run --workspace --locked
         shell: bash
       - name: Build release
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
         shell: bash
       - name: Import macOS signing certificate
         if: env.MACOS_CODESIGN_CERT_P12_B64 != ''
@@ -180,13 +180,13 @@ jobs:
         run: cargo fmt --check
         shell: bash
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
         shell: bash
       - name: Run tests
-        run: cargo nextest run --workspace
+        run: cargo nextest run --workspace --locked
         shell: bash
       - name: Build release
-        run: cargo build --release --target x86_64-pc-windows-msvc
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
         shell: bash
       - name: Verify release binary
         shell: bash
