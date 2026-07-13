@@ -11,6 +11,10 @@ It is designed to operate across the Alteryx surface and enable sophisticated op
 
 > Status: `ayx` ships a stable CLI, a machine-readable command catalog, a first-class live `discover` entry point, and a live One surface inventory. The registry layer is still growing, but `catalog` remains the machine-readable view rather than a replacement for the live tree.
 
+**Created by Ryan Merlin.**
+
+`ayx` is an independent, open-source project.  It is not affiliated with, authorized, maintained, sponsored, or endorsed by Alteryx, Inc.  "Alteryx", "Alteryx One", and "Alteryx Server" are trademarks of Alteryx, Inc.; those names are used here only to describe the systems this tool operates against.
+
 ## Quick start
 
 `RyanMerlin/ayx-rs` is the canonical public home for source, releases, and self-update.
@@ -123,7 +127,7 @@ Use `ayx profile current` to see the active profile, `ayx profile list` to inspe
 `--profile <name>` selects a central profile by name. Use `ayx profile migrate --profile <path>` to import a legacy YAML file into the central store; the TUI and onboarding flows are the only places that intentionally operate on explicit file paths.
 
 `environments.yaml` is the canonical multi-environment file shape. It should contain `workspace_name`, `active_environment`, and an `environments` map of named `Config` entries. Use `--environment <name>` to override the active environment for a single run.
-For promotion-style workflows with multiple Server instances, keep one environment per instance and use `tools workspace resolve`, `compare`, or the migration helpers to make source/target selection explicit.
+For promotion-style workflows with multiple Server instances, keep one environment per instance and use `tools workspace resolve` to make source/target selection explicit. `tools workspace compare` and the cross-environment migration helpers (`migrate-workflows`, `check-dcm-connections`) resolve and summarize both environments today but do not yet compare or migrate anything (preview / not yet implemented).
 
 Minimum expectations:
 - `profile_name`
@@ -160,13 +164,14 @@ Embedded Mongo discovery looks for `RuntimeSettings.xml` in the standard Alteryx
 
 ## Release and install
 
-Release artifacts are built for Linux and macOS from GitHub Actions.
+Release artifacts are built for Linux, macOS, and Windows from GitHub Actions.
 The public release channel is this repository's GitHub Releases page.
 
 Release archives:
 - Linux: `ayx-x86_64-unknown-linux-gnu.tar.gz`
 - macOS Intel: `ayx-x86_64-apple-darwin.tar.gz`
 - macOS Apple Silicon: `ayx-aarch64-apple-darwin.tar.gz`
+- Windows: `ayx-x86_64-pc-windows-msvc.zip`
 
 Install scripts:
 - `scripts/install.ps1`
@@ -258,7 +263,7 @@ Build it locally with:
 ```powershell
 cd site
 npm ci
-npm run build  # or: npm start  (for live reload)
+npm run build  # or: npm run dev  (for live reload)
 ```
 
 On push to `main` the site is automatically deployed to Cloudflare Pages via `.github/workflows/docs-deploy.yml`.
@@ -273,11 +278,11 @@ The repository includes a `docs/fixtures/RuntimeSettings.xml` fixture for offlin
 
 - `profile` — central profile registry and active profile management
 - `one` — Alteryx One platform branch and API surface
-- `tools` — cross-environment tools for `environments.yaml` source/target workflows
+- `tools` — cross-environment tools for `environments.yaml` source/target workflows (`compare` and the migration helpers are preview / not yet implemented)
 - `secret` — keyring secret inspection and maintenance
 - `workflow` — workflow package and XML tooling for `.yxmd`, `.yxmc`, `.yxzp`, and `.yxdb`
 - `server` — Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls
-- `mongo` — embedded and managed Mongo inventory, backup, restore, query, and doctor helpers
+- `mongo` — embedded and managed Mongo inventory, backup, restore, query, and doctor helpers (`mutate` is preview / not yet implemented)
 - `sqlserver` — SQL Server status, prechecks, connection helpers, and migration planning
 - `onboard` — interactive first-run setup for `config.yaml` or `environments.yaml`
 - `tui` — interactive TUI for profile selection, editing, credentials, and connectivity checks

@@ -16,8 +16,15 @@ detect_platform() {
     Linux) os_part="unknown-linux-gnu" ;;
     Darwin) os_part="apple-darwin" ;;
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
-      os_part="pc-windows-msvc"
-      arch="${arch/x86_64/amd64}"
+      # This bash installer only ever builds a `.tar.gz` download URL below,
+      # but the Windows release asset is a `.zip` (see build-release.yml), so
+      # running this under Git Bash/MSYS/Cygwin 404'd. Send Windows users to
+      # the PowerShell installer instead of attempting a download that can't
+      # succeed.
+      echo "Windows detected: this installer (install.sh) only supports Linux and macOS." >&2
+      echo "Use the PowerShell installer instead:" >&2
+      echo "  iwr https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/scripts/install.ps1 | iex" >&2
+      exit 1
       ;;
     *)
       echo "unsupported OS: $os" >&2
@@ -90,7 +97,20 @@ require_cmd() {
 
 require_cmd curl
 require_cmd tar
-require_cmd sha256sum 2>/dev/null || require_cmd shasum
+
+# Pick whichever checksum tool is present. sha256sum ships on Linux; stock
+# macOS has only shasum (no sha256sum), so a bare `require_cmd sha256sum ||
+# require_cmd shasum` is dead code here: require_cmd calls `exit` on a miss,
+# and `exit` tears down the process before `||` gets a chance to try the
+# fallback, so a stock macOS host aborted silently before ever downloading.
+if command -v sha256sum >/dev/null 2>&1; then
+  CHECKSUM_CMD=(sha256sum)
+elif command -v shasum >/dev/null 2>&1; then
+  CHECKSUM_CMD=(shasum -a 256)
+else
+  echo "missing required command: sha256sum or shasum" >&2
+  exit 1
+fi
 
 if [[ "$VERSION" == "latest" ]]; then
   DOWNLOAD_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/${BINARY_NAME}-${PLATFORM}.tar.gz"
@@ -144,11 +164,7 @@ if [[ "${AYX_SKIP_CHECKSUM:-0}" != "1" ]]; then
       echo "Set AYX_SKIP_CHECKSUM=1 to bypass (not recommended)." >&2
       exit 1
     fi
-    if command -v sha256sum >/dev/null 2>&1; then
-      actual="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
-    else
-      actual="$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')"
-    fi
+    actual="$("${CHECKSUM_CMD[@]}" "$ARCHIVE" | awk '{print $1}')"
     if [[ "$expected" != "$actual" ]]; then
       echo "checksum mismatch: expected $expected got $actual" >&2
       echo "Refusing to install a corrupted or tampered archive." >&2

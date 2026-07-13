@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Added
+
+- **Command help backfill across the stable surface** (`#103`): every stable-family command (`server`, `sqlserver`, `mongo`, `doctor`, `tools`, `license`, ...) now carries a one-line `about`, so `--help` no longer renders blank description columns. The `one` subtree is excluded, reserved for its in-flight primitive-first redesign.
+- **Affiliation and trademark disclaimer**: the README, a new `NOTICE` file, and the docs site footer now state that `ayx` is an independent, open-source project — not affiliated with, authorized, maintained, sponsored, or endorsed by Alteryx, Inc. — and attribute the project to Ryan Merlin. The `LICENSE` copyright placeholder is filled in (`Copyright 2026 Ryan Merlin`).
+
+### Changed
+
+- **Alteryx-blue help, human-readable doctor, top-level command reorder** (`#95`): clap help/usage/errors are colorized with the Alteryx palette; `ayx doctor` renders a glyph/color status table instead of a raw JSON dump; the top-level `Command` enum is reordered task-first (profile, one, tools, secret, workflow, server, mongo, ...).
+- **CI and release builds now pin `--locked`** on the workspace `cargo build`, `cargo clippy`, and `cargo nextest run` invocations in `ci.yml` and `build-release.yml`. `Cargo.lock` is already committed, so this closes a gap where the dependency resolution used in CI/release could silently drift from what a contributor last verified locally.
+- **README accuracy fixes**: documented the Windows release archive (`ayx-x86_64-pc-windows-msvc.zip`) and Windows as a built target alongside Linux and macOS; corrected the docs-site live-reload command from the nonexistent `npm start` to `npm run dev`; reworded the `tools workspace` promotion-workflow guidance so it no longer points users at the `compare`/migration-helper scaffolds as if they were implemented, and annotated `tools` (`compare`, migration helpers) and `mongo` (`mutate`) as preview / not yet implemented in the top-level command list.
+- **`docs/cli-spec.md`**: dropped the stale `(v0.11.0)` version stamp from the title so the published spec doesn't read as version-locked.
+
+### Fixed
+
+- **Error-contract and OTP-prompt DX fixes** (`#100`): CLI errors now exit non-zero via `process::exit` instead of returning `Err` from `main` (previously appended a bare non-JSON `Error: ...` line that broke `--output json` parsing and triple-printed in text mode); "is required" validation errors are classified as `Validation` instead of `Internal`; `--output` is constrained to `text`/`json`/`yaml`/`table` via a clap value parser; the OTP login prompt now prints and flushes before reading stdin instead of leaving a frozen cursor.
+- **`scripts/install.sh` checksum-tool selection**: `require_cmd sha256sum 2>/dev/null || require_cmd shasum` was dead code — `require_cmd` calls `exit` on a miss, so the `||` fallback never got a chance to run — and a stock macOS host (which has only `shasum`, not `sha256sum`) aborted silently before ever downloading. The installer now picks whichever tool is present once, up front, and reuses that choice for the checksum comparison.
+- **`scripts/install.sh` Windows branch**: the download URL was hard-coded to `.tar.gz`, but the only Windows release asset is a `.zip`, so running the bash installer under Git Bash/MSYS/Cygwin 404'd. Windows now gets a clear message pointing at the PowerShell installer (`scripts/install.ps1`) instead of attempting a download that can't succeed.
+
+### Docs
+
+- Roadmap, hygiene, and pruning passes (`#96`, `#97`, `#98`, `#99`, `#101`, `#102`): reconciled the active roadmap against the shipped v0.12.2 surface, scrubbed a leaked internal vault-path reference and personal/internal identifiers (emails, workspace GIDs, tier names) from source, tests, docs, and the site, removed the dead Docusaurus `docs-site/` and stale internal planning docs, and fixed command-tree drift plus envelope-contract contradictions across the README, `cli-spec`, and site docs.
+
+### Dependencies
+
+- Bump `taiki-e/install-action` 2.82.9 → 2.83.2 (`#104`), `regex` 1.12.4 → 1.13.0 (`#106`), `apple-native-keyring-store` 1.0.0 → 1.0.1 and `getrandom` 0.4.2 → 0.4.3 (`#105`).
+
 ## 0.12.2 — 2026-07-07
 
 ### Fixed
