@@ -562,7 +562,10 @@ fn ui_help_is_absent_without_feature() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     // clap renders the bin name from argv[0]'s file name — `ayx.exe` on Windows,
     // `ayx` elsewhere — so match the platform-invariant tail of the usage line.
-    assert!(stderr.contains("one [OPTIONS] [COMMAND]"));
+    // `one`'s subcommand is now required (arg_required_else_help + non-Option
+    // command field, so bare `ayx one` shows real clap help instead of a
+    // hand-rolled string) -- usage renders `<COMMAND>`, not `[COMMAND]`.
+    assert!(stderr.contains("one [OPTIONS] <COMMAND>"));
     assert!(
         stderr.contains("unexpected argument 'ui' found")
             || stderr.contains("unrecognized subcommand 'ui'")

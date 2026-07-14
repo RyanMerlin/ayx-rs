@@ -6,19 +6,16 @@ use crate::{OneWriteSettingCommand, cmd::RuntimeCtx, load_payload};
 
 pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
-    command: Option<OneWriteSettingCommand>,
+    command: OneWriteSettingCommand,
 ) -> Result<Envelope> {
     Ok(match command {
-        None => Envelope::ok(
-            "one write-setting commands available: list, count, create, detail, update, delete",
-        ),
-        Some(OneWriteSettingCommand::List {
+        OneWriteSettingCommand::List {
             profile,
             limit,
             page_token,
             all,
             max_pages,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let params = ayx_one_api::OneListParams::new()
                 .with_limit(limit)
@@ -33,7 +30,7 @@ pub(crate) fn execute(
                 &params,
             )?
         }
-        Some(OneWriteSettingCommand::Count { profile }) => {
+        OneWriteSettingCommand::Count { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -45,7 +42,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneWriteSettingCommand::Create { profile, body }) => {
+        OneWriteSettingCommand::Create { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -59,7 +56,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneWriteSettingCommand::Detail { profile, id }) => {
+        OneWriteSettingCommand::Detail { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -71,7 +68,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneWriteSettingCommand::Update { profile, id, body }) => {
+        OneWriteSettingCommand::Update { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -85,7 +82,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneWriteSettingCommand::Delete { profile, id }) => {
+        OneWriteSettingCommand::Delete { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,

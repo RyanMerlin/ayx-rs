@@ -4,10 +4,9 @@ use serde_json::json;
 
 use crate::{UiJobsCommand, ui_command_envelope};
 
-pub(crate) fn execute(command: Option<UiJobsCommand>) -> Result<Envelope> {
+pub(crate) fn execute(command: UiJobsCommand) -> Result<Envelope> {
     Ok(match command {
-        None => Envelope::ok("one ui jobs commands available: inventory (experimental)"),
-        Some(UiJobsCommand::Inventory) => Envelope::ok_with_data(
+        UiJobsCommand::Inventory => Envelope::ok_with_data(
             "one ui jobs inventory scaffolded",
             ui_command_envelope("jobs", "inventory", json!({})),
         ),

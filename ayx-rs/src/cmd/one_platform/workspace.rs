@@ -49,19 +49,16 @@ pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
     apply: bool,
     yes: bool,
-    command: Option<OneWorkspaceCommand>,
+    command: OneWorkspaceCommand,
 ) -> Result<Envelope> {
     Ok(match command {
-        None => Envelope::ok(
-            "one workspace commands available: list, current, current-configuration, configuration-v4, save-current-configuration, save-configuration-v4, configuration, configuration-schema, current-configuration-schema, delete-current-configuration, delete-configuration, people, admins, switch, invite-users, remove-user, suspend-users, unsuspend-users, transfer, transfer-assets",
-        ),
-        Some(OneWorkspaceCommand::List {
+        OneWorkspaceCommand::List {
             profile,
             limit,
             page_token,
             all,
             max_pages,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let params = ayx_one_api::OneListParams::new()
                 .with_limit(limit)
@@ -76,7 +73,7 @@ pub(crate) fn execute(
                 &params,
             )?
         }
-        Some(OneWorkspaceCommand::ConfigurationV4 { id }) => {
+        OneWorkspaceCommand::ConfigurationV4 { id } => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
@@ -88,7 +85,7 @@ pub(crate) fn execute(
                 &[("id", &id)],
             )?
         }
-        Some(OneWorkspaceCommand::CurrentConfiguration) => {
+        OneWorkspaceCommand::CurrentConfiguration => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
@@ -100,7 +97,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneWorkspaceCommand::SaveCurrentConfiguration { profile, body }) => {
+        OneWorkspaceCommand::SaveCurrentConfiguration { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -114,7 +111,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneWorkspaceCommand::SaveConfigurationV4 { profile, id, body }) => {
+        OneWorkspaceCommand::SaveConfigurationV4 { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -128,7 +125,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneWorkspaceCommand::Current) => {
+        OneWorkspaceCommand::Current => {
             if ayx_one_api::debug_trace() {
                 eprintln!("[one-debug] workspace current: loading profile");
             }
@@ -146,7 +143,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneWorkspaceCommand::ConfigurationSchema { id }) => {
+        OneWorkspaceCommand::ConfigurationSchema { id } => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
@@ -158,7 +155,7 @@ pub(crate) fn execute(
                 &[("id", &id)],
             )?
         }
-        Some(OneWorkspaceCommand::CurrentConfigurationSchema) => {
+        OneWorkspaceCommand::CurrentConfigurationSchema => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
@@ -170,7 +167,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneWorkspaceCommand::DeleteCurrentConfiguration { profile }) => {
+        OneWorkspaceCommand::DeleteCurrentConfiguration { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -182,7 +179,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneWorkspaceCommand::DeleteConfiguration { id }) => {
+        OneWorkspaceCommand::DeleteConfiguration { id } => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
@@ -194,7 +191,7 @@ pub(crate) fn execute(
                 &[("id", &id)],
             )?
         }
-        Some(OneWorkspaceCommand::Configuration { id }) => {
+        OneWorkspaceCommand::Configuration { id } => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
@@ -206,7 +203,7 @@ pub(crate) fn execute(
                 &[("id", &id)],
             )?
         }
-        Some(OneWorkspaceCommand::People) => {
+        OneWorkspaceCommand::People => {
             let config = runtime.load_profile_lenient(None)?;
             // The workspace context is conveyed via the x-alteryx-workspace-gid
             // header (set by the transport layer); /v4/people is the correct
@@ -221,7 +218,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneWorkspaceCommand::Admins) => {
+        OneWorkspaceCommand::Admins => {
             let config = runtime.load_profile_lenient(None)?;
             // Same: workspace context via header; filter admins with role query
             // param. /v4/workspaces/{id}/admins returns 404.
@@ -235,7 +232,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneWorkspaceCommand::Switch { profile, id }) => {
+        OneWorkspaceCommand::Switch { profile, id } => {
             let mut config = runtime.load_profile_lenient(profile.as_deref())?;
             let one = config
                 .alteryx_one
@@ -283,7 +280,7 @@ pub(crate) fn execute(
                 }),
             )
         }
-        Some(OneWorkspaceCommand::InviteUsers { workspace_id }) => {
+        OneWorkspaceCommand::InviteUsers { workspace_id } => {
             let config = runtime.load_profile_lenient(None)?;
             let ws_id = resolve_workspace_id(workspace_id, &config)?;
             one_api_live_request(
@@ -296,7 +293,7 @@ pub(crate) fn execute(
                 &[("id", &ws_id)],
             )?
         }
-        Some(OneWorkspaceCommand::RemoveUser { workspace_id, id }) => {
+        OneWorkspaceCommand::RemoveUser { workspace_id, id } => {
             let config = runtime.load_profile_lenient(None)?;
             let ws_id = resolve_workspace_id(workspace_id, &config)?;
             if apply {
@@ -319,7 +316,7 @@ pub(crate) fn execute(
                 &[("workspaceId", &ws_id), ("id", &id)],
             )?
         }
-        Some(OneWorkspaceCommand::SuspendUsers { workspace_id }) => {
+        OneWorkspaceCommand::SuspendUsers { workspace_id } => {
             let config = runtime.load_profile_lenient(None)?;
             let ws_id = resolve_workspace_id(workspace_id, &config)?;
             if apply {
@@ -342,7 +339,7 @@ pub(crate) fn execute(
                 &[("id", &ws_id)],
             )?
         }
-        Some(OneWorkspaceCommand::UnsuspendUsers { workspace_id }) => {
+        OneWorkspaceCommand::UnsuspendUsers { workspace_id } => {
             let config = runtime.load_profile_lenient(None)?;
             let ws_id = resolve_workspace_id(workspace_id, &config)?;
             if apply {
@@ -365,7 +362,7 @@ pub(crate) fn execute(
                 &[("id", &ws_id)],
             )?
         }
-        Some(OneWorkspaceCommand::Transfer { workspace_id }) => {
+        OneWorkspaceCommand::Transfer { workspace_id } => {
             let config = runtime.load_profile_lenient(None)?;
             let ws_id = resolve_workspace_id(workspace_id, &config)?;
             if apply {
@@ -388,7 +385,7 @@ pub(crate) fn execute(
                 &[("id", &ws_id)],
             )?
         }
-        Some(OneWorkspaceCommand::TransferAssets { profile, body }) => {
+        OneWorkspaceCommand::TransferAssets { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(

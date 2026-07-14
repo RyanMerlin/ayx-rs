@@ -22,7 +22,7 @@ use serde_json::json;
 
 use crate::WorkflowCommand;
 
-pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> Result<Envelope> {
+pub fn execute(environment: Option<&str>, command: WorkflowCommand) -> Result<Envelope> {
     let runtime = crate::cmd::RuntimeCtx::new(environment);
     macro_rules! load_profile {
         ($profile:expr) => {
@@ -30,17 +30,14 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
         };
     }
     match command {
-        None => Ok(Envelope::ok(
-            "workflow commands available: inspect, unpack, validate, replace, repackage, recurse, scan, convert-cloud, publish, migrate, yxdb",
-        )),
-        Some(WorkflowCommand::Inspect { input }) => {
+        WorkflowCommand::Inspect { input } => {
             let detail = inspect_workflow(&input)?;
             Ok(Envelope::ok_with_data(
                 "workflow inspection completed",
                 json!({ "input": input.display().to_string(), "data": detail }),
             ))
         }
-        Some(WorkflowCommand::Unpack { input, output_dir }) => {
+        WorkflowCommand::Unpack { input, output_dir } => {
             let detail = unpack_workflow(&input, &output_dir)?;
             Ok(Envelope::ok_with_data(
                 "workflow package unpacked",
@@ -51,20 +48,20 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
                 }),
             ))
         }
-        Some(WorkflowCommand::Validate { input }) => {
+        WorkflowCommand::Validate { input } => {
             let detail = validate_workflow(&input)?;
             Ok(Envelope::ok_with_data(
                 "workflow validation completed",
                 json!({ "input": input.display().to_string(), "data": detail }),
             ))
         }
-        Some(WorkflowCommand::Replace {
+        WorkflowCommand::Replace {
             input,
             output_path,
             find,
             replace,
             validate,
-        }) => {
+        } => {
             let detail = replace_workflow(
                 &input,
                 &output_path,
@@ -80,10 +77,10 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
                 }),
             ))
         }
-        Some(WorkflowCommand::Repackage {
+        WorkflowCommand::Repackage {
             input_dir,
             output_path,
-        }) => {
+        } => {
             let detail = repackage_workflow(&input_dir, &output_path)?;
             Ok(Envelope::ok_with_data(
                 "workflow package rebuilt",
@@ -94,14 +91,14 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
                 }),
             ))
         }
-        Some(WorkflowCommand::Recurse {
+        WorkflowCommand::Recurse {
             input,
             output_path,
             rules,
             find,
             replace,
             validate,
-        }) => {
+        } => {
             let replacements = build_replacements(rules.as_ref(), find, replace, "recurse")?;
             let detail = recurse_workflow(&input, &output_path, &replacements, validate)?;
             Ok(Envelope::ok_with_data(
@@ -113,13 +110,13 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
                 }),
             ))
         }
-        Some(WorkflowCommand::Migrate {
+        WorkflowCommand::Migrate {
             input,
             output_path,
             find,
             replace,
             validate,
-        }) => {
+        } => {
             let detail = migrate_workflow(
                 &input,
                 &output_path,
@@ -135,7 +132,7 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
                 }),
             ))
         }
-        Some(WorkflowCommand::Yxdb { input, csv }) => {
+        WorkflowCommand::Yxdb { input, csv } => {
             let detail = read_yxdb_workflow(&input, csv.as_deref())?;
             Ok(Envelope::ok_with_data(
                 "workflow yxdb read completed",
@@ -146,12 +143,12 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
                 }),
             ))
         }
-        Some(WorkflowCommand::Scan {
+        WorkflowCommand::Scan {
             input,
             rules,
             find,
             replace,
-        }) => {
+        } => {
             let replacements = build_replacements(rules.as_ref(), find, replace, "scan")?;
             let detail = scan_workflow(&input, &replacements)?;
             Ok(Envelope::ok_with_data(
@@ -159,11 +156,11 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
                 json!({ "input": input.display().to_string(), "data": detail }),
             ))
         }
-        Some(WorkflowCommand::ConvertCloud {
+        WorkflowCommand::ConvertCloud {
             input,
             output_path,
             fail_on_unsupported,
-        }) => {
+        } => {
             let report = convert_desktop_to_cloud(
                 &input,
                 CloudConversionOptions {
@@ -190,7 +187,7 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
             ))
         }
         #[allow(clippy::too_many_arguments)]
-        Some(WorkflowCommand::Publish {
+        WorkflowCommand::Publish {
             profile,
             input,
             workflow_id,
@@ -205,7 +202,7 @@ pub fn execute(environment: Option<&str>, command: Option<WorkflowCommand>) -> R
             workflow_credential_type,
             credential_id,
             bypass_workflow_version_check,
-        }) => {
+        } => {
             let config = load_profile!(profile.as_deref())?;
             // Accept either a pre-built .yxzp or a directory we'll zip in a
             // tempfile. The temp filename includes pid + nanos so concurrent

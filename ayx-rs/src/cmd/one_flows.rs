@@ -29,19 +29,16 @@ pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
     apply: bool,
     yes: bool,
-    command: Option<OneFlowsCommand>,
+    command: OneFlowsCommand,
 ) -> Result<Envelope> {
     Ok(match command {
-        None => Envelope::ok(
-            "one flows commands available: list, count, library, folders, detail, create, update, delete, copy, run, validate, parameters, inputs, outputs, permissions-get, permissions, move, replace-dataset, import, import-dry-run, export, export-dry-run",
-        ),
-        Some(OneFlowsCommand::List {
+        OneFlowsCommand::List {
             profile,
             limit,
             page_token,
             all,
             max_pages,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let params = ayx_one_api::OneListParams::new()
                 .with_limit(limit)
@@ -49,7 +46,7 @@ pub(crate) fn execute(
                 .with_all(all, max_pages);
             ayx_one_api::one_api_list_request(&config, "flow", "list", "/v4/flows", &[], &params)?
         }
-        Some(OneFlowsCommand::Count { profile }) => {
+        OneFlowsCommand::Count { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -61,13 +58,12 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneFlowsCommand::Library { command }) => match command {
-            None => Envelope::ok("one flows library commands available: list, count"),
-            Some(OneFlowLibraryCommand::List {
+        OneFlowsCommand::Library { command } => match command {
+            OneFlowLibraryCommand::List {
                 profile,
                 limit,
                 offset,
-            }) => {
+            } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 let mut query = Vec::new();
                 if let Some(limit) = limit {
@@ -87,7 +83,7 @@ pub(crate) fn execute(
                     &[],
                 )?
             }
-            Some(OneFlowLibraryCommand::Count { profile }) => {
+            OneFlowLibraryCommand::Count { profile } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 one_api_live_request(
                     &config,
@@ -100,15 +96,12 @@ pub(crate) fn execute(
                 )?
             }
         },
-        Some(OneFlowsCommand::Folders { command }) => match command {
-            None => Envelope::ok(
-                "one flows folders commands available: list, count, detail, create, update, delete, flows",
-            ),
-            Some(OneFlowFoldersCommand::List {
+        OneFlowsCommand::Folders { command } => match command {
+            OneFlowFoldersCommand::List {
                 profile,
                 limit,
                 offset,
-            }) => {
+            } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 let mut query = Vec::new();
                 if let Some(limit) = limit {
@@ -128,7 +121,7 @@ pub(crate) fn execute(
                     &[],
                 )?
             }
-            Some(OneFlowFoldersCommand::Count { profile }) => {
+            OneFlowFoldersCommand::Count { profile } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 one_api_live_request(
                     &config,
@@ -140,7 +133,7 @@ pub(crate) fn execute(
                     &[],
                 )?
             }
-            Some(OneFlowFoldersCommand::Detail { profile, id }) => {
+            OneFlowFoldersCommand::Detail { profile, id } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 one_api_live_request(
                     &config,
@@ -152,7 +145,7 @@ pub(crate) fn execute(
                     &[("id", id.as_str())],
                 )?
             }
-            Some(OneFlowFoldersCommand::Create { profile, body }) => {
+            OneFlowFoldersCommand::Create { profile, body } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 let payload = load_payload(&body)?;
                 one_api_live_request_with_body(
@@ -166,7 +159,7 @@ pub(crate) fn execute(
                     Some(payload),
                 )?
             }
-            Some(OneFlowFoldersCommand::Update { profile, id, body }) => {
+            OneFlowFoldersCommand::Update { profile, id, body } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 let payload = load_payload(&body)?;
                 one_api_live_request_with_body(
@@ -180,7 +173,7 @@ pub(crate) fn execute(
                     Some(payload),
                 )?
             }
-            Some(OneFlowFoldersCommand::Delete { profile, id }) => {
+            OneFlowFoldersCommand::Delete { profile, id } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 if apply {
                     cmd::confirm::require_tty_confirmation(
@@ -202,14 +195,13 @@ pub(crate) fn execute(
                     &[("id", id.as_str())],
                 )?
             }
-            Some(OneFlowFoldersCommand::Flows { command }) => match command {
-                None => Envelope::ok("one flows folders flows commands available: list, count"),
-                Some(OneFlowFolderFlowsCommand::List {
+            OneFlowFoldersCommand::Flows { command } => match command {
+                OneFlowFolderFlowsCommand::List {
                     profile,
                     id,
                     limit,
                     offset,
-                }) => {
+                } => {
                     let config = runtime.load_profile_lenient(profile.as_deref())?;
                     let mut query = Vec::new();
                     if let Some(limit) = limit {
@@ -229,7 +221,7 @@ pub(crate) fn execute(
                         &[("id", id.as_str())],
                     )?
                 }
-                Some(OneFlowFolderFlowsCommand::Count { profile, id }) => {
+                OneFlowFolderFlowsCommand::Count { profile, id } => {
                     let config = runtime.load_profile_lenient(profile.as_deref())?;
                     one_api_live_request(
                         &config,
@@ -243,7 +235,7 @@ pub(crate) fn execute(
                 }
             },
         },
-        Some(OneFlowsCommand::Create { profile, body }) => {
+        OneFlowsCommand::Create { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -257,7 +249,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneFlowsCommand::Detail { profile, id }) => {
+        OneFlowsCommand::Detail { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -269,7 +261,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneFlowsCommand::Update { profile, id, body }) => {
+        OneFlowsCommand::Update { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -283,7 +275,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneFlowsCommand::Delete { profile, id }) => {
+        OneFlowsCommand::Delete { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
@@ -305,7 +297,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneFlowsCommand::Copy { profile, id, body }) => {
+        OneFlowsCommand::Copy { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = body.map(|path| load_payload(&path)).transpose()?;
             match payload {
@@ -330,7 +322,7 @@ pub(crate) fn execute(
                 )?,
             }
         }
-        Some(OneFlowsCommand::Run { profile, id, body }) => {
+        OneFlowsCommand::Run { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = body.map(|path| load_payload(&path)).transpose()?;
             match payload {
@@ -355,7 +347,7 @@ pub(crate) fn execute(
                 )?,
             }
         }
-        Some(OneFlowsCommand::Validate { profile, id }) => {
+        OneFlowsCommand::Validate { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -367,11 +359,11 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneFlowsCommand::Parameters {
+        OneFlowsCommand::Parameters {
             profile,
             id,
             output_object_type,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let endpoint = if let Some(value) = output_object_type.as_deref() {
                 format!(
@@ -383,7 +375,7 @@ pub(crate) fn execute(
             };
             one_api_live_request(&config, "flow", "parameters", "GET", &endpoint, false, &[])?
         }
-        Some(OneFlowsCommand::Inputs { profile, id }) => {
+        OneFlowsCommand::Inputs { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -395,7 +387,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneFlowsCommand::Outputs { profile, id }) => {
+        OneFlowsCommand::Outputs { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -407,7 +399,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneFlowsCommand::PermissionsGet { profile, id }) => {
+        OneFlowsCommand::PermissionsGet { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -419,7 +411,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneFlowsCommand::Permissions { profile, id, body }) => {
+        OneFlowsCommand::Permissions { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -433,7 +425,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneFlowsCommand::Move { profile, id, body }) => {
+        OneFlowsCommand::Move { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -447,7 +439,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneFlowsCommand::ReplaceDataset { profile, id, body }) => {
+        OneFlowsCommand::ReplaceDataset { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -461,13 +453,13 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneFlowsCommand::Import {
+        OneFlowsCommand::Import {
             profile,
             input,
             folder_id,
             from_ui,
             override_js_udfs,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             flow_import_package_envelope(
                 &config,
@@ -478,13 +470,13 @@ pub(crate) fn execute(
                 false,
             )?
         }
-        Some(OneFlowsCommand::ImportDryRun {
+        OneFlowsCommand::ImportDryRun {
             profile,
             input,
             folder_id,
             from_ui,
             override_js_udfs,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             flow_import_package_envelope(
                 &config,
@@ -495,15 +487,15 @@ pub(crate) fn execute(
                 true,
             )?
         }
-        Some(OneFlowsCommand::Export {
+        OneFlowsCommand::Export {
             profile,
             id,
             output_file,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             flow_export_package_envelope(&config, &id, &output_file, false)?
         }
-        Some(OneFlowsCommand::ExportDryRun { profile, id }) => {
+        OneFlowsCommand::ExportDryRun { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             flow_export_package_envelope(&config, &id, Path::new("unused"), true)?
         }

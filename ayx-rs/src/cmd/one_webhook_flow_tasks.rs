@@ -6,13 +6,10 @@ use crate::{OneWebhookFlowTaskCommand, cmd::RuntimeCtx, load_payload};
 
 pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
-    command: Option<OneWebhookFlowTaskCommand>,
+    command: OneWebhookFlowTaskCommand,
 ) -> Result<Envelope> {
     Ok(match command {
-        None => {
-            Envelope::ok("one webhook-flow-task commands available: create, detail, delete, test")
-        }
-        Some(OneWebhookFlowTaskCommand::Create { profile, body }) => {
+        OneWebhookFlowTaskCommand::Create { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -26,7 +23,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneWebhookFlowTaskCommand::Detail { profile, id }) => {
+        OneWebhookFlowTaskCommand::Detail { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -38,7 +35,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneWebhookFlowTaskCommand::Delete { profile, id }) => {
+        OneWebhookFlowTaskCommand::Delete { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -50,7 +47,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneWebhookFlowTaskCommand::Test { profile, body }) => {
+        OneWebhookFlowTaskCommand::Test { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(

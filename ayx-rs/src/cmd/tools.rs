@@ -13,43 +13,40 @@ use crate::{
     tools_workspace_resolve_envelope,
 };
 
-pub fn execute(command: Option<ToolsCommand>) -> Result<Envelope> {
-    let help = "tools workspace commands available: init, resolve, compare, migrate-workflows, check-dcm-connections";
+pub fn execute(command: ToolsCommand) -> Result<Envelope> {
     match command {
-        None => Ok(Envelope::ok(help)),
-        Some(ToolsCommand::Workspace { command }) => match command {
-            None => Ok(Envelope::ok(help)),
-            Some(ToolsWorkspaceCommand::Init {
+        ToolsCommand::Workspace { command } => match command {
+            ToolsWorkspaceCommand::Init {
                 output_file,
                 active_environment,
                 source_environment,
                 target_environment,
-            }) => tools_workspace_init_envelope(
+            } => tools_workspace_init_envelope(
                 &output_file,
                 &active_environment,
                 &source_environment,
                 &target_environment,
             ),
-            Some(ToolsWorkspaceCommand::Resolve {
+            ToolsWorkspaceCommand::Resolve {
                 workspace,
                 source,
                 target,
-            }) => tools_workspace_resolve_envelope(&workspace, &source, &target),
-            Some(ToolsWorkspaceCommand::Compare {
+            } => tools_workspace_resolve_envelope(&workspace, &source, &target),
+            ToolsWorkspaceCommand::Compare {
                 workspace,
                 source,
                 target,
-            }) => tools_workspace_compare_envelope(&workspace, &source, &target),
-            Some(ToolsWorkspaceCommand::MigrateWorkflows {
+            } => tools_workspace_compare_envelope(&workspace, &source, &target),
+            ToolsWorkspaceCommand::MigrateWorkflows {
                 workspace,
                 source,
                 target,
-            }) => tools_workspace_migrate_envelope(&workspace, &source, &target, "workflows"),
-            Some(ToolsWorkspaceCommand::CheckDcmConnections {
+            } => tools_workspace_migrate_envelope(&workspace, &source, &target, "workflows"),
+            ToolsWorkspaceCommand::CheckDcmConnections {
                 workspace,
                 source,
                 target,
-            }) => tools_workspace_migrate_envelope(&workspace, &source, &target, "dcm-connections"),
+            } => tools_workspace_migrate_envelope(&workspace, &source, &target, "dcm-connections"),
         },
     }
 }

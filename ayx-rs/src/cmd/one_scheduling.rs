@@ -4,22 +4,15 @@ use ayx_one_api::one_api_live_request;
 
 use crate::{OneSchedulingCommand, cmd::RuntimeCtx};
 
-pub(crate) fn execute(
-    runtime: &RuntimeCtx<'_>,
-    command: Option<OneSchedulingCommand>,
-) -> Result<Envelope> {
+pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneSchedulingCommand) -> Result<Envelope> {
     Ok(match command {
-        None => Envelope::ok(
-            "one scheduling commands available: list, detail, enable, disable, count. \
-             Note: Scheduling API requires an enterprise-tier workspace — returns 404 on some workspace tiers.",
-        ),
-        Some(OneSchedulingCommand::List {
+        OneSchedulingCommand::List {
             profile,
             limit,
             page_token,
             all,
             max_pages,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let params = ayx_one_api::OneListParams::new()
                 .with_limit(limit)
@@ -34,7 +27,7 @@ pub(crate) fn execute(
                 &params,
             )?
         }
-        Some(OneSchedulingCommand::Detail { profile, id }) => {
+        OneSchedulingCommand::Detail { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -46,7 +39,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneSchedulingCommand::Enable { profile, id }) => {
+        OneSchedulingCommand::Enable { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -58,7 +51,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneSchedulingCommand::Disable { profile, id }) => {
+        OneSchedulingCommand::Disable { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -70,7 +63,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneSchedulingCommand::Count { profile }) => {
+        OneSchedulingCommand::Count { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,

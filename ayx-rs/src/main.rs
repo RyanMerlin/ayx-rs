@@ -281,25 +281,31 @@ enum Command {
         #[command(subcommand)]
         command: ProfileCommand,
     },
-    #[command(about = "Alteryx One command surface")]
+    #[command(about = "Alteryx One command surface", arg_required_else_help = true)]
     One {
         #[command(subcommand)]
-        command: Option<OneCommand>,
+        command: OneCommand,
     },
-    #[command(about = "Cross-environment tools for environments.yaml source/target workflows")]
+    #[command(
+        about = "Cross-environment tools for environments.yaml source/target workflows",
+        arg_required_else_help = true
+    )]
     Tools {
         #[command(subcommand)]
-        command: Option<ToolsCommand>,
+        command: ToolsCommand,
     },
     #[command(about = "Keyring secret inspection and maintenance")]
     Secret {
         #[command(subcommand)]
         command: SecretCommand,
     },
-    #[command(about = "Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb")]
+    #[command(
+        about = "Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb",
+        arg_required_else_help = true
+    )]
     Workflow {
         #[command(subcommand)]
-        command: Option<WorkflowCommand>,
+        command: WorkflowCommand,
     },
     #[command(
         about = "Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls"
@@ -313,10 +319,13 @@ enum Command {
         #[command(subcommand)]
         command: MongoCommand,
     },
-    #[command(about = "SQL Server status, prechecks, connection helpers, and migration planning")]
+    #[command(
+        about = "SQL Server status, prechecks, connection helpers, and migration planning",
+        arg_required_else_help = true
+    )]
     Sqlserver {
         #[command(subcommand)]
-        command: Option<SqlserverCommand>,
+        command: SqlserverCommand,
     },
     #[command(
         about = "Interactive first-run setup for config.yaml or environments.yaml with validation and secret reuse"
@@ -333,7 +342,10 @@ enum Command {
         about = "Interactive TUI for central profile selection, explicit file editing, One credentials, and connectivity checks"
     )]
     Tui,
-    #[command(about = "Machine-readable command registry")]
+    #[command(
+        about = "Machine-readable command registry",
+        arg_required_else_help = true
+    )]
     Catalog {
         #[command(subcommand)]
         command: CatalogCommand,
@@ -357,10 +369,13 @@ enum Command {
         #[command(subcommand)]
         command: WorkflowsCommand,
     },
-    #[command(about = "Licensing portal branch and API surface")]
+    #[command(
+        about = "Licensing portal branch and API surface",
+        arg_required_else_help = true
+    )]
     License {
         #[command(subcommand)]
-        command: Option<LicenseCommand>,
+        command: LicenseCommand,
     },
     #[command(
         about = "Show active profile, account email, workspace, and environment in one shot."
@@ -1022,97 +1037,123 @@ pub(crate) enum WorkflowCommand {
 #[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiCommand {
+    /// Manage the experimental One UI browser session.
+    #[command(arg_required_else_help = true)]
     Session {
         #[command(subcommand)]
-        command: Option<UiSessionCommand>,
+        command: UiSessionCommand,
     },
+    /// Open and inspect workflows in the experimental One UI.
+    #[command(arg_required_else_help = true)]
     Workflow {
         #[command(subcommand)]
-        command: Option<UiWorkflowCommand>,
+        command: UiWorkflowCommand,
     },
+    /// Browse datasets and connections in the experimental One UI.
+    #[command(arg_required_else_help = true)]
     Data {
         #[command(subcommand)]
-        command: Option<UiDataCommand>,
+        command: UiDataCommand,
     },
+    /// Inventory the experimental One UI library page.
+    #[command(arg_required_else_help = true)]
     Library {
         #[command(subcommand)]
-        command: Option<UiLibraryCommand>,
+        command: UiLibraryCommand,
     },
+    /// Inventory the experimental One UI schedules page.
+    #[command(arg_required_else_help = true)]
     Schedules {
         #[command(subcommand)]
-        command: Option<UiSchedulesCommand>,
+        command: UiSchedulesCommand,
     },
+    /// Inventory the experimental One UI jobs page.
+    #[command(arg_required_else_help = true)]
     Jobs {
         #[command(subcommand)]
-        command: Option<UiJobsCommand>,
+        command: UiJobsCommand,
     },
 }
 
 #[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiSessionCommand {
+    /// Report the experimental One visual interface session policy and reuse posture.
     Status,
+    /// Ensure the experimental One UI browser session is warm and ready.
     Ensure,
+    /// Attach to a specific experimental One UI browser tab.
     Attach {
         #[arg(long)]
         tab: Option<String>,
     },
+    /// Inventory the experimental One UI session's open tabs.
     Inventory,
 }
 
 #[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiWorkflowCommand {
+    /// Open a workflow canvas in the experimental One UI.
     Open {
         #[arg(long)]
         workflow_id: Option<String>,
         #[arg(long)]
         foreground: bool,
     },
+    /// Create a new workflow in the experimental One UI.
     Create {
         #[arg(long)]
         name: String,
         #[arg(long)]
         foreground: bool,
     },
+    /// Inventory the experimental workflow page canvas, config pane, and results pane.
     Inventory {
         #[arg(long)]
         workflow_id: Option<String>,
         #[arg(long)]
         foreground: bool,
     },
+    /// Read a tool's configuration pane in the experimental One UI.
     PaneConfig {
         #[arg(long)]
         workflow_id: Option<String>,
         #[arg(long)]
         tool_id: Option<String>,
     },
+    /// Read a tool's results pane in the experimental One UI.
     PaneResults {
         #[arg(long)]
         workflow_id: Option<String>,
         #[arg(long)]
         tool_id: Option<String>,
     },
+    /// List tools on the workflow canvas in the experimental One UI.
     ToolList {
         #[arg(long)]
         workflow_id: Option<String>,
     },
+    /// Select a tool on the workflow canvas in the experimental One UI.
     ToolSelect {
         #[arg(long)]
         workflow_id: Option<String>,
         #[arg(long)]
         tool_id: String,
     },
+    /// Inspect a tool's configuration in the experimental One UI.
     ToolInspect {
         #[arg(long)]
         workflow_id: Option<String>,
         #[arg(long)]
         tool_id: String,
     },
+    /// Read the workflow's tool graph in the experimental One UI.
     GraphGet {
         #[arg(long)]
         workflow_id: Option<String>,
     },
+    /// Write the workflow's tool graph in the experimental One UI.
     GraphPut {
         #[arg(long)]
         workflow_id: Option<String>,
@@ -1124,28 +1165,33 @@ pub(crate) enum UiWorkflowCommand {
 #[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiDataCommand {
+    /// List available One datasets from the visual data page.
     ListDatasets {
         #[arg(long)]
         foreground: bool,
     },
+    /// Inspect a dataset's detail in the experimental One UI.
     DatasetDetail {
         #[arg(long)]
         dataset_id: String,
         #[arg(long)]
         foreground: bool,
     },
+    /// Preview a dataset's rows in the experimental One UI.
     DatasetPreview {
         #[arg(long)]
         dataset_id: String,
         #[arg(long)]
         foreground: bool,
     },
+    /// Upload a dataset file in the experimental One UI.
     Upload {
         #[arg(long)]
         input: PathBuf,
         #[arg(long)]
         foreground: bool,
     },
+    /// List available One connections from the visual data page (experimental).
     ListConnections {
         #[arg(long)]
         foreground: bool,
@@ -1155,27 +1201,33 @@ pub(crate) enum UiDataCommand {
 #[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiLibraryCommand {
+    /// Inventory the experimental One UI library page.
     Inventory,
 }
 
 #[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiSchedulesCommand {
+    /// Inventory the experimental One UI schedules page.
     Inventory,
 }
 
 #[cfg(feature = "ui")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum UiJobsCommand {
+    /// Inventory the experimental One UI jobs page.
     Inventory,
 }
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum ToolsCommand {
-    #[command(about = "Cross-environment workspace scaffolding and comparison")]
+    #[command(
+        about = "Cross-environment workspace scaffolding and comparison",
+        arg_required_else_help = true
+    )]
     Workspace {
         #[command(subcommand)]
-        command: Option<ToolsWorkspaceCommand>,
+        command: ToolsWorkspaceCommand,
     },
 }
 
@@ -1279,108 +1331,190 @@ pub(crate) enum OneCommand {
         #[arg(long)]
         workspace_gid: Option<String>,
     },
+    /// Clear stored Alteryx One credentials from the active profile.
     Logout {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Show the current One user profile.
     Whoami,
+    #[command(
+        about = "Summarize One API token posture for managed IAM",
+        arg_required_else_help = true
+    )]
     Auth {
         #[command(subcommand)]
         command: OneAuthCommand,
     },
+    #[command(
+        about = "Alteryx One workspace inspection and administration",
+        arg_required_else_help = true
+    )]
     Workspace {
         #[command(subcommand)]
         command: OneWorkspaceCommand,
     },
+    #[command(
+        about = "Alteryx One managed-IAM role assignments",
+        arg_required_else_help = true
+    )]
     Role {
         #[command(subcommand)]
         command: OneRoleCommand,
     },
+    // NOTE: Token/Person stay `Option<...>` -- bare `ayx one token` / `ayx one
+    // person` have real default behavior (list), not just a dead help
+    // string, so they're intentionally excluded from the
+    // arg_required_else_help conversion (see cmd/one_platform/token.rs and
+    // cmd/one_platform/person.rs).
+    #[command(about = "Alteryx One API access token management")]
     Token {
         #[command(subcommand)]
         command: Option<OneTokenCommand>,
     },
+    #[command(about = "Alteryx One person (user) management")]
     Person {
         #[command(subcommand)]
         command: Option<OnePersonCommand>,
     },
+    /// Summarize the current One API surface registry.
     Inventory {
         #[arg(long)]
         profile: Option<String>,
     },
     /// Alteryx One API introspection (spec + coverage).
+    #[command(arg_required_else_help = true)]
     Api {
         #[command(subcommand)]
-        command: Option<OneApiCommand>,
+        command: OneApiCommand,
     },
+    #[command(
+        about = "Alteryx One configuration, auth, and product health diagnostics",
+        arg_required_else_help = true
+    )]
     Doctor {
         #[command(subcommand)]
-        command: Option<OneDoctorCommand>,
+        command: OneDoctorCommand,
     },
+    #[command(
+        about = "Alteryx One plans — list, run, share, and manage",
+        long_about = "Alteryx One plans — list, run, share, and manage. Note: the Plans API \
+                      requires an enterprise-tier workspace — returns 404 on some workspace \
+                      tiers.",
+        arg_required_else_help = true
+    )]
     Plans {
         #[command(subcommand)]
-        command: Option<OnePlansCommand>,
+        command: OnePlansCommand,
     },
+    #[command(
+        about = "Alteryx One flows — list, run, import, and export",
+        arg_required_else_help = true
+    )]
     Flows {
         #[command(subcommand)]
-        command: Option<OneFlowsCommand>,
+        command: OneFlowsCommand,
     },
-    #[command(about = "Read datasets from the Alteryx One dataset APIs")]
+    #[command(
+        about = "Read datasets from the Alteryx One dataset APIs",
+        arg_required_else_help = true
+    )]
     Datasets {
         #[command(subcommand)]
-        command: Option<OneDatasetsCommand>,
+        command: OneDatasetsCommand,
     },
+    #[command(
+        about = "Alteryx One connections — list, create, and manage credentials",
+        arg_required_else_help = true
+    )]
     Connections {
         #[command(subcommand)]
-        command: Option<OneConnectionsCommand>,
+        command: OneConnectionsCommand,
     },
+    #[command(
+        about = "Alteryx One job groups — run, publish, and inspect",
+        arg_required_else_help = true
+    )]
     JobGroups {
         #[command(subcommand)]
-        command: Option<OneJobGroupCommand>,
+        command: OneJobGroupCommand,
     },
+    #[command(
+        about = "Alteryx One output objects — list, create, and manage",
+        arg_required_else_help = true
+    )]
     OutputObjects {
         #[command(subcommand)]
-        command: Option<OneOutputObjectCommand>,
+        command: OneOutputObjectCommand,
     },
+    #[command(
+        about = "Alteryx One webhook flow tasks — create, inspect, and test",
+        arg_required_else_help = true
+    )]
     WebhookFlowTasks {
         #[command(subcommand)]
-        command: Option<OneWebhookFlowTaskCommand>,
+        command: OneWebhookFlowTaskCommand,
     },
+    #[command(
+        about = "Alteryx One write settings — list, create, and manage",
+        arg_required_else_help = true
+    )]
     WriteSettings {
         #[command(subcommand)]
-        command: Option<OneWriteSettingCommand>,
+        command: OneWriteSettingCommand,
     },
+    #[command(
+        about = "Alteryx One schedules — list, enable, and disable",
+        long_about = "Alteryx One schedules — list, enable, and disable. Note: the Scheduling \
+                      API requires an enterprise-tier workspace — returns 404 on some workspace \
+                      tiers.",
+        arg_required_else_help = true
+    )]
     Scheduling {
         #[command(subcommand)]
-        command: Option<OneSchedulingCommand>,
+        command: OneSchedulingCommand,
     },
+    #[command(
+        about = "Alteryx One billing account and usage export",
+        long_about = "Alteryx One billing account and usage export. Note: the Billing API \
+                      requires an enterprise-tier workspace — returns 404 on some workspace \
+                      tiers.",
+        arg_required_else_help = true
+    )]
     Billing {
         #[command(subcommand)]
-        command: Option<OneBillingCommand>,
+        command: OneBillingCommand,
     },
     #[cfg(feature = "ui")]
-    #[command(about = "Experimental Alteryx One visual interface surface")]
+    #[command(
+        about = "Experimental Alteryx One visual interface surface",
+        arg_required_else_help = true
+    )]
     Ui {
         #[command(subcommand)]
-        command: Option<UiCommand>,
+        command: UiCommand,
     },
 }
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneTokenCommand {
+    /// List One API access tokens.
     List,
+    /// Create a One API access token from JSON payload.
     Create {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Inspect a One API access token by id.
     Detail {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Delete a One API access token by id.
     Delete {
         #[arg(long)]
         profile: Option<String>,
@@ -1391,6 +1525,7 @@ pub(crate) enum OneTokenCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OnePersonCommand {
+    /// List One people.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -1403,20 +1538,25 @@ pub(crate) enum OnePersonCommand {
         #[arg(long)]
         max_pages: Option<u32>,
     },
+    /// Inspect the current One person record.
     Current,
+    /// Count One people.
     Count,
+    /// Inspect a One person record by id.
     Detail {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Create a One person from JSON payload.
     Create {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Replace a One person record from JSON payload.
     Update {
         #[arg(long)]
         profile: Option<String>,
@@ -1425,6 +1565,7 @@ pub(crate) enum OnePersonCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Patch a One person record from JSON payload.
     Patch {
         #[arg(long)]
         profile: Option<String>,
@@ -1433,18 +1574,21 @@ pub(crate) enum OnePersonCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Delete a One person record.
     Delete {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Update the current One person's password from JSON payload.
     UpdatePassword {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Request a One password reset from JSON payload.
     PasswordResetRequest {
         #[arg(long)]
         profile: Option<String>,
@@ -1455,6 +1599,7 @@ pub(crate) enum OnePersonCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneWorkspaceCommand {
+    /// List accessible One workspaces.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -1467,18 +1612,23 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(long)]
         max_pages: Option<u32>,
     },
+    /// Inspect the current One workspace posture.
     Current,
+    /// Inspect the current One workspace configuration.
     CurrentConfiguration,
+    /// Inspect a One workspace configuration by id.
     ConfigurationV4 {
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Update the current One workspace configuration from JSON payload.
     SaveCurrentConfiguration {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Update a One workspace configuration by id from JSON payload.
     SaveConfigurationV4 {
         #[arg(long)]
         profile: Option<String>,
@@ -1487,24 +1637,31 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Inspect a One workspace configuration by id.
     Configuration {
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Inspect the workspace configuration schema.
     ConfigurationSchema {
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Inspect the current workspace configuration schema.
     CurrentConfigurationSchema,
+    /// Reset the current workspace configuration.
     DeleteCurrentConfiguration {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Reset a workspace configuration by workspace id.
     DeleteConfiguration {
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// List people in the current One workspace.
     People,
+    /// List workspace admins.
     Admins,
     /// Select which authenticated workspace is active for this profile.
     Switch {
@@ -1513,28 +1670,34 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Invite users to a One workspace.
     InviteUsers {
         #[arg(long)]
         workspace_id: Option<String>,
     },
+    /// Remove a user from a One workspace.
     RemoveUser {
         #[arg(long)]
         workspace_id: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Suspend users in a One workspace.
     SuspendUsers {
         #[arg(long)]
         workspace_id: Option<String>,
     },
+    /// Unsuspend users in a One workspace.
     UnsuspendUsers {
         #[arg(long)]
         workspace_id: Option<String>,
     },
+    /// Start a transfer for a One workspace.
     Transfer {
         #[arg(long)]
         workspace_id: Option<String>,
     },
+    /// Transfer assets from the current One workspace from JSON payload.
     TransferAssets {
         #[arg(long)]
         profile: Option<String>,
@@ -1545,16 +1708,19 @@ pub(crate) enum OneWorkspaceCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneRoleCommand {
+    /// Inspect role assignments for One managed IAM.
     ListAssignments {
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Assign a subject to a One managed IAM role.
     Assign {
         #[arg(value_name = "ROLE-ID")]
         role_id: String,
         #[arg(value_name = "SUBJECT-ID")]
         subject_id: String,
     },
+    /// Unassign a subject from a One managed IAM role.
     Unassign {
         #[arg(value_name = "ROLE-ID")]
         role_id: String,
@@ -1565,14 +1731,17 @@ pub(crate) enum OneRoleCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneApiCommand {
+    /// Summarize the Alteryx One API posture.
     Status {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Validate Alteryx One API reachability and auth posture.
     Diagnose {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Fetch the Alteryx One OpenAPI specification.
     OpenApiSpec {
         #[arg(long)]
         profile: Option<String>,
@@ -1592,10 +1761,12 @@ pub(crate) enum OneApiCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneAuthCommand {
+    /// Summarize One API token posture for managed IAM.
     Status {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Validate One API token reachability and workspace scope.
     Diagnose {
         #[arg(long)]
         profile: Option<String>,
@@ -1604,6 +1775,7 @@ pub(crate) enum OneAuthCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OnePlansCommand {
+    /// List One plans.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -1616,52 +1788,61 @@ pub(crate) enum OnePlansCommand {
         #[arg(long)]
         max_pages: Option<u32>,
     },
+    /// Create a One plan.
     Create {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Inspect a One plan.
     Detail {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Inspect a One plan with the full documented payload.
     Full {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Run a One plan.
     Run {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Count One plans.
     Count {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Inspect run parameters for a One plan.
     RunParameters {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// List schedules for a One plan.
     Schedules {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Fetch a One plan package.
     Export {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Update a One plan from JSON payload.
     Update {
         #[arg(long)]
         profile: Option<String>,
@@ -1670,12 +1851,14 @@ pub(crate) enum OnePlansCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Delete a One plan.
     Delete {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Share a One plan from JSON payload.
     Share {
         #[arg(long)]
         profile: Option<String>,
@@ -1684,10 +1867,12 @@ pub(crate) enum OnePlansCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Import a One plan package.
     Import {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// List plan permissions, or delete one when `--subject-id` is provided.
     Permissions {
         #[arg(long)]
         profile: Option<String>,
@@ -1700,6 +1885,7 @@ pub(crate) enum OnePlansCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneFlowsCommand {
+    /// List One flows.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -1720,30 +1906,38 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long)]
         max_pages: Option<u32>,
     },
+    /// Count One flows.
     Count {
         #[arg(long)]
         profile: Option<String>,
     },
+    #[command(arg_required_else_help = true)]
+    /// Browse the One flow library (list, count).
     Library {
         #[command(subcommand)]
-        command: Option<OneFlowLibraryCommand>,
+        command: OneFlowLibraryCommand,
     },
+    #[command(arg_required_else_help = true)]
+    /// Manage One flow folders (list, create, update, delete, nested flows).
     Folders {
         #[command(subcommand)]
-        command: Option<OneFlowFoldersCommand>,
+        command: OneFlowFoldersCommand,
     },
+    /// Create a One flow from JSON payload.
     Create {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Inspect a One flow by id.
     Detail {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Update a One flow from JSON payload.
     Update {
         #[arg(long)]
         profile: Option<String>,
@@ -1752,12 +1946,14 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Delete a One flow.
     Delete {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Copy a One flow using a JSON payload.
     Copy {
         #[arg(long)]
         profile: Option<String>,
@@ -1766,6 +1962,7 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long)]
         body: Option<PathBuf>,
     },
+    /// Run a One flow using a JSON payload.
     Run {
         #[arg(long)]
         profile: Option<String>,
@@ -1774,12 +1971,14 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long)]
         body: Option<PathBuf>,
     },
+    /// Validate a One flow.
     Validate {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Inspect flow-level parameters and overrides.
     Parameters {
         #[arg(long)]
         profile: Option<String>,
@@ -1788,24 +1987,28 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long)]
         output_object_type: Option<String>,
     },
+    /// List inputs for a One flow.
     Inputs {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// List outputs for a One flow.
     Outputs {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// List permissions for a One flow.
     PermissionsGet {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Share a flow from JSON payload.
     Permissions {
         #[arg(long)]
         profile: Option<String>,
@@ -1814,6 +2017,7 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Move a One flow from JSON payload.
     Move {
         #[arg(long)]
         profile: Option<String>,
@@ -1822,6 +2026,7 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Replace a dataset in a One flow from JSON payload.
     ReplaceDataset {
         #[arg(long)]
         profile: Option<String>,
@@ -1830,6 +2035,7 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Import a flow package.
     Import {
         #[arg(long)]
         profile: Option<String>,
@@ -1842,6 +2048,7 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long)]
         override_js_udfs: bool,
     },
+    /// Dry-run import of a flow package.
     ImportDryRun {
         #[arg(long)]
         profile: Option<String>,
@@ -1854,6 +2061,7 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long)]
         override_js_udfs: bool,
     },
+    /// Export a flow package to disk.
     Export {
         #[arg(long)]
         profile: Option<String>,
@@ -1866,6 +2074,7 @@ pub(crate) enum OneFlowsCommand {
         )]
         output_file: PathBuf,
     },
+    /// Dry-run export of a flow package.
     ExportDryRun {
         #[arg(long)]
         profile: Option<String>,
@@ -1891,14 +2100,16 @@ pub(crate) enum OneDatasetsCommand {
         profile: Option<String>,
     },
     /// Read wrangled-dataset resources.
+    #[command(arg_required_else_help = true)]
     Wrangled {
         #[command(subcommand)]
-        command: Option<OneDatasetsWrangledCommand>,
+        command: OneDatasetsWrangledCommand,
     },
     /// Read imported-dataset resources.
+    #[command(arg_required_else_help = true)]
     Imported {
         #[command(subcommand)]
-        command: Option<OneDatasetsImportedCommand>,
+        command: OneDatasetsImportedCommand,
     },
 }
 
@@ -1940,6 +2151,7 @@ pub(crate) enum OneDatasetsImportedCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneFlowLibraryCommand {
+    /// List the One flow library.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -1948,6 +2160,7 @@ pub(crate) enum OneFlowLibraryCommand {
         #[arg(long)]
         offset: Option<u32>,
     },
+    /// Count the One flow library.
     Count {
         #[arg(long)]
         profile: Option<String>,
@@ -1956,6 +2169,7 @@ pub(crate) enum OneFlowLibraryCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneFlowFoldersCommand {
+    /// List flow folders.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -1964,22 +2178,26 @@ pub(crate) enum OneFlowFoldersCommand {
         #[arg(long)]
         offset: Option<u32>,
     },
+    /// Count flow folders.
     Count {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Inspect a flow folder by id.
     Detail {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Create a flow folder from JSON payload.
     Create {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Update a flow folder from JSON payload.
     Update {
         #[arg(long)]
         profile: Option<String>,
@@ -1988,20 +2206,24 @@ pub(crate) enum OneFlowFoldersCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Delete a flow folder.
     Delete {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    #[command(arg_required_else_help = true)]
+    /// List or count flows within a folder.
     Flows {
         #[command(subcommand)]
-        command: Option<OneFlowFolderFlowsCommand>,
+        command: OneFlowFolderFlowsCommand,
     },
 }
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneFlowFolderFlowsCommand {
+    /// List flows in a folder.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -2012,6 +2234,7 @@ pub(crate) enum OneFlowFolderFlowsCommand {
         #[arg(long)]
         offset: Option<u32>,
     },
+    /// Count flows in a folder.
     Count {
         #[arg(long)]
         profile: Option<String>,
@@ -2022,6 +2245,7 @@ pub(crate) enum OneFlowFolderFlowsCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneConnectionsCommand {
+    /// List One connections.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -2034,34 +2258,40 @@ pub(crate) enum OneConnectionsCommand {
         #[arg(long)]
         max_pages: Option<u32>,
     },
+    /// Count One connections.
     Count {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Create a One connection from JSON payload.
     Create {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Dry-run creation of a One connection.
     DryRun {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Inspect a One connection.
     Detail {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Inspect connection status.
     Status {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Update a One connection from JSON payload.
     Update {
         #[arg(long)]
         profile: Option<String>,
@@ -2070,45 +2300,61 @@ pub(crate) enum OneConnectionsCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Delete a One connection.
     Delete {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    #[command(
+        arg_required_else_help = true,
+        long_about = "Inspect connector metadata — defaults, detail, publish info, and \
+                      overrides. Note: connector enumeration (list) is not available via the \
+                      Alteryx One v4 API — use a known connector slug (e.g. 'gsheetsuser', \
+                      'remotefile') with 'detail' to discover the schema."
+    )]
+    /// Inspect connector metadata — defaults, detail, publish info, and overrides.
     ConnectorMetadata {
         #[command(subcommand)]
-        command: Option<OneConnectorMetadataCommand>,
+        command: OneConnectorMetadataCommand,
     },
+    #[command(arg_required_else_help = true)]
+    /// Manage permissions for a One connection.
     Permissions {
         #[command(subcommand)]
-        command: Option<OneConnectionPermissionCommand>,
+        command: OneConnectionPermissionCommand,
     },
 }
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneConnectorMetadataCommand {
+    /// Inspect connector defaults.
     Defaults {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "CONNECTOR")]
         connector: String,
     },
+    /// Inspect connector publish information.
     PublishInfo {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "CONNECTOR")]
         connector: String,
     },
+    /// Inspect current connector metadata.
     Detail {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "CONNECTOR")]
         connector: String,
     },
+    #[command(arg_required_else_help = true)]
+    /// Manage connector metadata overrides.
     Overrides {
         #[command(subcommand)]
-        command: Option<OneConnectorMetadataOverridesCommand>,
+        command: OneConnectorMetadataOverridesCommand,
     },
     /// Fetch connector metadata defaults and emit a fillable JSON template
     /// for use with `connections create --body <file>`.
@@ -2125,6 +2371,7 @@ pub(crate) enum OneConnectorMetadataCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneConnectorMetadataOverridesCommand {
+    /// Create connector metadata overrides from JSON payload.
     Create {
         #[arg(long)]
         profile: Option<String>,
@@ -2133,12 +2380,14 @@ pub(crate) enum OneConnectorMetadataOverridesCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Inspect connector metadata overrides.
     List {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "CONNECTOR")]
         connector: String,
     },
+    /// Delete connector metadata overrides.
     Delete {
         #[arg(long)]
         profile: Option<String>,
@@ -2149,12 +2398,14 @@ pub(crate) enum OneConnectorMetadataOverridesCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneConnectionPermissionCommand {
+    /// List permissions for a One connection.
     List {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Create permissions for a One connection.
     Create {
         #[arg(long)]
         profile: Option<String>,
@@ -2163,6 +2414,7 @@ pub(crate) enum OneConnectionPermissionCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Inspect a One connection permission by subject id.
     Detail {
         #[arg(long)]
         profile: Option<String>,
@@ -2171,6 +2423,7 @@ pub(crate) enum OneConnectionPermissionCommand {
         #[arg(value_name = "SUBJECT-ID")]
         subject_id: String,
     },
+    /// Delete a One connection permission by subject id.
     Delete {
         #[arg(long)]
         profile: Option<String>,
@@ -2183,6 +2436,7 @@ pub(crate) enum OneConnectionPermissionCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneJobGroupCommand {
+    /// List One job groups.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -2195,16 +2449,19 @@ pub(crate) enum OneJobGroupCommand {
         #[arg(long)]
         max_pages: Option<u32>,
     },
+    /// Count One job groups.
     Count {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Run a One job group.
     Run {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Publish job-group results to a target.
     Publish {
         #[arg(long)]
         profile: Option<String>,
@@ -2213,60 +2470,70 @@ pub(crate) enum OneJobGroupCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Inspect a One job group.
     Detail {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Cancel a One job group.
     Cancel {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Inspect a One job group status.
     Status {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// List One job group inputs.
     Inputs {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// List One job group outputs.
     Outputs {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// List jobs for a One job group.
     Jobs {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// List publications for a One job group.
     Publications {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Inspect profile data for a One job group.
     Profile {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Inspect profile results for a One job group.
     ProfileResults {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Inspect PDF results for a One job group.
     PdfResults {
         #[arg(long)]
         profile: Option<String>,
@@ -2277,6 +2544,7 @@ pub(crate) enum OneJobGroupCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneOutputObjectCommand {
+    /// List One output objects.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -2289,22 +2557,26 @@ pub(crate) enum OneOutputObjectCommand {
         #[arg(long)]
         max_pages: Option<u32>,
     },
+    /// Count One output objects.
     Count {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Create a One output object from JSON payload.
     Create {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Inspect a One output object.
     Detail {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Update a One output object from JSON payload.
     Update {
         #[arg(long)]
         profile: Option<String>,
@@ -2313,18 +2585,21 @@ pub(crate) enum OneOutputObjectCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Delete a One output object.
     Delete {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// List inputs for a One output object.
     Inputs {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Generate Python from a One output object.
     WrangleToPython {
         #[arg(long)]
         profile: Option<String>,
@@ -2337,24 +2612,28 @@ pub(crate) enum OneOutputObjectCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneWebhookFlowTaskCommand {
+    /// Create a webhook flow task from JSON payload.
     Create {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Inspect a webhook flow task.
     Detail {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Delete a webhook flow task.
     Delete {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Send a test webhook from JSON payload.
     Test {
         #[arg(long)]
         profile: Option<String>,
@@ -2365,6 +2644,7 @@ pub(crate) enum OneWebhookFlowTaskCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneWriteSettingCommand {
+    /// List One write settings.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -2377,22 +2657,26 @@ pub(crate) enum OneWriteSettingCommand {
         #[arg(long)]
         max_pages: Option<u32>,
     },
+    /// Count One write settings.
     Count {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Create a One write setting from JSON payload.
     Create {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Inspect a One write setting.
     Detail {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Update a One write setting from JSON payload.
     Update {
         #[arg(long)]
         profile: Option<String>,
@@ -2401,6 +2685,7 @@ pub(crate) enum OneWriteSettingCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Delete a One write setting.
     Delete {
         #[arg(long)]
         profile: Option<String>,
@@ -2411,6 +2696,7 @@ pub(crate) enum OneWriteSettingCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneSchedulingCommand {
+    /// List One schedules.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -2423,24 +2709,28 @@ pub(crate) enum OneSchedulingCommand {
         #[arg(long)]
         max_pages: Option<u32>,
     },
+    /// Inspect a One schedule by id.
     Detail {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Enable a One schedule.
     Enable {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Disable a One schedule.
     Disable {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Count One schedules.
     Count {
         #[arg(long)]
         profile: Option<String>,
@@ -2449,10 +2739,12 @@ pub(crate) enum OneSchedulingCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneBillingCommand {
+    /// Inspect the current One billing account.
     CurrentAccount {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Export One billing usage data.
     UsageExport {
         #[arg(long)]
         profile: Option<String>,
@@ -2461,26 +2753,32 @@ pub(crate) enum OneBillingCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneDoctorCommand {
+    /// Run the One auth doctor workflow.
     Auth {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Run the One discovery doctor workflow.
     Discover {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Run the One identity doctor workflow.
     Identity {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Run the One plans doctor workflow.
     Plans {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Run the One scheduling doctor workflow.
     Scheduling {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Run the One billing doctor workflow.
     Billing {
         #[arg(long)]
         profile: Option<String>,
@@ -5330,8 +5628,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
             command,
         )?,
         Command::License { command } => match command {
-            None => Envelope::ok("license commands available: api, status, inventory"),
-            Some(LicenseCommand::Api { command }) => match command {
+            LicenseCommand::Api { command } => match command {
                 LicenseApiCommand::Status { profile } => {
                     let config = load_profile(profile.as_deref())?;
                     api_status_envelope(&config, "license")?
@@ -5341,16 +5638,16 @@ fn execute(cli: Cli) -> Result<Envelope> {
                     api_diagnose_envelope(&config, "license")?
                 }
             },
-            Some(LicenseCommand::Status { profile }) => {
+            LicenseCommand::Status { profile } => {
                 let config = load_profile(profile.as_deref())?;
                 api_status_envelope(&config, "license")?
             }
-            Some(LicenseCommand::Inventory { profile }) => {
+            LicenseCommand::Inventory { profile } => {
                 let config = load_profile(profile.as_deref())?;
                 api_inventory_envelope(&config, "license")?
             }
         },
-        Command::Catalog { command } => cmd::catalog::execute(Some(command))?,
+        Command::Catalog { command } => cmd::catalog::execute(command)?,
         Command::Update {
             repo_owner,
             repo_name,

@@ -4,12 +4,9 @@ use serde_json::json;
 
 use crate::{UiDataCommand, ui_command_envelope};
 
-pub(crate) fn execute(command: Option<UiDataCommand>) -> Result<Envelope> {
+pub(crate) fn execute(command: UiDataCommand) -> Result<Envelope> {
     Ok(match command {
-        None => Envelope::ok(
-            "one ui data commands available: list-datasets, dataset-detail, dataset-preview, upload, list-connections (experimental)",
-        ),
-        Some(UiDataCommand::ListDatasets { foreground }) => Envelope::ok_with_data(
+        UiDataCommand::ListDatasets { foreground } => Envelope::ok_with_data(
             "one ui data list-datasets scaffolded",
             ui_command_envelope(
                 "data",
@@ -20,10 +17,10 @@ pub(crate) fn execute(command: Option<UiDataCommand>) -> Result<Envelope> {
                 }),
             ),
         ),
-        Some(UiDataCommand::DatasetDetail {
+        UiDataCommand::DatasetDetail {
             dataset_id,
             foreground,
-        }) => Envelope::ok_with_data(
+        } => Envelope::ok_with_data(
             "one ui data dataset-detail scaffolded",
             ui_command_envelope(
                 "data",
@@ -31,10 +28,10 @@ pub(crate) fn execute(command: Option<UiDataCommand>) -> Result<Envelope> {
                 json!({ "dataset_id": dataset_id, "foreground": foreground }),
             ),
         ),
-        Some(UiDataCommand::DatasetPreview {
+        UiDataCommand::DatasetPreview {
             dataset_id,
             foreground,
-        }) => Envelope::ok_with_data(
+        } => Envelope::ok_with_data(
             "one ui data dataset-preview scaffolded",
             ui_command_envelope(
                 "data",
@@ -42,7 +39,7 @@ pub(crate) fn execute(command: Option<UiDataCommand>) -> Result<Envelope> {
                 json!({ "dataset_id": dataset_id, "foreground": foreground }),
             ),
         ),
-        Some(UiDataCommand::Upload { input, foreground }) => Envelope::ok_with_data(
+        UiDataCommand::Upload { input, foreground } => Envelope::ok_with_data(
             "one ui data upload scaffolded",
             ui_command_envelope(
                 "data",
@@ -50,7 +47,7 @@ pub(crate) fn execute(command: Option<UiDataCommand>) -> Result<Envelope> {
                 json!({ "input": input.display().to_string(), "foreground": foreground }),
             ),
         ),
-        Some(UiDataCommand::ListConnections { foreground }) => Envelope::ok_with_data(
+        UiDataCommand::ListConnections { foreground } => Envelope::ok_with_data(
             "one ui data list-connections scaffolded",
             ui_command_envelope(
                 "data",

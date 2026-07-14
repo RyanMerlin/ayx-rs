@@ -8,23 +8,17 @@ use crate::{OneApiCommand, cmd::RuntimeCtx};
 
 pub(crate) mod coverage;
 
-pub(crate) fn execute(
-    runtime: &RuntimeCtx<'_>,
-    command: Option<OneApiCommand>,
-) -> Result<Envelope> {
+pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneApiCommand) -> Result<Envelope> {
     Ok(match command {
-        None => {
-            Envelope::ok("one api commands available: status, diagnose, open-api-spec, coverage")
-        }
-        Some(OneApiCommand::Status { profile }) => {
+        OneApiCommand::Status { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             api_status_envelope(&config, "one")?
         }
-        Some(OneApiCommand::Diagnose { profile }) => {
+        OneApiCommand::Diagnose { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             api_diagnose_envelope(&config, "one")?
         }
-        Some(OneApiCommand::OpenApiSpec { profile }) => {
+        OneApiCommand::OpenApiSpec { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -36,10 +30,10 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneApiCommand::Coverage {
+        OneApiCommand::Coverage {
             profile,
             spec,
             check,
-        }) => coverage::execute(runtime, profile, spec, check)?,
+        } => coverage::execute(runtime, profile, spec, check)?,
     })
 }
