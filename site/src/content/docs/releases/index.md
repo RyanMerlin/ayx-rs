@@ -7,6 +7,16 @@ sidebar:
 
 Release notes for each tagged version of `ayx`. For current behavior, use the live docs above; for a specific binary, read the notes for that version.
 
+## v0.12.2
+
+**`ayx update` still failed after v0.12.1 on Linux and macOS.** The `.tar.gz` release archive named every member `./ayx` (from `tar -C "$root" .`), but `self_update` matches archive entries against the exact path `ayx`, so `./ayx != ayx` and self-update failed with `Could not find the required path in the archive: "ayx"`. Archive members are now packaged explicitly so the binary sits at `ayx`. Windows was already fixed by v0.12.1 — its `.zip` stores `ayx.exe` at the root.
+
+## v0.12.1
+
+**`ayx update` failed to extract release archives on every platform.** `self_update` was pulled with default features only, which ship no archive backend, so self-update aborted with `ArchiveNotEnabled` — `Archive extension 'zip' not supported` on Windows, and the equivalent failure for `.tar.gz` on Linux/macOS. Enabled `archive-tar` + `compression-flate2` (for `.tar.gz`) and `archive-zip` + `compression-zip-deflate` (for the Windows `.zip`) to restore both formats. Note: upgrading *into* this fix from an older binary still needs one manual download, since the currently installed binary is the one that can't extract.
+
+Dependency: `ayx-one-api`'s `getrandom` moved from 0.2 to 0.4 (the PKCE-challenge and OAuth-state CSPRNG helpers now use `getrandom::fill`; same OS entropy source, no behavior change).
+
 ## v0.12.0
 
 **New command surfaces and a smoother first run.**

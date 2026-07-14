@@ -30,12 +30,12 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
     },
     EndpointSpec {
         method: "GET",
-        path: "/v4/workspaces/{id}/people",
+        path: "/v4/people",
         command: "one platform workspace people",
     },
     EndpointSpec {
         method: "GET",
-        path: "/v4/workspaces/{workspaceId}/admins",
+        path: "/v4/people?role=admin",
         command: "one platform workspace admins",
     },
     EndpointSpec {
@@ -47,16 +47,6 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
         method: "DELETE",
         path: "/v4/workspaces/{workspaceId}/people/{id}",
         command: "one platform workspace remove-user",
-    },
-    EndpointSpec {
-        method: "PUT",
-        path: "/v4/workspaces/{id}/people/{personId}/suspended",
-        command: "one platform workspace suspend-users",
-    },
-    EndpointSpec {
-        method: "DELETE",
-        path: "/v4/workspaces/{id}/people/{personId}/suspended",
-        command: "one platform workspace unsuspend-users",
     },
     EndpointSpec {
         method: "POST",
@@ -329,7 +319,7 @@ const FLOW_ENDPOINTS: &[EndpointSpec] = &[
         command: "one flows detail",
     },
     EndpointSpec {
-        method: "PUT",
+        method: "PATCH",
         path: "/v4/flows/{id}",
         command: "one flows update",
     },

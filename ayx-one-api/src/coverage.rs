@@ -264,23 +264,50 @@ mod tests {
 
     #[test]
     fn inventory_has_no_duplicate_canonical_keys() {
-        use std::collections::{HashMap, HashSet};
+        use std::collections::{BTreeSet, HashMap};
 
         // Known, intentional command aliases that legitimately share a canonical
-        // (METHOD, path) key. Two distinct CLI commands wire the same live
+        // (METHOD, path) key, keyed to the EXACT set of command names allowed to
+        // share it. Three distinct groups of CLI commands wire the same live
         // endpoint on purpose:
         //   - `one platform user` / `one platform person current` -> GET /v4/people/current
         //   - `one platform workspace configuration` / `...configuration-v4` -> GET /v4/workspaces/{}/configuration
-        // This allowlist exists so the test still catches *new, accidental*
-        // collisions (a real bug) without weakening detection or silently
-        // deduping pre-existing, deliberate aliases. Any duplicate key not in
-        // this list fails the test.
-        let allowlisted_duplicates: HashSet<(&str, &str)> = [
-            ("GET", "/v4/people/current"),
-            ("GET", "/v4/workspaces/{}/configuration"),
-        ]
-        .into_iter()
-        .collect();
+        //   - `one platform person list` / `one platform workspace people` /
+        //     `one platform workspace admins` -> GET /v4/people. All three hit the
+        //     same live endpoint (`/v4/workspaces/{id}/people` and
+        //     `/v4/workspaces/{workspaceId}/admins` both 404; the workspace context
+        //     comes from the `x-alteryx-workspace-gid` header instead). `admins`
+        //     adds `?role=admin`, which `canonical_op` strips along with every
+        //     other query string, so it collapses onto the same canonical key.
+        //
+        // Keying on the exact command set (not just the (method, path) pair)
+        // means this test fails both on a brand-new accidental collision AND on
+        // an allowlisted key silently gaining or losing a member — e.g. a future
+        // 4th command accidentally landing on `GET /v4/people` still trips this,
+        // even though the key itself is already allowlisted.
+        let allowlisted_duplicates: HashMap<(&str, &str), &[&str]> = HashMap::from([
+            (
+                ("GET", "/v4/people/current"),
+                ["one platform user", "one platform person current"].as_slice(),
+            ),
+            (
+                ("GET", "/v4/workspaces/{}/configuration"),
+                [
+                    "one platform workspace configuration",
+                    "one platform workspace configuration-v4",
+                ]
+                .as_slice(),
+            ),
+            (
+                ("GET", "/v4/people"),
+                [
+                    "one platform person list",
+                    "one platform workspace people",
+                    "one platform workspace admins",
+                ]
+                .as_slice(),
+            ),
+        ]);
 
         let mut by_key: HashMap<(String, String), Vec<&'static str>> = HashMap::new();
         for (m, p, c) in inventory_endpoints_full() {
@@ -301,11 +328,21 @@ mod tests {
                 continue;
             }
             let key_ref = (key.0.as_str(), key.1.as_str());
-            assert!(
-                allowlisted_duplicates.contains(&key_ref),
-                "unexpected duplicate canonical inventory key {key:?} -> {commands:?} \
-                 (not in the known-alias allowlist; either fix the wiring or add it \
-                 to `allowlisted_duplicates` with a documented reason)"
+            let Some(expected) = allowlisted_duplicates.get(&key_ref) else {
+                panic!(
+                    "unexpected duplicate canonical inventory key {key:?} -> {commands:?} \
+                     (not in the known-alias allowlist; either fix the wiring or add it \
+                     to `allowlisted_duplicates` with a documented reason)"
+                );
+            };
+            let actual: BTreeSet<&str> = commands.iter().copied().collect();
+            let expected: BTreeSet<&str> = expected.iter().copied().collect();
+            assert_eq!(
+                actual, expected,
+                "canonical inventory key {key:?} command set drifted from the \
+                 allowlist (actual {actual:?} vs allowlisted {expected:?}); update \
+                 `allowlisted_duplicates` if this is an intentional change, \
+                 otherwise fix the wiring"
             );
         }
     }

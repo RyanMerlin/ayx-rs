@@ -25,9 +25,9 @@ Source of this audit: a live-tree run on `main` (`ayx discover one --deep`,
 ## Next Steps
 
 - A few top-level `one` commands still lack a clap `#[command(about=...)]`
-  help line (e.g. `status`, `inventory`, `auto-insights`, `desktop-exec`) even
-  though the registry has summaries. Fold this into the in-flight
-  primitive-first `one` hierarchy rework rather than editing the current tree.
+  help line (e.g. `status`, `inventory`) even though the registry has
+  summaries. Fold this into the in-flight primitive-first `one` hierarchy
+  rework rather than editing the current tree.
 - Dataset coverage is a primitive now but not the full dataset API surface
   (e.g. `POST /v4/importedDatasets` is still uncovered).
 - Add shell-completion freshness automation alongside the existing

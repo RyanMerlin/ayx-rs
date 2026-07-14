@@ -1272,14 +1272,6 @@ pub(crate) enum OneCommand {
         #[command(subcommand)]
         command: Option<UiCommand>,
     },
-    AutoInsights {
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    DesktopExec {
-        #[arg(long)]
-        profile: Option<String>,
-    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -2907,7 +2899,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
         notes: &[
-            "Use this before platform, plans, auto-insights, or desktop-exec workflows.",
+            "Use this before platform or plans workflows.",
             "Managed IAM is wired from the documented One API surface.",
         ],
     },
@@ -3179,8 +3171,10 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace people envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /v4/workspaces/{id}/people in the One API docs."],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
+        notes: &[
+            "Maps to GET /v4/people in the One API docs. Workspace context comes from the x-alteryx-workspace-gid header; /v4/workspaces/{id}/people returns 404.",
+        ],
     },
     CommandSpec {
         name: "one platform workspace admins",
@@ -3189,8 +3183,10 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         output: "one platform workspace admins envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /v4/workspaces/{workspaceId}/admins in the One API docs."],
+        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
+        notes: &[
+            "Maps to GET /v4/people?role=admin in the One API docs. Workspace context comes from the x-alteryx-workspace-gid header; /v4/workspaces/{workspaceId}/admins returns 404.",
+        ],
     },
     CommandSpec {
         name: "one platform workspace switch",
@@ -3784,7 +3780,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "server_api", "payload json"],
-        notes: &["Maps to PUT /v4/flows/{id} in the One API docs."],
+        notes: &["Maps to PATCH /v4/flows/{id} in the One API docs."],
     },
     CommandSpec {
         name: "one flows delete",
@@ -4569,32 +4565,6 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /billing/v1/usage/export in managed-billing-v1.yaml."],
-    },
-    CommandSpec {
-        name: "one auto-insights",
-        path: "one/auto-insights",
-        summary: "Validate Alteryx One Auto Insights reachability and auth posture.",
-        output: "one auto-insights diagnose envelope",
-        safety: "read-only",
-        mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
-        notes: &[
-            "Reserved for Auto Insights workflows.",
-            "Delegates to the shared API diagnostic envelope for this surface.",
-        ],
-    },
-    CommandSpec {
-        name: "one desktop-exec",
-        path: "one/desktop-exec",
-        summary: "Summarize the Alteryx One desktop execution posture.",
-        output: "one desktop-exec envelope",
-        safety: "read-only",
-        mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
-        notes: &[
-            "Reserved for desktop execution workflows.",
-            "Keep this branch narrow until the desktop-exec surface is validated.",
-        ],
     },
     CommandSpec {
         name: "license api status",
