@@ -16,11 +16,11 @@ Mutating commands are dry-run by default. Add `--apply` to commit.
 | `ayx one output-objects list` | List all output objects; supports pagination |
 | `ayx one output-objects count` | Return the total count |
 | `ayx one output-objects create --body <json>` | Create an output object |
-| `ayx one output-objects detail --output-object-id <id>` | Get details for a single output object |
-| `ayx one output-objects update --output-object-id <id> --body <json>` | Update an output object |
-| `ayx one output-objects delete --output-object-id <id>` | Delete an output object |
-| `ayx one output-objects inputs --output-object-id <id>` | List input references for an output object |
-| `ayx one output-objects wrangle-to-python --output-object-id <id>` | Convert an output object to a Python wrangle definition |
+| `ayx one output-objects detail <id>` | Get details for a single output object |
+| `ayx one output-objects update <id> --body <json>` | Update an output object |
+| `ayx one output-objects delete <id>` | Delete an output object |
+| `ayx one output-objects inputs <id>` | List input references for an output object |
+| `ayx one output-objects wrangle-to-python <id>` | Convert an output object to a Python wrangle definition |
 
 ## Listing and counting
 
@@ -43,7 +43,7 @@ ayx one output-objects count
 ## Getting details
 
 ```bash
-ayx one output-objects detail --output-object-id <id>
+ayx one output-objects detail <id>
 ```
 
 Add `--profile <name>` to target a non-default workspace.
@@ -60,17 +60,17 @@ ayx one output-objects create --body '{"name": "my-output", ...}'
 ayx one output-objects create --body '{"name": "my-output", ...}' --apply
 
 # Update an existing object
-ayx one output-objects update --output-object-id <id> --body '{"name": "renamed"}' --apply
+ayx one output-objects update <id> --body '{"name": "renamed"}' --apply
 ```
 
 ## Deleting
 
 ```bash
 # Dry-run
-ayx one output-objects delete --output-object-id <id>
+ayx one output-objects delete <id>
 
 # Commit
-ayx one output-objects delete --output-object-id <id> --apply --yes
+ayx one output-objects delete <id> --apply --yes
 ```
 
 `--yes` skips the TTY confirmation, required in non-interactive scripts.
@@ -80,7 +80,7 @@ ayx one output-objects delete --output-object-id <id> --apply --yes
 List the input references that feed into an output object:
 
 ```bash
-ayx one output-objects inputs --output-object-id <id>
+ayx one output-objects inputs <id>
 ```
 
 ## Converting to Python
@@ -88,10 +88,10 @@ ayx one output-objects inputs --output-object-id <id>
 `wrangle-to-python` generates a Python definition from an output object. Useful for reproducing the output object's logic in a Python tool or external pipeline.
 
 ```bash
-ayx one output-objects wrangle-to-python --output-object-id <id>
+ayx one output-objects wrangle-to-python <id>
 
 # Optionally pass a body for conversion parameters
-ayx one output-objects wrangle-to-python --output-object-id <id> --body '{"options": {}}'
+ayx one output-objects wrangle-to-python <id> --body '{"options": {}}'
 ```
 
 ## JSON output

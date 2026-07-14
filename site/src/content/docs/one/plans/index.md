@@ -55,10 +55,10 @@ ayx one plans count --profile <name>
 
 ```bash
 # Summary record
-ayx one plans detail --plan-id <plan-id>
+ayx one plans detail <plan-id>
 
 # Full record including flows
-ayx one plans full --plan-id <plan-id>
+ayx one plans full <plan-id>
 ```
 
 Use `detail` for fast lookups. Use `full` when you need to inspect which flows are in the plan or their configuration.
@@ -66,7 +66,7 @@ Use `detail` for fast lookups. Use `full` when you need to inspect which flows a
 ### Run parameters
 
 ```bash
-ayx one plans run-parameters --plan-id <plan-id>
+ayx one plans run-parameters <plan-id>
 ```
 
 Lists the parameters that can be passed when triggering a run.
@@ -74,7 +74,7 @@ Lists the parameters that can be passed when triggering a run.
 ### Schedules
 
 ```bash
-ayx one plans schedules --plan-id <plan-id>
+ayx one plans schedules <plan-id>
 ```
 
 Returns the schedules configured for this plan. See [Plan schedules](/one/plans/schedules/) for detail.
@@ -82,8 +82,8 @@ Returns the schedules configured for this plan. See [Plan schedules](/one/plans/
 ### Permissions
 
 ```bash
-ayx one plans permissions --plan-id <plan-id>
-ayx one plans permissions --plan-id <plan-id> --subject-id <subject-id>
+ayx one plans permissions <plan-id>
+ayx one plans permissions <plan-id> --subject-id <subject-id>
 ```
 
 `--subject-id` filters the response to a specific user or group. Omit it to return all permission entries for the plan.
@@ -92,13 +92,13 @@ ayx one plans permissions --plan-id <plan-id> --subject-id <subject-id>
 
 ```bash
 # Dry-run
-ayx one plans run --plan-id <plan-id>
+ayx one plans run <plan-id>
 
 # Trigger an on-demand run
-ayx one plans run --plan-id <plan-id> --apply
+ayx one plans run <plan-id> --apply
 
 # Non-interactive
-ayx one plans run --plan-id <plan-id> --apply --yes
+ayx one plans run <plan-id> --apply --yes
 ```
 
 ## Create and update
@@ -111,7 +111,7 @@ ayx one plans create --body '<json>'
 ayx one plans create --body '<json>' --apply
 
 # Update
-ayx one plans update --plan-id <plan-id> --body '<json>' --apply
+ayx one plans update <plan-id> --body '<json>' --apply
 ```
 
 Both commands require `--body` with the plan definition or patch as a JSON string.
@@ -120,23 +120,23 @@ Both commands require `--body` with the plan definition or patch as a JSON strin
 
 ```bash
 # Preview
-ayx one plans share --plan-id <plan-id> --body '<json>'
+ayx one plans share <plan-id> --body '<json>'
 
 # Commit
-ayx one plans share --plan-id <plan-id> --body '<json>' --apply
+ayx one plans share <plan-id> --body '<json>' --apply
 ```
 
 ## Delete
 
 ```bash
 # Dry-run
-ayx one plans delete --plan-id <plan-id>
+ayx one plans delete <plan-id>
 
 # Commit
-ayx one plans delete --plan-id <plan-id> --apply
+ayx one plans delete <plan-id> --apply
 
 # Non-interactive
-ayx one plans delete --plan-id <plan-id> --apply --yes
+ayx one plans delete <plan-id> --apply --yes
 ```
 
 ## Automation patterns
@@ -158,7 +158,7 @@ ayx --output json one plans list --all \
 ### Run a plan and check success
 
 ```bash
-result=$(ayx --output json one plans run --plan-id <plan-id> --apply)
+result=$(ayx --output json one plans run <plan-id> --apply)
 echo "$result" | jq -e '.ok'
 ```
 

@@ -20,10 +20,10 @@ Mutating commands are dry-run by default — add `--apply` to commit.
 
 ```bash
 # Dry-run — shows export metadata, writes nothing
-ayx one plans export --plan-id <plan-id>
+ayx one plans export <plan-id>
 
 # Commit — write the export
-ayx one plans export --plan-id <plan-id> --apply
+ayx one plans export <plan-id> --apply
 ```
 
 Unlike flow export, `plans export` does not take an `--output` path flag — the server controls the output location or returns the content inline. Use `--output json` to capture the full response including any returned artifact data.
@@ -50,7 +50,7 @@ In this version, `ayx one plans import --help` shows only the standard flags (`-
 
 ```bash
 # 1. Export from dev
-ayx --output json --profile dev one plans export --plan-id <plan-id> --apply \
+ayx --output json --profile dev one plans export <plan-id> --apply \
   > plan-export.json
 
 # 2. Import to prod

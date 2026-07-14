@@ -10,6 +10,7 @@
 ### Changed
 
 - **BREAKING — `ayx one` hierarchy dissolved `platform`, primitive-first tree.** Pre-release, no back-compat aliases. `one platform {workspace,role,person,token}` → `one {workspace,role,person,token}`; `one platform auth login` → `one login` (plus a new `one logout` that clears stored Alteryx One credentials from the active profile); `one platform auth {status,diagnose}` → `one auth {status,diagnose}`. The redundant `one platform user` is dropped in favor of a new `one whoami` (equivalent to `one person current`, `GET /v4/people/current`). `one status` and `one platform status` are removed — they were Alteryx Server `api` views, still available at `ayx server api status` — and `one inventory` is now the Alteryx One command-surface inventory (previously `one platform inventory`). `one doctor platform` → `one doctor identity`, and the deprecated hidden `one platform api` alias is removed (`one api` stays).
+- **BREAKING — `ayx one` resource identifiers are now positional.** Pre-release, no back-compat. Commands that took a required `--<noun>-id` flag now take the id positionally: e.g. `one flows detail <id>`, `one plans run <id>`, `one job-groups status <id>`, `one connections detail <id>`, `one token delete <id>`, `one person update <id>`, `one scheduling enable <id>`. Two-id commands take ordered positionals (`one connections permissions detail <connection-id> <subject-id>`, `one role assign <role-id> <subject-id>`); connector-metadata commands take a positional `<connector>` slug; `one datasets {wrangled,imported} detail <id>` (the old `--wrangled-id`/`--imported-id` are gone); `one flows import <input>`. Optional context selectors stay flags (`--workspace-id`, `one login`'s `--client-id`/`--workspace-id`/`--workspace-gid`, `plans permissions --subject-id`), as do payload/output controls (`--body`, `--output-file`, filters, pagination).
 - **Alteryx-blue help, human-readable doctor, top-level command reorder** (`#95`): clap help/usage/errors are colorized with the Alteryx palette; `ayx doctor` renders a glyph/color status table instead of a raw JSON dump; the top-level `Command` enum is reordered task-first (profile, one, tools, secret, workflow, server, mongo, ...).
 - **CI and release builds now pin `--locked`** on the workspace `cargo build`, `cargo clippy`, and `cargo nextest run` invocations in `ci.yml` and `build-release.yml`. `Cargo.lock` is already committed, so this closes a gap where the dependency resolution used in CI/release could silently drift from what a contributor last verified locally.
 - **README accuracy fixes**: documented the Windows release archive (`ayx-x86_64-pc-windows-msvc.zip`) and Windows as a built target alongside Linux and macOS; corrected the docs-site live-reload command from the nonexistent `npm start` to `npm run dev`; reworded the `tools workspace` promotion-workflow guidance so it no longer points users at the `compare`/migration-helper scaffolds as if they were implemented, and annotated `tools` (`compare`, migration helpers) and `mongo` (`mutate`) as preview / not yet implemented in the top-level command list.
@@ -242,7 +243,7 @@ and covered by tests (288 total, up from 255).
 
 ### One API additions
 
-- `connections connector-metadata template --connector <slug>`: generates a fillable JSON create-body template from connector metadata (derives `type`, `vendor`, `credentialType`, and a `params` skeleton). Unblocks `connections create` body construction.
+- `connections connector-metadata template <slug>`: generates a fillable JSON create-body template from connector metadata (derives `type`, `vendor`, `credentialType`, and a `params` skeleton). Unblocks `connections create` body construction.
 
 ### Documentation
 
@@ -252,7 +253,7 @@ and covered by tests (288 total, up from 255).
 
 ### One API additions
 
-- `flows permissions-get --flow-id <ID>`: read command for `GET /v4/flows/{id}/permissions`. Returns a clean `permission_denied` error (the endpoint is 403 under the current PAT scope) rather than a missing-command error. The existing `flows permissions` (POST, set permissions) is unchanged.
+- `flows permissions-get <ID>`: read command for `GET /v4/flows/{id}/permissions`. Returns a clean `permission_denied` error (the endpoint is 403 under the current PAT scope) rather than a missing-command error. The existing `flows permissions` (POST, set permissions) is unchanged.
 - `job-groups list`: synthesizes a display name (`flow-{flowId}`, falling back to `job-{id}`) when the API returns a null name, so flow-run job-groups are intelligible in text output.
 
 ## 0.9.12 — 2026-06-22

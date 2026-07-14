@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::one_api_live_request;
 use url::form_urlencoded::Serializer;
@@ -16,16 +16,6 @@ fn append_query(endpoint: &str, query: &[(&str, String)]) -> String {
         serializer.append_pair(key, value);
     }
     format!("{endpoint}?{}", serializer.finish())
-}
-
-fn resolve_dataset_id(
-    flag_value: Option<String>,
-    positional: Option<String>,
-    flag: &str,
-) -> Result<String> {
-    flag_value
-        .or(positional)
-        .ok_or_else(|| anyhow!("{flag} or positional id is required"))
 }
 
 pub(crate) fn execute(
@@ -100,13 +90,8 @@ pub(crate) fn execute(
                     &[],
                 )?
             }
-            Some(OneDatasetsWrangledCommand::Detail {
-                profile,
-                wrangled_id,
-                id,
-            }) => {
+            Some(OneDatasetsWrangledCommand::Detail { profile, id }) => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
-                let wrangled_id = resolve_dataset_id(wrangled_id, id, "--wrangled-id")?;
                 one_api_live_request(
                     &config,
                     "datasets",
@@ -114,19 +99,14 @@ pub(crate) fn execute(
                     "GET",
                     "/v4/wrangledDatasets/{id}",
                     false,
-                    &[("id", wrangled_id.as_str())],
+                    &[("id", id.as_str())],
                 )?
             }
         },
         Some(OneDatasetsCommand::Imported { command }) => match command {
             None => Envelope::ok("one datasets imported commands available: detail"),
-            Some(OneDatasetsImportedCommand::Detail {
-                profile,
-                imported_id,
-                id,
-            }) => {
+            Some(OneDatasetsImportedCommand::Detail { profile, id }) => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
-                let imported_id = resolve_dataset_id(imported_id, id, "--imported-id")?;
                 one_api_live_request(
                     &config,
                     "datasets",
@@ -134,7 +114,7 @@ pub(crate) fn execute(
                     "GET",
                     "/v4/importedDatasets/{id}",
                     false,
-                    &[("id", imported_id.as_str())],
+                    &[("id", id.as_str())],
                 )?
             }
         },

@@ -31,10 +31,10 @@ Every command that modifies remote state prints a structured dry-run by default 
 
 ```bash
 # Shows what would be deleted; changes nothing
-ayx one flows delete --flow-id <id>
+ayx one flows delete <id>
 
 # Actually deletes
-ayx one flows delete --flow-id <id> --apply
+ayx one flows delete <id> --apply
 ```
 
 For non-interactive automation (CI pipelines, scripts), add `--yes` to suppress the TTY confirmation prompt.

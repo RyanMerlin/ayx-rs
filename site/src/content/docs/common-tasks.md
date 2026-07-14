@@ -34,7 +34,7 @@ ayx --output json one flows list --all
 ## Inspect a flow before you touch it
 
 ```bash
-ayx --output json one flows detail --flow-id <id>
+ayx --output json one flows detail <id>
 ```
 
 Read-only — returns the flow's metadata, parameters, and permissions.
@@ -43,10 +43,10 @@ Read-only — returns the flow's metadata, parameters, and permissions.
 
 ```bash
 # Dry-run: shows what would happen, deletes nothing
-ayx one flows delete --flow-id <id>
+ayx one flows delete <id>
 
 # Commit it
-ayx one flows delete --flow-id <id> --apply
+ayx one flows delete <id> --apply
 ```
 
 Add `--yes` to skip the confirmation prompt in scripts.

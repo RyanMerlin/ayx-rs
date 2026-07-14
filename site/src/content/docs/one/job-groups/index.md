@@ -47,19 +47,19 @@ When the API returns a null `name` for a job group, `list` synthesizes a display
 
 ```bash
 # Full record
-ayx one job-groups detail --job-group-id <id>
+ayx one job-groups detail <id>
 
 # Execution status
-ayx one job-groups status --job-group-id <id>
+ayx one job-groups status <id>
 
 # Input parameters (useful before triggering a run)
-ayx one job-groups inputs --job-group-id <id>
+ayx one job-groups inputs <id>
 
 # Outputs produced by the last run
-ayx one job-groups outputs --job-group-id <id>
+ayx one job-groups outputs <id>
 
 # Individual jobs within the group
-ayx one job-groups jobs --job-group-id <id>
+ayx one job-groups jobs <id>
 ```
 
 `inputs` tells you which parameters a job group accepts so you can build the correct run payload. `jobs` lists the constituent jobs and their status, which is useful for diagnosing partial failures.
@@ -84,12 +84,12 @@ ayx one job-groups run \
 ```bash
 # Dry-run
 ayx one job-groups publish \
-  --job-group-id <id> \
+  <id> \
   --body '{"target":"<target>","...":{}}'
 
 # Commit
 ayx one job-groups publish \
-  --job-group-id <id> \
+  <id> \
   --body '{"target":"<target>","...":"{}"}' \
   --apply
 ```
@@ -100,10 +100,10 @@ For profile and publication queries see [Results & publications](/one/job-groups
 
 ```bash
 # Dry-run
-ayx one job-groups cancel --job-group-id <id>
+ayx one job-groups cancel <id>
 
 # Commit (skips TTY prompt in CI)
-ayx one job-groups cancel --job-group-id <id> --apply --yes
+ayx one job-groups cancel <id> --apply --yes
 ```
 
 Cancel is a best-effort operation. Jobs that have already completed are not affected.
@@ -115,7 +115,7 @@ Find all job groups and show their status in one pass:
 ```bash
 ayx --output json one job-groups list --all \
   | jq -r '.data[].id' \
-  | xargs -I{} ayx --output json one job-groups status --job-group-id {} \
+  | xargs -I{} ayx --output json one job-groups status {} \
   | jq -r '[.data.id, .data.status] | @tsv'
 ```
 
@@ -126,7 +126,7 @@ ayx one job-groups run --body '{"jobGroupId":"<id>"}' --apply
 
 # Poll status
 while true; do
-  STATUS=$(ayx --output json one job-groups status --job-group-id <id> | jq -r '.data.status')
+  STATUS=$(ayx --output json one job-groups status <id> | jq -r '.data.status')
   echo "$STATUS"
   [[ "$STATUS" == "Completed" || "$STATUS" == "Failed" ]] && break
   sleep 10

@@ -45,8 +45,8 @@ ayx one flows folders count --profile <name>
 ### Folder detail
 
 ```bash
-ayx one flows folders detail --folder-id <folder-id>
-ayx one flows folders detail --folder-id <folder-id> --profile <name>
+ayx one flows folders detail <folder-id>
+ayx one flows folders detail <folder-id> --profile <name>
 ```
 
 Returns the full metadata record for a single folder.
@@ -54,14 +54,14 @@ Returns the full metadata record for a single folder.
 ### List flows in a folder
 
 ```bash
-ayx one flows folders flows list --folder-id <folder-id>
-ayx one flows folders flows list --folder-id <folder-id> --limit 50 --offset 0
+ayx one flows folders flows list <folder-id>
+ayx one flows folders flows list <folder-id> --limit 50 --offset 0
 ```
 
 ### Count flows in a folder
 
 ```bash
-ayx one flows folders flows count --folder-id <folder-id>
+ayx one flows folders flows count <folder-id>
 ```
 
 ## Create and update
@@ -74,7 +74,7 @@ ayx one flows folders create --body '<json>'
 ayx one flows folders create --body '<json>' --apply
 
 # Update (rename, re-parent, etc.)
-ayx one flows folders update --folder-id <folder-id> --body '<json>' --apply
+ayx one flows folders update <folder-id> --body '<json>' --apply
 ```
 
 Both commands accept a JSON body specifying the folder attributes.
@@ -83,13 +83,13 @@ Both commands accept a JSON body specifying the folder attributes.
 
 ```bash
 # Dry-run
-ayx one flows folders delete --folder-id <folder-id>
+ayx one flows folders delete <folder-id>
 
 # Commit
-ayx one flows folders delete --folder-id <folder-id> --apply
+ayx one flows folders delete <folder-id> --apply
 
 # Non-interactive
-ayx one flows folders delete --folder-id <folder-id> --apply --yes
+ayx one flows folders delete <folder-id> --apply --yes
 ```
 
 Deleting a folder that still contains flows will be rejected by the server. Move or delete the flows first.
@@ -116,7 +116,7 @@ ayx --output json one flows folders list \
 folder_id=$(ayx --output json one flows folders list \
   | jq -r '.data[] | select(.name == "Production") | .id')
 
-ayx --output json one flows folders flows list --folder-id "$folder_id" \
+ayx --output json one flows folders flows list "$folder_id" \
   | jq '.data[]'
 ```
 

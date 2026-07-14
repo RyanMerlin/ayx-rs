@@ -76,7 +76,7 @@ pub(crate) fn execute(
                 &params,
             )?
         }
-        Some(OneWorkspaceCommand::ConfigurationV4 { workspace_id }) => {
+        Some(OneWorkspaceCommand::ConfigurationV4 { id }) => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
@@ -85,7 +85,7 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/workspaces/{id}/configuration",
                 false,
-                &[("id", &workspace_id)],
+                &[("id", &id)],
             )?
         }
         Some(OneWorkspaceCommand::CurrentConfiguration) => {
@@ -114,11 +114,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneWorkspaceCommand::SaveConfigurationV4 {
-            profile,
-            workspace_id,
-            body,
-        }) => {
+        Some(OneWorkspaceCommand::SaveConfigurationV4 { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -128,7 +124,7 @@ pub(crate) fn execute(
                 "PATCH",
                 "/v4/workspaces/{id}/configuration",
                 true,
-                &[("id", &workspace_id)],
+                &[("id", &id)],
                 Some(payload),
             )?
         }
@@ -150,7 +146,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneWorkspaceCommand::ConfigurationSchema { workspace_id }) => {
+        Some(OneWorkspaceCommand::ConfigurationSchema { id }) => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
@@ -159,7 +155,7 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/workspaces/{id}/configuration-schema",
                 false,
-                &[("id", &workspace_id)],
+                &[("id", &id)],
             )?
         }
         Some(OneWorkspaceCommand::CurrentConfigurationSchema) => {
@@ -186,7 +182,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneWorkspaceCommand::DeleteConfiguration { workspace_id }) => {
+        Some(OneWorkspaceCommand::DeleteConfiguration { id }) => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
@@ -195,10 +191,10 @@ pub(crate) fn execute(
                 "POST",
                 "/v4/workspaces/{id}/delete-configuration",
                 true,
-                &[("id", &workspace_id)],
+                &[("id", &id)],
             )?
         }
-        Some(OneWorkspaceCommand::Configuration { workspace_id }) => {
+        Some(OneWorkspaceCommand::Configuration { id }) => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
@@ -207,7 +203,7 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/workspaces/{id}/configuration",
                 false,
-                &[("id", &workspace_id)],
+                &[("id", &id)],
             )?
         }
         Some(OneWorkspaceCommand::People) => {
@@ -239,17 +235,14 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneWorkspaceCommand::Switch {
-            profile,
-            workspace_id,
-        }) => {
+        Some(OneWorkspaceCommand::Switch { profile, id }) => {
             let mut config = runtime.load_profile_lenient(profile.as_deref())?;
             let one = config
                 .alteryx_one
                 .as_mut()
                 .ok_or_else(|| anyhow!("no alteryx_one section in profile"))?;
             let available: Vec<String> = one.workspace_credentials.keys().cloned().collect();
-            if !one.workspace_credentials.contains_key(&workspace_id) {
+            if !one.workspace_credentials.contains_key(&id) {
                 let profile_name = config.profile_name.clone();
                 return Err(anyhow!(
                     "no stored credential for workspace '{}' in profile '{}'. \
@@ -258,7 +251,7 @@ pub(crate) fn execute(
                      the token is workspace-bound). \
                      Available: {}. \
                      Run `ayx one workspace list` to see workspaces.",
-                    workspace_id,
+                    id,
                     profile_name,
                     if available.is_empty() {
                         "(none)".to_string()
@@ -267,7 +260,7 @@ pub(crate) fn execute(
                     }
                 ));
             }
-            one.expected_workspace_id = Some(workspace_id.clone());
+            one.expected_workspace_id = Some(id.clone());
             let profile_name = config.profile_name.clone();
             let available_after: Vec<String> = config
                 .alteryx_one
@@ -282,9 +275,9 @@ pub(crate) fn execute(
                 eprintln!("warning: {msg}");
             }
             Envelope::ok_with_data(
-                format!("active workspace set to '{workspace_id}'"),
+                format!("active workspace set to '{id}'"),
                 json!({
-                    "active_workspace_id": workspace_id,
+                    "active_workspace_id": id,
                     "available_workspace_ids": available_after,
                     "profile": profile_name,
                 }),
@@ -303,10 +296,7 @@ pub(crate) fn execute(
                 &[("id", &ws_id)],
             )?
         }
-        Some(OneWorkspaceCommand::RemoveUser {
-            workspace_id,
-            person_id,
-        }) => {
+        Some(OneWorkspaceCommand::RemoveUser { workspace_id, id }) => {
             let config = runtime.load_profile_lenient(None)?;
             let ws_id = resolve_workspace_id(workspace_id, &config)?;
             if apply {
@@ -314,7 +304,7 @@ pub(crate) fn execute(
                     yes,
                     &cmd::confirm::access_change_message(
                         "remove",
-                        &format!("user person id='{person_id}' from workspace id='{ws_id}'"),
+                        &format!("user person id='{id}' from workspace id='{ws_id}'"),
                         &config.profile_name,
                     ),
                 )?;
@@ -326,7 +316,7 @@ pub(crate) fn execute(
                 "DELETE",
                 "/v4/workspaces/{workspaceId}/people/{id}",
                 true,
-                &[("workspaceId", &ws_id), ("id", &person_id)],
+                &[("workspaceId", &ws_id), ("id", &id)],
             )?
         }
         Some(OneWorkspaceCommand::SuspendUsers { workspace_id }) => {

@@ -16,9 +16,9 @@ Mutating commands are dry-run by default. Add `--apply` to commit.
 | `ayx one write-settings list` | List all write settings; supports pagination |
 | `ayx one write-settings count` | Return the total count |
 | `ayx one write-settings create --body <json>` | Create a write setting |
-| `ayx one write-settings detail --write-setting-id <id>` | Get details for a single write setting |
-| `ayx one write-settings update --write-setting-id <id> --body <json>` | Update a write setting |
-| `ayx one write-settings delete --write-setting-id <id>` | Delete a write setting |
+| `ayx one write-settings detail <id>` | Get details for a single write setting |
+| `ayx one write-settings update <id> --body <json>` | Update a write setting |
+| `ayx one write-settings delete <id>` | Delete a write setting |
 
 ## Listing and counting
 
@@ -41,7 +41,7 @@ ayx one write-settings count
 ## Getting details
 
 ```bash
-ayx one write-settings detail --write-setting-id <id>
+ayx one write-settings detail <id>
 ```
 
 Add `--profile <name>` to target a non-default workspace.
@@ -61,17 +61,17 @@ ayx one write-settings create --body '{"name": "prod-output", ...}' --apply
 ## Updating a write setting
 
 ```bash
-ayx one write-settings update --write-setting-id <id> --body '{"name": "renamed"}' --apply
+ayx one write-settings update <id> --body '{"name": "renamed"}' --apply
 ```
 
 ## Deleting a write setting
 
 ```bash
 # Dry-run
-ayx one write-settings delete --write-setting-id <id>
+ayx one write-settings delete <id>
 
 # Commit (skip TTY prompt in scripts)
-ayx one write-settings delete --write-setting-id <id> --apply --yes
+ayx one write-settings delete <id> --apply --yes
 ```
 
 ## JSON output

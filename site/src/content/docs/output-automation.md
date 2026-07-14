@@ -34,10 +34,10 @@ Mutating commands print what they *would* do and exit `0` unless you pass `--app
 
 ```bash
 # Preview — no changes; capture the planned request
-ayx --output json one flows delete --flow-id <id>
+ayx --output json one flows delete <id>
 
 # Commit, non-interactively
-ayx one flows delete --flow-id <id> --apply --yes
+ayx one flows delete <id> --apply --yes
 ```
 
 `--yes` skips the confirmation prompt that destructive commands show in a terminal — required for CI and pipes.

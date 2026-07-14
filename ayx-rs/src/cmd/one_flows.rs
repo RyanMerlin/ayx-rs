@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{
     flow_export_package_envelope, flow_import_package_envelope, one_api_live_request,
@@ -140,9 +140,8 @@ pub(crate) fn execute(
                     &[],
                 )?
             }
-            Some(OneFlowFoldersCommand::Detail { profile, folder_id }) => {
+            Some(OneFlowFoldersCommand::Detail { profile, id }) => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
-                let folder_id = folder_id.ok_or_else(|| anyhow!("--folder-id is required"))?;
                 one_api_live_request(
                     &config,
                     "flow",
@@ -150,7 +149,7 @@ pub(crate) fn execute(
                     "GET",
                     "/v4/folders/{id}",
                     false,
-                    &[("id", folder_id.as_str())],
+                    &[("id", id.as_str())],
                 )?
             }
             Some(OneFlowFoldersCommand::Create { profile, body }) => {
@@ -167,13 +166,8 @@ pub(crate) fn execute(
                     Some(payload),
                 )?
             }
-            Some(OneFlowFoldersCommand::Update {
-                profile,
-                folder_id,
-                body,
-            }) => {
+            Some(OneFlowFoldersCommand::Update { profile, id, body }) => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
-                let folder_id = folder_id.ok_or_else(|| anyhow!("--folder-id is required"))?;
                 let payload = load_payload(&body)?;
                 one_api_live_request_with_body(
                     &config,
@@ -182,19 +176,18 @@ pub(crate) fn execute(
                     "PATCH",
                     "/v4/folders/{id}",
                     true,
-                    &[("id", folder_id.as_str())],
+                    &[("id", id.as_str())],
                     Some(payload),
                 )?
             }
-            Some(OneFlowFoldersCommand::Delete { profile, folder_id }) => {
+            Some(OneFlowFoldersCommand::Delete { profile, id }) => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
-                let folder_id = folder_id.ok_or_else(|| anyhow!("--folder-id is required"))?;
                 if apply {
                     cmd::confirm::require_tty_confirmation(
                         yes,
                         &cmd::confirm::destructive_action_message(
                             "delete",
-                            &format!("folder id='{folder_id}'"),
+                            &format!("folder id='{id}'"),
                             &config.profile_name,
                         ),
                     )?;
@@ -206,19 +199,18 @@ pub(crate) fn execute(
                     "DELETE",
                     "/v4/folders/{id}",
                     true,
-                    &[("id", folder_id.as_str())],
+                    &[("id", id.as_str())],
                 )?
             }
             Some(OneFlowFoldersCommand::Flows { command }) => match command {
                 None => Envelope::ok("one flows folders flows commands available: list, count"),
                 Some(OneFlowFolderFlowsCommand::List {
                     profile,
-                    folder_id,
+                    id,
                     limit,
                     offset,
                 }) => {
                     let config = runtime.load_profile_lenient(profile.as_deref())?;
-                    let folder_id = folder_id.ok_or_else(|| anyhow!("--folder-id is required"))?;
                     let mut query = Vec::new();
                     if let Some(limit) = limit {
                         query.push(("limit", limit.to_string()));
@@ -234,12 +226,11 @@ pub(crate) fn execute(
                         "GET",
                         &endpoint,
                         false,
-                        &[("id", folder_id.as_str())],
+                        &[("id", id.as_str())],
                     )?
                 }
-                Some(OneFlowFolderFlowsCommand::Count { profile, folder_id }) => {
+                Some(OneFlowFolderFlowsCommand::Count { profile, id }) => {
                     let config = runtime.load_profile_lenient(profile.as_deref())?;
-                    let folder_id = folder_id.ok_or_else(|| anyhow!("--folder-id is required"))?;
                     one_api_live_request(
                         &config,
                         "flow",
@@ -247,7 +238,7 @@ pub(crate) fn execute(
                         "GET",
                         "/v4/folders/{id}/flows/count",
                         false,
-                        &[("id", folder_id.as_str())],
+                        &[("id", id.as_str())],
                     )?
                 }
             },
@@ -266,9 +257,8 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneFlowsCommand::Detail { profile, flow_id }) => {
+        Some(OneFlowsCommand::Detail { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             one_api_live_request(
                 &config,
                 "flow",
@@ -276,16 +266,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/flows/{id}",
                 false,
-                &[("id", flow_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneFlowsCommand::Update {
-            profile,
-            flow_id,
-            body,
-        }) => {
+        Some(OneFlowsCommand::Update { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
@@ -294,19 +279,18 @@ pub(crate) fn execute(
                 "PATCH",
                 "/v4/flows/{id}",
                 true,
-                &[("id", flow_id.as_str())],
+                &[("id", id.as_str())],
                 Some(payload),
             )?
         }
-        Some(OneFlowsCommand::Delete { profile, flow_id }) => {
+        Some(OneFlowsCommand::Delete { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
                     &cmd::confirm::destructive_action_message(
                         "delete",
-                        &format!("flow id='{flow_id}'"),
+                        &format!("flow id='{id}'"),
                         &config.profile_name,
                     ),
                 )?;
@@ -318,16 +302,11 @@ pub(crate) fn execute(
                 "DELETE",
                 "/v4/flows/{id}",
                 true,
-                &[("id", flow_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneFlowsCommand::Copy {
-            profile,
-            flow_id,
-            body,
-        }) => {
+        Some(OneFlowsCommand::Copy { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             let payload = body.map(|path| load_payload(&path)).transpose()?;
             match payload {
                 Some(payload) => one_api_live_request_with_body(
@@ -337,7 +316,7 @@ pub(crate) fn execute(
                     "POST",
                     "/v4/flows/{id}/copy",
                     true,
-                    &[("id", flow_id.as_str())],
+                    &[("id", id.as_str())],
                     Some(payload),
                 )?,
                 None => one_api_live_request(
@@ -347,17 +326,12 @@ pub(crate) fn execute(
                     "POST",
                     "/v4/flows/{id}/copy",
                     true,
-                    &[("id", flow_id.as_str())],
+                    &[("id", id.as_str())],
                 )?,
             }
         }
-        Some(OneFlowsCommand::Run {
-            profile,
-            flow_id,
-            body,
-        }) => {
+        Some(OneFlowsCommand::Run { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             let payload = body.map(|path| load_payload(&path)).transpose()?;
             match payload {
                 Some(payload) => one_api_live_request_with_body(
@@ -367,7 +341,7 @@ pub(crate) fn execute(
                     "POST",
                     "/v4/flows/{id}/run",
                     true,
-                    &[("id", flow_id.as_str())],
+                    &[("id", id.as_str())],
                     Some(payload),
                 )?,
                 None => one_api_live_request(
@@ -377,13 +351,12 @@ pub(crate) fn execute(
                     "POST",
                     "/v4/flows/{id}/run",
                     true,
-                    &[("id", flow_id.as_str())],
+                    &[("id", id.as_str())],
                 )?,
             }
         }
-        Some(OneFlowsCommand::Validate { profile, flow_id }) => {
+        Some(OneFlowsCommand::Validate { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             one_api_live_request(
                 &config,
                 "flow",
@@ -391,29 +364,27 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/flows/{id}/validate",
                 false,
-                &[("id", flow_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
         Some(OneFlowsCommand::Parameters {
             profile,
-            flow_id,
+            id,
             output_object_type,
         }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             let endpoint = if let Some(value) = output_object_type.as_deref() {
                 format!(
                     "/v4/flows/{}/recipeParameters?outputObjectType={}",
-                    flow_id, value
+                    id, value
                 )
             } else {
-                format!("/v4/flows/{}/recipeParameters", flow_id)
+                format!("/v4/flows/{}/recipeParameters", id)
             };
             one_api_live_request(&config, "flow", "parameters", "GET", &endpoint, false, &[])?
         }
-        Some(OneFlowsCommand::Inputs { profile, flow_id }) => {
+        Some(OneFlowsCommand::Inputs { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             one_api_live_request(
                 &config,
                 "flow",
@@ -421,12 +392,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/flows/{id}/inputs",
                 false,
-                &[("id", flow_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneFlowsCommand::Outputs { profile, flow_id }) => {
+        Some(OneFlowsCommand::Outputs { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             one_api_live_request(
                 &config,
                 "flow",
@@ -434,12 +404,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/flows/{id}/outputs",
                 false,
-                &[("id", flow_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneFlowsCommand::PermissionsGet { profile, flow_id }) => {
+        Some(OneFlowsCommand::PermissionsGet { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             one_api_live_request(
                 &config,
                 "flow",
@@ -447,16 +416,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/flows/{id}/permissions",
                 false,
-                &[("id", flow_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneFlowsCommand::Permissions {
-            profile,
-            flow_id,
-            body,
-        }) => {
+        Some(OneFlowsCommand::Permissions { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
@@ -465,17 +429,12 @@ pub(crate) fn execute(
                 "POST",
                 "/v4/flows/{id}/permissions",
                 true,
-                &[("id", flow_id.as_str())],
+                &[("id", id.as_str())],
                 Some(payload),
             )?
         }
-        Some(OneFlowsCommand::Move {
-            profile,
-            flow_id,
-            body,
-        }) => {
+        Some(OneFlowsCommand::Move { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
@@ -484,17 +443,12 @@ pub(crate) fn execute(
                 "POST",
                 "/v4/flows/{id}/move",
                 true,
-                &[("id", flow_id.as_str())],
+                &[("id", id.as_str())],
                 Some(payload),
             )?
         }
-        Some(OneFlowsCommand::ReplaceDataset {
-            profile,
-            flow_id,
-            body,
-        }) => {
+        Some(OneFlowsCommand::ReplaceDataset { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
@@ -503,7 +457,7 @@ pub(crate) fn execute(
                 "PATCH",
                 "/v4/flows/{id}/replaceDataset",
                 true,
-                &[("id", flow_id.as_str())],
+                &[("id", id.as_str())],
                 Some(payload),
             )?
         }
@@ -543,17 +497,15 @@ pub(crate) fn execute(
         }
         Some(OneFlowsCommand::Export {
             profile,
-            flow_id,
+            id,
             output_file,
         }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
-            flow_export_package_envelope(&config, &flow_id, &output_file, false)?
+            flow_export_package_envelope(&config, &id, &output_file, false)?
         }
-        Some(OneFlowsCommand::ExportDryRun { profile, flow_id }) => {
+        Some(OneFlowsCommand::ExportDryRun { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let flow_id = flow_id.ok_or_else(|| anyhow!("--flow-id is required"))?;
-            flow_export_package_envelope(&config, &flow_id, Path::new("unused"), true)?
+            flow_export_package_envelope(&config, &id, Path::new("unused"), true)?
         }
     })
 }

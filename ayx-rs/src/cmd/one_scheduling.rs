@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::one_api_live_request;
 
@@ -34,12 +34,8 @@ pub(crate) fn execute(
                 &params,
             )?
         }
-        Some(OneSchedulingCommand::Detail {
-            profile,
-            schedule_id,
-        }) => {
+        Some(OneSchedulingCommand::Detail { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let schedule_id = schedule_id.ok_or_else(|| anyhow!("--schedule-id is required"))?;
             one_api_live_request(
                 &config,
                 "scheduling",
@@ -47,15 +43,11 @@ pub(crate) fn execute(
                 "GET",
                 "/scheduling/v1/schedules/{id}",
                 false,
-                &[("id", schedule_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneSchedulingCommand::Enable {
-            profile,
-            schedule_id,
-        }) => {
+        Some(OneSchedulingCommand::Enable { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let schedule_id = schedule_id.ok_or_else(|| anyhow!("--schedule-id is required"))?;
             one_api_live_request(
                 &config,
                 "scheduling",
@@ -63,15 +55,11 @@ pub(crate) fn execute(
                 "POST",
                 "/scheduling/v1/schedules/{id}/enable",
                 true,
-                &[("id", schedule_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneSchedulingCommand::Disable {
-            profile,
-            schedule_id,
-        }) => {
+        Some(OneSchedulingCommand::Disable { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let schedule_id = schedule_id.ok_or_else(|| anyhow!("--schedule-id is required"))?;
             one_api_live_request(
                 &config,
                 "scheduling",
@@ -79,7 +67,7 @@ pub(crate) fn execute(
                 "POST",
                 "/scheduling/v1/schedules/{id}/disable",
                 true,
-                &[("id", schedule_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
         Some(OneSchedulingCommand::Count { profile }) => {

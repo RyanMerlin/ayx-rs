@@ -14,11 +14,11 @@ sidebar:
 | `person list` | List all users |
 | `person current` | Show the user tied to the active profile |
 | `person count` | Return the total user count |
-| `person detail --person-id <id>` | Show detail for a specific user |
+| `person detail <id>` | Show detail for a specific user |
 | `person create --body <json>` | Create a new user |
-| `person update --person-id <id> --body <json>` | Replace a user record (PUT) |
-| `person patch --person-id <id> --body <json>` | Partially update a user record (PATCH) |
-| `person delete --person-id <id>` | Delete a user |
+| `person update <id> --body <json>` | Replace a user record (PUT) |
+| `person patch <id> --body <json>` | Partially update a user record (PATCH) |
+| `person delete <id>` | Delete a user |
 | `person update-password --body <json>` | Update the current user's password |
 | `person password-reset-request --body <json>` | Send a password reset email |
 
@@ -41,7 +41,7 @@ ayx one platform person count
 ayx one platform person current
 
 # Specific user
-ayx one platform person detail --person-id <id>
+ayx one platform person detail <id>
 
 # Machine-readable
 ayx --output json one platform person list --all
@@ -70,18 +70,18 @@ Pass `--profile <name>` to create in a specific environment.
 ```bash
 # Full replace (preview)
 ayx one platform person update \
-  --person-id <id> \
+  <id> \
   --body '{"email":"<email>","firstName":"...","lastName":"..."}'
 
 # Commit
 ayx one platform person update \
-  --person-id <id> \
+  <id> \
   --body '{"email":"<email>","firstName":"...","lastName":"..."}' \
   --apply
 
 # Partial update (patch a single field)
 ayx one platform person patch \
-  --person-id <id> \
+  <id> \
   --body '{"firstName":"NewName"}' \
   --apply
 ```
@@ -92,10 +92,10 @@ Destructive. Review the dry-run output carefully before adding `--apply`.
 
 ```bash
 # Preview
-ayx one platform person delete --person-id <id>
+ayx one platform person delete <id>
 
 # Commit
-ayx one platform person delete --person-id <id> --apply --yes
+ayx one platform person delete <id> --apply --yes
 ```
 
 `--yes` suppresses the TTY confirmation, required in CI or piped scripts.
@@ -141,7 +141,7 @@ ayx --output json one platform person list --all \
 # Bulk delete: pipe IDs into xargs (dry-run first)
 ayx --output json one platform person list --all \
   | jq -r '.data[] | select(.someField == "value") | .id' \
-  | xargs -I{} ayx one platform person delete --person-id {}
+  | xargs -I{} ayx one platform person delete {}
 
 # Add --apply once the dry-run output looks right
 ```

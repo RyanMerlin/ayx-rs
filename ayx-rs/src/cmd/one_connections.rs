@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 use serde_json::json;
@@ -178,13 +178,8 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneConnectionsCommand::Detail {
-            profile,
-            connection_id,
-        }) => {
+        Some(OneConnectionsCommand::Detail { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let connection_id =
-                connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
             one_api_live_request(
                 &config,
                 "connection",
@@ -192,16 +187,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/connections/{id}",
                 false,
-                &[("id", connection_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneConnectionsCommand::Status {
-            profile,
-            connection_id,
-        }) => {
+        Some(OneConnectionsCommand::Status { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let connection_id =
-                connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
             one_api_live_request(
                 &config,
                 "connection",
@@ -209,17 +199,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/connections/{id}/status",
                 false,
-                &[("id", connection_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneConnectionsCommand::Update {
-            profile,
-            connection_id,
-            body,
-        }) => {
+        Some(OneConnectionsCommand::Update { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let connection_id =
-                connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
@@ -228,23 +212,18 @@ pub(crate) fn execute(
                 "PATCH",
                 "/v4/connections/{id}",
                 true,
-                &[("id", connection_id.as_str())],
+                &[("id", id.as_str())],
                 Some(payload),
             )?
         }
-        Some(OneConnectionsCommand::Delete {
-            profile,
-            connection_id,
-        }) => {
+        Some(OneConnectionsCommand::Delete { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let connection_id =
-                connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
                     &cmd::confirm::destructive_action_message(
                         "delete",
-                        &format!("connection id='{connection_id}'"),
+                        &format!("connection id='{id}'"),
                         &config.profile_name,
                     ),
                 )?;
@@ -256,7 +235,7 @@ pub(crate) fn execute(
                 "DELETE",
                 "/v4/connections/{id}",
                 true,
-                &[("id", connection_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
         Some(OneConnectionsCommand::ConnectorMetadata { command }) => match command {
@@ -399,13 +378,8 @@ pub(crate) fn execute(
             None => Envelope::ok(
                 "one connection permissions commands available: list, create, detail, delete",
             ),
-            Some(OneConnectionPermissionCommand::List {
-                profile,
-                connection_id,
-            }) => {
+            Some(OneConnectionPermissionCommand::List { profile, id }) => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
-                let connection_id =
-                    connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
                 one_api_live_request(
                     &config,
                     "connection",
@@ -413,17 +387,11 @@ pub(crate) fn execute(
                     "GET",
                     "/v4/connections/{id}/permissions",
                     false,
-                    &[("id", connection_id.as_str())],
+                    &[("id", id.as_str())],
                 )?
             }
-            Some(OneConnectionPermissionCommand::Create {
-                profile,
-                connection_id,
-                body,
-            }) => {
+            Some(OneConnectionPermissionCommand::Create { profile, id, body }) => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
-                let connection_id =
-                    connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
                 let payload = load_payload(&body)?;
                 one_api_live_request_with_body(
                     &config,
@@ -432,7 +400,7 @@ pub(crate) fn execute(
                     "POST",
                     "/v4/connections/{id}/permissions",
                     true,
-                    &[("id", connection_id.as_str())],
+                    &[("id", id.as_str())],
                     Some(payload),
                 )?
             }
@@ -442,8 +410,6 @@ pub(crate) fn execute(
                 subject_id,
             }) => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
-                let connection_id =
-                    connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
                 one_api_live_request(
                     &config,
                     "connection",
@@ -460,8 +426,6 @@ pub(crate) fn execute(
                 subject_id,
             }) => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
-                let connection_id =
-                    connection_id.ok_or_else(|| anyhow!("--connection-id is required"))?;
                 if apply {
                     cmd::confirm::require_tty_confirmation(
                         yes,

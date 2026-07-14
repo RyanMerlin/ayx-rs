@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
@@ -59,13 +59,8 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneWriteSettingCommand::Detail {
-            profile,
-            write_setting_id,
-        }) => {
+        Some(OneWriteSettingCommand::Detail { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let write_setting_id =
-                write_setting_id.ok_or_else(|| anyhow!("--write-setting-id is required"))?;
             one_api_live_request(
                 &config,
                 "writeSetting",
@@ -73,17 +68,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/writeSettings/{id}",
                 false,
-                &[("id", write_setting_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneWriteSettingCommand::Update {
-            profile,
-            write_setting_id,
-            body,
-        }) => {
+        Some(OneWriteSettingCommand::Update { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let write_setting_id =
-                write_setting_id.ok_or_else(|| anyhow!("--write-setting-id is required"))?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
@@ -92,17 +81,12 @@ pub(crate) fn execute(
                 "PATCH",
                 "/v4/writeSettings/{id}",
                 true,
-                &[("id", write_setting_id.as_str())],
+                &[("id", id.as_str())],
                 Some(payload),
             )?
         }
-        Some(OneWriteSettingCommand::Delete {
-            profile,
-            write_setting_id,
-        }) => {
+        Some(OneWriteSettingCommand::Delete { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let write_setting_id =
-                write_setting_id.ok_or_else(|| anyhow!("--write-setting-id is required"))?;
             one_api_live_request(
                 &config,
                 "writeSetting",
@@ -110,7 +94,7 @@ pub(crate) fn execute(
                 "DELETE",
                 "/v4/writeSettings/{id}",
                 true,
-                &[("id", write_setting_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
     })

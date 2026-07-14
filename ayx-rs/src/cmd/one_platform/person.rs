@@ -63,7 +63,7 @@ pub(crate) fn execute(
             )?
         }
         Some(OnePersonCommand::Current) => current(runtime, None)?,
-        Some(OnePersonCommand::Detail { profile, person_id }) => {
+        Some(OnePersonCommand::Detail { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -72,14 +72,10 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/people/{id}",
                 false,
-                &[("id", &person_id)],
+                &[("id", &id)],
             )?
         }
-        Some(OnePersonCommand::Update {
-            profile,
-            person_id,
-            body,
-        }) => {
+        Some(OnePersonCommand::Update { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -89,15 +85,11 @@ pub(crate) fn execute(
                 "PUT",
                 "/v4/people/{id}",
                 true,
-                &[("id", &person_id)],
+                &[("id", &id)],
                 Some(payload),
             )?
         }
-        Some(OnePersonCommand::Patch {
-            profile,
-            person_id,
-            body,
-        }) => {
+        Some(OnePersonCommand::Patch { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -107,18 +99,18 @@ pub(crate) fn execute(
                 "PATCH",
                 "/v4/people/{id}",
                 true,
-                &[("id", &person_id)],
+                &[("id", &id)],
                 Some(payload),
             )?
         }
-        Some(OnePersonCommand::Delete { profile, person_id }) => {
+        Some(OnePersonCommand::Delete { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
                     &cmd::confirm::access_change_message(
                         "delete",
-                        &format!("person id='{person_id}'"),
+                        &format!("person id='{id}'"),
                         &config.profile_name,
                     ),
                 )?;
@@ -130,7 +122,7 @@ pub(crate) fn execute(
                 "DELETE",
                 "/v4/people/{id}",
                 true,
-                &[("id", &person_id)],
+                &[("id", &id)],
             )?
         }
         Some(OnePersonCommand::Create { profile, body }) => {

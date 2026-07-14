@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
@@ -54,9 +54,8 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OnePlansCommand::Detail { profile, plan_id }) => {
+        Some(OnePlansCommand::Detail { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
             one_api_live_request(
                 &config,
                 "plans",
@@ -64,12 +63,11 @@ pub(crate) fn execute(
                 "GET",
                 "/plans/v1/plans/{id}",
                 false,
-                &[("id", plan_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OnePlansCommand::Full { profile, plan_id }) => {
+        Some(OnePlansCommand::Full { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
             one_api_live_request(
                 &config,
                 "plans",
@@ -77,12 +75,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/plans/{id}/full",
                 false,
-                &[("id", plan_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OnePlansCommand::Run { profile, plan_id }) => {
+        Some(OnePlansCommand::Run { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
             one_api_live_request(
                 &config,
                 "plans",
@@ -90,7 +87,7 @@ pub(crate) fn execute(
                 "POST",
                 "/plans/v1/plans/{id}/run",
                 true,
-                &[("id", plan_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
         Some(OnePlansCommand::Count { profile }) => {
@@ -105,9 +102,8 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OnePlansCommand::RunParameters { profile, plan_id }) => {
+        Some(OnePlansCommand::RunParameters { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
             one_api_live_request(
                 &config,
                 "plans",
@@ -115,12 +111,11 @@ pub(crate) fn execute(
                 "GET",
                 "/plans/v1/plans/{id}/runParameters",
                 false,
-                &[("id", plan_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OnePlansCommand::Schedules { profile, plan_id }) => {
+        Some(OnePlansCommand::Schedules { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
             one_api_live_request(
                 &config,
                 "plans",
@@ -128,12 +123,11 @@ pub(crate) fn execute(
                 "GET",
                 "/plans/v1/plans/{id}/schedules",
                 false,
-                &[("id", plan_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OnePlansCommand::Export { profile, plan_id }) => {
+        Some(OnePlansCommand::Export { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
             one_api_live_request(
                 &config,
                 "plans",
@@ -141,16 +135,11 @@ pub(crate) fn execute(
                 "GET",
                 "/plans/v1/plans/{id}/package",
                 false,
-                &[("id", plan_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OnePlansCommand::Update {
-            profile,
-            plan_id,
-            body,
-        }) => {
+        Some(OnePlansCommand::Update { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
@@ -159,18 +148,17 @@ pub(crate) fn execute(
                 "PATCH",
                 "/v4/plans/{id}",
                 true,
-                &[("id", plan_id.as_str())],
+                &[("id", id.as_str())],
                 Some(payload),
             )?
         }
-        Some(OnePlansCommand::Delete { profile, plan_id }) => {
+        Some(OnePlansCommand::Delete { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
                     &format!(
-                        "About to DELETE plan id='{plan_id}' on profile '{}'. This cannot be undone.",
+                        "About to DELETE plan id='{id}' on profile '{}'. This cannot be undone.",
                         config.profile_name
                     ),
                 )?;
@@ -182,16 +170,11 @@ pub(crate) fn execute(
                 "DELETE",
                 "/v4/plans/{id}",
                 true,
-                &[("id", plan_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OnePlansCommand::Share {
-            profile,
-            plan_id,
-            body,
-        }) => {
+        Some(OnePlansCommand::Share { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
@@ -200,7 +183,7 @@ pub(crate) fn execute(
                 "POST",
                 "/v4/plans/{id}/permissions",
                 true,
-                &[("id", plan_id.as_str())],
+                &[("id", id.as_str())],
                 Some(payload),
             )?
         }
@@ -218,11 +201,10 @@ pub(crate) fn execute(
         }
         Some(OnePlansCommand::Permissions {
             profile,
-            plan_id,
+            id,
             subject_id,
         }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let plan_id = plan_id.ok_or_else(|| anyhow!("--plan-id is required"))?;
             let subject_id = subject_id.unwrap_or_default();
             if subject_id.is_empty() {
                 one_api_live_request(
@@ -232,7 +214,7 @@ pub(crate) fn execute(
                     "GET",
                     "/plans/v1/plans/{id}/permissions",
                     false,
-                    &[("id", plan_id.as_str())],
+                    &[("id", id.as_str())],
                 )?
             } else {
                 one_api_live_request(
@@ -242,7 +224,7 @@ pub(crate) fn execute(
                     "DELETE",
                     "/plans/v1/plans/{id}/permissions/{subjectId}",
                     true,
-                    &[("id", plan_id.as_str()), ("subjectId", subject_id.as_str())],
+                    &[("id", id.as_str()), ("subjectId", subject_id.as_str())],
                 )?
             }
         }

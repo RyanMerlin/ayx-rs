@@ -13,8 +13,8 @@ sidebar:
 |---|---|
 | `token list` | List API tokens for the current user |
 | `token create --body <json>` | Create a new API token |
-| `token detail --token-id <id>` | Show details for a specific token |
-| `token delete --token-id <id>` | Delete a token |
+| `token detail <id>` | Show details for a specific token |
+| `token delete <id>` | Delete a token |
 
 ## Listing tokens
 
@@ -47,10 +47,10 @@ Pass `--profile <name>` to create the token against a non-default environment.
 ## Inspecting a token
 
 ```bash
-ayx one platform token detail --token-id <id>
+ayx one platform token detail <id>
 
 # JSON for scripting
-ayx --output json one platform token detail --token-id <id>
+ayx --output json one platform token detail <id>
 ```
 
 Pass `--profile <name>` to query a specific environment.
@@ -61,10 +61,10 @@ Deleting a token immediately revokes it. Any automation using it will stop worki
 
 ```bash
 # Preview
-ayx one platform token delete --token-id <id>
+ayx one platform token delete <id>
 
 # Commit
-ayx one platform token delete --token-id <id> --apply --yes
+ayx one platform token delete <id> --apply --yes
 ```
 
 `--yes` skips the TTY confirmation, required in non-interactive scripts.
@@ -82,7 +82,7 @@ NEW_ID=$(ayx --output json one platform token create \
   | jq -r '.data.id')
 
 # Store the new token value from that response, then:
-ayx one platform token delete --token-id <old-id> --apply --yes
+ayx one platform token delete <old-id> --apply --yes
 ```
 
 ## Related

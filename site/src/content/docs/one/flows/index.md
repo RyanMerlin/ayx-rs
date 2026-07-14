@@ -62,8 +62,8 @@ Returns the total number of flows in the workspace.
 ### Flow detail
 
 ```bash
-ayx one flows detail --flow-id <flow-id>
-ayx one flows detail --flow-id <flow-id> --profile <name>
+ayx one flows detail <flow-id>
+ayx one flows detail <flow-id> --profile <name>
 ```
 
 Returns the full metadata record for a single flow.
@@ -71,7 +71,7 @@ Returns the full metadata record for a single flow.
 ### Validate a flow
 
 ```bash
-ayx one flows validate --flow-id <flow-id>
+ayx one flows validate <flow-id>
 ```
 
 Runs server-side validation and returns any errors. Read-only — does not modify the flow.
@@ -80,27 +80,27 @@ Runs server-side validation and returns any errors. Read-only — does not modif
 
 ```bash
 # Parameters the flow accepts
-ayx one flows parameters --flow-id <flow-id>
-ayx one flows parameters --flow-id <flow-id> --output-object-type <type>
+ayx one flows parameters <flow-id>
+ayx one flows parameters <flow-id> --output-object-type <type>
 
 # Input data connections
-ayx one flows inputs --flow-id <flow-id>
+ayx one flows inputs <flow-id>
 
 # Output data connections
-ayx one flows outputs --flow-id <flow-id>
+ayx one flows outputs <flow-id>
 ```
 
 ## Run
 
 ```bash
 # Dry-run (shows what would be triggered)
-ayx one flows run --flow-id <flow-id>
+ayx one flows run <flow-id>
 
 # Trigger an on-demand run
-ayx one flows run --flow-id <flow-id> --apply
+ayx one flows run <flow-id> --apply
 
 # Pass a JSON body (e.g. run parameters)
-ayx one flows run --flow-id <flow-id> --body '<json>' --apply
+ayx one flows run <flow-id> --body '<json>' --apply
 ```
 
 `--body` accepts a raw JSON string. Use it to override parameters or pass run-time configuration accepted by the flow.
@@ -115,7 +115,7 @@ ayx one flows create --body '<json>'
 ayx one flows create --body '<json>' --apply
 
 # Update
-ayx one flows update --flow-id <flow-id> --body '<json>' --apply
+ayx one flows update <flow-id> --body '<json>' --apply
 ```
 
 Both commands require `--body` with the flow definition or patch as a JSON string.
@@ -124,16 +124,16 @@ Both commands require `--body` with the flow definition or patch as a JSON strin
 
 ```bash
 # Copy (body specifies the destination name / folder)
-ayx one flows copy --flow-id <flow-id> --body '<json>' --apply
+ayx one flows copy <flow-id> --body '<json>' --apply
 
 # Move to a different folder
-ayx one flows move --flow-id <flow-id> --body '<json>' --apply
+ayx one flows move <flow-id> --body '<json>' --apply
 ```
 
 ## Replace a dataset
 
 ```bash
-ayx one flows replace-dataset --flow-id <flow-id> --body '<json>' --apply
+ayx one flows replace-dataset <flow-id> --body '<json>' --apply
 ```
 
 Replaces a dataset reference inside the flow without modifying the flow logic. Useful when promoting flows between environments that point at different data sources.
@@ -142,13 +142,13 @@ Replaces a dataset reference inside the flow without modifying the flow logic. U
 
 ```bash
 # Dry-run
-ayx one flows delete --flow-id <flow-id>
+ayx one flows delete <flow-id>
 
 # Commit
-ayx one flows delete --flow-id <flow-id> --apply
+ayx one flows delete <flow-id> --apply
 
 # Non-interactive (CI / scripts)
-ayx one flows delete --flow-id <flow-id> --apply --yes
+ayx one flows delete <flow-id> --apply --yes
 ```
 
 ## Automation patterns
@@ -170,14 +170,14 @@ ayx --output json one flows list --all \
 ### Run a flow and capture the job reference
 
 ```bash
-result=$(ayx --output json one flows run --flow-id <flow-id> --apply)
+result=$(ayx --output json one flows run <flow-id> --apply)
 ok=$(echo "$result" | jq -r '.ok')
 ```
 
 ### Validate before promoting
 
 ```bash
-ayx --output json one flows validate --flow-id <flow-id> \
+ayx --output json one flows validate <flow-id> \
   | jq -e '.ok'
 ```
 

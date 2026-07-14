@@ -14,8 +14,8 @@ Mutating commands are dry-run by default. Add `--apply` to commit.
 | Command | What it does |
 |---|---|
 | `ayx one webhook-flow-tasks create --body <json>` | Create a webhook flow task |
-| `ayx one webhook-flow-tasks detail --webhook-flow-task-id <id>` | Get details for a webhook flow task |
-| `ayx one webhook-flow-tasks delete --webhook-flow-task-id <id>` | Delete a webhook flow task |
+| `ayx one webhook-flow-tasks detail <id>` | Get details for a webhook flow task |
+| `ayx one webhook-flow-tasks delete <id>` | Delete a webhook flow task |
 | `ayx one webhook-flow-tasks test --body <json>` | Send a test trigger to a webhook flow task |
 
 ## Creating a webhook flow task
@@ -35,7 +35,7 @@ Add `--profile <name>` to target a non-default workspace.
 ## Getting task details
 
 ```bash
-ayx one webhook-flow-tasks detail --webhook-flow-task-id <id>
+ayx one webhook-flow-tasks detail <id>
 ```
 
 Use this to retrieve the webhook URL and current task configuration.
@@ -58,16 +58,16 @@ ayx one webhook-flow-tasks test --body '{"test_payload": {}}' --apply
 
 ```bash
 # Dry-run
-ayx one webhook-flow-tasks delete --webhook-flow-task-id <id>
+ayx one webhook-flow-tasks delete <id>
 
 # Commit
-ayx one webhook-flow-tasks delete --webhook-flow-task-id <id> --apply --yes
+ayx one webhook-flow-tasks delete <id> --apply --yes
 ```
 
 ## JSON output
 
 ```bash
-ayx --output json one webhook-flow-tasks detail --webhook-flow-task-id <id>
+ayx --output json one webhook-flow-tasks detail <id>
 ```
 
 The envelope is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`.

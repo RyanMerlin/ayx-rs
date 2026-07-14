@@ -30,7 +30,7 @@ The Alteryx One PAT you authenticated with determines your active workspace. The
 | `workspace admins` | List admins of the active workspace |
 | `workspace switch --workspace-id <id>` | Make an already-authenticated workspace credential active |
 | `workspace invite-users` | Invite users to the active workspace |
-| `workspace remove-user --person-id <id>` | Remove a user from the active workspace |
+| `workspace remove-user <id>` | Remove a user from the active workspace |
 | `workspace suspend-users` | Suspend users in the active workspace |
 | `workspace unsuspend-users` | Unsuspend users in the active workspace |
 | `workspace transfer` | Transfer active workspace ownership |
@@ -140,11 +140,11 @@ ayx one platform workspace invite-users --apply
 
 ```bash
 # Preview
-ayx one platform workspace remove-user --person-id <id>
+ayx one platform workspace remove-user <id>
 
 # Commit (non-interactive)
 ayx one platform workspace remove-user \
-  --person-id <id> \
+  <id> \
   --apply --yes
 ```
 

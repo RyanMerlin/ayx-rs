@@ -45,10 +45,10 @@ The `--all` flag follows pagination automatically and returns every record. For 
 
 ```bash
 # Full detail
-ayx one connections detail --connection-id <id>
+ayx one connections detail <id>
 
 # Health status only
-ayx one connections status --connection-id <id>
+ayx one connections status <id>
 ```
 
 `detail` returns the full connection record including type, owner, and configuration keys. `status` returns a lighter response focused on whether the connection can reach its target.
@@ -80,7 +80,7 @@ ayx one connections create --body "$(cat connection.json)" --apply
 To generate a starting body for a connector type, use `connector-metadata template`:
 
 ```bash
-ayx one connections connector-metadata template --connector <slug> --output json > body.json
+ayx one connections connector-metadata template <slug> --output json > body.json
 # edit body.json, then:
 ayx one connections create --body "$(cat body.json)" --apply
 ```
@@ -91,10 +91,10 @@ See [Connector metadata](/one/connections/connector-metadata/) for details.
 
 ```bash
 # Dry-run
-ayx one connections update --connection-id <id> --body '{"name":"Renamed DB"}'
+ayx one connections update <id> --body '{"name":"Renamed DB"}'
 
 # Commit
-ayx one connections update --connection-id <id> --body '{"name":"Renamed DB"}' --apply
+ayx one connections update <id> --body '{"name":"Renamed DB"}' --apply
 ```
 
 Only the fields you include in `--body` are changed.
@@ -103,10 +103,10 @@ Only the fields you include in `--body` are changed.
 
 ```bash
 # Dry-run
-ayx one connections delete --connection-id <id>
+ayx one connections delete <id>
 
 # Commit (skips TTY prompt in CI)
-ayx one connections delete --connection-id <id> --apply --yes
+ayx one connections delete <id> --apply --yes
 ```
 
 ## Automation patterns
@@ -123,7 +123,7 @@ Audit connection health across all connections:
 ```bash
 ayx --output json one connections list --all \
   | jq -r '.data[].id' \
-  | xargs -I{} ayx --output json one connections status --connection-id {}
+  | xargs -I{} ayx --output json one connections status {}
 ```
 
 ## Related

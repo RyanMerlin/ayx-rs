@@ -11,30 +11,30 @@ sidebar:
 
 | Command | What it does |
 |---|---|
-| `role list-assignments --role-id <id>` | List all subjects assigned to a role |
-| `role assign --role-id <id> --subject-id <id>` | Assign a role to a subject |
-| `role unassign --role-id <id> --subject-id <id>` | Remove a role from a subject |
+| `role list-assignments <id>` | List all subjects assigned to a role |
+| `role assign <id> <id>` | Assign a role to a subject |
+| `role unassign <id> <id>` | Remove a role from a subject |
 
 ## Listing assignments
 
 ```bash
 # Who holds this role?
-ayx one platform role list-assignments --role-id <id>
+ayx one platform role list-assignments <id>
 
 # Machine-readable
-ayx --output json one platform role list-assignments --role-id <id>
+ayx --output json one platform role list-assignments <id>
 ```
 
 ## Assigning a role
 
 ```bash
 # Preview
-ayx one platform role assign --role-id <id> --subject-id <id>
+ayx one platform role assign <id> <id>
 
 # Commit
 ayx one platform role assign \
-  --role-id <id> \
-  --subject-id <id> \
+  <id> \
+  <id> \
   --apply
 ```
 
@@ -44,12 +44,12 @@ The subject is typically a person ID. Use `ayx one platform person list --all` t
 
 ```bash
 # Preview
-ayx one platform role unassign --role-id <id> --subject-id <id>
+ayx one platform role unassign <id> <id>
 
 # Commit
 ayx one platform role unassign \
-  --role-id <id> \
-  --subject-id <id> \
+  <id> \
+  <id> \
   --apply --yes
 ```
 
@@ -57,19 +57,19 @@ ayx one platform role unassign \
 
 ```bash
 # Audit: dump all assignments for a role
-ayx --output json one platform role list-assignments --role-id <id> \
+ayx --output json one platform role list-assignments <id> \
   | jq '.data'
 
 # Bulk assign: read subject IDs from a file, assign each
 while IFS= read -r subject_id; do
   ayx one platform role assign \
-    --role-id <id> \
-    --subject-id "$subject_id" \
+    <id> \
+    "$subject_id" \
     --apply
 done < subject_ids.txt
 
 # Verify a specific user holds a role
-ayx --output json one platform role list-assignments --role-id <id> \
+ayx --output json one platform role list-assignments <id> \
   | jq -e --arg uid "<person-id>" '.data[] | select(.id == $uid)' \
   && echo "assigned" || echo "not assigned"
 ```
