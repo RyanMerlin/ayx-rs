@@ -18,17 +18,13 @@ fn append_query(endpoint: &str, query: &[(&str, String)]) -> String {
     format!("{endpoint}?{}", serializer.finish())
 }
 
-pub(crate) fn execute(
-    runtime: &RuntimeCtx<'_>,
-    command: Option<OneDatasetsCommand>,
-) -> Result<Envelope> {
+pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneDatasetsCommand) -> Result<Envelope> {
     Ok(match command {
-        None => Envelope::ok("one datasets commands available: list, count, wrangled, imported"),
-        Some(OneDatasetsCommand::List {
+        OneDatasetsCommand::List {
             profile,
             limit,
             offset,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let mut query = Vec::new();
             if let Some(limit) = limit {
@@ -40,7 +36,7 @@ pub(crate) fn execute(
             let endpoint = append_query("/v4/datasetLibrary", &query);
             one_api_live_request(&config, "datasets", "list", "GET", &endpoint, false, &[])?
         }
-        Some(OneDatasetsCommand::Count { profile }) => {
+        OneDatasetsCommand::Count { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -52,13 +48,12 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneDatasetsCommand::Wrangled { command }) => match command {
-            None => Envelope::ok("one datasets wrangled commands available: list, count, detail"),
-            Some(OneDatasetsWrangledCommand::List {
+        OneDatasetsCommand::Wrangled { command } => match command {
+            OneDatasetsWrangledCommand::List {
                 profile,
                 limit,
                 offset,
-            }) => {
+            } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 let mut query = Vec::new();
                 if let Some(limit) = limit {
@@ -78,7 +73,7 @@ pub(crate) fn execute(
                     &[],
                 )?
             }
-            Some(OneDatasetsWrangledCommand::Count { profile }) => {
+            OneDatasetsWrangledCommand::Count { profile } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 one_api_live_request(
                     &config,
@@ -90,7 +85,7 @@ pub(crate) fn execute(
                     &[],
                 )?
             }
-            Some(OneDatasetsWrangledCommand::Detail { profile, id }) => {
+            OneDatasetsWrangledCommand::Detail { profile, id } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 one_api_live_request(
                     &config,
@@ -103,9 +98,8 @@ pub(crate) fn execute(
                 )?
             }
         },
-        Some(OneDatasetsCommand::Imported { command }) => match command {
-            None => Envelope::ok("one datasets imported commands available: detail"),
-            Some(OneDatasetsImportedCommand::Detail { profile, id }) => {
+        OneDatasetsCommand::Imported { command } => match command {
+            OneDatasetsImportedCommand::Detail { profile, id } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 one_api_live_request(
                     &config,

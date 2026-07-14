@@ -4,21 +4,15 @@ use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
 use crate::{OneJobGroupCommand, cmd::RuntimeCtx, load_payload};
 
-pub(crate) fn execute(
-    runtime: &RuntimeCtx<'_>,
-    command: Option<OneJobGroupCommand>,
-) -> Result<Envelope> {
+pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> Result<Envelope> {
     Ok(match command {
-        None => Envelope::ok(
-            "one job-group commands available: list, count, pdf-results, run, publish, detail, cancel, status, inputs, outputs, jobs, publications, profile, profile-results",
-        ),
-        Some(OneJobGroupCommand::List {
+        OneJobGroupCommand::List {
             profile,
             limit,
             page_token,
             all,
             max_pages,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let params = ayx_one_api::OneListParams::new()
                 .with_limit(limit)
@@ -35,7 +29,7 @@ pub(crate) fn execute(
             synthesize_job_group_names(&mut envelope.data);
             envelope
         }
-        Some(OneJobGroupCommand::Count { profile }) => {
+        OneJobGroupCommand::Count { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -47,7 +41,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneJobGroupCommand::Run { profile, body }) => {
+        OneJobGroupCommand::Run { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -61,7 +55,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneJobGroupCommand::Publish { profile, id, body }) => {
+        OneJobGroupCommand::Publish { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -75,7 +69,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneJobGroupCommand::PdfResults { profile, id }) => {
+        OneJobGroupCommand::PdfResults { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -87,7 +81,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Detail { profile, id }) => {
+        OneJobGroupCommand::Detail { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -99,7 +93,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Cancel { profile, id }) => {
+        OneJobGroupCommand::Cancel { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -111,7 +105,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Status { profile, id }) => {
+        OneJobGroupCommand::Status { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -123,7 +117,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Inputs { profile, id }) => {
+        OneJobGroupCommand::Inputs { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -135,7 +129,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Outputs { profile, id }) => {
+        OneJobGroupCommand::Outputs { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -147,7 +141,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Jobs { profile, id }) => {
+        OneJobGroupCommand::Jobs { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -159,7 +153,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Publications { profile, id }) => {
+        OneJobGroupCommand::Publications { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -171,7 +165,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Profile { profile, id }) => {
+        OneJobGroupCommand::Profile { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -183,7 +177,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::ProfileResults { profile, id }) => {
+        OneJobGroupCommand::ProfileResults { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,

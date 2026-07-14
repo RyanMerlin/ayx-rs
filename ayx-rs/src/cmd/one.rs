@@ -41,16 +41,13 @@ pub struct Ctx<'a> {
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
+pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
     // Capture `environment` up-front so `cli.environment` reads through the
     // helper don't conflict with `cli` itself being borrowed by other arms.
     let environment = cli.environment;
     let runtime = crate::cmd::RuntimeCtx::new(environment);
     Ok(match command {
-        None => Envelope::ok(
-            "one commands available: login, logout, whoami, auth, workspace, person, role, token, inventory, api, doctor, plans, flows, datasets, connections, scheduling, billing",
-        ),
-        Some(OneCommand::Login {
+        OneCommand::Login {
             profile,
             client_id,
             browser,
@@ -60,7 +57,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
             token_endpoint,
             workspace_id,
             workspace_gid,
-        }) => super::one_platform::auth::login(
+        } => super::one_platform::auth::login(
             &runtime,
             profile,
             client_id,
@@ -72,58 +69,52 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
             workspace_id,
             workspace_gid,
         )?,
-        Some(OneCommand::Logout { profile }) => {
+        OneCommand::Logout { profile } => {
             super::one_platform::auth::logout(&runtime, profile.as_deref())?
         }
-        Some(OneCommand::Whoami) => super::one_platform::person::current(&runtime, None)?,
-        Some(OneCommand::Auth { command }) => {
-            super::one_platform::auth::execute(&runtime, command)?
+        OneCommand::Whoami => super::one_platform::person::current(&runtime, None)?,
+        OneCommand::Auth { command } => super::one_platform::auth::execute(&runtime, command)?,
+        OneCommand::Workspace { command } => {
+            super::one_platform::workspace::execute(&runtime, cli.apply, cli.yes, command)?
         }
-        Some(OneCommand::Workspace { command }) => {
-            super::one_platform::workspace::execute(&runtime, cli.apply, cli.yes, Some(command))?
-        }
-        Some(OneCommand::Role { command }) => {
+        OneCommand::Role { command } => {
             super::one_platform::role::execute(&runtime, cli.apply, cli.yes, command)?
         }
-        Some(OneCommand::Token { command }) => {
+        OneCommand::Token { command } => {
             super::one_platform::token::execute(&runtime, cli.apply, cli.yes, command)?
         }
-        Some(OneCommand::Person { command }) => {
+        OneCommand::Person { command } => {
             super::one_platform::person::execute(&runtime, cli.apply, cli.yes, command)?
         }
-        Some(OneCommand::Inventory { profile }) => {
+        OneCommand::Inventory { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_surface_inventory_envelope(&config)?
         }
-        Some(OneCommand::Doctor { command }) => super::one_doctor::execute(&runtime, command)?,
-        Some(OneCommand::Api { command }) => super::one_api::execute(&runtime, command)?,
-        Some(OneCommand::JobGroups { command }) => {
-            super::one_job_groups::execute(&runtime, command)?
-        }
-        Some(OneCommand::OutputObjects { command }) => {
+        OneCommand::Doctor { command } => super::one_doctor::execute(&runtime, command)?,
+        OneCommand::Api { command } => super::one_api::execute(&runtime, command)?,
+        OneCommand::JobGroups { command } => super::one_job_groups::execute(&runtime, command)?,
+        OneCommand::OutputObjects { command } => {
             super::one_output_objects::execute(&runtime, command)?
         }
-        Some(OneCommand::WebhookFlowTasks { command }) => {
+        OneCommand::WebhookFlowTasks { command } => {
             super::one_webhook_flow_tasks::execute(&runtime, command)?
         }
-        Some(OneCommand::WriteSettings { command }) => {
+        OneCommand::WriteSettings { command } => {
             super::one_write_settings::execute(&runtime, command)?
         }
-        Some(OneCommand::Connections { command }) => {
+        OneCommand::Connections { command } => {
             super::one_connections::execute(&runtime, cli.apply, cli.yes, command)?
         }
-        Some(OneCommand::Datasets { command }) => super::one_datasets::execute(&runtime, command)?,
-        Some(OneCommand::Flows { command }) => {
+        OneCommand::Datasets { command } => super::one_datasets::execute(&runtime, command)?,
+        OneCommand::Flows { command } => {
             super::one_flows::execute(&runtime, cli.apply, cli.yes, command)?
         }
-        Some(OneCommand::Plans { command }) => {
+        OneCommand::Plans { command } => {
             super::one_plans::execute(&runtime, cli.apply, cli.yes, command)?
         }
-        Some(OneCommand::Scheduling { command }) => {
-            super::one_scheduling::execute(&runtime, command)?
-        }
-        Some(OneCommand::Billing { command }) => super::one_billing::execute(&runtime, command)?,
+        OneCommand::Scheduling { command } => super::one_scheduling::execute(&runtime, command)?,
+        OneCommand::Billing { command } => super::one_billing::execute(&runtime, command)?,
         #[cfg(feature = "ui")]
-        Some(OneCommand::Ui { command }) => super::one_ui::execute(&runtime, command)?,
+        OneCommand::Ui { command } => super::one_ui::execute(&runtime, command)?,
     })
 }

@@ -111,19 +111,16 @@ pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
     apply: bool,
     yes: bool,
-    command: Option<OneConnectionsCommand>,
+    command: OneConnectionsCommand,
 ) -> Result<Envelope> {
     Ok(match command {
-        None => Envelope::ok(
-            "one connections commands available: list, count, create, dry-run, detail, status, update, delete, permissions, connector-metadata",
-        ),
-        Some(OneConnectionsCommand::List {
+        OneConnectionsCommand::List {
             profile,
             limit,
             page_token,
             all,
             max_pages,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let params = ayx_one_api::OneListParams::new()
                 .with_limit(limit)
@@ -138,7 +135,7 @@ pub(crate) fn execute(
                 &params,
             )?
         }
-        Some(OneConnectionsCommand::Count { profile }) => {
+        OneConnectionsCommand::Count { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -150,7 +147,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneConnectionsCommand::Create { profile, body }) => {
+        OneConnectionsCommand::Create { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -164,7 +161,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneConnectionsCommand::DryRun { profile, body }) => {
+        OneConnectionsCommand::DryRun { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -178,7 +175,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneConnectionsCommand::Detail { profile, id }) => {
+        OneConnectionsCommand::Detail { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -190,7 +187,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneConnectionsCommand::Status { profile, id }) => {
+        OneConnectionsCommand::Status { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -202,7 +199,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneConnectionsCommand::Update { profile, id, body }) => {
+        OneConnectionsCommand::Update { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -216,7 +213,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneConnectionsCommand::Delete { profile, id }) => {
+        OneConnectionsCommand::Delete { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
@@ -238,13 +235,8 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneConnectionsCommand::ConnectorMetadata { command }) => match command {
-            None => Envelope::ok(
-                "one connections connector-metadata commands available: defaults, detail, publish-info, overrides, template. \
-                 Note: connector enumeration (list) is not available via the Alteryx One v4 API — use a known connector slug \
-                 (e.g. 'gsheetsuser', 'remotefile') with 'detail' to discover the schema.",
-            ),
-            Some(OneConnectorMetadataCommand::Defaults { profile, connector }) => {
+        OneConnectionsCommand::ConnectorMetadata { command } => match command {
+            OneConnectorMetadataCommand::Defaults { profile, connector } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 one_api_live_request(
                     &config,
@@ -256,7 +248,7 @@ pub(crate) fn execute(
                     &[("connector", connector.as_str())],
                 )?
             }
-            Some(OneConnectorMetadataCommand::Detail { profile, connector }) => {
+            OneConnectorMetadataCommand::Detail { profile, connector } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 one_api_live_request(
                     &config,
@@ -268,7 +260,7 @@ pub(crate) fn execute(
                     &[("connector", connector.as_str())],
                 )?
             }
-            Some(OneConnectorMetadataCommand::PublishInfo { profile, connector }) => {
+            OneConnectorMetadataCommand::PublishInfo { profile, connector } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 one_api_live_request(
                     &config,
@@ -280,7 +272,7 @@ pub(crate) fn execute(
                     &[("connector", connector.as_str())],
                 )?
             }
-            Some(OneConnectorMetadataCommand::Template { profile, connector }) => {
+            OneConnectorMetadataCommand::Template { profile, connector } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 let envelope = one_api_live_request(
                     &config,
@@ -314,11 +306,8 @@ pub(crate) fn execute(
                     template,
                 )
             }
-            Some(OneConnectorMetadataCommand::Overrides { command }) => match command {
-                None => Envelope::ok(
-                    "one connections connector-metadata overrides commands available: list, create, delete",
-                ),
-                Some(OneConnectorMetadataOverridesCommand::List { profile, connector }) => {
+            OneConnectorMetadataCommand::Overrides { command } => match command {
+                OneConnectorMetadataOverridesCommand::List { profile, connector } => {
                     let config = runtime.load_profile_lenient(profile.as_deref())?;
                     one_api_live_request(
                         &config,
@@ -330,11 +319,11 @@ pub(crate) fn execute(
                         &[("connector", connector.as_str())],
                     )?
                 }
-                Some(OneConnectorMetadataOverridesCommand::Create {
+                OneConnectorMetadataOverridesCommand::Create {
                     profile,
                     connector,
                     body,
-                }) => {
+                } => {
                     let config = runtime.load_profile_lenient(profile.as_deref())?;
                     let payload = load_payload(&body)?;
                     one_api_live_request_with_body(
@@ -348,7 +337,7 @@ pub(crate) fn execute(
                         Some(payload),
                     )?
                 }
-                Some(OneConnectorMetadataOverridesCommand::Delete { profile, connector }) => {
+                OneConnectorMetadataOverridesCommand::Delete { profile, connector } => {
                     let config = runtime.load_profile_lenient(profile.as_deref())?;
                     if apply {
                         cmd::confirm::require_tty_confirmation(
@@ -374,11 +363,8 @@ pub(crate) fn execute(
                 }
             },
         },
-        Some(OneConnectionsCommand::Permissions { command }) => match command {
-            None => Envelope::ok(
-                "one connection permissions commands available: list, create, detail, delete",
-            ),
-            Some(OneConnectionPermissionCommand::List { profile, id }) => {
+        OneConnectionsCommand::Permissions { command } => match command {
+            OneConnectionPermissionCommand::List { profile, id } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 one_api_live_request(
                     &config,
@@ -390,7 +376,7 @@ pub(crate) fn execute(
                     &[("id", id.as_str())],
                 )?
             }
-            Some(OneConnectionPermissionCommand::Create { profile, id, body }) => {
+            OneConnectionPermissionCommand::Create { profile, id, body } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 let payload = load_payload(&body)?;
                 one_api_live_request_with_body(
@@ -404,11 +390,11 @@ pub(crate) fn execute(
                     Some(payload),
                 )?
             }
-            Some(OneConnectionPermissionCommand::Detail {
+            OneConnectionPermissionCommand::Detail {
                 profile,
                 connection_id,
                 subject_id,
-            }) => {
+            } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 one_api_live_request(
                     &config,
@@ -420,11 +406,11 @@ pub(crate) fn execute(
                     &[("id", connection_id.as_str()), ("aid", subject_id.as_str())],
                 )?
             }
-            Some(OneConnectionPermissionCommand::Delete {
+            OneConnectionPermissionCommand::Delete {
                 profile,
                 connection_id,
                 subject_id,
-            }) => {
+            } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 if apply {
                     cmd::confirm::require_tty_confirmation(

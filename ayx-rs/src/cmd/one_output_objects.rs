@@ -6,19 +6,16 @@ use crate::{OneOutputObjectCommand, cmd::RuntimeCtx, load_payload};
 
 pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
-    command: Option<OneOutputObjectCommand>,
+    command: OneOutputObjectCommand,
 ) -> Result<Envelope> {
     Ok(match command {
-        None => Envelope::ok(
-            "one output-object commands available: list, count, create, detail, update, delete, inputs, wrangle-to-python",
-        ),
-        Some(OneOutputObjectCommand::List {
+        OneOutputObjectCommand::List {
             profile,
             limit,
             page_token,
             all,
             max_pages,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let params = ayx_one_api::OneListParams::new()
                 .with_limit(limit)
@@ -33,7 +30,7 @@ pub(crate) fn execute(
                 &params,
             )?
         }
-        Some(OneOutputObjectCommand::Count { profile }) => {
+        OneOutputObjectCommand::Count { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -45,7 +42,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneOutputObjectCommand::Create { profile, body }) => {
+        OneOutputObjectCommand::Create { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -59,7 +56,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneOutputObjectCommand::Detail { profile, id }) => {
+        OneOutputObjectCommand::Detail { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -71,7 +68,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneOutputObjectCommand::Update { profile, id, body }) => {
+        OneOutputObjectCommand::Update { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -85,7 +82,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneOutputObjectCommand::Delete { profile, id }) => {
+        OneOutputObjectCommand::Delete { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -97,7 +94,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneOutputObjectCommand::Inputs { profile, id }) => {
+        OneOutputObjectCommand::Inputs { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -109,7 +106,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OneOutputObjectCommand::WrangleToPython { profile, id, body }) => {
+        OneOutputObjectCommand::WrangleToPython { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             match body {
                 Some(body) => {

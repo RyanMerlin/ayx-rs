@@ -4,16 +4,9 @@ use ayx_one_api::one_api_live_request;
 
 use crate::{OneBillingCommand, cmd::RuntimeCtx};
 
-pub(crate) fn execute(
-    runtime: &RuntimeCtx<'_>,
-    command: Option<OneBillingCommand>,
-) -> Result<Envelope> {
+pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneBillingCommand) -> Result<Envelope> {
     Ok(match command {
-        None => Envelope::ok(
-            "one billing commands available: current-account, usage-export. \
-             Note: Billing API requires an enterprise-tier workspace — returns 404 on some workspace tiers.",
-        ),
-        Some(OneBillingCommand::CurrentAccount { profile }) => {
+        OneBillingCommand::CurrentAccount { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -25,7 +18,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OneBillingCommand::UsageExport { profile }) => {
+        OneBillingCommand::UsageExport { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,

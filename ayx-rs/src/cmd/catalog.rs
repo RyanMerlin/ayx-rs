@@ -13,23 +13,20 @@ use std::fs;
 use crate::capability;
 use crate::{COMMAND_SPECS, CatalogCommand};
 
-pub fn execute(command: Option<CatalogCommand>) -> Result<Envelope> {
+pub fn execute(command: CatalogCommand) -> Result<Envelope> {
     Ok(match command {
-        Some(CatalogCommand::List { tag, format }) => {
-            catalog_list_envelope(tag.as_deref(), &format)?
-        }
-        Some(CatalogCommand::Describe { target, command }) => {
+        CatalogCommand::List { tag, format } => catalog_list_envelope(tag.as_deref(), &format)?,
+        CatalogCommand::Describe { target, command } => {
             let target = target.as_deref().or(command.as_deref()).ok_or_else(|| {
                 anyhow!("catalog describe requires a command or capability identifier")
             })?;
             catalog_describe_envelope(target)?
         }
-        Some(CatalogCommand::Run {
+        CatalogCommand::Run {
             capability,
             json_input,
             dry_run,
-        }) => catalog_run_envelope(&capability, &json_input, dry_run)?,
-        None => Envelope::ok("catalog registry commands available: list, describe, run"),
+        } => catalog_run_envelope(&capability, &json_input, dry_run)?,
     })
 }
 

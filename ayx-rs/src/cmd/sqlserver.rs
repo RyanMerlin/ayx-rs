@@ -14,7 +14,7 @@ use ayx_server::sqlserver::{
 
 use crate::SqlserverCommand;
 
-pub fn execute(environment: Option<&str>, command: Option<SqlserverCommand>) -> Result<Envelope> {
+pub fn execute(environment: Option<&str>, command: SqlserverCommand) -> Result<Envelope> {
     let runtime = crate::cmd::RuntimeCtx::new(environment);
     macro_rules! load_profile {
         ($profile:expr) => {
@@ -22,38 +22,35 @@ pub fn execute(environment: Option<&str>, command: Option<SqlserverCommand>) -> 
         };
     }
     match command {
-        None => Ok(Envelope::ok(
-            "sqlserver commands available: status, inventory, precheck, connection-string, migrate",
-        )),
-        Some(SqlserverCommand::Status { profile }) => {
+        SqlserverCommand::Status { profile } => {
             let config = load_profile!(profile.as_deref())?;
             Ok(Envelope::ok_with_data(
                 "sqlserver status summarized",
                 sqlserver_status_envelope(&config)?,
             ))
         }
-        Some(SqlserverCommand::Inventory { profile }) => {
+        SqlserverCommand::Inventory { profile } => {
             let config = load_profile!(profile.as_deref())?;
             Ok(Envelope::ok_with_data(
                 "sqlserver inventory summarized",
                 sqlserver_inventory_envelope(&config)?,
             ))
         }
-        Some(SqlserverCommand::Precheck { profile, collation }) => {
+        SqlserverCommand::Precheck { profile, collation } => {
             let config = load_profile!(profile.as_deref())?;
             Ok(Envelope::ok_with_data(
                 "sqlserver precheck summarized",
                 sqlserver_precheck_envelope(&config, collation.as_deref())?,
             ))
         }
-        Some(SqlserverCommand::ValidateStrings { profile }) => {
+        SqlserverCommand::ValidateStrings { profile } => {
             let config = load_profile!(profile.as_deref())?;
             Ok(Envelope::ok_with_data(
                 "sqlserver connection strings validated",
                 validate_connection_strings_envelope(&config)?,
             ))
         }
-        Some(SqlserverCommand::ConnectionString {
+        SqlserverCommand::ConnectionString {
             profile,
             scope,
             auth,
@@ -63,7 +60,7 @@ pub fn execute(environment: Option<&str>, command: Option<SqlserverCommand>) -> 
             encrypt,
             trust_server_certificate,
             multi_subnet_failover,
-        }) => {
+        } => {
             let config = load_profile!(profile.as_deref())?;
             Ok(Envelope::ok_with_data(
                 "sqlserver connection string generated",
@@ -80,22 +77,22 @@ pub fn execute(environment: Option<&str>, command: Option<SqlserverCommand>) -> 
                 )?,
             ))
         }
-        Some(SqlserverCommand::Migrate {
+        SqlserverCommand::Migrate {
             profile,
             target_version,
             dry_run,
-        }) => {
+        } => {
             let config = load_profile!(profile.as_deref())?;
             Ok(Envelope::ok_with_data(
                 "sqlserver migration plan generated",
                 migration_prepare_envelope(&config, target_version.as_deref(), dry_run)?,
             ))
         }
-        Some(SqlserverCommand::Prepare {
+        SqlserverCommand::Prepare {
             profile,
             target_version,
             dry_run,
-        }) => {
+        } => {
             let config = load_profile!(profile.as_deref())?;
             Ok(Envelope::ok_with_data(
                 "sqlserver migration preparation generated",

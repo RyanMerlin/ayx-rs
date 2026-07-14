@@ -12,20 +12,16 @@ pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
     apply: bool,
     yes: bool,
-    command: Option<OnePlansCommand>,
+    command: OnePlansCommand,
 ) -> Result<Envelope> {
     Ok(match command {
-        None => Envelope::ok(
-            "one plans commands available: list, create, detail, full, run, count, run-parameters, schedules, export, update, delete, share, import, permissions. \
-             Note: Plans API requires an enterprise-tier workspace — returns 404 on some workspace tiers.",
-        ),
-        Some(OnePlansCommand::List {
+        OnePlansCommand::List {
             profile,
             limit,
             page_token,
             all,
             max_pages,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let params = ayx_one_api::OneListParams::new()
                 .with_limit(limit)
@@ -40,7 +36,7 @@ pub(crate) fn execute(
                 &params,
             )?
         }
-        Some(OnePlansCommand::Create { profile, body }) => {
+        OnePlansCommand::Create { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -54,7 +50,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OnePlansCommand::Detail { profile, id }) => {
+        OnePlansCommand::Detail { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -66,7 +62,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OnePlansCommand::Full { profile, id }) => {
+        OnePlansCommand::Full { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -78,7 +74,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OnePlansCommand::Run { profile, id }) => {
+        OnePlansCommand::Run { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -90,7 +86,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OnePlansCommand::Count { profile }) => {
+        OnePlansCommand::Count { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -102,7 +98,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OnePlansCommand::RunParameters { profile, id }) => {
+        OnePlansCommand::RunParameters { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -114,7 +110,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OnePlansCommand::Schedules { profile, id }) => {
+        OnePlansCommand::Schedules { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -126,7 +122,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OnePlansCommand::Export { profile, id }) => {
+        OnePlansCommand::Export { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -138,7 +134,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OnePlansCommand::Update { profile, id, body }) => {
+        OnePlansCommand::Update { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -152,7 +148,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OnePlansCommand::Delete { profile, id }) => {
+        OnePlansCommand::Delete { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
@@ -173,7 +169,7 @@ pub(crate) fn execute(
                 &[("id", id.as_str())],
             )?
         }
-        Some(OnePlansCommand::Share { profile, id, body }) => {
+        OnePlansCommand::Share { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
@@ -187,7 +183,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OnePlansCommand::Import { profile }) => {
+        OnePlansCommand::Import { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -199,11 +195,11 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OnePlansCommand::Permissions {
+        OnePlansCommand::Permissions {
             profile,
             id,
             subject_id,
-        }) => {
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let subject_id = subject_id.unwrap_or_default();
             if subject_id.is_empty() {
