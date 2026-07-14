@@ -1,11 +1,11 @@
 ---
-title: People
-description: Create, update, delete, and manage passwords for Alteryx One users.
+title: Person
+description: Create, update, delete, and manage passwords for Alteryx One users with ayx one person.
 sidebar:
   order: 3
 ---
 
-`ayx one platform person` manages users in Alteryx One. It covers the full lifecycle: listing, creating, updating, deleting, and handling password resets. Mutating commands are dry-run by default; add `--apply` to commit. Password operations and deletes are sensitive — review dry-run output before adding `--apply`.
+`ayx one person` manages users in Alteryx One. It covers the full lifecycle: listing, creating, updating, deleting, and handling password resets. Mutating commands are dry-run by default; add `--apply` to commit. Password operations and deletes are sensitive — review dry-run output before adding `--apply`.
 
 ## Quick reference
 
@@ -26,25 +26,25 @@ sidebar:
 
 ```bash
 # Paginated list
-ayx one platform person list
+ayx one person list
 
 # All users (auto-paginate)
-ayx one platform person list --all
+ayx one person list --all
 
 # Limit page size
-ayx one platform person list --limit 100
+ayx one person list --limit 100
 
 # Total user count
-ayx one platform person count
+ayx one person count
 
 # The authenticated caller
-ayx one platform person current
+ayx one person current
 
 # Specific user
-ayx one platform person detail <id>
+ayx one person detail <id>
 
 # Machine-readable
-ayx --output json one platform person list --all
+ayx --output json one person list --all
 ```
 
 `--profile <name>` switches the target environment on commands that support it. Use `--max-pages <n>` to cap auto-pagination.
@@ -53,10 +53,10 @@ ayx --output json one platform person list --all
 
 ```bash
 # Preview the request
-ayx one platform person create --body '{"email":"<email>","firstName":"...","lastName":"..."}'
+ayx one person create --body '{"email":"<email>","firstName":"...","lastName":"..."}'
 
 # Commit
-ayx one platform person create \
+ayx one person create \
   --body '{"email":"<email>","firstName":"...","lastName":"..."}' \
   --apply
 ```
@@ -69,18 +69,18 @@ Pass `--profile <name>` to create in a specific environment.
 
 ```bash
 # Full replace (preview)
-ayx one platform person update \
+ayx one person update \
   <id> \
   --body '{"email":"<email>","firstName":"...","lastName":"..."}'
 
 # Commit
-ayx one platform person update \
+ayx one person update \
   <id> \
   --body '{"email":"<email>","firstName":"...","lastName":"..."}' \
   --apply
 
 # Partial update (patch a single field)
-ayx one platform person patch \
+ayx one person patch \
   <id> \
   --body '{"firstName":"NewName"}' \
   --apply
@@ -92,10 +92,10 @@ Destructive. Review the dry-run output carefully before adding `--apply`.
 
 ```bash
 # Preview
-ayx one platform person delete <id>
+ayx one person delete <id>
 
 # Commit
-ayx one platform person delete <id> --apply --yes
+ayx one person delete <id> --apply --yes
 ```
 
 `--yes` suppresses the TTY confirmation, required in CI or piped scripts.
@@ -106,10 +106,10 @@ ayx one platform person delete <id> --apply --yes
 
 ```bash
 # Preview
-ayx one platform person update-password --body '{"currentPassword":"...","newPassword":"..."}'
+ayx one person update-password --body '{"currentPassword":"...","newPassword":"..."}'
 
 # Commit
-ayx one platform person update-password \
+ayx one person update-password \
   --body '{"currentPassword":"...","newPassword":"..."}' \
   --apply
 ```
@@ -118,10 +118,10 @@ ayx one platform person update-password \
 
 ```bash
 # Preview
-ayx one platform person password-reset-request --body '{"email":"<email>"}'
+ayx one person password-reset-request --body '{"email":"<email>"}'
 
 # Commit
-ayx one platform person password-reset-request \
+ayx one person password-reset-request \
   --body '{"email":"<email>"}' \
   --apply
 ```
@@ -132,23 +132,23 @@ This sends the reset email to the user. No `--yes` is required — it is not con
 
 ```bash
 # Export all users as JSON for auditing
-ayx --output json one platform person list --all | jq '.data'
+ayx --output json one person list --all | jq '.data'
 
 # Get a user's ID by email
-ayx --output json one platform person list --all \
+ayx --output json one person list --all \
   | jq -r '.data[] | select(.email == "<email>") | .id'
 
 # Bulk delete: pipe IDs into xargs (dry-run first)
-ayx --output json one platform person list --all \
+ayx --output json one person list --all \
   | jq -r '.data[] | select(.someField == "value") | .id' \
-  | xargs -I{} ayx one platform person delete {}
+  | xargs -I{} ayx one person delete {}
 
 # Add --apply once the dry-run output looks right
 ```
 
 ## Related
 
-- [Platform overview](/one/platform/)
-- [Workspace](/one/platform/workspace/) — workspace membership (invite, remove, suspend)
-- [Roles](/one/platform/roles/) — assign roles to users
+- [Identity & auth](/one/identity/)
+- [Workspace](/one/workspace/) — workspace membership (invite, remove, suspend)
+- [Roles](/one/role/) — assign roles to users
 - [Safety model](/safety-model/)

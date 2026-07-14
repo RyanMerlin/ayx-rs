@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-`ayx one platform token` manages API tokens for the active Alteryx One profile. Tokens are scoped to the authenticated caller. Creating and deleting tokens are mutating; add `--apply` to commit.
+`ayx one token` manages API tokens for the active Alteryx One profile. Tokens are scoped to the authenticated caller. Creating and deleting tokens are mutating; add `--apply` to commit.
 
 ## Quick reference
 
@@ -20,10 +20,10 @@ sidebar:
 
 ```bash
 # List all tokens for the current user
-ayx one platform token list
+ayx one token list
 
 # Machine-readable
-ayx --output json one platform token list
+ayx --output json one token list
 ```
 
 `token list` takes no filter flags. Use `jq` to filter the JSON output.
@@ -32,10 +32,10 @@ ayx --output json one platform token list
 
 ```bash
 # Preview the request
-ayx one platform token create --body '{"name":"ci-bot","description":"..."}'
+ayx one token create --body '{"name":"ci-bot","description":"..."}'
 
 # Commit
-ayx one platform token create \
+ayx one token create \
   --body '{"name":"ci-bot","description":"..."}' \
   --apply
 ```
@@ -47,10 +47,10 @@ Pass `--profile <name>` to create the token against a non-default environment.
 ## Inspecting a token
 
 ```bash
-ayx one platform token detail <id>
+ayx one token detail <id>
 
 # JSON for scripting
-ayx --output json one platform token detail <id>
+ayx --output json one token detail <id>
 ```
 
 Pass `--profile <name>` to query a specific environment.
@@ -61,10 +61,10 @@ Deleting a token immediately revokes it. Any automation using it will stop worki
 
 ```bash
 # Preview
-ayx one platform token delete <id>
+ayx one token delete <id>
 
 # Commit
-ayx one platform token delete <id> --apply --yes
+ayx one token delete <id> --apply --yes
 ```
 
 `--yes` skips the TTY confirmation, required in non-interactive scripts.
@@ -73,20 +73,20 @@ ayx one platform token delete <id> --apply --yes
 
 ```bash
 # Audit: list all token IDs and names
-ayx --output json one platform token list \
+ayx --output json one token list \
   | jq -r '.data[] | "\(.id)\t\(.name)"'
 
 # Rotate: create new, then delete old
-NEW_ID=$(ayx --output json one platform token create \
+NEW_ID=$(ayx --output json one token create \
   --body '{"name":"ci-bot-new"}' --apply \
   | jq -r '.data.id')
 
 # Store the new token value from that response, then:
-ayx one platform token delete <old-id> --apply --yes
+ayx one token delete <old-id> --apply --yes
 ```
 
 ## Related
 
-- [Platform overview](/one/platform/)
-- [People](/one/platform/people/) — manage the users who own tokens
+- [Identity & auth](/one/identity/)
+- [Person](/one/person/) — manage the users who own tokens
 - [Safety model](/safety-model/)

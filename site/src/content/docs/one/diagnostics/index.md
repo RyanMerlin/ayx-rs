@@ -1,11 +1,11 @@
 ---
 title: Diagnostics
-description: Check Alteryx One health with ayx one doctor, ayx one status, and ayx one inventory.
+description: Check Alteryx One health with ayx one doctor and ayx one inventory.
 sidebar:
   order: 5
 ---
 
-Three commands give you a quick read on the health of your Alteryx One environment: `ayx one doctor`, `ayx one status`, and `ayx one inventory`. Run these first when something seems off, or wire them into a monitoring script.
+Two commands give you a quick read on the health of your Alteryx One environment: `ayx one doctor` and `ayx one inventory`. Run these first when something seems off, or wire them into a monitoring script.
 
 ## Quick reference
 
@@ -13,11 +13,10 @@ Three commands give you a quick read on the health of your Alteryx One environme
 |---|---|
 | `ayx one doctor auth` | Verify authentication credentials are valid |
 | `ayx one doctor discover` | Probe API discoverability |
-| `ayx one doctor platform` | Check platform surface health |
+| `ayx one doctor identity` | Check identity surface health |
 | `ayx one doctor plans` | Check plans surface health |
 | `ayx one doctor scheduling` | Check scheduling surface health |
 | `ayx one doctor billing` | Check billing surface health |
-| `ayx one status` | Top-level platform status |
 | `ayx one inventory` | Asset inventory across the workspace |
 
 ## Running a full health check
@@ -27,7 +26,7 @@ Run all doctor subcommands in sequence to get a broad picture:
 ```bash
 ayx one doctor auth
 ayx one doctor discover
-ayx one doctor platform
+ayx one doctor identity
 ayx one doctor plans
 ayx one doctor scheduling
 ayx one doctor billing
@@ -57,12 +56,12 @@ ayx one doctor auth --profile staging
 ayx one doctor discover
 ```
 
-## Platform, plans, scheduling, and billing checks
+## Identity, plans, scheduling, and billing checks
 
 These targeted checks verify that specific API surfaces are healthy:
 
 ```bash
-ayx one doctor platform
+ayx one doctor identity
 ayx one doctor plans
 ayx one doctor scheduling
 ayx one doctor billing
@@ -70,19 +69,18 @@ ayx one doctor billing
 
 Run `ayx one doctor billing` before investigating billing data issues — it confirms the billing API is reachable before you try an export.
 
-## Status and inventory
+## Inventory
 
-`status` and `inventory` are standalone commands (not under `doctor`) that provide a broader view:
+`inventory` is a standalone command (not under `doctor`) that provides a broader view:
 
 ```bash
-# Top-level platform status
-ayx one status
-
 # Asset inventory across the workspace
 ayx one inventory
 ```
 
-Both accept `--profile <name>`.
+Accepts `--profile <name>`.
+
+The old top-level `status` command under `one` — and its nested equivalent from the former platform group — have both been removed entirely, with no direct successor. Looking for Alteryx Server health instead? That's `ayx server api status` — a separate command outside the `one` surface.
 
 ## JSON output
 
@@ -90,7 +88,6 @@ All diagnostic commands support `--output json`:
 
 ```bash
 ayx --output json one doctor auth
-ayx --output json one status
 ayx --output json one inventory
 ```
 

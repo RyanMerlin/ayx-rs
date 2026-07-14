@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-`ayx one platform role` manages role assignments in Alteryx One. You can inspect who holds a role, add a subject to a role, and remove them. Assign and unassign are mutating; add `--apply` to commit.
+`ayx one role` manages role assignments in Alteryx One. You can inspect who holds a role, add a subject to a role, and remove them. Assign and unassign are mutating; add `--apply` to commit.
 
 ## Quick reference
 
@@ -19,35 +19,35 @@ sidebar:
 
 ```bash
 # Who holds this role?
-ayx one platform role list-assignments <id>
+ayx one role list-assignments <id>
 
 # Machine-readable
-ayx --output json one platform role list-assignments <id>
+ayx --output json one role list-assignments <id>
 ```
 
 ## Assigning a role
 
 ```bash
 # Preview
-ayx one platform role assign <id> <id>
+ayx one role assign <id> <id>
 
 # Commit
-ayx one platform role assign \
+ayx one role assign \
   <id> \
   <id> \
   --apply
 ```
 
-The subject is typically a person ID. Use `ayx one platform person list --all` to find the right ID before assigning.
+The subject is typically a person ID. Use `ayx one person list --all` to find the right ID before assigning.
 
 ## Unassigning a role
 
 ```bash
 # Preview
-ayx one platform role unassign <id> <id>
+ayx one role unassign <id> <id>
 
 # Commit
-ayx one platform role unassign \
+ayx one role unassign \
   <id> \
   <id> \
   --apply --yes
@@ -57,25 +57,25 @@ ayx one platform role unassign \
 
 ```bash
 # Audit: dump all assignments for a role
-ayx --output json one platform role list-assignments <id> \
+ayx --output json one role list-assignments <id> \
   | jq '.data'
 
 # Bulk assign: read subject IDs from a file, assign each
 while IFS= read -r subject_id; do
-  ayx one platform role assign \
+  ayx one role assign \
     <id> \
     "$subject_id" \
     --apply
 done < subject_ids.txt
 
 # Verify a specific user holds a role
-ayx --output json one platform role list-assignments <id> \
+ayx --output json one role list-assignments <id> \
   | jq -e --arg uid "<person-id>" '.data[] | select(.id == $uid)' \
   && echo "assigned" || echo "not assigned"
 ```
 
 ## Related
 
-- [Platform overview](/one/platform/)
-- [People](/one/platform/people/) — look up person IDs to use as subjects
+- [Identity & auth](/one/identity/)
+- [Person](/one/person/) — look up person IDs to use as subjects
 - [Safety model](/safety-model/)
