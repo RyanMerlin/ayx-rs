@@ -71,7 +71,7 @@ ayx whoami
 Want machine-readable output? Ask for JSON. `--output` is a global flag — it can appear anywhere on the command line, before or after the subcommand.
 
 ```bash
-ayx --output json one platform workspace current
+ayx --output json one workspace current
 ```
 
 ## Where to go next

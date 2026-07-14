@@ -42,7 +42,7 @@ These require new subcommands or corrected endpoint targets.
   `/v4/connectors` returns 404 — no enumeration endpoint exists in the Alteryx One v4 API. The `connector-metadata` help text now documents this gap and lists known working slugs (`gsheetsuser`, `remotefile`, etc.). A `list` subcommand is deferred until the API adds enumeration support.
 
 - [x] **`flows permissions` — add a read command** — DONE v0.9.13  
-  Added `ayx one flows permissions-get --flow-id <ID>` that hits `GET /v4/flows/{id}/permissions`. The endpoint returns 403 via PAT (permission_denied error code). The command exists and surfaces a clean `permission_denied` error — not a gap in the CLI, a limitation in the API's PAT scope. Documented in `site/src/content/docs/one/flows/permissions.md`.
+  Added `ayx one flows permissions-get <ID>` that hits `GET /v4/flows/{id}/permissions`. The endpoint returns 403 via PAT (permission_denied error code). The command exists and surfaces a clean `permission_denied` error — not a gap in the CLI, a limitation in the API's PAT scope. Documented in `site/src/content/docs/one/flows/permissions.md`.
 
 - [x] **`platform workspace people/admins` — fixed correct endpoints** — DONE v0.9.12  
   `people` → `GET /v4/people` (workspace context via `x-alteryx-workspace-gid` header — live-verified 200, 9 members returned).  
@@ -58,7 +58,7 @@ These require new subcommands or corrected endpoint targets.
 Connection create is broken in practice because the required body schema is undiscoverable.
 
 - [x] **`connections create` — template generator** — DONE v0.9.14  
-  Added `ayx one connections connector-metadata template --connector <slug>`. It calls `GET /v4/connectorMetadata/{slug}/defaults` and emits a fillable JSON create-body: `name`, `description`, `type` (derived from category: `relational`→`jdbc`, else `remotefile`), `vendor`, `vendorName`, `credentialType` (first of metadata `credentialTypes`), `isGlobal`, `ssl`, and a `params` object built from `connectionParameters` (defaults or `<type>` placeholders). Live-verified: `bigquery`→jdbc/apiKey/`params.projectId`; `gsheetsuser`→remotefile/oauth2.
+  Added `ayx one connections connector-metadata template <slug>`. It calls `GET /v4/connectorMetadata/{slug}/defaults` and emits a fillable JSON create-body: `name`, `description`, `type` (derived from category: `relational`→`jdbc`, else `remotefile`), `vendor`, `vendorName`, `credentialType` (first of metadata `credentialTypes`), `isGlobal`, `ssl`, and a `params` object built from `connectionParameters` (defaults or `<type>` placeholders). Live-verified: `bigquery`→jdbc/apiKey/`params.projectId`; `gsheetsuser`→remotefile/oauth2.
 
 - [~] **`connections create` — end-to-end test** — PARTIAL  
   `POST /v4/connections/dryRun` returns `AccessControlException` (403) via the current PAT — same scope wall as flows permissions/recipeParameters/roles. A full `create --apply` needs valid connector credentials (OAuth token for gsheets, service-account key for bigquery) that aren't available in this environment. The template generator unblocks the body-construction half; the credential half is environment-gated.
@@ -97,7 +97,7 @@ that collided with the global `--output <text|json>` format flag (same clap id, 
 panicked at runtime on every call. All four renamed their file arg to `--output-file`.
 
 - [x] **`flows export`** — FIXED v0.9.14. Was panicking; now exports a real `.yxzp` package (743 bytes for an empty flow, live-verified).
-- [x] **`flows copy --flow-id`** — VERIFIED working. `POST /v4/flows/{id}/copy` returns 201.
+- [x] **`flows copy <ID>`** — VERIFIED working. `POST /v4/flows/{id}/copy` returns 201.
 - [x] **`flows library`** — VERIFIED working. `GET /v4/flowsLibrary` returns 200 (0 items in this workspace).
 - [x] **`flows inputs` / `flows outputs`** — VERIFIED working on an empty flow (200).
 - [x] **`output-objects list` / `write-settings list`** — VERIFIED working (200, 0 items).

@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-14 12:24:31 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-14 13:39:30 UTC._
 
 This is the curated **catalog** view — the agent-facing capability surface, not the complete command tree. For every command and flag, use `ayx --help`, `ayx <group> --help`, or `ayx discover --deep`.
 

@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
@@ -59,13 +59,8 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneOutputObjectCommand::Detail {
-            profile,
-            output_object_id,
-        }) => {
+        Some(OneOutputObjectCommand::Detail { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let output_object_id =
-                output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
             one_api_live_request(
                 &config,
                 "outputObject",
@@ -73,17 +68,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/outputObjects/{id}",
                 false,
-                &[("id", output_object_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneOutputObjectCommand::Update {
-            profile,
-            output_object_id,
-            body,
-        }) => {
+        Some(OneOutputObjectCommand::Update { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let output_object_id =
-                output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
@@ -92,17 +81,12 @@ pub(crate) fn execute(
                 "PATCH",
                 "/v4/outputObjects/{id}",
                 true,
-                &[("id", output_object_id.as_str())],
+                &[("id", id.as_str())],
                 Some(payload),
             )?
         }
-        Some(OneOutputObjectCommand::Delete {
-            profile,
-            output_object_id,
-        }) => {
+        Some(OneOutputObjectCommand::Delete { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let output_object_id =
-                output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
             one_api_live_request(
                 &config,
                 "outputObject",
@@ -110,16 +94,11 @@ pub(crate) fn execute(
                 "DELETE",
                 "/v4/outputObjects/{id}",
                 true,
-                &[("id", output_object_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneOutputObjectCommand::Inputs {
-            profile,
-            output_object_id,
-        }) => {
+        Some(OneOutputObjectCommand::Inputs { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let output_object_id =
-                output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
             one_api_live_request(
                 &config,
                 "outputObject",
@@ -127,17 +106,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/outputObjects/{id}/inputs",
                 false,
-                &[("id", output_object_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneOutputObjectCommand::WrangleToPython {
-            profile,
-            output_object_id,
-            body,
-        }) => {
+        Some(OneOutputObjectCommand::WrangleToPython { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let output_object_id =
-                output_object_id.ok_or_else(|| anyhow!("--output-object-id is required"))?;
             match body {
                 Some(body) => {
                     let payload = load_payload(&body)?;
@@ -148,7 +121,7 @@ pub(crate) fn execute(
                         "POST",
                         "/v4/outputObjects/{id}/wrangleToPython",
                         true,
-                        &[("id", output_object_id.as_str())],
+                        &[("id", id.as_str())],
                         Some(payload),
                     )?
                 }
@@ -159,7 +132,7 @@ pub(crate) fn execute(
                     "POST",
                     "/v4/outputObjects/{id}/wrangleToPython",
                     false,
-                    &[("id", output_object_id.as_str())],
+                    &[("id", id.as_str())],
                 )?,
             }
         }

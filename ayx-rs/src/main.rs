@@ -547,11 +547,11 @@ mod tests {
     }
 
     #[test]
-    fn missing_flag_errors_classify_as_validation() {
-        // A "--x-id is required" error must classify as Validation (not Internal)
-        // so the user gets the flag/`--help` hint instead of a fabricated
+    fn missing_argument_errors_classify_as_validation() {
+        // A required-argument error must classify as Validation (not Internal)
+        // so the user gets the input/`--help` hint instead of a fabricated
         // transport diagnosis.
-        let err = anyhow::anyhow!("--flow-id is required");
+        let err = anyhow::anyhow!("id is required");
         assert!(matches!(classify_anyhow_error(&err), ErrorCode::Validation));
     }
 
@@ -1378,14 +1378,14 @@ pub(crate) enum OneTokenCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        token_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Delete {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        token_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
     },
 }
 
@@ -1408,8 +1408,8 @@ pub(crate) enum OnePersonCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        person_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Create {
         #[arg(long)]
@@ -1420,24 +1420,24 @@ pub(crate) enum OnePersonCommand {
     Update {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        person_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     Patch {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        person_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     Delete {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        person_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     UpdatePassword {
         #[arg(long)]
@@ -1470,8 +1470,8 @@ pub(crate) enum OneWorkspaceCommand {
     Current,
     CurrentConfiguration,
     ConfigurationV4 {
-        #[arg(long)]
-        workspace_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     SaveCurrentConfiguration {
         #[arg(long)]
@@ -1482,18 +1482,18 @@ pub(crate) enum OneWorkspaceCommand {
     SaveConfigurationV4 {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        workspace_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     Configuration {
-        #[arg(long)]
-        workspace_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     ConfigurationSchema {
-        #[arg(long)]
-        workspace_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     CurrentConfigurationSchema,
     DeleteCurrentConfiguration {
@@ -1501,8 +1501,8 @@ pub(crate) enum OneWorkspaceCommand {
         profile: Option<String>,
     },
     DeleteConfiguration {
-        #[arg(long)]
-        workspace_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     People,
     Admins,
@@ -1510,8 +1510,8 @@ pub(crate) enum OneWorkspaceCommand {
     Switch {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "WORKSPACE_ID")]
-        workspace_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     InviteUsers {
         #[arg(long)]
@@ -1520,8 +1520,8 @@ pub(crate) enum OneWorkspaceCommand {
     RemoveUser {
         #[arg(long)]
         workspace_id: Option<String>,
-        #[arg(long)]
-        person_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     SuspendUsers {
         #[arg(long)]
@@ -1546,19 +1546,19 @@ pub(crate) enum OneWorkspaceCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneRoleCommand {
     ListAssignments {
-        #[arg(long)]
-        role_id: String,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Assign {
-        #[arg(long)]
+        #[arg(value_name = "ROLE-ID")]
         role_id: String,
-        #[arg(long)]
+        #[arg(value_name = "SUBJECT-ID")]
         subject_id: String,
     },
     Unassign {
-        #[arg(long)]
+        #[arg(value_name = "ROLE-ID")]
         role_id: String,
-        #[arg(long)]
+        #[arg(value_name = "SUBJECT-ID")]
         subject_id: String,
     },
 }
@@ -1625,20 +1625,20 @@ pub(crate) enum OnePlansCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        plan_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Full {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        plan_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Run {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        plan_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Count {
         #[arg(long)]
@@ -1647,40 +1647,40 @@ pub(crate) enum OnePlansCommand {
     RunParameters {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        plan_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Schedules {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        plan_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Export {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        plan_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Update {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        plan_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     Delete {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        plan_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Share {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        plan_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
@@ -1691,8 +1691,8 @@ pub(crate) enum OnePlansCommand {
     Permissions {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        plan_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long)]
         subject_id: Option<String>,
     },
@@ -1741,99 +1741,99 @@ pub(crate) enum OneFlowsCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Update {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     Delete {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Copy {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long)]
         body: Option<PathBuf>,
     },
     Run {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long)]
         body: Option<PathBuf>,
     },
     Validate {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Parameters {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long)]
         output_object_type: Option<String>,
     },
     Inputs {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Outputs {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     PermissionsGet {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Permissions {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     Move {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     ReplaceDataset {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     Import {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
+        #[arg(value_name = "INPUT")]
         input: PathBuf,
         #[arg(long)]
         folder_id: Option<String>,
@@ -1845,7 +1845,7 @@ pub(crate) enum OneFlowsCommand {
     ImportDryRun {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
+        #[arg(value_name = "INPUT")]
         input: PathBuf,
         #[arg(long)]
         folder_id: Option<String>,
@@ -1857,8 +1857,8 @@ pub(crate) enum OneFlowsCommand {
     Export {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(
             long = "output-file",
             value_name = "FILE",
@@ -1869,8 +1869,8 @@ pub(crate) enum OneFlowsCommand {
     ExportDryRun {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        flow_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
 }
 
@@ -1922,10 +1922,8 @@ pub(crate) enum OneDatasetsWrangledCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        wrangled_id: Option<String>,
         #[arg(value_name = "ID")]
-        id: Option<String>,
+        id: String,
     },
 }
 
@@ -1935,10 +1933,8 @@ pub(crate) enum OneDatasetsImportedCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        imported_id: Option<String>,
         #[arg(value_name = "ID")]
-        id: Option<String>,
+        id: String,
     },
 }
 
@@ -1975,8 +1971,8 @@ pub(crate) enum OneFlowFoldersCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        folder_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Create {
         #[arg(long)]
@@ -1987,16 +1983,16 @@ pub(crate) enum OneFlowFoldersCommand {
     Update {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        folder_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     Delete {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        folder_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Flows {
         #[command(subcommand)]
@@ -2009,8 +2005,8 @@ pub(crate) enum OneFlowFolderFlowsCommand {
     List {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        folder_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long)]
         limit: Option<u32>,
         #[arg(long)]
@@ -2019,8 +2015,8 @@ pub(crate) enum OneFlowFolderFlowsCommand {
     Count {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        folder_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
 }
 
@@ -2057,28 +2053,28 @@ pub(crate) enum OneConnectionsCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        connection_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Status {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        connection_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Update {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        connection_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     Delete {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        connection_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     ConnectorMetadata {
         #[command(subcommand)]
@@ -2095,19 +2091,19 @@ pub(crate) enum OneConnectorMetadataCommand {
     Defaults {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
+        #[arg(value_name = "CONNECTOR")]
         connector: String,
     },
     PublishInfo {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
+        #[arg(value_name = "CONNECTOR")]
         connector: String,
     },
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
+        #[arg(value_name = "CONNECTOR")]
         connector: String,
     },
     Overrides {
@@ -2122,7 +2118,7 @@ pub(crate) enum OneConnectorMetadataCommand {
     Template {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
+        #[arg(value_name = "CONNECTOR")]
         connector: String,
     },
 }
@@ -2132,7 +2128,7 @@ pub(crate) enum OneConnectorMetadataOverridesCommand {
     Create {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
+        #[arg(value_name = "CONNECTOR")]
         connector: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
@@ -2140,13 +2136,13 @@ pub(crate) enum OneConnectorMetadataOverridesCommand {
     List {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
+        #[arg(value_name = "CONNECTOR")]
         connector: String,
     },
     Delete {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
+        #[arg(value_name = "CONNECTOR")]
         connector: String,
     },
 }
@@ -2156,31 +2152,31 @@ pub(crate) enum OneConnectionPermissionCommand {
     List {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        connection_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Create {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        connection_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        connection_id: Option<String>,
-        #[arg(long, alias = "aid")]
+        #[arg(value_name = "CONNECTION-ID")]
+        connection_id: String,
+        #[arg(value_name = "SUBJECT-ID")]
         subject_id: String,
     },
     Delete {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        connection_id: Option<String>,
-        #[arg(long, alias = "aid")]
+        #[arg(value_name = "CONNECTION-ID")]
+        connection_id: String,
+        #[arg(value_name = "SUBJECT-ID")]
         subject_id: String,
     },
 }
@@ -2212,70 +2208,70 @@ pub(crate) enum OneJobGroupCommand {
     Publish {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        job_group_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        job_group_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Cancel {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        job_group_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Status {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        job_group_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Inputs {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        job_group_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Outputs {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        job_group_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Jobs {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        job_group_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Publications {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        job_group_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Profile {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        job_group_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     ProfileResults {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        job_group_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     PdfResults {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        job_group_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
 }
 
@@ -2306,34 +2302,34 @@ pub(crate) enum OneOutputObjectCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        output_object_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Update {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        output_object_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     Delete {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        output_object_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Inputs {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        output_object_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     WrangleToPython {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        output_object_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long)]
         body: Option<PathBuf>,
     },
@@ -2350,14 +2346,14 @@ pub(crate) enum OneWebhookFlowTaskCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        webhook_flow_task_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Delete {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        webhook_flow_task_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Test {
         #[arg(long)]
@@ -2394,22 +2390,22 @@ pub(crate) enum OneWriteSettingCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        write_setting_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Update {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        write_setting_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
     Delete {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        write_setting_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
 }
 
@@ -2430,20 +2426,20 @@ pub(crate) enum OneSchedulingCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        schedule_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Enable {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        schedule_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Disable {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        schedule_id: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     Count {
         #[arg(long)]

@@ -19,7 +19,7 @@ The `ayx one flows permissions` command sets the access permissions on a flow. I
 ## Get permissions
 
 ```bash
-ayx one flows permissions-get --flow-id <flow-id>
+ayx one flows permissions-get <flow-id>
 ```
 
 Returns the current permission state for the flow as reported by `GET /v4/flows/{id}/permissions`. Under PAT authentication this call returns 403 (`permission_denied`) — the command will surface the error directly.
@@ -29,18 +29,18 @@ Returns the current permission state for the flow as reported by `GET /v4/flows/
 ```bash
 # Dry-run — shows what the request would contain
 ayx one flows permissions \
-  --flow-id <flow-id> \
+  <flow-id> \
   --body '<json>'
 
 # Commit
 ayx one flows permissions \
-  --flow-id <flow-id> \
+  <flow-id> \
   --body '<json>' \
   --apply
 
 # Non-interactive (CI / scripts)
 ayx one flows permissions \
-  --flow-id <flow-id> \
+  <flow-id> \
   --body '<json>' \
   --apply --yes
 ```
@@ -52,7 +52,7 @@ ayx one flows permissions \
 ```bash
 ayx one flows permissions \
   --profile <name> \
-  --flow-id <flow-id> \
+  <flow-id> \
   --body '<json>' \
   --apply
 ```
@@ -66,7 +66,7 @@ BODY='{"permissions": [...]}'
 
 while IFS= read -r id; do
   ayx --output json one flows permissions \
-    --flow-id "$id" \
+    "$id" \
     --body "$BODY" \
     --apply --yes \
     | jq -r '[.ok, "'"$id"'"] | @tsv'

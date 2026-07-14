@@ -51,7 +51,7 @@ alteryx_one:
   access_token_ref: keyring:my-profile/alteryx_one.access_token
 ```
 
-You don't write the token in by hand — `ayx one platform auth login` obtains it and stores it for you (in your OS keyring where available; see [Connecting](/connecting/)). `base_url` and `workspace_gid` come from the workspace URL you paste during onboarding.
+You don't write the token in by hand — `ayx one login` obtains it and stores it for you (in your OS keyring where available; see [Connecting](/connecting/)). `base_url` and `workspace_gid` come from the workspace URL you paste during onboarding.
 
 ### Secret references
 
@@ -72,8 +72,8 @@ alteryx_one:
 A single profile can carry a separate token per workspace under `workspace_credentials`, keyed by workspace id. Bind a login to a workspace, then switch which one is active:
 
 ```bash
-ayx one platform auth login --workspace-id <id>          # store that workspace's token
-ayx one platform workspace switch --workspace-id <id>    # make it active
+ayx one login --workspace-id <id>          # store that workspace's token
+ayx one workspace switch <id>              # make it active
 ```
 
 The active workspace's token is used for every One command until you switch again. `expected_workspace_id` guards mutating commands against running on the wrong workspace.

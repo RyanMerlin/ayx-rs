@@ -16,8 +16,8 @@ The `ayx one plans schedules` command returns the schedules configured for a pla
 ## List schedules for a plan
 
 ```bash
-ayx one plans schedules --plan-id <plan-id>
-ayx one plans schedules --plan-id <plan-id> --profile <name>
+ayx one plans schedules <plan-id>
+ayx one plans schedules <plan-id> --profile <name>
 ```
 
 Returns all schedules attached to the plan. Each schedule entry includes the recurrence definition, enabled state, and next run time.
@@ -25,7 +25,7 @@ Returns all schedules attached to the plan. Each schedule entry includes the rec
 ## JSON output
 
 ```bash
-ayx --output json one plans schedules --plan-id <plan-id>
+ayx --output json one plans schedules <plan-id>
 ```
 
 The response follows the standard envelope:
@@ -46,7 +46,7 @@ The response follows the standard envelope:
 ### Check whether a plan has any active schedules
 
 ```bash
-ayx --output json one plans schedules --plan-id <plan-id> \
+ayx --output json one plans schedules <plan-id> \
   | jq '[.data[] | select(.enabled == true)] | length'
 ```
 
@@ -55,7 +55,7 @@ ayx --output json one plans schedules --plan-id <plan-id> \
 ```bash
 ayx --output json one plans list --all | jq -r '.data[].id' \
   | while IFS= read -r id; do
-      ayx --output json one plans schedules --plan-id "$id" \
+      ayx --output json one plans schedules "$id" \
         | jq -r --arg id "$id" '.data[] | [$id, .nextRun] | @tsv'
     done
 ```

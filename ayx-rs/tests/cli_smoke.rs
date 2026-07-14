@@ -305,7 +305,7 @@ fn one_datasets_help_renders_surface_groups() {
 }
 
 #[test]
-fn one_datasets_wrangled_detail_help_renders_flag_and_positional_id() {
+fn one_datasets_wrangled_detail_help_renders_required_positional_id() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(["one", "datasets", "wrangled", "detail", "--help"])
         .output()
@@ -313,8 +313,8 @@ fn one_datasets_wrangled_detail_help_renders_flag_and_positional_id() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--wrangled-id"));
-    assert!(stdout.contains("[ID]"));
+    assert!(stdout.contains("<ID>"));
+    assert!(!stdout.contains("--wrangled-id"));
 }
 
 #[test]
@@ -334,12 +334,13 @@ fn one_connections_connector_metadata_overrides_create_help_renders_connector_ar
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("create"));
-    assert!(stdout.contains("--connector"));
+    assert!(stdout.contains("<CONNECTOR>"));
+    assert!(!stdout.contains("--connector"));
     assert!(stdout.contains("--body"));
 }
 
 #[test]
-fn one_flows_delete_help_renders_flow_id() {
+fn one_flows_delete_help_renders_positional_id() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(["one", "flows", "delete", "--help"])
         .output()
@@ -347,12 +348,13 @@ fn one_flows_delete_help_renders_flow_id() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--flow-id"));
+    assert!(stdout.contains("<ID>"));
+    assert!(!stdout.contains("--flow-id"));
     assert!(stdout.contains("--apply"));
 }
 
 #[test]
-fn one_flows_folders_delete_help_renders_folder_id() {
+fn one_flows_folders_delete_help_renders_positional_id() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(["one", "flows", "folders", "delete", "--help"])
         .output()
@@ -360,7 +362,8 @@ fn one_flows_folders_delete_help_renders_folder_id() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--folder-id"));
+    assert!(stdout.contains("<ID>"));
+    assert!(!stdout.contains("--folder-id"));
     assert!(stdout.contains("--apply"));
 }
 
@@ -379,7 +382,7 @@ fn one_token_help_renders_access_token_actions() {
 }
 
 #[test]
-fn one_connection_permission_help_renders_subject_id() {
+fn one_connection_permission_help_renders_ordered_positional_ids() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(["one", "connections", "permissions", "detail", "--help"])
         .output()
@@ -387,8 +390,11 @@ fn one_connection_permission_help_renders_subject_id() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("--subject-id"));
-    assert!(stdout.contains("--connection-id"));
+    assert!(stdout.contains("<CONNECTION-ID>"));
+    assert!(stdout.contains("<SUBJECT-ID>"));
+    assert!(!stdout.contains("--subject-id"));
+    assert!(!stdout.contains("--connection-id"));
+    assert!(!stdout.contains("--aid"));
 }
 
 #[test]

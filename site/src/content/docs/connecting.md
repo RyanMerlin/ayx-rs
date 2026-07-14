@@ -18,7 +18,7 @@ The wizard collects your email and workspace URL and offers to log you in on the
 ## Signing in
 
 ```bash
-ayx one platform auth login
+ayx one login
 ```
 
 With no flags this runs the **email-OTP flow**:
@@ -35,15 +35,15 @@ It reads three fields from your profile — your email (from the onboarding prom
 | `workspace_gid` | The workspace id (a ULID) in your workspace URL — required by the sign-in handshake |
 | `base_url` | Your Alteryx One region host, e.g. `https://us1.alteryxcloud.com` (also read from the URL) |
 
-If the token later expires, just run `ayx one platform auth login` again.
+If the token later expires, just run `ayx one login` again.
 
 ### Other sign-in flows
 
 You usually won't need these, but they're there:
 
-- `ayx one platform auth login --device` — device-code grant: prints a URL and code to complete sign-in on any device.
-- `ayx one platform auth login --browser` — PKCE authorization-code flow in your browser.
-- `ayx one platform auth login --refresh-token <t>` / `--access-token <t>` — store tokens you already have, for CI.
+- `ayx one login --device` — device-code grant: prints a URL and code to complete sign-in on any device.
+- `ayx one login --browser` — PKCE authorization-code flow in your browser.
+- `ayx one login --refresh-token <t>` / `--access-token <t>` — store tokens you already have, for CI.
 
 The `--browser` and `--device` flows use an OAuth client, so they need an `oauth_client_id` in your profile (or `--client-id`). The default email-OTP flow does not.
 
@@ -54,15 +54,15 @@ ayx doctor auth     # checks the token path end to end
 ayx whoami          # shows the workspace you're connected to
 ```
 
-If `doctor auth` passes but a command later fails with an auth error, your token has expired — run `ayx one platform auth login` again.
+If `doctor auth` passes but a command later fails with an auth error, your token has expired — run `ayx one login` again.
 
 ## Multiple workspaces
 
 One profile can hold a separate token per workspace. Bind a login to a specific workspace, then switch which one is active:
 
 ```bash
-ayx one platform auth login --workspace-id <id>   # store this workspace's token
-ayx one platform workspace switch --workspace-id <id>   # make it the active one
+ayx one login --workspace-id <id>   # store this workspace's token
+ayx one workspace switch <id>       # make it the active one
 ```
 
 See [Profiles & configuration](/configuration/) for the full model.

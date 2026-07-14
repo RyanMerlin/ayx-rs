@@ -41,7 +41,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneTokenCommand::Detail { profile, token_id }) => {
+        Some(OneTokenCommand::Detail { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
@@ -50,17 +50,17 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/apiAccessTokens/{tokenId}",
                 false,
-                &[("tokenId", &token_id)],
+                &[("tokenId", &id)],
             )?
         }
-        Some(OneTokenCommand::Delete { profile, token_id }) => {
+        Some(OneTokenCommand::Delete { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
                     &cmd::confirm::access_change_message(
                         "delete",
-                        &format!("token id='{token_id}'"),
+                        &format!("token id='{id}'"),
                         &config.profile_name,
                     ),
                 )?;
@@ -72,7 +72,7 @@ pub(crate) fn execute(
                 "DELETE",
                 "/v4/apiAccessTokens/{tokenId}",
                 true,
-                &[("tokenId", &token_id)],
+                &[("tokenId", &id)],
             )?
         }
     })

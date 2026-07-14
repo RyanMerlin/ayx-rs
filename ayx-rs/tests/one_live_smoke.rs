@@ -667,7 +667,6 @@ fn one_token_detail_not_found_live() {
             "one",
             "token",
             "detail",
-            "--token-id",
             &invalid_token_id,
         ],
         &live,
@@ -794,14 +793,7 @@ fn one_flows_folders_detail_live_real_object() {
 
     let (success, stdout, stderr) = run_ayx_result(
         &[
-            "--output",
-            "json",
-            "one",
-            "flows",
-            "folders",
-            "detail",
-            "--folder-id",
-            &folder_id,
+            "--output", "json", "one", "flows", "folders", "detail", &folder_id,
         ],
         &live,
     );
@@ -810,7 +802,7 @@ fn one_flows_folders_detail_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one flows folders detail --folder-id {folder_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows folders detail {folder_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -839,7 +831,6 @@ fn one_flows_folders_detail_not_found_live() {
             "flows",
             "folders",
             "detail",
-            "--folder-id",
             &invalid_folder_id,
         ],
         &live,
@@ -869,15 +860,7 @@ fn one_flows_folder_flows_list_live_real_object() {
 
     let (success, stdout, stderr) = run_ayx_result(
         &[
-            "--output",
-            "json",
-            "one",
-            "flows",
-            "folders",
-            "flows",
-            "list",
-            "--folder-id",
-            &folder_id,
+            "--output", "json", "one", "flows", "folders", "flows", "list", &folder_id,
         ],
         &live,
     );
@@ -886,7 +869,7 @@ fn one_flows_folder_flows_list_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one flows folders flows list --folder-id {folder_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows folders flows list {folder_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -907,15 +890,7 @@ fn one_flows_folder_flows_count_live_real_object() {
 
     let (success, stdout, stderr) = run_ayx_result(
         &[
-            "--output",
-            "json",
-            "one",
-            "flows",
-            "folders",
-            "flows",
-            "count",
-            "--folder-id",
-            &folder_id,
+            "--output", "json", "one", "flows", "folders", "flows", "count", &folder_id,
         ],
         &live,
     );
@@ -924,7 +899,7 @@ fn one_flows_folder_flows_count_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one flows folders flows count --folder-id {folder_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows folders flows count {folder_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -954,7 +929,6 @@ fn one_flows_permissions_dry_run_shape_live() {
             "one",
             "flows",
             "permissions",
-            "--flow-id",
             &flow_id,
             "--body",
             &payload_path,
@@ -966,7 +940,7 @@ fn one_flows_permissions_dry_run_shape_live() {
             return;
         }
         panic!(
-            "command failed: --output json one flows permissions --flow-id {flow_id} --body <payload>\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows permissions {flow_id} --body <payload>\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -995,7 +969,6 @@ fn one_flows_move_dry_run_shape_live() {
             "one",
             "flows",
             "move",
-            "--flow-id",
             &flow_id,
             "--body",
             &payload_path,
@@ -1007,7 +980,7 @@ fn one_flows_move_dry_run_shape_live() {
             return;
         }
         panic!(
-            "command failed: --output json one flows move --flow-id {flow_id} --body <payload>\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows move {flow_id} --body <payload>\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1036,7 +1009,6 @@ fn one_flows_replace_dataset_dry_run_shape_live() {
             "one",
             "flows",
             "replace-dataset",
-            "--flow-id",
             &flow_id,
             "--body",
             &payload_path,
@@ -1048,7 +1020,7 @@ fn one_flows_replace_dataset_dry_run_shape_live() {
             return;
         }
         panic!(
-            "command failed: --output json one flows replace-dataset --flow-id {flow_id} --body <payload>\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows replace-dataset {flow_id} --body <payload>\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1115,7 +1087,6 @@ fn one_flows_folder_update_dry_run_shape_live() {
             "flows",
             "folders",
             "update",
-            "--folder-id",
             &folder_id,
             "--body",
             &payload_path,
@@ -1127,7 +1098,7 @@ fn one_flows_folder_update_dry_run_shape_live() {
             return;
         }
         panic!(
-            "command failed: --output json one flows folders update --folder-id {folder_id} --body <payload>\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows folders update {folder_id} --body <payload>\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1149,14 +1120,7 @@ fn one_flows_folder_delete_dry_run_shape_live() {
 
     let (success, stdout, stderr) = run_ayx_result(
         &[
-            "--output",
-            "json",
-            "one",
-            "flows",
-            "folders",
-            "delete",
-            "--folder-id",
-            &folder_id,
+            "--output", "json", "one", "flows", "folders", "delete", &folder_id,
         ],
         &live,
     );
@@ -1165,7 +1129,7 @@ fn one_flows_folder_delete_dry_run_shape_live() {
             return;
         }
         panic!(
-            "command failed: --output json one flows folders delete --folder-id {folder_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows folders delete {folder_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1186,15 +1150,7 @@ fn one_flows_detail_live_real_object() {
     };
 
     let (success, stdout, stderr) = run_ayx_result(
-        &[
-            "--output",
-            "json",
-            "one",
-            "flows",
-            "detail",
-            "--flow-id",
-            &flow_id,
-        ],
+        &["--output", "json", "one", "flows", "detail", &flow_id],
         &live,
     );
     if !success {
@@ -1202,7 +1158,7 @@ fn one_flows_detail_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one flows detail --flow-id {flow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows detail {flow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1230,7 +1186,6 @@ fn one_flows_detail_not_found_live() {
             "one",
             "flows",
             "detail",
-            "--flow-id",
             &invalid_flow_id,
         ],
         &live,
@@ -1259,15 +1214,7 @@ fn one_flows_validate_live_real_object() {
     };
 
     let (success, stdout, stderr) = run_ayx_result(
-        &[
-            "--output",
-            "json",
-            "one",
-            "flows",
-            "validate",
-            "--flow-id",
-            &flow_id,
-        ],
+        &["--output", "json", "one", "flows", "validate", &flow_id],
         &live,
     );
     if !success {
@@ -1275,7 +1222,7 @@ fn one_flows_validate_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one flows validate --flow-id {flow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows validate {flow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1296,15 +1243,7 @@ fn one_flows_parameters_live_real_object() {
     };
 
     let (success, stdout, stderr) = run_ayx_result(
-        &[
-            "--output",
-            "json",
-            "one",
-            "flows",
-            "parameters",
-            "--flow-id",
-            &flow_id,
-        ],
+        &["--output", "json", "one", "flows", "parameters", &flow_id],
         &live,
     );
     if !success {
@@ -1312,7 +1251,7 @@ fn one_flows_parameters_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one flows parameters --flow-id {flow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows parameters {flow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1333,15 +1272,7 @@ fn one_flows_inputs_live_real_object() {
     };
 
     let (success, stdout, stderr) = run_ayx_result(
-        &[
-            "--output",
-            "json",
-            "one",
-            "flows",
-            "inputs",
-            "--flow-id",
-            &flow_id,
-        ],
+        &["--output", "json", "one", "flows", "inputs", &flow_id],
         &live,
     );
     if !success {
@@ -1349,7 +1280,7 @@ fn one_flows_inputs_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one flows inputs --flow-id {flow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows inputs {flow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1370,15 +1301,7 @@ fn one_flows_outputs_live_real_object() {
     };
 
     let (success, stdout, stderr) = run_ayx_result(
-        &[
-            "--output",
-            "json",
-            "one",
-            "flows",
-            "outputs",
-            "--flow-id",
-            &flow_id,
-        ],
+        &["--output", "json", "one", "flows", "outputs", &flow_id],
         &live,
     );
     if !success {
@@ -1386,7 +1309,7 @@ fn one_flows_outputs_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one flows outputs --flow-id {flow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows outputs {flow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1413,7 +1336,6 @@ fn one_flows_export_dry_run_live_real_object() {
             "one",
             "flows",
             "export-dry-run",
-            "--flow-id",
             &flow_id,
         ],
         &live,
@@ -1423,7 +1345,7 @@ fn one_flows_export_dry_run_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one flows export-dry-run --flow-id {flow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one flows export-dry-run {flow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1457,7 +1379,6 @@ fn one_connections_detail_not_found_live() {
             "one",
             "connections",
             "detail",
-            "--connection-id",
             &invalid_connection_id,
         ],
         &live,
@@ -1497,7 +1418,6 @@ fn one_connections_detail_live_real_object() {
             "one",
             "connections",
             "detail",
-            "--connection-id",
             &connection_id,
         ],
         &live,
@@ -1507,7 +1427,7 @@ fn one_connections_detail_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one connections detail --connection-id {connection_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one connections detail {connection_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1540,7 +1460,6 @@ fn one_connections_permissions_list_live_real_object() {
             "connections",
             "permissions",
             "list",
-            "--connection-id",
             &connection_id,
         ],
         &live,
@@ -1550,7 +1469,7 @@ fn one_connections_permissions_list_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one connections permissions list --connection-id {connection_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one connections permissions list {connection_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1584,9 +1503,7 @@ fn one_connections_permissions_detail_not_found_live() {
             "connections",
             "permissions",
             "detail",
-            "--connection-id",
             &connection_id,
-            "--subject-id",
             invalid_subject_id,
         ],
         &live,
@@ -1636,7 +1553,6 @@ fn one_connections_connector_metadata_defaults_live_real_object() {
             "connections",
             "connector-metadata",
             "defaults",
-            "--connector",
             &connector_id,
         ],
         &live,
@@ -1646,7 +1562,7 @@ fn one_connections_connector_metadata_defaults_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one connections connector-metadata defaults --connector {connector_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one connections connector-metadata defaults {connector_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1686,7 +1602,6 @@ fn one_connections_connector_metadata_publish_info_live_real_object() {
             "connections",
             "connector-metadata",
             "publish-info",
-            "--connector",
             &connector_id,
         ],
         &live,
@@ -1696,7 +1611,7 @@ fn one_connections_connector_metadata_publish_info_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one connections connector-metadata publish-info --connector {connector_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one connections connector-metadata publish-info {connector_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1791,7 +1706,6 @@ fn one_job_groups_detail_not_found_live() {
             "one",
             "job-groups",
             "detail",
-            "--job-group-id",
             &invalid_job_group_id,
         ],
         &live,
@@ -1826,7 +1740,6 @@ fn one_job_groups_detail_live_real_object() {
             "one",
             "job-groups",
             "detail",
-            "--job-group-id",
             &job_group_id,
         ],
         &live,
@@ -1836,7 +1749,7 @@ fn one_job_groups_detail_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one job-groups detail --job-group-id {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one job-groups detail {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1863,7 +1776,6 @@ fn one_job_groups_status_live_real_object() {
             "one",
             "job-groups",
             "status",
-            "--job-group-id",
             &job_group_id,
         ],
         &live,
@@ -1873,7 +1785,7 @@ fn one_job_groups_status_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one job-groups status --job-group-id {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one job-groups status {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
@@ -1902,7 +1814,6 @@ fn one_job_groups_inspection_live_real_object() {
                 "one",
                 "job-groups",
                 "inputs",
-                "--job-group-id",
                 job_group_id.as_str(),
             ],
         ),
@@ -1914,7 +1825,6 @@ fn one_job_groups_inspection_live_real_object() {
                 "one",
                 "job-groups",
                 "outputs",
-                "--job-group-id",
                 job_group_id.as_str(),
             ],
         ),
@@ -1926,7 +1836,6 @@ fn one_job_groups_inspection_live_real_object() {
                 "one",
                 "job-groups",
                 "jobs",
-                "--job-group-id",
                 job_group_id.as_str(),
             ],
         ),
@@ -1938,7 +1847,6 @@ fn one_job_groups_inspection_live_real_object() {
                 "one",
                 "job-groups",
                 "publications",
-                "--job-group-id",
                 job_group_id.as_str(),
             ],
         ),
@@ -1950,7 +1858,6 @@ fn one_job_groups_inspection_live_real_object() {
                 "one",
                 "job-groups",
                 "profile",
-                "--job-group-id",
                 job_group_id.as_str(),
             ],
         ),
@@ -1962,7 +1869,6 @@ fn one_job_groups_inspection_live_real_object() {
                 "one",
                 "job-groups",
                 "profile-results",
-                "--job-group-id",
                 job_group_id.as_str(),
             ],
         ),
@@ -1974,7 +1880,6 @@ fn one_job_groups_inspection_live_real_object() {
                 "one",
                 "job-groups",
                 "pdf-results",
-                "--job-group-id",
                 job_group_id.as_str(),
             ],
         ),
@@ -1985,7 +1890,7 @@ fn one_job_groups_inspection_live_real_object() {
                 return;
             }
             panic!(
-                "command failed: --output json one job-groups {operation} --job-group-id {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+                "command failed: --output json one job-groups {operation} {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
             );
         }
         assert_live_ok(&stdout);
@@ -2046,7 +1951,6 @@ fn one_output_objects_detail_not_found_live() {
             "one",
             "output-objects",
             "detail",
-            "--output-object-id",
             &invalid_output_object_id,
         ],
         &live,
@@ -2114,7 +2018,6 @@ fn one_write_settings_detail_not_found_live() {
             "one",
             "write-settings",
             "detail",
-            "--write-setting-id",
             &invalid_write_setting_id,
         ],
         &live,
@@ -2200,7 +2103,6 @@ fn one_plans_detail_not_found_live() {
             "one",
             "plans",
             "detail",
-            "--plan-id",
             &invalid_plan_id,
         ],
         &live,
@@ -2241,7 +2143,6 @@ fn one_person_detail_not_found_live() {
             "one",
             "person",
             "detail",
-            "--person-id",
             &invalid_person_id,
         ],
         &live,

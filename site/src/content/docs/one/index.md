@@ -21,9 +21,9 @@ All mutating commands are dry-run by default. Nothing changes on the server unti
 | Write settings | `ayx one write-settings` | Configure where flows write their output data |
 | Webhooks | `ayx one webhook-flow-tasks` | Create, inspect, delete, and test webhook-triggered flow tasks |
 | Scheduling | `ayx one scheduling` | List schedules, enable and disable them |
-| Platform & users | `ayx one platform` | Workspaces, users, tokens, roles, API auth |
+| Identity & users | `ayx one login` / `logout` / `whoami` / `auth` / `workspace` / `person` / `token` / `role` | Sign in/out, inspect identity, and administer workspaces, users, tokens, and roles |
 | Billing | `ayx one billing` | Account information and usage exports |
-| Diagnostics | `ayx one doctor` / `ayx one status` / `ayx one inventory` | Health checks across auth, platform, plans, scheduling, and billing |
+| Diagnostics | `ayx one doctor` / `ayx one inventory` | Health checks across auth, identity, plans, scheduling, and billing |
 
 ## How `--apply` keeps you safe
 
@@ -31,10 +31,10 @@ Every command that modifies remote state prints a structured dry-run by default 
 
 ```bash
 # Shows what would be deleted; changes nothing
-ayx one flows delete --flow-id <id>
+ayx one flows delete <id>
 
 # Actually deletes
-ayx one flows delete --flow-id <id> --apply
+ayx one flows delete <id> --apply
 ```
 
 For non-interactive automation (CI pipelines, scripts), add `--yes` to suppress the TTY confirmation prompt.
@@ -65,5 +65,5 @@ ayx one flows list --profile staging
 - [Webhooks](/one/webhooks/) — webhook-triggered flow tasks
 - [Billing](/one/billing/) — account and usage data
 - [Diagnostics](/one/diagnostics/) — health checks and status
-- [Platform overview](/one/platform/) — users, workspaces, roles, tokens
+- [Identity & auth](/one/identity/) — sign in/out, whoami, auth status, workspaces, users, roles, tokens
 - [Safety model](/safety-model/) — dry-run and `--apply` in detail

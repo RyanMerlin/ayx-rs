@@ -24,10 +24,10 @@ Mutating commands are dry-run by default — add `--apply` to commit.
 
 ```bash
 # Dry-run — shows export metadata, writes nothing
-ayx one flows export-dry-run --flow-id <flow-id>
+ayx one flows export-dry-run <flow-id>
 
 # Write the package to disk
-ayx one flows export --flow-id <flow-id> --output-file <path/to/file> --apply
+ayx one flows export <flow-id> --output-file <path/to/file> --apply
 ```
 
 `--output-file` is required for `export` and specifies the local file path to write. The resulting file can be committed to version control or passed directly to `import` on a target environment.
@@ -39,8 +39,8 @@ ayx one flows export --flow-id <flow-id> --output-file <path/to/file> --apply
 ### Preview an import
 
 ```bash
-ayx one flows import-dry-run --input <path/to/file>
-ayx one flows import-dry-run --input <path/to/file> --folder-id <folder-id>
+ayx one flows import-dry-run <path/to/file>
+ayx one flows import-dry-run <path/to/file> <folder-id>
 ```
 
 `import-dry-run` sends the package to the server for validation and returns what would happen, without committing anything. Run this before every import to catch conflicts early.
@@ -49,16 +49,16 @@ ayx one flows import-dry-run --input <path/to/file> --folder-id <folder-id>
 
 ```bash
 # Basic import into the default location
-ayx one flows import --input <path/to/file> --apply
+ayx one flows import <path/to/file> --apply
 
 # Import into a specific folder
-ayx one flows import --input <path/to/file> --folder-id <folder-id> --apply
+ayx one flows import <path/to/file> <folder-id> --apply
 
 # Override JavaScript UDFs on conflict
-ayx one flows import --input <path/to/file> --override-js-udfs --apply
+ayx one flows import <path/to/file> --override-js-udfs --apply
 
 # Skip the confirmation prompt (CI / scripts)
-ayx one flows import --input <path/to/file> --apply --yes
+ayx one flows import <path/to/file> --apply --yes
 ```
 
 `--from-ui` is available on both `import` and `import-dry-run` for packages produced by the Alteryx One web UI rather than by `ayx one flows export`. You generally do not need it when round-tripping through the CLI.
@@ -71,21 +71,21 @@ This pattern exports from one environment and imports into another using `--prof
 # 1. Export from dev
 ayx one flows export \
   --profile dev \
-  --flow-id <flow-id> \
+  <flow-id> \
   --output-file /tmp/my-flow.yxzp \
   --apply
 
 # 2. Preview the import on prod
 ayx one flows import-dry-run \
   --profile prod \
-  --input /tmp/my-flow.yxzp \
-  --folder-id <prod-folder-id>
+  /tmp/my-flow.yxzp \
+  <prod-folder-id>
 
 # 3. Commit
 ayx one flows import \
   --profile prod \
-  --input /tmp/my-flow.yxzp \
-  --folder-id <prod-folder-id> \
+  /tmp/my-flow.yxzp \
+  <prod-folder-id> \
   --apply --yes
 ```
 
@@ -95,14 +95,14 @@ ayx one flows import \
 
 ```bash
 while IFS= read -r id; do
-  ayx one flows export --flow-id "$id" --output-file "./exports/${id}.yxzp" --apply
+  ayx one flows export "$id" --output-file "./exports/${id}.yxzp" --apply
 done < flow-ids.txt
 ```
 
 ### Validate before importing in CI
 
 ```bash
-ayx --output json one flows import-dry-run --input my-flow.yxzp \
+ayx --output json one flows import-dry-run my-flow.yxzp \
   | jq -e '.ok'
 # Exits non-zero if the dry-run reports a problem
 ```

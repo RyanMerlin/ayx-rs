@@ -14,7 +14,7 @@ pub(crate) fn execute(
     command: OneRoleCommand,
 ) -> Result<Envelope> {
     Ok(match command {
-        OneRoleCommand::ListAssignments { role_id } => {
+        OneRoleCommand::ListAssignments { id } => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
@@ -23,7 +23,7 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/authorization/roles/{id}/people",
                 false,
-                &[("id", &role_id)],
+                &[("id", &id)],
             )?
         }
         OneRoleCommand::Assign {

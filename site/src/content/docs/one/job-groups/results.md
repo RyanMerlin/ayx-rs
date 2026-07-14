@@ -16,7 +16,7 @@ After a job group runs, Alteryx One stores profile data, tabular results, public
 | `ayx one job-groups pdf-results` | Retrieve PDF output for a job group |
 | `ayx one job-groups publications` | List publication records for a job group |
 
-All commands accept `--job-group-id <id>` and `--profile <profile-id>`.
+All commands accept `<id>` as the job group positional argument and `--profile <profile-id>`.
 
 ## Profile data
 
@@ -24,16 +24,16 @@ Profile data describes the data quality and shape of the job group's outputs —
 
 ```bash
 # Summary profile
-ayx one job-groups profile --job-group-id <id>
+ayx one job-groups profile <id>
 
 # Detailed profile results
-ayx one job-groups profile-results --job-group-id <id>
+ayx one job-groups profile-results <id>
 
 # Scoped to a specific Alteryx One profile
-ayx one job-groups profile --job-group-id <id> --profile <profile-id>
+ayx one job-groups profile <id> --profile <profile-id>
 
 # Machine-readable
-ayx --output json one job-groups profile --job-group-id <id>
+ayx --output json one job-groups profile <id>
 ```
 
 `profile` returns a summary view. `profile-results` returns a more detailed breakdown. Use `profile-results` when you need field-level statistics or are building data quality checks.
@@ -43,9 +43,9 @@ ayx --output json one job-groups profile --job-group-id <id>
 Some job groups produce PDF outputs when configured to do so.
 
 ```bash
-ayx one job-groups pdf-results --job-group-id <id>
+ayx one job-groups pdf-results <id>
 
-ayx --output json one job-groups pdf-results --job-group-id <id>
+ayx --output json one job-groups pdf-results <id>
 ```
 
 The response includes the PDF data or a reference to where it can be retrieved.
@@ -56,13 +56,13 @@ Publications are records of when and where job group results were pushed to down
 
 ```bash
 # All publications for a job group
-ayx one job-groups publications --job-group-id <id>
+ayx one job-groups publications <id>
 
 # Scoped to a profile
-ayx one job-groups publications --job-group-id <id> --profile <profile-id>
+ayx one job-groups publications <id> --profile <profile-id>
 
 # Machine-readable
-ayx --output json one job-groups publications --job-group-id <id>
+ayx --output json one job-groups publications <id>
 ```
 
 To publish new results to a target, use `ayx one job-groups publish` — see [Job groups](/one/job-groups/).
@@ -72,14 +72,14 @@ To publish new results to a target, use `ayx one job-groups publish` — see [Jo
 Check profile results for data quality after every run:
 
 ```bash
-PROFILE=$(ayx --output json one job-groups profile-results --job-group-id <id>)
+PROFILE=$(ayx --output json one job-groups profile-results <id>)
 echo "$PROFILE" | jq '.data'
 ```
 
 Audit all publication targets for a job group:
 
 ```bash
-ayx --output json one job-groups publications --job-group-id <id> \
+ayx --output json one job-groups publications <id> \
   | jq -r '.data[] | [.target, .publishedAt, .status] | @tsv'
 ```
 
@@ -89,7 +89,7 @@ List job groups that have produced PDF results:
 ayx --output json one job-groups list --all \
   | jq -r '.data[].id' \
   | while read id; do
-      COUNT=$(ayx --output json one job-groups pdf-results --job-group-id "$id" \
+      COUNT=$(ayx --output json one job-groups pdf-results "$id" \
                | jq '.data | length')
       [[ "$COUNT" -gt 0 ]] && echo "$id: $COUNT PDF result(s)"
     done

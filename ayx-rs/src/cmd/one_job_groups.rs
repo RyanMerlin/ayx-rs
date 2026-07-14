@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
@@ -61,13 +61,8 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OneJobGroupCommand::Publish {
-            profile,
-            job_group_id,
-            body,
-        }) => {
+        Some(OneJobGroupCommand::Publish { profile, id, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
@@ -76,16 +71,12 @@ pub(crate) fn execute(
                 "PUT",
                 "/v4/jobGroups/{id}/publish",
                 true,
-                &[("id", job_group_id.as_str())],
+                &[("id", id.as_str())],
                 Some(payload),
             )?
         }
-        Some(OneJobGroupCommand::PdfResults {
-            profile,
-            job_group_id,
-        }) => {
+        Some(OneJobGroupCommand::PdfResults { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
             one_api_live_request(
                 &config,
                 "jobGroup",
@@ -93,15 +84,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/jobGroups/{id}/pdfResults",
                 false,
-                &[("id", job_group_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Detail {
-            profile,
-            job_group_id,
-        }) => {
+        Some(OneJobGroupCommand::Detail { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
             one_api_live_request(
                 &config,
                 "jobGroup",
@@ -109,15 +96,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/jobGroups/{id}",
                 false,
-                &[("id", job_group_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Cancel {
-            profile,
-            job_group_id,
-        }) => {
+        Some(OneJobGroupCommand::Cancel { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
             one_api_live_request(
                 &config,
                 "jobGroup",
@@ -125,15 +108,11 @@ pub(crate) fn execute(
                 "POST",
                 "/v4/jobGroups/{id}/cancel",
                 true,
-                &[("id", job_group_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Status {
-            profile,
-            job_group_id,
-        }) => {
+        Some(OneJobGroupCommand::Status { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
             one_api_live_request(
                 &config,
                 "jobGroup",
@@ -141,15 +120,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/jobGroups/{id}/status",
                 false,
-                &[("id", job_group_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Inputs {
-            profile,
-            job_group_id,
-        }) => {
+        Some(OneJobGroupCommand::Inputs { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
             one_api_live_request(
                 &config,
                 "jobGroup",
@@ -157,15 +132,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/jobGroups/{id}/inputs",
                 false,
-                &[("id", job_group_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Outputs {
-            profile,
-            job_group_id,
-        }) => {
+        Some(OneJobGroupCommand::Outputs { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
             one_api_live_request(
                 &config,
                 "jobGroup",
@@ -173,15 +144,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/jobGroups/{id}/outputs",
                 false,
-                &[("id", job_group_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Jobs {
-            profile,
-            job_group_id,
-        }) => {
+        Some(OneJobGroupCommand::Jobs { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
             one_api_live_request(
                 &config,
                 "jobGroup",
@@ -189,15 +156,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/jobGroups/{id}/jobs",
                 false,
-                &[("id", job_group_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Publications {
-            profile,
-            job_group_id,
-        }) => {
+        Some(OneJobGroupCommand::Publications { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
             one_api_live_request(
                 &config,
                 "jobGroup",
@@ -205,15 +168,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/jobGroups/{id}/publications",
                 false,
-                &[("id", job_group_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::Profile {
-            profile,
-            job_group_id,
-        }) => {
+        Some(OneJobGroupCommand::Profile { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
             one_api_live_request(
                 &config,
                 "jobGroup",
@@ -221,15 +180,11 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/jobGroups/{id}/profile",
                 false,
-                &[("id", job_group_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
-        Some(OneJobGroupCommand::ProfileResults {
-            profile,
-            job_group_id,
-        }) => {
+        Some(OneJobGroupCommand::ProfileResults { profile, id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let job_group_id = job_group_id.ok_or_else(|| anyhow!("--job-group-id is required"))?;
             one_api_live_request(
                 &config,
                 "jobGroup",
@@ -237,7 +192,7 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/jobGroups/{id}/profileResults",
                 false,
-                &[("id", job_group_id.as_str())],
+                &[("id", id.as_str())],
             )?
         }
     })

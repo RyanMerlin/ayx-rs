@@ -16,19 +16,19 @@ Connection permissions control which users and groups can use a given connection
 | `ayx one connections permissions create` | Grant a permission from a JSON payload |
 | `ayx one connections permissions delete` | Revoke a permission by subject ID |
 
-All commands accept `--connection-id <id>` and `--profile <profile-id>`.
+All commands accept `<connection-id>` as the connection positional argument and `--profile <profile-id>`.
 
 ## Listing permissions
 
 ```bash
 # All permissions for a connection
-ayx one connections permissions list --connection-id <id>
+ayx one connections permissions list <id>
 
 # Scoped to a profile
-ayx one connections permissions list --connection-id <id> --profile <profile-id>
+ayx one connections permissions list <id> --profile <profile-id>
 
 # Machine-readable output
-ayx --output json one connections permissions list --connection-id <id>
+ayx --output json one connections permissions list <id>
 ```
 
 ## Inspecting a permission
@@ -37,8 +37,8 @@ A subject is a user or group that has been granted access.
 
 ```bash
 ayx one connections permissions detail \
-  --connection-id <id> \
-  --subject-id <subject-id>
+  <id> \
+  <subject-id>
 ```
 
 ## Granting a permission
@@ -46,12 +46,12 @@ ayx one connections permissions detail \
 ```bash
 # Dry-run
 ayx one connections permissions create \
-  --connection-id <id> \
+  <id> \
   --body '{"subjectId":"<subject-id>","role":"viewer"}'
 
 # Commit
 ayx one connections permissions create \
-  --connection-id <id> \
+  <id> \
   --body '{"subjectId":"<subject-id>","role":"viewer"}' \
   --apply
 ```
@@ -63,13 +63,13 @@ The `--body` JSON structure depends on your Alteryx One version. Use `ayx one co
 ```bash
 # Dry-run
 ayx one connections permissions delete \
-  --connection-id <id> \
-  --subject-id <subject-id>
+  <id> \
+  <subject-id>
 
 # Commit (skips TTY prompt in CI)
 ayx one connections permissions delete \
-  --connection-id <id> \
-  --subject-id <subject-id> \
+  <id> \
+  <subject-id> \
   --apply --yes
 ```
 
@@ -78,7 +78,7 @@ ayx one connections permissions delete \
 Audit all subjects with access to a connection:
 
 ```bash
-ayx --output json one connections permissions list --connection-id <id> \
+ayx --output json one connections permissions list <id> \
   | jq -r '.data[] | [.subjectId, .role] | @tsv'
 ```
 
@@ -90,12 +90,12 @@ ayx --output json one connections list --all | jq -r '.data[].id' > conn-ids.txt
 
 # Then revoke per connection where the subject appears
 while read conn_id; do
-  ayx --output json one connections permissions list --connection-id "$conn_id" \
+  ayx --output json one connections permissions list "$conn_id" \
     | jq -r '.data[] | select(.subjectId == "<subject-id>") | .subjectId' \
     | grep -q . && \
     ayx one connections permissions delete \
-      --connection-id "$conn_id" \
-      --subject-id <subject-id> \
+      "$conn_id" \
+      <subject-id> \
       --apply --yes
 done < conn-ids.txt
 ```
