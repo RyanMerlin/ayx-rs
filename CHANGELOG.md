@@ -14,15 +14,21 @@
 - **README accuracy fixes**: documented the Windows release archive (`ayx-x86_64-pc-windows-msvc.zip`) and Windows as a built target alongside Linux and macOS; corrected the docs-site live-reload command from the nonexistent `npm start` to `npm run dev`; reworded the `tools workspace` promotion-workflow guidance so it no longer points users at the `compare`/migration-helper scaffolds as if they were implemented, and annotated `tools` (`compare`, migration helpers) and `mongo` (`mutate`) as preview / not yet implemented in the top-level command list.
 - **`docs/cli-spec.md`**: dropped the stale `(v0.11.0)` version stamp from the title so the published spec doesn't read as version-locked.
 
+### Removed
+
+- **`one auto-insights` and `one desktop-exec` commands**: both were config-posture stubs that performed no Alteryx One work and, worse, demanded a Server config section — so they errored on a One-only profile. They are removed from the `one` command tree and the machine-readable `catalog` rather than shipped as commands that mislead. They can return when the underlying surfaces are implemented.
+
 ### Fixed
 
 - **Error-contract and OTP-prompt DX fixes** (`#100`): CLI errors now exit non-zero via `process::exit` instead of returning `Err` from `main` (previously appended a bare non-JSON `Error: ...` line that broke `--output json` parsing and triple-printed in text mode); "is required" validation errors are classified as `Validation` instead of `Internal`; `--output` is constrained to `text`/`json`/`yaml`/`table` via a clap value parser; the OTP login prompt now prints and flushes before reading stdin instead of leaving a frozen cursor.
 - **`scripts/install.sh` checksum-tool selection**: `require_cmd sha256sum 2>/dev/null || require_cmd shasum` was dead code — `require_cmd` calls `exit` on a miss, so the `||` fallback never got a chance to run — and a stock macOS host (which has only `shasum`, not `sha256sum`) aborted silently before ever downloading. The installer now picks whichever tool is present once, up front, and reuses that choice for the checksum comparison.
 - **`scripts/install.sh` Windows branch**: the download URL was hard-coded to `.tar.gz`, but the only Windows release asset is a `.zip`, so running the bash installer under Git Bash/MSYS/Cygwin 404'd. Windows now gets a clear message pointing at the PowerShell installer (`scripts/install.ps1`) instead of attempting a download that can't succeed.
+- **Alteryx One API-coverage metadata drift**: `one api coverage` and `catalog describe` now report the endpoints the CLI actually calls. `one flows update` is recorded as `PATCH /v4/flows/{id}` (was `PUT`); `one platform workspace people`/`admins` map to `GET /v4/people` and `GET /v4/people?role=admin` (the `/v4/workspaces/{id}/people` and `/admins` routes 404 — workspace context is carried by the `x-alteryx-workspace-gid` header); the never-called `/v4/workspaces/{id}/people/{personId}/suspended` PUT/DELETE mappings are dropped in favor of the live `/iam/v1/.../suspend`|`unsuspend` pair; and the `workspace people`/`admins` prerequisites are corrected from `server_api` to `alteryx_one.access_token`. The inventory dedup guard now pins each shared endpoint to its exact expected command set, so future accidental drift fails the test.
 
 ### Docs
 
 - Roadmap, hygiene, and pruning passes (`#96`, `#97`, `#98`, `#99`, `#101`, `#102`): reconciled the active roadmap against the shipped v0.12.2 surface, scrubbed a leaked internal vault-path reference and personal/internal identifiers (emails, workspace GIDs, tier names) from source, tests, docs, and the site, removed the dead Docusaurus `docs-site/` and stale internal planning docs, and fixed command-tree drift plus envelope-contract contradictions across the README, `cli-spec`, and site docs.
+- **Docs-site release notes**: the Releases page no longer links to ungenerated `v0.9.12`/`v0.9.13`/`v0.9.14` pages (they are now generated from `docs/releases/`), and it carries `v0.12.1`/`v0.12.2` entries instead of stopping at `v0.12.0`.
 
 ### Dependencies
 

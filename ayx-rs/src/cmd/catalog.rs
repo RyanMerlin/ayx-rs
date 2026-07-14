@@ -244,8 +244,6 @@ mod tests {
         assert!(names.contains(&"one platform token create"));
         assert!(names.contains(&"one platform token detail"));
         assert!(names.contains(&"one platform token delete"));
-        assert!(names.contains(&"one auto-insights"));
-        assert!(names.contains(&"one desktop-exec"));
         assert!(!names.contains(&"one platform group"));
         assert!(!names.contains(&"one platform sso"));
         assert!(!names.contains(&"one platform audit"));

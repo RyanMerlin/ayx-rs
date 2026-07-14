@@ -4,7 +4,7 @@
 //! covering platform / workspace / role / person / token / api / auth /
 //! plans / scheduling / billing / flows / connections / connector
 //! metadata / job groups / output objects / webhook flow tasks / write
-//! settings / doctor / auto-insights / desktop-exec.
+//! settings / doctor.
 //!
 //! Each arm is verbatim from the original dispatch, wrapped in
 //! `Ok(match command { ... })` so the function returns `Result<Envelope>`.
@@ -76,7 +76,7 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
     }
     Ok(match command {
         None => Envelope::ok(
-            "one commands available: platform, plans, flows, datasets, connections, scheduling, billing, auto-insights, desktop-exec",
+            "one commands available: platform, plans, flows, datasets, connections, scheduling, billing",
         ),
         Some(OneCommand::Doctor { command }) => super::one_doctor::execute(&runtime, command)?,
         Some(OneCommand::Platform { command }) => {
@@ -131,12 +131,6 @@ pub fn execute(cli: Ctx<'_>, command: Option<OneCommand>) -> Result<Envelope> {
         Some(OneCommand::Billing { command }) => super::one_billing::execute(&runtime, command)?,
         #[cfg(feature = "ui")]
         Some(OneCommand::Ui { command }) => super::one_ui::execute(&runtime, command)?,
-        Some(OneCommand::AutoInsights { profile }) => {
-            super::one_auto_insights::execute(&runtime, profile)?
-        }
-        Some(OneCommand::DesktopExec { profile }) => {
-            super::one_desktop_exec::execute(&runtime, profile)?
-        }
     })
 }
 

@@ -25,12 +25,12 @@ The public One API surface exposed here does not provide a general-purpose workf
 - `platform.iam`
   - `GET /v4/workspaces/current`
   - `GET /v4/workspaces/{id}/configuration`
-  - `GET /v4/workspaces/{id}/people`
-  - `GET /v4/workspaces/{workspaceId}/admins`
+  - `GET /v4/people` (workspace context via the `x-alteryx-workspace-gid` header;
+    `/v4/workspaces/{id}/people` 404s)
+  - `GET /v4/people?role=admin` (same header-scoped workspace context;
+    `/v4/workspaces/{workspaceId}/admins` 404s)
   - `POST /v4/workspaces/{id}/people/batch`
   - `DELETE /v4/workspaces/{workspaceId}/people/{id}`
-  - `PUT /v4/workspaces/{id}/people/{personId}/suspended`
-  - `DELETE /v4/workspaces/{id}/people/{personId}/suspended`
   - `POST /iam/v1/workspaces/{id}/people/suspend`
   - `POST /iam/v1/workspaces/{id}/people/unsuspend`
   - `POST /v4/workspaces/{id}/transfer`
@@ -79,7 +79,7 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `GET /v4/flows`
   - `GET /v4/flows/count`
   - `GET /v4/flows/{id}`
-  - `PUT /v4/flows/{id}`
+  - `PATCH /v4/flows/{id}`
   - `DELETE /v4/flows/{id}`
   - `POST /v4/flows/{id}/copy`
   - `POST /v4/flows/{id}/run`

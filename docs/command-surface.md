@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-06 15:50:06 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-14 00:17:06 UTC._
 
 This file is generated. Refresh it with:
 
@@ -10,7 +10,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 209
+- Commands: 207
 - Capabilities: 8
 
 ## Commands
@@ -63,7 +63,6 @@ cargo run -q -p xtask -- refresh-command-surface
 | one api diagnose | `one/api/diagnose` | read-only | no | Validate Alteryx One API reachability and auth posture. |
 | one api open-api-spec | `one/api/open-api-spec` | read-only | no | Fetch the Alteryx One OpenAPI specification. |
 | one api status | `one/api/status` | read-only | no | Summarize the Alteryx One API posture. |
-| one auto-insights | `one/auto-insights` | read-only | no | Validate Alteryx One Auto Insights reachability and auth posture. |
 | one billing current-account | `one/billing/current-account` | read-only | no | Inspect the current One billing account. |
 | one billing usage-export | `one/billing/usage-export` | read-only | no | Export One billing usage data. |
 | one connections connector-metadata defaults | `one/connections/connector-metadata/defaults` | read-only | no | Inspect connector defaults. |
@@ -90,7 +89,6 @@ cargo run -q -p xtask -- refresh-command-surface
 | one datasets wrangled count | `one/datasets/wrangled/count` | read-only | no | Count One wrangled datasets. |
 | one datasets wrangled detail | `one/datasets/wrangled/detail` | read-only | no | Inspect a One wrangled dataset by id. |
 | one datasets wrangled list | `one/datasets/wrangled/list` | read-only | no | List One wrangled datasets. |
-| one desktop-exec | `one/desktop-exec` | read-only | no | Summarize the Alteryx One desktop execution posture. |
 | one doctor auth | `one/doctor/auth` | read-only | no | Run the One auth doctor workflow. |
 | one doctor billing | `one/doctor/billing` | read-only | no | Run the One billing doctor workflow. |
 | one doctor discover | `one/doctor/discover` | read-only | no | Run the One discovery doctor workflow. |
