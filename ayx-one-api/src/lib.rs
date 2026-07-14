@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::fs;
+use std::mem::ManuallyDrop;
 use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -32,7 +33,25 @@ thread_local! {
     static ONE_APPLY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static NO_VERIFY_TLS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static DEBUG_TRACE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static ONE_HTTP_CLIENT: RefCell<Option<Client>> = const { RefCell::new(None) };
+    // `ManuallyDrop` is deliberate, not an oversight: `reqwest::blocking::Client`
+    // is a thin handle around an `Arc<InnerClientHandle>` whose `Drop` joins the
+    // dedicated background thread that runs its internal tokio runtime. When
+    // the *last* reference — this cached one — is dropped as part of this
+    // thread-local's own teardown, that join runs from inside a thread-local
+    // destructor callback invoked by the OS during main-thread/process exit
+    // (on Windows, via FLS; this fires whether `main()` returns normally or
+    // calls `std::process::exit()` — that call only skips libstd's own
+    // at-exit/destructor bookkeeping, not OS-level TLS/FLS callbacks tied to a
+    // non-trivially-droppable thread-local). By the time that callback runs,
+    // Windows may already be tearing down other threads, so joining one here
+    // is fragile and was the actual cause of the "thread local panicked on
+    // drop, aborting" crash on successful commands (see docs/releases notes /
+    // tokio-rs/tokio#593 for the same class of bug). `ManuallyDrop` makes this
+    // thread-local's stored value provably non-drop-needing, so no destructor
+    // is ever registered for it at all — the background thread (and its
+    // channel/JoinHandle) is intentionally leaked for the life of the
+    // process, which is fine for a short-lived CLI invocation.
+    static ONE_HTTP_CLIENT: RefCell<Option<ManuallyDrop<Client>>> = const { RefCell::new(None) };
 }
 
 /// Disable TLS certificate verification for the calling thread. Lab/dev only.
@@ -1526,7 +1545,7 @@ pub fn flow_export_package_envelope(
 fn build_client() -> Result<Client> {
     ONE_HTTP_CLIENT.with(|cache| {
         if let Some(client) = cache.borrow().as_ref() {
-            return Ok(client.clone());
+            return Ok((**client).clone());
         }
         let timeout = Duration::from_secs(60);
         let mut builder = Client::builder().timeout(timeout);
@@ -1540,7 +1559,7 @@ fn build_client() -> Result<Client> {
         let client = builder
             .build()
             .context("failed to build one api HTTP client")?;
-        *cache.borrow_mut() = Some(client.clone());
+        *cache.borrow_mut() = Some(ManuallyDrop::new(client.clone()));
         Ok(client)
     })
 }

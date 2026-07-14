@@ -410,6 +410,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "crossterm",
+ "httpmock",
  "keyring-core",
  "nucleo-matcher",
  "ratatui",

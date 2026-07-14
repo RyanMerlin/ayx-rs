@@ -7105,7 +7105,9 @@ fn main() -> Result<()> {
             if envelope.ok {
                 print!("{rendered}");
                 println!();
-                Ok(())
+                let _ = io::stdout().lock().flush();
+                let _ = io::stderr().lock().flush();
+                std::process::exit(exit_code_for_envelope(&envelope));
             } else {
                 eprint!("{rendered}");
                 eprintln!();
