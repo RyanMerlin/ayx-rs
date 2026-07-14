@@ -147,8 +147,11 @@ fn catalog_surface_lists_core_one_commands() {
         .filter_map(|item| item.get("name").and_then(Value::as_str))
         .collect();
 
-    assert!(names.contains(&"one platform status"));
-    assert!(names.contains(&"one platform inventory"));
+    assert!(names.contains(&"one login"));
+    assert!(names.contains(&"one logout"));
+    assert!(names.contains(&"one whoami"));
+    assert!(names.contains(&"one auth status"));
+    assert!(names.contains(&"one inventory"));
     assert!(names.contains(&"one doctor auth"));
     assert!(names.contains(&"one doctor discover"));
     assert!(names.contains(&"one plans status"));
@@ -220,13 +223,13 @@ fn one_doctor_help_renders() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("discover"));
-    assert!(stdout.contains("platform"));
+    assert!(stdout.contains("identity"));
 }
 
 #[test]
-fn one_platform_help_renders_governance_groups() {
+fn one_help_renders_governance_groups() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["one", "platform", "--help"])
+        .args(["one", "--help"])
         .output()
         .expect("ayx binary should run");
 
@@ -236,13 +239,15 @@ fn one_platform_help_renders_governance_groups() {
     assert!(stdout.contains("role"));
     assert!(stdout.contains("token"));
     assert!(stdout.contains("person"));
-    assert!(stdout.contains("user"));
+    assert!(stdout.contains("whoami"));
+    assert!(stdout.contains("login"));
+    assert!(!stdout.contains("platform"));
 }
 
 #[test]
-fn one_platform_workspace_help_renders_governance_actions() {
+fn one_workspace_help_renders_governance_actions() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["one", "platform", "workspace", "--help"])
+        .args(["one", "workspace", "--help"])
         .output()
         .expect("ayx binary should run");
 
@@ -257,9 +262,9 @@ fn one_platform_workspace_help_renders_governance_actions() {
 }
 
 #[test]
-fn one_platform_role_help_renders_assignments() {
+fn one_role_help_renders_assignments() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["one", "platform", "role", "--help"])
+        .args(["one", "role", "--help"])
         .output()
         .expect("ayx binary should run");
 
@@ -360,9 +365,9 @@ fn one_flows_folders_delete_help_renders_folder_id() {
 }
 
 #[test]
-fn one_platform_token_help_renders_access_token_actions() {
+fn one_token_help_renders_access_token_actions() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["one", "platform", "token", "--help"])
+        .args(["one", "token", "--help"])
         .output()
         .expect("ayx binary should run");
 
@@ -803,16 +808,6 @@ fn one_api_group_help_lists_spec_and_coverage() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("open-api-spec"));
     assert!(stdout.contains("coverage"));
-}
-
-#[test]
-fn hidden_platform_api_alias_still_parses() {
-    // Deprecated path must still work (help renders, exit 0).
-    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["one", "platform", "api", "open-api-spec", "--help"])
-        .output()
-        .expect("ayx binary should run");
-    assert!(output.status.success());
 }
 
 #[test]

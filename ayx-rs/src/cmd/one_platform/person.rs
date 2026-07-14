@@ -3,7 +3,7 @@ use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
 use crate::{
-    OnePlatformPersonCommand,
+    OnePersonCommand,
     cmd::{self, RuntimeCtx},
     load_payload,
 };
@@ -12,16 +12,16 @@ pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
     apply: bool,
     yes: bool,
-    command: Option<OnePlatformPersonCommand>,
+    command: Option<OnePersonCommand>,
 ) -> Result<Envelope> {
     Ok(match command {
         None => {
-            // Bare `ayx one platform person` runs an unpaginated list
+            // Bare `ayx one person` runs an unpaginated list
             // against the default config.yaml for back-compat.
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
-                "platform",
+                "person",
                 "person-list",
                 "GET",
                 "/v4/people",
@@ -29,7 +29,7 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OnePlatformPersonCommand::List {
+        Some(OnePersonCommand::List {
             profile,
             limit,
             page_token,
@@ -43,18 +43,18 @@ pub(crate) fn execute(
                 .with_all(all, max_pages);
             ayx_one_api::one_api_list_request(
                 &config,
-                "platform",
+                "person",
                 "person-list",
                 "/v4/people",
                 &[],
                 &params,
             )?
         }
-        Some(OnePlatformPersonCommand::Count) => {
+        Some(OnePersonCommand::Count) => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
-                "platform",
+                "person",
                 "person-count",
                 "GET",
                 "/v4/people/count",
@@ -62,23 +62,12 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OnePlatformPersonCommand::Current) => {
-            let config = runtime.load_profile_lenient(None)?;
-            one_api_live_request(
-                &config,
-                "platform",
-                "person-current",
-                "GET",
-                "/v4/people/current",
-                false,
-                &[],
-            )?
-        }
-        Some(OnePlatformPersonCommand::Detail { profile, person_id }) => {
+        Some(OnePersonCommand::Current) => current(runtime, None)?,
+        Some(OnePersonCommand::Detail { profile, person_id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "platform",
+                "person",
                 "person-detail",
                 "GET",
                 "/v4/people/{id}",
@@ -86,7 +75,7 @@ pub(crate) fn execute(
                 &[("id", &person_id)],
             )?
         }
-        Some(OnePlatformPersonCommand::Update {
+        Some(OnePersonCommand::Update {
             profile,
             person_id,
             body,
@@ -95,7 +84,7 @@ pub(crate) fn execute(
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
-                "platform",
+                "person",
                 "person-update",
                 "PUT",
                 "/v4/people/{id}",
@@ -104,7 +93,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OnePlatformPersonCommand::Patch {
+        Some(OnePersonCommand::Patch {
             profile,
             person_id,
             body,
@@ -113,7 +102,7 @@ pub(crate) fn execute(
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
-                "platform",
+                "person",
                 "person-patch",
                 "PATCH",
                 "/v4/people/{id}",
@@ -122,7 +111,7 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OnePlatformPersonCommand::Delete { profile, person_id }) => {
+        Some(OnePersonCommand::Delete { profile, person_id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
@@ -136,7 +125,7 @@ pub(crate) fn execute(
             }
             one_api_live_request(
                 &config,
-                "platform",
+                "person",
                 "person-delete",
                 "DELETE",
                 "/v4/people/{id}",
@@ -144,12 +133,12 @@ pub(crate) fn execute(
                 &[("id", &person_id)],
             )?
         }
-        Some(OnePlatformPersonCommand::Create { profile, body }) => {
+        Some(OnePersonCommand::Create { profile, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
-                "platform",
+                "person",
                 "person-create",
                 "POST",
                 "/v4/people",
@@ -158,12 +147,12 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OnePlatformPersonCommand::UpdatePassword { profile, body }) => {
+        Some(OnePersonCommand::UpdatePassword { profile, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
-                "platform",
+                "person",
                 "person-update-password",
                 "PATCH",
                 "/v4/people/current/updatePassword",
@@ -172,12 +161,12 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OnePlatformPersonCommand::PasswordResetRequest { profile, body }) => {
+        Some(OnePersonCommand::PasswordResetRequest { profile, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
-                "platform",
+                "person",
                 "person-password-reset-request",
                 "POST",
                 "/v4/passwordresetrequest",
@@ -187,4 +176,17 @@ pub(crate) fn execute(
             )?
         }
     })
+}
+
+pub(crate) fn current(runtime: &RuntimeCtx<'_>, profile: Option<&str>) -> Result<Envelope> {
+    let config = runtime.load_profile_lenient(profile)?;
+    one_api_live_request(
+        &config,
+        "person",
+        "person-current",
+        "GET",
+        "/v4/people/current",
+        false,
+        &[],
+    )
 }

@@ -270,10 +270,10 @@ mod tests {
         // (METHOD, path) key, keyed to the EXACT set of command names allowed to
         // share it. Three distinct groups of CLI commands wire the same live
         // endpoint on purpose:
-        //   - `one platform user` / `one platform person current` -> GET /v4/people/current
-        //   - `one platform workspace configuration` / `...configuration-v4` -> GET /v4/workspaces/{}/configuration
-        //   - `one platform person list` / `one platform workspace people` /
-        //     `one platform workspace admins` -> GET /v4/people. All three hit the
+        //   - `one whoami` / `one person current` -> GET /v4/people/current
+        //   - `one workspace configuration` / `...configuration-v4` -> GET /v4/workspaces/{}/configuration
+        //   - `one person list` / `one workspace people` /
+        //     `one workspace admins` -> GET /v4/people. All three hit the
         //     same live endpoint (`/v4/workspaces/{id}/people` and
         //     `/v4/workspaces/{workspaceId}/admins` both 404; the workspace context
         //     comes from the `x-alteryx-workspace-gid` header instead). `admins`
@@ -288,22 +288,22 @@ mod tests {
         let allowlisted_duplicates: HashMap<(&str, &str), &[&str]> = HashMap::from([
             (
                 ("GET", "/v4/people/current"),
-                ["one platform user", "one platform person current"].as_slice(),
+                ["one whoami", "one person current"].as_slice(),
             ),
             (
                 ("GET", "/v4/workspaces/{}/configuration"),
                 [
-                    "one platform workspace configuration",
-                    "one platform workspace configuration-v4",
+                    "one workspace configuration",
+                    "one workspace configuration-v4",
                 ]
                 .as_slice(),
             ),
             (
                 ("GET", "/v4/people"),
                 [
-                    "one platform person list",
-                    "one platform workspace people",
-                    "one platform workspace admins",
+                    "one person list",
+                    "one workspace people",
+                    "one workspace admins",
                 ]
                 .as_slice(),
             ),

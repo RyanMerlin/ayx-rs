@@ -1959,7 +1959,7 @@ pub fn poll_device_token(
     let error = j["error"].as_str().unwrap_or("");
     match error {
         "authorization_pending" | "slow_down" => Ok(None),
-        "expired_token" => bail!("device code expired — run `ayx one platform auth login` again"),
+        "expired_token" => bail!("device code expired — run `ayx one login` again"),
         "access_denied" => bail!("access denied — the user rejected the authorization request"),
         _ => bail!(
             "device token poll returned {}: {}",

@@ -3,7 +3,7 @@ use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 
 use crate::{
-    OnePlatformTokenCommand,
+    OneTokenCommand,
     cmd::{self, RuntimeCtx},
     load_payload,
 };
@@ -12,14 +12,14 @@ pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
     apply: bool,
     yes: bool,
-    command: Option<OnePlatformTokenCommand>,
+    command: Option<OneTokenCommand>,
 ) -> Result<Envelope> {
     Ok(match command {
-        None | Some(OnePlatformTokenCommand::List) => {
+        None | Some(OneTokenCommand::List) => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
-                "platform",
+                "token",
                 "api-access-tokens-list",
                 "GET",
                 "/v4/apiAccessTokens",
@@ -27,12 +27,12 @@ pub(crate) fn execute(
                 &[],
             )?
         }
-        Some(OnePlatformTokenCommand::Create { profile, body }) => {
+        Some(OneTokenCommand::Create { profile, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
-                "platform",
+                "token",
                 "api-access-tokens-create",
                 "POST",
                 "/v4/apiAccessTokens",
@@ -41,11 +41,11 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        Some(OnePlatformTokenCommand::Detail { profile, token_id }) => {
+        Some(OneTokenCommand::Detail { profile, token_id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "platform",
+                "token",
                 "api-access-tokens-detail",
                 "GET",
                 "/v4/apiAccessTokens/{tokenId}",
@@ -53,7 +53,7 @@ pub(crate) fn execute(
                 &[("tokenId", &token_id)],
             )?
         }
-        Some(OnePlatformTokenCommand::Delete { profile, token_id }) => {
+        Some(OneTokenCommand::Delete { profile, token_id }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
@@ -67,7 +67,7 @@ pub(crate) fn execute(
             }
             one_api_live_request(
                 &config,
-                "platform",
+                "token",
                 "api-access-tokens-delete",
                 "DELETE",
                 "/v4/apiAccessTokens/{tokenId}",

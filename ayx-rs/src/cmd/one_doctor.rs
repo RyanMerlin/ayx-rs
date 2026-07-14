@@ -3,7 +3,7 @@ use ayx_core::envelope::Envelope;
 
 use crate::{
     OneDoctorCommand, cmd::RuntimeCtx, one_doctor_billing_envelope, one_doctor_discover_envelope,
-    one_doctor_plans_envelope, one_doctor_platform_envelope, one_doctor_scheduling_envelope,
+    one_doctor_identity_envelope, one_doctor_plans_envelope, one_doctor_scheduling_envelope,
     one_platform_auth_diagnose_envelope,
 };
 
@@ -20,9 +20,9 @@ pub(crate) fn execute(
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_doctor_discover_envelope(&config)?
         }
-        Some(OneDoctorCommand::Platform { profile }) => {
+        Some(OneDoctorCommand::Identity { profile }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            one_doctor_platform_envelope(&config)?
+            one_doctor_identity_envelope(&config)?
         }
         Some(OneDoctorCommand::Plans { profile }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
@@ -37,7 +37,7 @@ pub(crate) fn execute(
             one_doctor_billing_envelope(&config)?
         }
         None => Envelope::ok(
-            "one doctor commands available: auth, discover, platform, plans, scheduling, billing",
+            "one doctor commands available: auth, discover, identity, plans, scheduling, billing",
         ),
     })
 }

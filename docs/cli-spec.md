@@ -44,7 +44,7 @@ The shortest supported setup path is:
 1. Install from the public GitHub release channel.
 2. Run `ayx onboard`.
 3. Confirm the active profile with `ayx profile current`.
-4. Run a read-only command such as `ayx one platform workspace current` or
+4. Run a read-only command such as `ayx one workspace current` or
    `ayx server api status`.
 
 Legacy YAML import remains supported through:

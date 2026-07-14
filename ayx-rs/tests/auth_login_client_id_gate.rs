@@ -1,5 +1,5 @@
 //! Regression tests pinning the flow-specific `oauth_client_id` gate in
-//! `ayx one platform auth login`.
+//! `ayx one login`.
 //!
 //! Contract:
 //!   * The **default email-OTP** flow must NOT require `oauth_client_id` — a
@@ -39,12 +39,12 @@ fn config_home_without_client_id() -> TempDir {
     temp
 }
 
-/// Run `ayx one platform auth login --profile gate <extra>` against the
+/// Run `ayx one login --profile gate <extra>` against the
 /// isolated home. Returns (success, combined stdout+stderr). stdin is closed so
 /// the default OTP path can never block waiting for a passcode — it must bail
 /// at the `workspace_gid` check first.
 fn run_login(home: &TempDir, extra: &[&str]) -> (bool, String) {
-    let mut args = vec!["one", "platform", "auth", "login", "--profile", "gate"];
+    let mut args = vec!["one", "login", "--profile", "gate"];
     args.extend_from_slice(extra);
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(&args)

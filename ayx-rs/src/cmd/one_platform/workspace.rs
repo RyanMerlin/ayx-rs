@@ -31,7 +31,7 @@ fn resolve_workspace_id(
     match (explicit, active) {
         (Some(exp), Some(act)) if exp != act => Err(anyhow!(
             "--workspace-id '{}' does not match the active workspace '{}'. \
-             The token is workspace-bound; switch with `ayx one platform workspace switch` \
+             The token is workspace-bound; switch with `ayx one workspace switch` \
              or re-authenticate. Omit --workspace-id to use the active workspace.",
             exp,
             act
@@ -53,7 +53,7 @@ pub(crate) fn execute(
 ) -> Result<Envelope> {
     Ok(match command {
         None => Envelope::ok(
-            "one platform workspace commands available: list, current, current-configuration, configuration-v4, save-current-configuration, save-configuration-v4, configuration, configuration-schema, current-configuration-schema, delete-current-configuration, delete-configuration, people, admins, switch, invite-users, remove-user, suspend-users, unsuspend-users, transfer, transfer-assets",
+            "one workspace commands available: list, current, current-configuration, configuration-v4, save-current-configuration, save-configuration-v4, configuration, configuration-schema, current-configuration-schema, delete-current-configuration, delete-configuration, people, admins, switch, invite-users, remove-user, suspend-users, unsuspend-users, transfer, transfer-assets",
         ),
         Some(OneWorkspaceCommand::List {
             profile,
@@ -69,7 +69,7 @@ pub(crate) fn execute(
                 .with_all(all, max_pages);
             ayx_one_api::one_api_list_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-list",
                 "/v4/workspaces",
                 &[],
@@ -80,7 +80,7 @@ pub(crate) fn execute(
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-configuration-v4",
                 "GET",
                 "/v4/workspaces/{id}/configuration",
@@ -92,7 +92,7 @@ pub(crate) fn execute(
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-current-configuration",
                 "GET",
                 "/v4/workspaces/current/configuration",
@@ -105,7 +105,7 @@ pub(crate) fn execute(
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-save-current-configuration",
                 "PATCH",
                 "/v4/workspaces/current/configuration",
@@ -123,7 +123,7 @@ pub(crate) fn execute(
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-save-configuration-v4",
                 "PATCH",
                 "/v4/workspaces/{id}/configuration",
@@ -142,7 +142,7 @@ pub(crate) fn execute(
             }
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-current",
                 "GET",
                 "/v4/workspaces/current",
@@ -154,7 +154,7 @@ pub(crate) fn execute(
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-configuration-schema",
                 "GET",
                 "/v4/workspaces/{id}/configuration-schema",
@@ -166,7 +166,7 @@ pub(crate) fn execute(
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-current-configuration-schema",
                 "GET",
                 "/v4/workspaces/current/configuration-schema",
@@ -178,7 +178,7 @@ pub(crate) fn execute(
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-delete-current-configuration",
                 "POST",
                 "/v4/workspaces/current/delete-configuration",
@@ -190,7 +190,7 @@ pub(crate) fn execute(
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-delete-configuration",
                 "POST",
                 "/v4/workspaces/{id}/delete-configuration",
@@ -202,7 +202,7 @@ pub(crate) fn execute(
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-configuration",
                 "GET",
                 "/v4/workspaces/{id}/configuration",
@@ -217,7 +217,7 @@ pub(crate) fn execute(
             // live-verified endpoint. /v4/workspaces/{id}/people returns 404.
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-people",
                 "GET",
                 "/v4/people",
@@ -231,7 +231,7 @@ pub(crate) fn execute(
             // param. /v4/workspaces/{id}/admins returns 404.
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-admins",
                 "GET",
                 "/v4/people?role=admin",
@@ -253,11 +253,11 @@ pub(crate) fn execute(
                 let profile_name = config.profile_name.clone();
                 return Err(anyhow!(
                     "no stored credential for workspace '{}' in profile '{}'. \
-                     Authenticate into it first with `ayx one platform auth login` \
+                     Authenticate into it first with `ayx one login` \
                      (the active workspace is determined by which workspace you logged into — \
                      the token is workspace-bound). \
                      Available: {}. \
-                     Run `ayx one platform workspace list` to see workspaces.",
+                     Run `ayx one workspace list` to see workspaces.",
                     workspace_id,
                     profile_name,
                     if available.is_empty() {
@@ -295,7 +295,7 @@ pub(crate) fn execute(
             let ws_id = resolve_workspace_id(workspace_id, &config)?;
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-invite-users",
                 "POST",
                 "/v4/workspaces/{id}/people/batch",
@@ -321,7 +321,7 @@ pub(crate) fn execute(
             }
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-remove-user",
                 "DELETE",
                 "/v4/workspaces/{workspaceId}/people/{id}",
@@ -344,7 +344,7 @@ pub(crate) fn execute(
             }
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-suspend-users",
                 "POST",
                 "/iam/v1/workspaces/{id}/people/suspend",
@@ -367,7 +367,7 @@ pub(crate) fn execute(
             }
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-unsuspend-users",
                 "POST",
                 "/iam/v1/workspaces/{id}/people/unsuspend",
@@ -390,7 +390,7 @@ pub(crate) fn execute(
             }
             one_api_live_request(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-transfer",
                 "POST",
                 "/v4/workspaces/{id}/transfer",
@@ -403,7 +403,7 @@ pub(crate) fn execute(
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
-                "platform",
+                "workspace",
                 "workspace-transfer-assets",
                 "PATCH",
                 "/v4/workspaces/current/transfer",

@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-14 01:06:29 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-14 12:24:31 UTC._
 
 This is the curated **catalog** view — the agent-facing capability surface, not the complete command tree. For every command and flag, use `ayx --help`, `ayx <group> --help`, or `ayx discover --deep`.
 
@@ -12,7 +12,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 207
+- Commands: 206
 - Capabilities: 6
 
 ## Commands
@@ -65,6 +65,8 @@ cargo run -q -p xtask -- refresh-command-surface
 | one api diagnose | `one/api/diagnose` | read-only | no | Validate Alteryx One API reachability and auth posture. |
 | one api open-api-spec | `one/api/open-api-spec` | read-only | no | Fetch the Alteryx One OpenAPI specification. |
 | one api status | `one/api/status` | read-only | no | Summarize the Alteryx One API posture. |
+| one auth diagnose | `one/auth/diagnose` | read-only | no | Validate One API token reachability and workspace scope. |
+| one auth status | `one/auth/status` | read-only | no | Summarize One API token posture for managed IAM. |
 | one billing current-account | `one/billing/current-account` | read-only | no | Inspect the current One billing account. |
 | one billing usage-export | `one/billing/usage-export` | read-only | no | Export One billing usage data. |
 | one connections connector-metadata defaults | `one/connections/connector-metadata/defaults` | read-only | no | Inspect connector defaults. |
@@ -94,8 +96,8 @@ cargo run -q -p xtask -- refresh-command-surface
 | one doctor auth | `one/doctor/auth` | read-only | no | Run the One auth doctor workflow. |
 | one doctor billing | `one/doctor/billing` | read-only | no | Run the One billing doctor workflow. |
 | one doctor discover | `one/doctor/discover` | read-only | no | Run the One discovery doctor workflow. |
+| one doctor identity | `one/doctor/identity` | read-only | no | Run the One identity doctor workflow. |
 | one doctor plans | `one/doctor/plans` | read-only | no | Run the One plans doctor workflow. |
-| one doctor platform | `one/doctor/platform` | read-only | no | Run the One platform doctor workflow. |
 | one doctor scheduling | `one/doctor/scheduling` | read-only | no | Run the One scheduling doctor workflow. |
 | one flows copy | `one/flows/copy` | mutating | yes | Copy a One flow using a JSON payload. |
 | one flows count | `one/flows/count` | read-only | no | Count One flows. |
@@ -127,7 +129,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one flows run | `one/flows/run` | mutating | yes | Run a One flow using a JSON payload. |
 | one flows update | `one/flows/update` | mutating | yes | Update a One flow from JSON payload. |
 | one flows validate | `one/flows/validate` | read-only | no | Validate a One flow. |
-| one inventory | `one/inventory` | read-only | no | Show One API inventory, or redirect One-only profiles to the platform doctor. |
+| one inventory | `one/inventory` | read-only | no | Summarize the current One API surface registry. |
 | one job-group cancel | `one/job-group/cancel` | mutating | yes | Cancel a One job group. |
 | one job-group count | `one/job-group/count` | read-only | no | Count One job groups. |
 | one job-group detail | `one/job-group/detail` | read-only | no | Inspect a One job group. |
@@ -142,6 +144,8 @@ cargo run -q -p xtask -- refresh-command-surface
 | one job-group publish | `one/job-group/publish` | mutating | yes | Publish job-group results to a target. |
 | one job-group run | `one/job-group/run` | mutating | yes | Run a One job group. |
 | one job-group status | `one/job-group/status` | read-only | no | Inspect a One job group status. |
+| one login | `one/login` | mutating | yes | Authenticate with Alteryx One and store credentials. |
+| one logout | `one/logout` | mutating | yes | Clear stored Alteryx One credentials from the active profile. |
 | one output-object count | `one/output-object/count` | read-only | no | Count One output objects. |
 | one output-object create | `one/output-object/create` | mutating | yes | Create a One output object from JSON payload. |
 | one output-object delete | `one/output-object/delete` | mutating | yes | Delete a One output object. |
@@ -150,6 +154,16 @@ cargo run -q -p xtask -- refresh-command-surface
 | one output-object list | `one/output-object/list` | read-only | no | List One output objects. |
 | one output-object update | `one/output-object/update` | mutating | yes | Update a One output object from JSON payload. |
 | one output-object wrangle-to-python | `one/output-object/wrangle-to-python` | read-only | no | Generate Python from a One output object. |
+| one person count | `one/person/count` | read-only | no | Count One people. |
+| one person create | `one/person/create` | mutating | yes | Create a One person from JSON payload. |
+| one person current | `one/person/current` | read-only | no | Inspect the current One person record. |
+| one person delete | `one/person/delete` | mutating | yes | Delete a One person record. |
+| one person detail | `one/person/detail` | read-only | no | Inspect a One person record by id. |
+| one person list | `one/person/list` | read-only | no | List One people. |
+| one person password-reset-request | `one/person/password-reset-request` | mutating | yes | Request a One password reset from JSON payload. |
+| one person patch | `one/person/patch` | mutating | yes | Patch a One person record from JSON payload. |
+| one person update | `one/person/update` | mutating | yes | Replace a One person record from JSON payload. |
+| one person update-password | `one/person/update-password` | mutating | yes | Update the current One person's password from JSON payload. |
 | one plans count | `one/plans/count` | read-only | no | Count One plans. |
 | one plans create | `one/plans/create` | mutating | yes | Create a One plan. |
 | one plans delete | `one/plans/delete` | mutating | yes | Delete a One plan. |
@@ -165,58 +179,43 @@ cargo run -q -p xtask -- refresh-command-surface
 | one plans share | `one/plans/share` | mutating | yes | Share a One plan from JSON payload. |
 | one plans status | `one/plans/status` | read-only | no | Summarize the Alteryx One plans posture. |
 | one plans update | `one/plans/update` | mutating | yes | Update a One plan from JSON payload. |
-| one platform auth diagnose | `one/platform/auth/diagnose` | read-only | no | Validate One API token reachability and workspace scope. |
-| one platform auth status | `one/platform/auth/status` | read-only | no | Summarize One API token posture for managed IAM. |
-| one platform inventory | `one/platform/inventory` | read-only | no | Summarize the current One API surface registry. |
-| one platform person count | `one/platform/person/count` | read-only | no | Count One people. |
-| one platform person create | `one/platform/person/create` | mutating | yes | Create a One person from JSON payload. |
-| one platform person current | `one/platform/person/current` | read-only | no | Inspect the current One person record. |
-| one platform person delete | `one/platform/person/delete` | mutating | yes | Delete a One person record. |
-| one platform person detail | `one/platform/person/detail` | read-only | no | Inspect a One person record by id. |
-| one platform person list | `one/platform/person/list` | read-only | no | List One people. |
-| one platform person password-reset-request | `one/platform/person/password-reset-request` | mutating | yes | Request a One password reset from JSON payload. |
-| one platform person patch | `one/platform/person/patch` | mutating | yes | Patch a One person record from JSON payload. |
-| one platform person update | `one/platform/person/update` | mutating | yes | Replace a One person record from JSON payload. |
-| one platform person update-password | `one/platform/person/update-password` | mutating | yes | Update the current One person's password from JSON payload. |
-| one platform role assign | `one/platform/role/assign` | mutating | yes | Assign a subject to a One managed IAM role. |
-| one platform role list-assignments | `one/platform/role/list-assignments` | read-only | no | Inspect role assignments for One managed IAM. |
-| one platform role unassign | `one/platform/role/unassign` | mutating | yes | Unassign a subject from a One managed IAM role. |
-| one platform status | `one/platform/status` | read-only | no | Summarize the Alteryx One platform posture. |
-| one platform token create | `one/platform/token/create` | mutating | yes | Create a One API access token from JSON payload. |
-| one platform token delete | `one/platform/token/delete` | mutating | yes | Delete a One API access token by id. |
-| one platform token detail | `one/platform/token/detail` | read-only | no | Inspect a One API access token by id. |
-| one platform token list | `one/platform/token/list` | read-only | no | List One API access tokens. |
-| one platform user | `one/platform/user` | read-only | no | Show the current One user profile. |
-| one platform workspace admins | `one/platform/workspace/admins` | read-only | no | List workspace admins. |
-| one platform workspace configuration | `one/platform/workspace/configuration` | read-only | no | Inspect a One workspace configuration by id. |
-| one platform workspace configuration-schema | `one/platform/workspace/configuration-schema` | read-only | no | Inspect the workspace configuration schema. |
-| one platform workspace configuration-v4 | `one/platform/workspace/configuration-v4` | read-only | no | Inspect a One workspace configuration by id. |
-| one platform workspace current | `one/platform/workspace/current` | read-only | no | Inspect the current One workspace posture. |
-| one platform workspace current-configuration | `one/platform/workspace/current-configuration` | read-only | no | Inspect the current One workspace configuration. |
-| one platform workspace current-configuration-schema | `one/platform/workspace/current-configuration-schema` | read-only | no | Inspect the current workspace configuration schema. |
-| one platform workspace delete-configuration | `one/platform/workspace/delete-configuration` | mutating | yes | Reset a workspace configuration by workspace id. |
-| one platform workspace delete-current-configuration | `one/platform/workspace/delete-current-configuration` | mutating | yes | Reset the current workspace configuration. |
-| one platform workspace invite-users | `one/platform/workspace/invite-users` | mutating | yes | Invite users to a One workspace. |
-| one platform workspace list | `one/platform/workspace/list` | read-only | no | List accessible One workspaces. |
-| one platform workspace people | `one/platform/workspace/people` | read-only | no | List people in the current One workspace. |
-| one platform workspace remove-user | `one/platform/workspace/remove-user` | mutating | yes | Remove a user from a One workspace. |
-| one platform workspace save-configuration-v4 | `one/platform/workspace/save-configuration-v4` | mutating | yes | Update a One workspace configuration by id from JSON payload. |
-| one platform workspace save-current-configuration | `one/platform/workspace/save-current-configuration` | mutating | yes | Update the current One workspace configuration from JSON payload. |
-| one platform workspace suspend-users | `one/platform/workspace/suspend-users` | mutating | yes | Suspend users in a One workspace. |
-| one platform workspace switch | `one/platform/workspace/switch` | mutating | yes | Set the active One workspace in the local profile. |
-| one platform workspace transfer | `one/platform/workspace/transfer` | mutating | yes | Start a transfer for a One workspace. |
-| one platform workspace transfer-assets | `one/platform/workspace/transfer-assets` | mutating | yes | Transfer assets from the current One workspace from JSON payload. |
-| one platform workspace unsuspend-users | `one/platform/workspace/unsuspend-users` | mutating | yes | Unsuspend users in a One workspace. |
+| one role assign | `one/role/assign` | mutating | yes | Assign a subject to a One managed IAM role. |
+| one role list-assignments | `one/role/list-assignments` | read-only | no | Inspect role assignments for One managed IAM. |
+| one role unassign | `one/role/unassign` | mutating | yes | Unassign a subject from a One managed IAM role. |
 | one scheduling count | `one/scheduling/count` | read-only | no | Count One schedules. |
 | one scheduling detail | `one/scheduling/detail` | read-only | no | Inspect a One schedule by id. |
 | one scheduling disable | `one/scheduling/disable` | mutating | yes | Disable a One schedule. |
 | one scheduling enable | `one/scheduling/enable` | mutating | yes | Enable a One schedule. |
 | one scheduling list | `one/scheduling/list` | read-only | no | List One schedules. |
-| one status | `one/status` | read-only | no | Show One API status, or redirect One-only profiles to the platform doctor. |
+| one token create | `one/token/create` | mutating | yes | Create a One API access token from JSON payload. |
+| one token delete | `one/token/delete` | mutating | yes | Delete a One API access token by id. |
+| one token detail | `one/token/detail` | read-only | no | Inspect a One API access token by id. |
+| one token list | `one/token/list` | read-only | no | List One API access tokens. |
 | one webhook-flow-task create | `one/webhook-flow-task/create` | mutating | yes | Create a webhook flow task from JSON payload. |
 | one webhook-flow-task delete | `one/webhook-flow-task/delete` | mutating | yes | Delete a webhook flow task. |
 | one webhook-flow-task detail | `one/webhook-flow-task/detail` | read-only | no | Inspect a webhook flow task. |
 | one webhook-flow-tasks test | `one/webhook-flow-tasks/test` | mutating | yes | Send a test webhook from JSON payload. |
+| one whoami | `one/whoami` | read-only | no | Show the current One user profile. |
+| one workspace admins | `one/workspace/admins` | read-only | no | List workspace admins. |
+| one workspace configuration | `one/workspace/configuration` | read-only | no | Inspect a One workspace configuration by id. |
+| one workspace configuration-schema | `one/workspace/configuration-schema` | read-only | no | Inspect the workspace configuration schema. |
+| one workspace configuration-v4 | `one/workspace/configuration-v4` | read-only | no | Inspect a One workspace configuration by id. |
+| one workspace current | `one/workspace/current` | read-only | no | Inspect the current One workspace posture. |
+| one workspace current-configuration | `one/workspace/current-configuration` | read-only | no | Inspect the current One workspace configuration. |
+| one workspace current-configuration-schema | `one/workspace/current-configuration-schema` | read-only | no | Inspect the current workspace configuration schema. |
+| one workspace delete-configuration | `one/workspace/delete-configuration` | mutating | yes | Reset a workspace configuration by workspace id. |
+| one workspace delete-current-configuration | `one/workspace/delete-current-configuration` | mutating | yes | Reset the current workspace configuration. |
+| one workspace invite-users | `one/workspace/invite-users` | mutating | yes | Invite users to a One workspace. |
+| one workspace list | `one/workspace/list` | read-only | no | List accessible One workspaces. |
+| one workspace people | `one/workspace/people` | read-only | no | List people in the current One workspace. |
+| one workspace remove-user | `one/workspace/remove-user` | mutating | yes | Remove a user from a One workspace. |
+| one workspace save-configuration-v4 | `one/workspace/save-configuration-v4` | mutating | yes | Update a One workspace configuration by id from JSON payload. |
+| one workspace save-current-configuration | `one/workspace/save-current-configuration` | mutating | yes | Update the current One workspace configuration from JSON payload. |
+| one workspace suspend-users | `one/workspace/suspend-users` | mutating | yes | Suspend users in a One workspace. |
+| one workspace switch | `one/workspace/switch` | mutating | yes | Set the active One workspace in the local profile. |
+| one workspace transfer | `one/workspace/transfer` | mutating | yes | Start a transfer for a One workspace. |
+| one workspace transfer-assets | `one/workspace/transfer-assets` | mutating | yes | Transfer assets from the current One workspace from JSON payload. |
+| one workspace unsuspend-users | `one/workspace/unsuspend-users` | mutating | yes | Unsuspend users in a One workspace. |
 | one write-setting count | `one/write-setting/count` | read-only | no | Count One write settings. |
 | one write-setting create | `one/write-setting/create` | mutating | yes | Create a One write setting from JSON payload. |
 | one write-setting delete | `one/write-setting/delete` | mutating | yes | Delete a One write setting. |
