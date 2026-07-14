@@ -35,7 +35,8 @@ pub fn write_audit_artifact(
         crate::sensitive::SensitiveIoError::CreateDir { path, source } => {
             AuditError::CreateDir { path, source }
         }
-        crate::sensitive::SensitiveIoError::Write { path, source }
+        crate::sensitive::SensitiveIoError::Lock { path, source }
+        | crate::sensitive::SensitiveIoError::Write { path, source }
         | crate::sensitive::SensitiveIoError::Append { path, source } => {
             AuditError::Write { path, source }
         }
@@ -53,7 +54,8 @@ pub fn write_audit_artifact(
         crate::sensitive::SensitiveIoError::CreateDir { path, source } => {
             AuditError::CreateDir { path, source }
         }
-        crate::sensitive::SensitiveIoError::Write { path, source }
+        crate::sensitive::SensitiveIoError::Lock { path, source }
+        | crate::sensitive::SensitiveIoError::Write { path, source }
         | crate::sensitive::SensitiveIoError::Append { path, source } => {
             AuditError::Write { path, source }
         }

@@ -2199,6 +2199,7 @@ pub fn save_ayx_state(state: &AyxState) -> Result<(), ProfileError> {
     })?;
     write_sensitive_file(&path, body.as_bytes()).map_err(|err| match err {
         crate::sensitive::SensitiveIoError::CreateDir { path, source }
+        | crate::sensitive::SensitiveIoError::Lock { path, source }
         | crate::sensitive::SensitiveIoError::Write { path, source }
         | crate::sensitive::SensitiveIoError::Append { path, source } => {
             ProfileError::Write { path, source }
