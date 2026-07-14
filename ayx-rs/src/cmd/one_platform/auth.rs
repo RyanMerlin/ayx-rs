@@ -2,52 +2,27 @@ use anyhow::{Context, Result, bail};
 use ayx_core::envelope::Envelope;
 
 use crate::{
-    OnePlatformAuthCommand, cmd::RuntimeCtx, one_platform_auth_diagnose_envelope,
+    OneAuthCommand, cmd::RuntimeCtx, one_platform_auth_diagnose_envelope,
     one_platform_auth_status_envelope,
 };
 
-pub(crate) fn execute(
-    runtime: &RuntimeCtx<'_>,
-    command: OnePlatformAuthCommand,
-) -> Result<Envelope> {
+pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneAuthCommand) -> Result<Envelope> {
     Ok(match command {
-        OnePlatformAuthCommand::Status { profile } => {
+        OneAuthCommand::Status { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_platform_auth_status_envelope(&config)?
         }
-        OnePlatformAuthCommand::Diagnose { profile } => {
+        OneAuthCommand::Diagnose { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_platform_auth_diagnose_envelope(&config)?
         }
-        OnePlatformAuthCommand::Login {
-            profile,
-            client_id,
-            browser,
-            device,
-            refresh_token,
-            access_token,
-            token_endpoint,
-            workspace_id,
-            workspace_gid,
-        } => login(
-            runtime,
-            profile.as_deref(),
-            client_id,
-            browser,
-            device,
-            refresh_token,
-            access_token,
-            token_endpoint,
-            workspace_id,
-            workspace_gid,
-        )?,
     })
 }
 
 #[allow(clippy::too_many_arguments)]
-fn login(
+pub(crate) fn login(
     runtime: &RuntimeCtx<'_>,
-    profile: Option<&str>,
+    profile: Option<String>,
     client_id: Option<String>,
     browser: bool,
     device: bool,
@@ -64,7 +39,7 @@ fn login(
     };
     use serde_json::json;
 
-    let mut config = runtime.load_profile_lenient(profile)?;
+    let mut config = runtime.load_profile_lenient(profile.as_deref())?;
     let one = config
         .alteryx_one
         .as_mut()
@@ -318,7 +293,7 @@ fn login(
         loop {
             std::thread::sleep(std::time::Duration::from_secs(interval));
             if std::time::Instant::now() >= deadline {
-                bail!("device code expired — run `ayx one platform auth login` again");
+                bail!("device code expired — run `ayx one login` again");
             }
             match poll_device_token(
                 &token_endpoint,
@@ -380,6 +355,71 @@ fn login(
             "endpoint": endpoint,
             "token_length": final_access_token.len(),
             "has_refresh_token": final_refresh_token.is_some(),
+            "inline_secret_fields": secretize.inline_fields,
+        }),
+    ))
+}
+
+pub(crate) fn logout(runtime: &RuntimeCtx<'_>, profile: Option<&str>) -> Result<Envelope> {
+    use ayx_core::profile::profile_storage_path;
+    use serde_json::json;
+
+    let mut config = runtime.load_profile_lenient(profile)?;
+    let one = config
+        .alteryx_one
+        .as_mut()
+        .context("no alteryx_one section in profile")?;
+
+    let top_level_cleared = one.access_token.is_some()
+        || one.access_token_ref.is_some()
+        || one.refresh_token.is_some()
+        || one.refresh_token_ref.is_some();
+    one.access_token = None;
+    one.access_token_ref = None;
+    one.refresh_token = None;
+    one.refresh_token_ref = None;
+
+    let mut workspace_credentials_cleared = 0usize;
+    for credential in one.workspace_credentials.values_mut() {
+        let had_credential = credential.access_token.is_some()
+            || credential.access_token_ref.is_some()
+            || credential.refresh_token.is_some()
+            || credential.refresh_token_ref.is_some();
+        credential.access_token = None;
+        credential.access_token_ref = None;
+        credential.refresh_token = None;
+        credential.refresh_token_ref = None;
+        if had_credential {
+            workspace_credentials_cleared += 1;
+        }
+    }
+
+    let profile_name = config.profile_name.clone();
+    let path = profile_storage_path(&profile_name)?;
+    let secretize = crate::onboard::write_config_with_policy(
+        &path,
+        &config,
+        crate::onboard::InlineSecretPolicy::Allow,
+    )
+    .context("failed to save profile")?;
+
+    if let Some(msg) = crate::onboard::inline_secret_warning(&secretize.inline_fields) {
+        eprintln!("warning: {msg}");
+    }
+
+    Ok(Envelope::ok_with_data(
+        "one credentials cleared",
+        json!({
+            "action": "auth.logout",
+            "status": "ok",
+            "profile": profile_name,
+            "top_level_credentials_cleared": top_level_cleared,
+            "workspace_credentials_cleared": workspace_credentials_cleared,
+            "remote_revocation": "not attempted",
+            "notes": [
+                "Cleared stored Alteryx One access/refresh credentials and credential refs from the profile",
+                "External secret-store entries referenced by the previous profile were not deleted",
+            ],
             "inline_secret_fields": secretize.inline_fields,
         }),
     ))

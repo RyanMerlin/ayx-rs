@@ -84,7 +84,7 @@ pub fn run_onboarding(
 
     // Alteryx One workspace: the workspace gid (a ULID) and region base URL both
     // live in the workspace URL the user sees in their browser. Parsing them here
-    // means the email-OTP login (`ayx one platform auth login`) has everything it
+    // means the email-OTP login (`ayx one login`) has everything it
     // needs — the gid is required by the OIDC workspace handshake.
     let gid_default = config
         .alteryx_one
@@ -101,7 +101,7 @@ pub fn run_onboarding(
                 Some(gid) => one.workspace_gid = Some(gid.clone()),
                 None => println!(
                     "Note: no workspace id found in that input. Set it later with \
-                     `ayx one platform auth login --workspace-gid <id>`."
+                     `ayx one login --workspace-gid <id>`."
                 ),
             }
             if let Some(base) = parsed.base_url {
@@ -980,7 +980,7 @@ pub(crate) fn parse_workspace_url(input: &str) -> ParsedWorkspaceUrl {
 /// at the next command. A login failure is deliberately NOT fatal: the profile is
 /// already saved, so it is surfaced as guidance, not an onboarding error.
 fn offer_login_now(config: &Config, saved_path: &Path, environment: Option<&str>) -> Result<Value> {
-    const NEXT_STEP: &str = "ayx one platform auth login";
+    const NEXT_STEP: &str = "ayx one login";
 
     let Some(one) = config.alteryx_one.as_ref() else {
         return Ok(json!({ "offered": false, "reason": "no alteryx_one section" }));
@@ -1015,7 +1015,7 @@ fn offer_login_now(config: &Config, saved_path: &Path, environment: Option<&str>
 
     match crate::cmd::one::run_otp_login(environment, Some(config.profile_name.clone())) {
         Ok(_) => {
-            println!("\nConnected. Verify any time with: ayx one platform workspace current");
+            println!("\nConnected. Verify any time with: ayx one workspace current");
             Ok(json!({ "offered": true, "ran": true, "ok": true }))
         }
         Err(err) => {

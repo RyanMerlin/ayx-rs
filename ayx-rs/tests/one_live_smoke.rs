@@ -454,9 +454,9 @@ macro_rules! live_page_boundary_case {
 /// fails loud: when the suite is enabled (`AYX_ONE_LIVE_SMOKE=1`) but the
 /// configured token cannot authenticate, the run goes RED here instead of
 /// silently passing. A red gate is the signal to rotate the PAT
-/// (`ayx one platform auth login`) and refresh the CI secret.
+/// (`ayx one login`) and refresh the CI secret.
 ///
-/// The probe mirrors `one platform auth diagnose`, which hits
+/// The probe mirrors `one auth diagnose`, which hits
 /// `GET /v4/apiAccessTokens` to prove the token authenticates against the
 /// tenant. A dead/expired token surfaces as `auth_failed` or a refresh-token
 /// exchange error; any other failure (permission_denied / not_found) still
@@ -468,8 +468,7 @@ fn live_smoke_requires_a_live_token() {
     }
 
     let live = LiveSmokeContext::new();
-    let (success, stdout, stderr) =
-        run_ayx_result(&["--output", "json", "one", "platform", "token"], &live);
+    let (success, stdout, stderr) = run_ayx_result(&["--output", "json", "one", "token"], &live);
 
     if success {
         assert_live_ok(&stdout);
@@ -482,7 +481,7 @@ fn live_smoke_requires_a_live_token() {
         panic!(
             "AYX_ONE_LIVE_SMOKE is enabled but the Alteryx One token is not live \
              (auth_failed / refresh-token exchange failed). Rotate the PAT with \
-             `ayx one platform auth login` and refresh the CI secret.\nstderr:\n{stderr}"
+             `ayx one login` and refresh the CI secret.\nstderr:\n{stderr}"
         );
     }
 
@@ -502,17 +501,10 @@ fn live_smoke_requires_a_live_token() {
 }
 
 live_case!(
-    one_platform_workspace_current_live,
-    args = [
-        "--output",
-        "json",
-        "one",
-        "platform",
-        "workspace",
-        "current"
-    ],
+    one_workspace_current_live,
+    args = ["--output", "json", "one", "workspace", "current"],
     ok = [
-        "\"surface\": \"platform\"",
+        "\"surface\": \"workspace\"",
         "\"operation\": \"workspace-current\""
     ],
     fail = [
@@ -545,7 +537,7 @@ live_unexpected_case!(
     one_doctor_auth_live,
     args = ["--output", "json", "one", "doctor", "auth"],
     ok = [
-        "\"surface\": \"platform\"",
+        "\"surface\": \"auth\"",
         "\"diagnosis\":",
         "\"access_token_present\": true",
         "\"workspace_probe\":"
@@ -553,20 +545,20 @@ live_unexpected_case!(
 );
 
 live_unexpected_case!(
-    one_platform_api_status_live,
-    args = ["--output", "json", "one", "platform", "api", "status"],
+    one_api_status_live,
+    args = ["--output", "json", "one", "api", "status"],
     ok = [
-        "\"product\": \"one platform\"",
+        "\"product\": \"one\"",
         "\"base_url\":",
         "\"has_credentials\":"
     ]
 );
 
 live_unexpected_case!(
-    one_platform_workspace_list_live,
-    args = ["--output", "json", "one", "platform", "workspace", "list"],
+    one_workspace_list_live,
+    args = ["--output", "json", "one", "workspace", "list"],
     ok = [
-        "\"surface\": \"platform\"",
+        "\"surface\": \"workspace\"",
         "\"operation\": \"workspace-list\"",
         "\"pages_fetched\":",
         "\"items\":"
@@ -574,12 +566,11 @@ live_unexpected_case!(
 );
 
 live_page_boundary_case!(
-    one_platform_workspace_list_page_boundary_live,
+    one_workspace_list_page_boundary_live,
     args = [
         "--output",
         "json",
         "one",
-        "platform",
         "workspace",
         "list",
         "--limit",
@@ -589,16 +580,16 @@ live_page_boundary_case!(
         "1"
     ],
     ok = [
-        "\"surface\": \"platform\"",
+        "\"surface\": \"workspace\"",
         "\"operation\": \"workspace-list\""
     ]
 );
 
 live_case!(
-    one_platform_person_current_live,
-    args = ["--output", "json", "one", "platform", "person", "current"],
+    one_person_current_live,
+    args = ["--output", "json", "one", "person", "current"],
     ok = [
-        "\"surface\": \"platform\"",
+        "\"surface\": \"person\"",
         "\"operation\": \"person-current\""
     ],
     fail = [
@@ -608,12 +599,11 @@ live_case!(
 );
 
 live_page_boundary_case!(
-    one_platform_person_list_page_boundary_live,
+    one_person_list_page_boundary_live,
     args = [
         "--output",
         "json",
         "one",
-        "platform",
         "person",
         "list",
         "--limit",
@@ -622,17 +612,14 @@ live_page_boundary_case!(
         "--max-pages",
         "1"
     ],
-    ok = [
-        "\"surface\": \"platform\"",
-        "\"operation\": \"person-list\""
-    ]
+    ok = ["\"surface\": \"person\"", "\"operation\": \"person-list\""]
 );
 
 live_case!(
-    one_platform_token_list_live,
-    args = ["--output", "json", "one", "platform", "token"],
+    one_token_list_live,
+    args = ["--output", "json", "one", "token"],
     ok = [
-        "\"surface\": \"platform\"",
+        "\"surface\": \"token\"",
         "\"operation\": \"api-access-tokens-list\""
     ],
     fail = [
@@ -657,7 +644,7 @@ live_case!(
 );
 
 #[test]
-fn one_platform_token_detail_not_found_live() {
+fn one_token_detail_not_found_live() {
     if !live_smoke_enabled() {
         return;
     }
@@ -665,7 +652,7 @@ fn one_platform_token_detail_not_found_live() {
     let live = LiveSmokeContext::new();
     let Some(token_id) = require_live_list_item_id(
         &live,
-        &["--output", "json", "one", "platform", "token"],
+        &["--output", "json", "one", "token"],
         &["id", "tokenId", "token_id"],
         "token",
     ) else {
@@ -678,7 +665,6 @@ fn one_platform_token_detail_not_found_live() {
             "--output",
             "json",
             "one",
-            "platform",
             "token",
             "detail",
             "--token-id",
@@ -690,7 +676,7 @@ fn one_platform_token_detail_not_found_live() {
         if live_auth_unavailable(&stderr) {
             return;
         }
-        assert_contains(&stderr, "\"surface\": \"platform\"");
+        assert_contains(&stderr, "\"surface\": \"token\"");
         assert_contains(&stderr, "\"operation\": \"api-access-tokens-detail\"");
         assert_live_error_code(&stderr, &["not_found", "validation"]);
         return;
@@ -2232,7 +2218,7 @@ fn one_plans_detail_not_found_live() {
 }
 
 #[test]
-fn one_platform_person_detail_not_found_live() {
+fn one_person_detail_not_found_live() {
     if !live_smoke_enabled() {
         return;
     }
@@ -2240,7 +2226,7 @@ fn one_platform_person_detail_not_found_live() {
     let live = LiveSmokeContext::new();
     let Some(person_id) = require_live_list_item_id(
         &live,
-        &["--output", "json", "one", "platform", "person", "list"],
+        &["--output", "json", "one", "person", "list"],
         &["id", "personId", "person_id"],
         "person",
     ) else {
@@ -2253,7 +2239,6 @@ fn one_platform_person_detail_not_found_live() {
             "--output",
             "json",
             "one",
-            "platform",
             "person",
             "detail",
             "--person-id",
@@ -2265,7 +2250,7 @@ fn one_platform_person_detail_not_found_live() {
         if live_auth_unavailable(&stderr) {
             return;
         }
-        assert_contains(&stderr, "\"surface\": \"platform\"");
+        assert_contains(&stderr, "\"surface\": \"person\"");
         assert_contains(&stderr, "\"operation\": \"person-detail\"");
         assert_live_error_code(&stderr, &["not_found", "validation"]);
         return;

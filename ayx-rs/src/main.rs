@@ -281,7 +281,7 @@ enum Command {
         #[command(subcommand)]
         command: ProfileCommand,
     },
-    #[command(about = "Alteryx One platform branch and API surface")]
+    #[command(about = "Alteryx One command surface")]
     One {
         #[command(subcommand)]
         command: Option<OneCommand>,
@@ -1236,9 +1236,77 @@ pub(crate) enum ToolsWorkspaceCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneCommand {
-    Platform {
+    /// Authenticate with Alteryx One and store credentials.
+    ///
+    /// Default (no flags): email OTP flow — sends a one-time passcode to your
+    /// account email address, then completes the Alteryx One OIDC workspace
+    /// handshake via a pure-HTTP reqwest flow (no browser or Python required).
+    ///
+    /// With --device: device-code flow — prints a short URL and code; open
+    /// the URL on any device, enter the code, and the CLI stores your tokens
+    /// automatically.
+    ///
+    /// With --browser: PKCE authorization-code flow — opens your default
+    /// browser and captures tokens via a local redirect.
+    ///
+    /// With --refresh-token / --access-token: store tokens you already have
+    /// (for scripted / CI use).
+    Login {
+        #[arg(long)]
+        profile: Option<String>,
+        /// OAuth client ID (defaults to the profile's oauth_client_id).
+        #[arg(long)]
+        client_id: Option<String>,
+        /// Use the browser-redirect PKCE flow instead of email OTP.
+        #[arg(long)]
+        browser: bool,
+        /// Use device-code grant instead of email OTP.
+        #[arg(long)]
+        device: bool,
+        /// Refresh token to store and exchange (bypasses interactive flow).
+        #[arg(long)]
+        refresh_token: Option<String>,
+        /// Access token to store directly (no exchange; bypasses interactive flow).
+        #[arg(long)]
+        access_token: Option<String>,
+        /// Token endpoint URL (defaults to the profile's configured endpoint).
+        #[arg(long)]
+        token_endpoint: Option<String>,
+        /// Workspace id to bind these credentials to (key in workspace_credentials).
+        #[arg(long)]
+        workspace_id: Option<String>,
+        /// Workspace ULID (gid) — stored as workspace_gid for SP scope.
+        #[arg(long)]
+        workspace_gid: Option<String>,
+    },
+    Logout {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    Whoami,
+    Auth {
         #[command(subcommand)]
-        command: Option<OnePlatformCommand>,
+        command: OneAuthCommand,
+    },
+    Workspace {
+        #[command(subcommand)]
+        command: OneWorkspaceCommand,
+    },
+    Role {
+        #[command(subcommand)]
+        command: OneRoleCommand,
+    },
+    Token {
+        #[command(subcommand)]
+        command: Option<OneTokenCommand>,
+    },
+    Person {
+        #[command(subcommand)]
+        command: Option<OnePersonCommand>,
+    },
+    Inventory {
+        #[arg(long)]
+        profile: Option<String>,
     },
     /// Alteryx One API introspection (spec + coverage).
     Api {
@@ -1248,14 +1316,6 @@ pub(crate) enum OneCommand {
     Doctor {
         #[command(subcommand)]
         command: Option<OneDoctorCommand>,
-    },
-    Status {
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    Inventory {
-        #[arg(long)]
-        profile: Option<String>,
     },
     Plans {
         #[command(subcommand)]
@@ -1307,46 +1367,7 @@ pub(crate) enum OneCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub(crate) enum OnePlatformCommand {
-    /// Deprecated: moved to `one api`. Kept as a hidden compatibility alias.
-    #[command(hide = true)]
-    Api {
-        #[command(subcommand)]
-        command: OneApiCommand,
-    },
-    Auth {
-        #[command(subcommand)]
-        command: OnePlatformAuthCommand,
-    },
-    Status {
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    Inventory {
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    Workspace {
-        #[command(subcommand)]
-        command: OneWorkspaceCommand,
-    },
-    Role {
-        #[command(subcommand)]
-        command: OneRoleCommand,
-    },
-    User,
-    Token {
-        #[command(subcommand)]
-        command: Option<OnePlatformTokenCommand>,
-    },
-    Person {
-        #[command(subcommand)]
-        command: Option<OnePlatformPersonCommand>,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub(crate) enum OnePlatformTokenCommand {
+pub(crate) enum OneTokenCommand {
     List,
     Create {
         #[arg(long)]
@@ -1369,7 +1390,7 @@ pub(crate) enum OnePlatformTokenCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub(crate) enum OnePlatformPersonCommand {
+pub(crate) enum OnePersonCommand {
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -1570,7 +1591,7 @@ pub(crate) enum OneApiCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub(crate) enum OnePlatformAuthCommand {
+pub(crate) enum OneAuthCommand {
     Status {
         #[arg(long)]
         profile: Option<String>,
@@ -1578,49 +1599,6 @@ pub(crate) enum OnePlatformAuthCommand {
     Diagnose {
         #[arg(long)]
         profile: Option<String>,
-    },
-    /// Authenticate with Alteryx One and store credentials.
-    ///
-    /// Default (no flags): email OTP flow — sends a one-time passcode to your
-    /// account email address, then completes the Alteryx One OIDC workspace
-    /// handshake via a pure-HTTP reqwest flow (no browser or Python required).
-    ///
-    /// With --device: device-code flow — prints a short URL and code; open
-    /// the URL on any device, enter the code, and the CLI stores your tokens
-    /// automatically.
-    ///
-    /// With --browser: PKCE authorization-code flow — opens your default
-    /// browser and captures tokens via a local redirect.
-    ///
-    /// With --refresh-token / --access-token: store tokens you already have
-    /// (for scripted / CI use).
-    Login {
-        #[arg(long)]
-        profile: Option<String>,
-        /// OAuth client ID (defaults to the profile's oauth_client_id).
-        #[arg(long)]
-        client_id: Option<String>,
-        /// Use the browser-redirect PKCE flow instead of email OTP.
-        #[arg(long)]
-        browser: bool,
-        /// Use device-code grant instead of email OTP.
-        #[arg(long)]
-        device: bool,
-        /// Refresh token to store and exchange (bypasses interactive flow).
-        #[arg(long)]
-        refresh_token: Option<String>,
-        /// Access token to store directly (no exchange; bypasses interactive flow).
-        #[arg(long)]
-        access_token: Option<String>,
-        /// Token endpoint URL (defaults to the profile's configured endpoint).
-        #[arg(long)]
-        token_endpoint: Option<String>,
-        /// Workspace id to bind these credentials to (key in workspace_credentials).
-        #[arg(long)]
-        workspace_id: Option<String>,
-        /// Workspace ULID (gid) — stored as workspace_gid for SP scope.
-        #[arg(long)]
-        workspace_gid: Option<String>,
     },
 }
 
@@ -2495,7 +2473,7 @@ pub(crate) enum OneDoctorCommand {
         #[arg(long)]
         profile: Option<String>,
     },
-    Platform {
+    Identity {
         #[arg(long)]
         profile: Option<String>,
     },
@@ -2897,49 +2875,36 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
-        name: "one status",
-        path: "one/status",
-        summary: "Show One API status, or redirect One-only profiles to the platform doctor.",
-        output: "one status envelope",
-        safety: "read-only",
-        mutating: false,
-        prerequisites: &["central runtime profile"],
+        name: "one login",
+        path: "one/login",
+        summary: "Authenticate with Alteryx One and store credentials.",
+        output: "one login envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["central runtime profile", "alteryx_one"],
         notes: &[
-            "Uses the shared API status envelope when the profile includes a Server API section.",
-            "One-only profiles return guidance to use `ayx one doctor platform` instead.",
+            "Default flow uses email OTP; browser, device, refresh-token, and access-token paths are also supported.",
+            "Stores credentials in the active profile using the existing inline-secret policy.",
+        ],
+    },
+    CommandSpec {
+        name: "one logout",
+        path: "one/logout",
+        summary: "Clear stored Alteryx One credentials from the active profile.",
+        output: "one logout envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["central runtime profile", "alteryx_one"],
+        notes: &[
+            "Clears top-level and workspace-scoped One access/refresh credential fields and refs.",
+            "Does not revoke remote tokens or delete external secret-store entries.",
         ],
     },
     CommandSpec {
         name: "one inventory",
         path: "one/inventory",
-        summary: "Show One API inventory, or redirect One-only profiles to the platform doctor.",
-        output: "one inventory envelope",
-        safety: "read-only",
-        mutating: false,
-        prerequisites: &["central runtime profile"],
-        notes: &[
-            "Uses the shared API inventory envelope when the profile includes a Server API section.",
-            "One-only profiles return guidance to use `ayx one doctor platform` instead.",
-        ],
-    },
-    CommandSpec {
-        name: "one platform status",
-        path: "one/platform/status",
-        summary: "Summarize the Alteryx One platform posture.",
-        output: "one platform status envelope",
-        safety: "read-only",
-        mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
-        notes: &[
-            "Use this before platform or plans workflows.",
-            "Managed IAM is wired from the documented One API surface.",
-        ],
-    },
-    CommandSpec {
-        name: "one platform inventory",
-        path: "one/platform/inventory",
         summary: "Summarize the current One API surface registry.",
-        output: "one platform inventory envelope",
+        output: "one inventory envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile"],
@@ -2949,60 +2914,60 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
-        name: "one platform user",
-        path: "one/platform/user",
+        name: "one whoami",
+        path: "one/whoami",
         summary: "Show the current One user profile.",
-        output: "one platform user envelope",
+        output: "one whoami envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/people/current in the One API docs."],
     },
     CommandSpec {
-        name: "one platform person list",
-        path: "one/platform/person/list",
+        name: "one person list",
+        path: "one/person/list",
         summary: "List One people.",
-        output: "one platform person list envelope",
+        output: "one person list envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/people in the One API docs."],
     },
     CommandSpec {
-        name: "one platform person current",
-        path: "one/platform/person/current",
+        name: "one person current",
+        path: "one/person/current",
         summary: "Inspect the current One person record.",
-        output: "one platform person current envelope",
+        output: "one person current envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/people/current in the One API docs."],
     },
     CommandSpec {
-        name: "one platform person count",
-        path: "one/platform/person/count",
+        name: "one person count",
+        path: "one/person/count",
         summary: "Count One people.",
-        output: "one platform person count envelope",
+        output: "one person count envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/people/count in the One API docs."],
     },
     CommandSpec {
-        name: "one platform person detail",
-        path: "one/platform/person/detail",
+        name: "one person detail",
+        path: "one/person/detail",
         summary: "Inspect a One person record by id.",
-        output: "one platform person detail envelope",
+        output: "one person detail envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/people/{id} in the One API docs."],
     },
     CommandSpec {
-        name: "one platform person create",
-        path: "one/platform/person/create",
+        name: "one person create",
+        path: "one/person/create",
         summary: "Create a One person from JSON payload.",
-        output: "one platform person create envelope",
+        output: "one person create envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &[
@@ -3013,10 +2978,10 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to POST /v4/people in the One API docs."],
     },
     CommandSpec {
-        name: "one platform person update",
-        path: "one/platform/person/update",
+        name: "one person update",
+        path: "one/person/update",
         summary: "Replace a One person record from JSON payload.",
-        output: "one platform person update envelope",
+        output: "one person update envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &[
@@ -3027,10 +2992,10 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to PUT /v4/people/{id} in the One API docs."],
     },
     CommandSpec {
-        name: "one platform person patch",
-        path: "one/platform/person/patch",
+        name: "one person patch",
+        path: "one/person/patch",
         summary: "Patch a One person record from JSON payload.",
-        output: "one platform person patch envelope",
+        output: "one person patch envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &[
@@ -3041,20 +3006,20 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to PATCH /v4/people/{id} in the One API docs."],
     },
     CommandSpec {
-        name: "one platform person delete",
-        path: "one/platform/person/delete",
+        name: "one person delete",
+        path: "one/person/delete",
         summary: "Delete a One person record.",
-        output: "one platform person delete envelope",
+        output: "one person delete envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to DELETE /v4/people/{id} in the One API docs."],
     },
     CommandSpec {
-        name: "one platform person update-password",
-        path: "one/platform/person/update-password",
+        name: "one person update-password",
+        path: "one/person/update-password",
         summary: "Update the current One person's password from JSON payload.",
-        output: "one platform person update-password envelope",
+        output: "one person update-password envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &[
@@ -3065,10 +3030,10 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to PATCH /v4/people/current/updatePassword in the One API docs."],
     },
     CommandSpec {
-        name: "one platform person password-reset-request",
-        path: "one/platform/person/password-reset-request",
+        name: "one person password-reset-request",
+        path: "one/person/password-reset-request",
         summary: "Request a One password reset from JSON payload.",
-        output: "one platform person password reset request envelope",
+        output: "one person password reset request envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &[
@@ -3079,50 +3044,50 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to POST /v4/passwordresetrequest in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace current",
-        path: "one/platform/workspace/current",
+        name: "one workspace current",
+        path: "one/workspace/current",
         summary: "Inspect the current One workspace posture.",
-        output: "one platform workspace current envelope",
+        output: "one workspace current envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/workspaces/current in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace current-configuration",
-        path: "one/platform/workspace/current-configuration",
+        name: "one workspace current-configuration",
+        path: "one/workspace/current-configuration",
         summary: "Inspect the current One workspace configuration.",
-        output: "one platform workspace current configuration envelope",
+        output: "one workspace current configuration envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/workspaces/current/configuration in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace configuration-v4",
-        path: "one/platform/workspace/configuration-v4",
+        name: "one workspace configuration-v4",
+        path: "one/workspace/configuration-v4",
         summary: "Inspect a One workspace configuration by id.",
-        output: "one platform workspace configuration-v4 envelope",
+        output: "one workspace configuration-v4 envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/workspaces/{id}/configuration in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace configuration",
-        path: "one/platform/workspace/configuration",
+        name: "one workspace configuration",
+        path: "one/workspace/configuration",
         summary: "Inspect a One workspace configuration by id.",
-        output: "one platform workspace configuration envelope",
+        output: "one workspace configuration envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/workspaces/{id}/configuration in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace save-current-configuration",
-        path: "one/platform/workspace/save-current-configuration",
+        name: "one workspace save-current-configuration",
+        path: "one/workspace/save-current-configuration",
         summary: "Update the current One workspace configuration from JSON payload.",
-        output: "one platform workspace save-current-configuration envelope",
+        output: "one workspace save-current-configuration envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &[
@@ -3133,10 +3098,10 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to PATCH /v4/workspaces/current/configuration in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace save-configuration-v4",
-        path: "one/platform/workspace/save-configuration-v4",
+        name: "one workspace save-configuration-v4",
+        path: "one/workspace/save-configuration-v4",
         summary: "Update a One workspace configuration by id from JSON payload.",
-        output: "one platform workspace save-configuration-v4 envelope",
+        output: "one workspace save-configuration-v4 envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &[
@@ -3147,60 +3112,60 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to PATCH /v4/workspaces/{id}/configuration in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace list",
-        path: "one/platform/workspace/list",
+        name: "one workspace list",
+        path: "one/workspace/list",
         summary: "List accessible One workspaces.",
-        output: "one platform workspace list envelope",
+        output: "one workspace list envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/workspaces in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace configuration-schema",
-        path: "one/platform/workspace/configuration-schema",
+        name: "one workspace configuration-schema",
+        path: "one/workspace/configuration-schema",
         summary: "Inspect the workspace configuration schema.",
-        output: "one platform workspace configuration schema envelope",
+        output: "one workspace configuration schema envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/workspaces/{id}/configuration-schema in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace current-configuration-schema",
-        path: "one/platform/workspace/current-configuration-schema",
+        name: "one workspace current-configuration-schema",
+        path: "one/workspace/current-configuration-schema",
         summary: "Inspect the current workspace configuration schema.",
-        output: "one platform workspace current configuration schema envelope",
+        output: "one workspace current configuration schema envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/workspaces/current/configuration-schema in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace delete-current-configuration",
-        path: "one/platform/workspace/delete-current-configuration",
+        name: "one workspace delete-current-configuration",
+        path: "one/workspace/delete-current-configuration",
         summary: "Reset the current workspace configuration.",
-        output: "one platform workspace delete-current-configuration envelope",
+        output: "one workspace delete-current-configuration envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to POST /v4/workspaces/current/delete-configuration in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace delete-configuration",
-        path: "one/platform/workspace/delete-configuration",
+        name: "one workspace delete-configuration",
+        path: "one/workspace/delete-configuration",
         summary: "Reset a workspace configuration by workspace id.",
-        output: "one platform workspace delete-configuration envelope",
+        output: "one workspace delete-configuration envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to POST /v4/workspaces/{id}/delete-configuration in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace people",
-        path: "one/platform/workspace/people",
+        name: "one workspace people",
+        path: "one/workspace/people",
         summary: "List people in the current One workspace.",
-        output: "one platform workspace people envelope",
+        output: "one workspace people envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
@@ -3209,10 +3174,10 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
-        name: "one platform workspace admins",
-        path: "one/platform/workspace/admins",
+        name: "one workspace admins",
+        path: "one/workspace/admins",
         summary: "List workspace admins.",
-        output: "one platform workspace admins envelope",
+        output: "one workspace admins envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
@@ -3221,10 +3186,10 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
-        name: "one platform workspace switch",
-        path: "one/platform/workspace/switch",
+        name: "one workspace switch",
+        path: "one/workspace/switch",
         summary: "Set the active One workspace in the local profile.",
-        output: "one platform workspace switch envelope",
+        output: "one workspace switch envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "stored workspace credentials"],
@@ -3234,60 +3199,60 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
-        name: "one platform workspace invite-users",
-        path: "one/platform/workspace/invite-users",
+        name: "one workspace invite-users",
+        path: "one/workspace/invite-users",
         summary: "Invite users to a One workspace.",
-        output: "one platform workspace invite-users envelope",
+        output: "one workspace invite-users envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to POST /v4/workspaces/{id}/people/batch in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace remove-user",
-        path: "one/platform/workspace/remove-user",
+        name: "one workspace remove-user",
+        path: "one/workspace/remove-user",
         summary: "Remove a user from a One workspace.",
-        output: "one platform workspace remove-user envelope",
+        output: "one workspace remove-user envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to DELETE /v4/workspaces/{workspaceId}/people/{id} in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace suspend-users",
-        path: "one/platform/workspace/suspend-users",
+        name: "one workspace suspend-users",
+        path: "one/workspace/suspend-users",
         summary: "Suspend users in a One workspace.",
-        output: "one platform workspace suspend-users envelope",
+        output: "one workspace suspend-users envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to POST /iam/v1/workspaces/{id}/people/suspend in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace unsuspend-users",
-        path: "one/platform/workspace/unsuspend-users",
+        name: "one workspace unsuspend-users",
+        path: "one/workspace/unsuspend-users",
         summary: "Unsuspend users in a One workspace.",
-        output: "one platform workspace unsuspend-users envelope",
+        output: "one workspace unsuspend-users envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to POST /iam/v1/workspaces/{id}/people/unsuspend in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace transfer",
-        path: "one/platform/workspace/transfer",
+        name: "one workspace transfer",
+        path: "one/workspace/transfer",
         summary: "Start a transfer for a One workspace.",
-        output: "one platform workspace transfer envelope",
+        output: "one workspace transfer envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to POST /v4/workspaces/{id}/transfer in the One API docs."],
     },
     CommandSpec {
-        name: "one platform workspace transfer-assets",
-        path: "one/platform/workspace/transfer-assets",
+        name: "one workspace transfer-assets",
+        path: "one/workspace/transfer-assets",
         summary: "Transfer assets from the current One workspace from JSON payload.",
-        output: "one platform workspace transfer-assets envelope",
+        output: "one workspace transfer-assets envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &[
@@ -3298,20 +3263,20 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to PATCH /v4/workspaces/current/transfer in the One API docs."],
     },
     CommandSpec {
-        name: "one platform role list-assignments",
-        path: "one/platform/role/list-assignments",
+        name: "one role list-assignments",
+        path: "one/role/list-assignments",
         summary: "Inspect role assignments for One managed IAM.",
-        output: "one platform role assignments envelope",
+        output: "one role assignments envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/authorization/roles/{id}/people in the One API docs."],
     },
     CommandSpec {
-        name: "one platform role assign",
-        path: "one/platform/role/assign",
+        name: "one role assign",
+        path: "one/role/assign",
         summary: "Assign a subject to a One managed IAM role.",
-        output: "one platform role assign envelope",
+        output: "one role assign envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
@@ -3320,10 +3285,10 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
-        name: "one platform role unassign",
-        path: "one/platform/role/unassign",
+        name: "one role unassign",
+        path: "one/role/unassign",
         summary: "Unassign a subject from a One managed IAM role.",
-        output: "one platform role unassign envelope",
+        output: "one role unassign envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
@@ -3332,10 +3297,10 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
-        name: "one platform auth status",
-        path: "one/platform/auth/status",
+        name: "one auth status",
+        path: "one/auth/status",
         summary: "Summarize One API token posture for managed IAM.",
-        output: "one platform auth status envelope",
+        output: "one auth status envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
@@ -3344,20 +3309,20 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
-        name: "one platform token list",
-        path: "one/platform/token/list",
+        name: "one token list",
+        path: "one/token/list",
         summary: "List One API access tokens.",
-        output: "one platform token list envelope",
+        output: "one token list envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/apiAccessTokens in the One API docs."],
     },
     CommandSpec {
-        name: "one platform token create",
-        path: "one/platform/token/create",
+        name: "one token create",
+        path: "one/token/create",
         summary: "Create a One API access token from JSON payload.",
-        output: "one platform token create envelope",
+        output: "one token create envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &[
@@ -3368,30 +3333,30 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Maps to POST /v4/apiAccessTokens in the One API docs."],
     },
     CommandSpec {
-        name: "one platform token detail",
-        path: "one/platform/token/detail",
+        name: "one token detail",
+        path: "one/token/detail",
         summary: "Inspect a One API access token by id.",
-        output: "one platform token detail envelope",
+        output: "one token detail envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to GET /v4/apiAccessTokens/{tokenId} in the One API docs."],
     },
     CommandSpec {
-        name: "one platform token delete",
-        path: "one/platform/token/delete",
+        name: "one token delete",
+        path: "one/token/delete",
         summary: "Delete a One API access token by id.",
-        output: "one platform token delete envelope",
+        output: "one token delete envelope",
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Maps to DELETE /v4/apiAccessTokens/{tokenId} in the One API docs."],
     },
     CommandSpec {
-        name: "one platform auth diagnose",
-        path: "one/platform/auth/diagnose",
+        name: "one auth diagnose",
+        path: "one/auth/diagnose",
         summary: "Validate One API token reachability and workspace scope.",
-        output: "one platform auth diagnostic envelope",
+        output: "one auth diagnostic envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
@@ -3420,10 +3385,10 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Surfaces workspace, plan, schedule, and billing discovery data."],
     },
     CommandSpec {
-        name: "one doctor platform",
-        path: "one/doctor/platform",
-        summary: "Run the One platform doctor workflow.",
-        output: "one platform doctor envelope",
+        name: "one doctor identity",
+        path: "one/doctor/identity",
+        summary: "Run the One identity doctor workflow.",
+        output: "one identity doctor envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
@@ -5432,7 +5397,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
         Command::Whoami { profile } => {
             // Identity in one shot. No network — purely what the local
             // profile + state knows. The operator can append `--output json`
-            // for a structured payload or pipe through `ayx one platform
+            // for a structured payload or pipe through `ayx one
             // workspace current` for the live workspace.
             let resolution = resolve_runtime_profile(profile.as_deref()).ok();
             let config = load_profile(profile.as_deref()).ok();
@@ -5666,11 +5631,11 @@ fn execute(cli: Cli) -> Result<Envelope> {
     Ok(envelope)
 }
 
-pub(crate) fn one_doctor_platform_envelope(config: &Config) -> Result<Envelope> {
+pub(crate) fn one_doctor_identity_envelope(config: &Config) -> Result<Envelope> {
     let auth = one_platform_auth_status_envelope(config)?;
     let workspace = one_api_live_request(
         config,
-        "platform",
+        "identity",
         "doctor-workspace-current",
         "GET",
         "/v4/workspaces/current",
@@ -5678,7 +5643,7 @@ pub(crate) fn one_doctor_platform_envelope(config: &Config) -> Result<Envelope> 
         &[],
     )?;
     Ok(Envelope::ok_with_data(
-        "one platform doctor workflow generated",
+        "one identity doctor workflow generated",
         json!({
             "profile": config.profile_name,
             "checks": [
@@ -5686,7 +5651,7 @@ pub(crate) fn one_doctor_platform_envelope(config: &Config) -> Result<Envelope> 
                 workspace.data,
             ],
             "recommendations": [
-                "Use one platform workspace people/admins to drill into workspace scope",
+                "Use one workspace people/admins to drill into workspace scope",
                 "Route deeper symptom handling to the workflow guidance layer",
             ]
         }),
@@ -5696,7 +5661,7 @@ pub(crate) fn one_doctor_platform_envelope(config: &Config) -> Result<Envelope> 
 pub(crate) fn one_doctor_discover_envelope(config: &Config) -> Result<Envelope> {
     let workspace = one_api_live_request(
         config,
-        "platform",
+        "workspace",
         "discover-workspace-current",
         "GET",
         "/v4/workspaces/current",
@@ -5742,10 +5707,10 @@ pub(crate) fn one_doctor_discover_envelope(config: &Config) -> Result<Envelope> 
                 billing.data,
             ],
             "recommendations": [
-                "Use one platform workspace current to identify the workspace context",
+                "Use one workspace current to identify the workspace context",
                 "Use one plans list/detail/run to resolve plan ids",
                 "Use one scheduling list/detail/enable/disable to resolve schedule ids",
-                "Use the workflow guidance layer to decide whether a symptom belongs to platform, plans, scheduling, or billing",
+                "Use the workflow guidance layer to decide whether a symptom belongs to identity, plans, scheduling, or billing",
             ]
         }),
     ))
@@ -6289,10 +6254,10 @@ fn doctor_one_envelope(profile: Option<&str>, environment: Option<&str>) -> Resu
     let config = Config::load_runtime_profile_with_environment(profile, environment)?;
     if config.alteryx_one.is_none() {
         return Ok(Envelope::ok_with_data(
-            "one platform auth diagnose",
+            "one auth diagnose",
             json!({
                 "product": "one",
-                "surface": "platform",
+                "surface": "auth",
                 "profile": config.profile_name,
                 "status": "skip",
                 "summary": "One not configured",
@@ -6593,7 +6558,7 @@ pub(crate) fn one_platform_auth_status_envelope(config: &Config) -> Result<Envel
     let workspace_probe = if access_token.is_some() {
         Some(one_api_live_request(
             config,
-            "platform",
+            "auth",
             "auth-status",
             "GET",
             "/v4/apiAccessTokens",
@@ -6605,10 +6570,10 @@ pub(crate) fn one_platform_auth_status_envelope(config: &Config) -> Result<Envel
     };
 
     Ok(Envelope::ok_with_data(
-        "one platform auth status",
+        "one auth status",
         json!({
             "product": "one",
-            "surface": "platform",
+            "surface": "auth",
             "profile": config.profile_name,
             "workspace_id": workspace_id,
             "oauth_client_id_present": oauth_client_id.is_some(),
@@ -6650,10 +6615,10 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
     let has_refresh_token = refresh_token.is_some();
     if !has_token {
         return Ok(Envelope::ok_with_data(
-            "one platform auth diagnose",
+            "one auth diagnose",
             json!({
                 "product": "one",
-                "surface": "platform",
+                "surface": "auth",
                 "profile": config.profile_name,
                 "workspace_id": workspace_id,
                 "oauth_client_id_present": oauth_client_id.is_some(),
@@ -6674,7 +6639,7 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
 
     let workspace_probe = match one_api_live_request(
         config,
-        "platform",
+        "auth",
         "auth-diagnose",
         "GET",
         "/v4/apiAccessTokens",
@@ -6684,10 +6649,10 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
         Ok(probe) => Some(probe),
         Err(err) => {
             return Ok(Envelope::ok_with_data(
-                "one platform auth diagnose",
+                "one auth diagnose",
                 json!({
                     "product": "one",
-                    "surface": "platform",
+                    "surface": "auth",
                     "profile": config.profile_name,
                     "workspace_id": workspace_id,
                     "oauth_client_id_present": oauth_client_id.is_some(),
@@ -6701,7 +6666,7 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                     "recommendations": [
                         "If the access token is expired, mint a fresh one or repair refresh-token auth",
                         "Confirm the active profile is pointing at the intended workspace and auth issuer",
-                        "Use one platform auth status for posture and one platform workspace current for live reachability",
+                        "Use one auth status for posture and one workspace current for live reachability",
                     ],
                 }),
             ));
@@ -6712,10 +6677,10 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
         // Unreachable: workspace_probe is Some at this point (the Err arm
         // returned early above), but bind defensively rather than .unwrap().
         return Ok(Envelope::ok_with_data(
-            "one platform auth diagnose",
+            "one auth diagnose",
             json!({
                 "product": "one",
-                "surface": "platform",
+                "surface": "auth",
                 "profile": config.profile_name,
                 "workspace_id": workspace_id,
                 "oauth_client_id_present": oauth_client_id.is_some(),
@@ -6727,17 +6692,17 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                 "diagnosis": "token present but workspace probe was not executed",
                 "workspace_probe": null,
                 "recommendations": [
-                    "Use one platform token or auth status for evidence",
+                    "Use one token or auth status for evidence",
                     "Route any failing symptoms into the workflow guidance layer",
                 ],
             }),
         ));
     };
     Ok(Envelope::ok_with_data(
-        "one platform auth diagnose",
+        "one auth diagnose",
         json!({
             "product": "one",
-            "surface": "platform",
+            "surface": "auth",
             "profile": config.profile_name,
             "workspace_id": workspace_id,
             "oauth_client_id_present": oauth_client_id.is_some(),
@@ -6752,7 +6717,7 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                 access_token.unwrap_or(""),
             ),
             "recommendations": [
-                "Use one platform token or auth status for evidence",
+                "Use one token or auth status for evidence",
                 "Route any failing symptoms into the workflow guidance layer",
             ],
         }),
@@ -7001,7 +6966,7 @@ fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static s
             "Run 'ayx onboard' to set up a profile, or 'ayx doctor config' to inspect the current one.",
         ),
         AuthFailed => Some(
-            "Run 'ayx doctor auth' to inspect auth posture. Re-run 'ayx one platform auth login' if tokens are stale.",
+            "Run 'ayx doctor auth' to inspect auth posture. Re-run 'ayx one login' if tokens are stale.",
         ),
         PermissionDenied => Some(
             "Check that the active profile's token has the required role/scope for this resource.",

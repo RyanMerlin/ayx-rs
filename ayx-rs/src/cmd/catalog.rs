@@ -148,28 +148,29 @@ mod tests {
         assert!(names.contains(&"license api status"));
         assert!(names.contains(&"license status"));
         assert!(names.contains(&"discover"));
-        assert!(names.contains(&"one platform status"));
-        assert!(names.contains(&"one platform inventory"));
-        assert!(names.contains(&"one platform user"));
-        assert!(names.contains(&"one platform person list"));
-        assert!(names.contains(&"one platform person current"));
-        assert!(names.contains(&"one platform person count"));
-        assert!(names.contains(&"one platform person detail"));
-        assert!(names.contains(&"one platform person create"));
-        assert!(names.contains(&"one platform person update"));
-        assert!(names.contains(&"one platform person patch"));
-        assert!(names.contains(&"one platform person delete"));
-        assert!(names.contains(&"one platform person update-password"));
-        assert!(names.contains(&"one platform person password-reset-request"));
+        assert!(names.contains(&"one login"));
+        assert!(names.contains(&"one logout"));
+        assert!(names.contains(&"one inventory"));
+        assert!(names.contains(&"one whoami"));
+        assert!(names.contains(&"one person list"));
+        assert!(names.contains(&"one person current"));
+        assert!(names.contains(&"one person count"));
+        assert!(names.contains(&"one person detail"));
+        assert!(names.contains(&"one person create"));
+        assert!(names.contains(&"one person update"));
+        assert!(names.contains(&"one person patch"));
+        assert!(names.contains(&"one person delete"));
+        assert!(names.contains(&"one person update-password"));
+        assert!(names.contains(&"one person password-reset-request"));
         assert!(names.contains(&"one api status"));
-        assert!(names.contains(&"one platform auth status"));
-        assert!(names.contains(&"one platform workspace current"));
-        assert!(names.contains(&"one platform workspace list"));
-        assert!(names.contains(&"one platform workspace current-configuration"));
-        assert!(names.contains(&"one platform workspace configuration-v4"));
-        assert!(names.contains(&"one platform workspace save-current-configuration"));
-        assert!(names.contains(&"one platform workspace save-configuration-v4"));
-        assert!(names.contains(&"one platform role list-assignments"));
+        assert!(names.contains(&"one auth status"));
+        assert!(names.contains(&"one workspace current"));
+        assert!(names.contains(&"one workspace list"));
+        assert!(names.contains(&"one workspace current-configuration"));
+        assert!(names.contains(&"one workspace configuration-v4"));
+        assert!(names.contains(&"one workspace save-current-configuration"));
+        assert!(names.contains(&"one workspace save-configuration-v4"));
+        assert!(names.contains(&"one role list-assignments"));
         assert!(names.contains(&"one plans status"));
         assert!(names.contains(&"one plans list"));
         assert!(names.contains(&"one plans create"));
@@ -240,19 +241,21 @@ mod tests {
         assert!(names.contains(&"one api coverage"));
         assert!(names.contains(&"one scheduling list"));
         assert!(names.contains(&"one billing current-account"));
-        assert!(names.contains(&"one platform token list"));
-        assert!(names.contains(&"one platform token create"));
-        assert!(names.contains(&"one platform token detail"));
-        assert!(names.contains(&"one platform token delete"));
-        assert!(!names.contains(&"one platform group"));
-        assert!(!names.contains(&"one platform sso"));
-        assert!(!names.contains(&"one platform audit"));
-        assert!(!names.contains(&"one platform session"));
-        assert!(!names.contains(&"one platform oauth-client"));
-        assert!(!names.contains(&"one platform env-param"));
-        assert!(!names.contains(&"one platform pdh"));
-        assert!(!names.contains(&"one platform app"));
-        assert!(!names.contains(&"one platform health"));
+        assert!(names.contains(&"one token list"));
+        assert!(names.contains(&"one token create"));
+        assert!(names.contains(&"one token detail"));
+        assert!(names.contains(&"one token delete"));
+        assert!(!names.contains(&"one group"));
+        assert!(!names.contains(&"one sso"));
+        assert!(!names.contains(&"one audit"));
+        assert!(!names.contains(&"one session"));
+        assert!(!names.contains(&"one oauth-client"));
+        assert!(!names.contains(&"one env-param"));
+        assert!(!names.contains(&"one pdh"));
+        assert!(!names.contains(&"one app"));
+        assert!(!names.contains(&"one health"));
+        assert!(!names.contains(&"one status"));
+        assert!(!names.contains(&"one user"));
         let capabilities = env.data["capabilities"]
             .as_array()
             .expect("capabilities array");
@@ -277,9 +280,8 @@ mod tests {
             .expect("catalog describe should work for license");
         assert_eq!(env.data["path"], "license/api/diagnose");
 
-        let env =
-            catalog_describe_envelope("one platform auth diagnose").expect("describe one auth");
-        assert_eq!(env.data["path"], "one/platform/auth/diagnose");
+        let env = catalog_describe_envelope("one auth diagnose").expect("describe one auth");
+        assert_eq!(env.data["path"], "one/auth/diagnose");
 
         let env = catalog_describe_envelope("designer.workflow.run")
             .expect("catalog describe should work for capability");

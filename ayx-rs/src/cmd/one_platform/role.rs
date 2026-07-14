@@ -18,7 +18,7 @@ pub(crate) fn execute(
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
-                "platform",
+                "role",
                 "role-list-assignments",
                 "GET",
                 "/v4/authorization/roles/{id}/people",
@@ -33,7 +33,7 @@ pub(crate) fn execute(
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
                 &config,
-                "platform",
+                "role",
                 "role-assign",
                 "POST",
                 "/v4/authorization/roles/{id}/people/{subjectId}",
@@ -58,7 +58,7 @@ pub(crate) fn execute(
             }
             one_api_live_request(
                 &config,
-                "platform",
+                "role",
                 "role-unassign",
                 "DELETE",
                 "/v4/authorization/roles/{id}/people/{subjectId}",

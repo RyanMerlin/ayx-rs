@@ -23,8 +23,8 @@ These are all in ayx-rs Rust code only. Fast, low-risk.
   All 32 `body: PathBuf` fields now show `--body <FILE>` with "path to JSON body file" in help.  
   Affected commands: `flows create/update/run/copy`, `connections create/update`, `output-objects create/update`, `write-settings create/update`, `webhook-flow-tasks create`, `plans create/update`.
 
-- [x] **`ayx one status` and `ayx one inventory` wrong surface routing** — DONE v0.9.12  
-  Both commands now detect One-only profiles and return a clean message pointing to `ayx one doctor platform` instead of erroring with "config missing api/server_api section".
+- [x] **Server-api status/inventory wrong surface routing** — superseded by the command-hierarchy rework
+  The obsolete Server API status view was removed from the One command surface. `ayx one inventory` now reports the One surface registry.
 
 - [x] **`platform workspace invite-users` should default `--workspace-id` to current workspace** — DONE v0.9.12  
   `--workspace-id` is now `Option<String>` on `invite-users`, `remove-user`, `suspend-users`, `unsuspend-users`, `transfer`, `transfer-assets`. Defaults to `workspace_gid` from the active profile when not supplied.

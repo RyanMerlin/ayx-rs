@@ -21,62 +21,62 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/v4/workspaces/current",
-        command: "one platform workspace current",
+        command: "one workspace current",
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/workspaces/{id}/configuration",
-        command: "one platform workspace configuration",
+        command: "one workspace configuration",
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/people",
-        command: "one platform workspace people",
+        command: "one workspace people",
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/people?role=admin",
-        command: "one platform workspace admins",
+        command: "one workspace admins",
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/workspaces/{id}/people/batch",
-        command: "one platform workspace invite-users",
+        command: "one workspace invite-users",
     },
     EndpointSpec {
         method: "DELETE",
         path: "/v4/workspaces/{workspaceId}/people/{id}",
-        command: "one platform workspace remove-user",
+        command: "one workspace remove-user",
     },
     EndpointSpec {
         method: "POST",
         path: "/iam/v1/workspaces/{id}/people/suspend",
-        command: "one platform workspace suspend-users",
+        command: "one workspace suspend-users",
     },
     EndpointSpec {
         method: "POST",
         path: "/iam/v1/workspaces/{id}/people/unsuspend",
-        command: "one platform workspace unsuspend-users",
+        command: "one workspace unsuspend-users",
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/workspaces/{id}/transfer",
-        command: "one platform workspace transfer",
+        command: "one workspace transfer",
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/authorization/roles/{id}/people",
-        command: "one platform role list-assignments",
+        command: "one role list-assignments",
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/authorization/roles/{id}/people/{subjectId}",
-        command: "one platform role assign",
+        command: "one role assign",
     },
     EndpointSpec {
         method: "DELETE",
         path: "/v4/authorization/roles/{id}/people/{subjectId}",
-        command: "one platform role unassign",
+        command: "one role unassign",
     },
 ];
 
@@ -752,22 +752,22 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             EndpointSpec {
                 method: "GET",
                 path: "/v4/apiAccessTokens",
-                command: "one platform token",
+                command: "one token",
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/apiAccessTokens",
-                command: "one platform token create",
+                command: "one token create",
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/apiAccessTokens/{tokenId}",
-                command: "one platform token detail",
+                command: "one token detail",
             },
             EndpointSpec {
                 method: "DELETE",
                 path: "/v4/apiAccessTokens/{tokenId}",
-                command: "one platform token delete",
+                command: "one token delete",
             },
         ],
         notes: &[
@@ -781,57 +781,57 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             EndpointSpec {
                 method: "GET",
                 path: "/v4/people/current",
-                command: "one platform user",
+                command: "one whoami",
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/people",
-                command: "one platform person list",
+                command: "one person list",
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/people/current",
-                command: "one platform person current",
+                command: "one person current",
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/people/count",
-                command: "one platform person count",
+                command: "one person count",
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/people/{id}",
-                command: "one platform person detail",
+                command: "one person detail",
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/people",
-                command: "one platform person create",
+                command: "one person create",
             },
             EndpointSpec {
                 method: "PUT",
                 path: "/v4/people/{id}",
-                command: "one platform person update",
+                command: "one person update",
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/people/{id}",
-                command: "one platform person patch",
+                command: "one person patch",
             },
             EndpointSpec {
                 method: "DELETE",
                 path: "/v4/people/{id}",
-                command: "one platform person delete",
+                command: "one person delete",
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/people/current/updatePassword",
-                command: "one platform person update-password",
+                command: "one person update-password",
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/passwordresetrequest",
-                command: "one platform person password-reset-request",
+                command: "one person password-reset-request",
             },
         ],
         notes: &[
@@ -845,52 +845,52 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             EndpointSpec {
                 method: "GET",
                 path: "/v4/workspaces",
-                command: "one platform workspace list",
+                command: "one workspace list",
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/workspaces/{id}/configuration",
-                command: "one platform workspace configuration-v4",
+                command: "one workspace configuration-v4",
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/workspaces/current/transfer",
-                command: "one platform workspace transfer-assets",
+                command: "one workspace transfer-assets",
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/workspaces/current/configuration",
-                command: "one platform workspace current-configuration",
+                command: "one workspace current-configuration",
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/workspaces/current/configuration",
-                command: "one platform workspace save-current-configuration",
+                command: "one workspace save-current-configuration",
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/workspaces/{id}/configuration",
-                command: "one platform workspace save-configuration-v4",
+                command: "one workspace save-configuration-v4",
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/workspaces/{id}/configuration-schema",
-                command: "one platform workspace configuration-schema",
+                command: "one workspace configuration-schema",
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/workspaces/current/configuration-schema",
-                command: "one platform workspace current-configuration-schema",
+                command: "one workspace current-configuration-schema",
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/workspaces/current/delete-configuration",
-                command: "one platform workspace delete-current-configuration",
+                command: "one workspace delete-current-configuration",
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/workspaces/{id}/delete-configuration",
-                command: "one platform workspace delete-configuration",
+                command: "one workspace delete-configuration",
             },
         ],
         notes: &[
@@ -914,7 +914,7 @@ const SURFACES: &[SurfaceSpec] = &[
         endpoints: &[EndpointSpec {
             method: "GET",
             path: "/v4/open-api-spec",
-            command: "one platform api open-api-spec",
+            command: "one api open-api-spec",
         }],
         notes: &["The OpenAPI spec is now exposed through the CLI."],
     },
