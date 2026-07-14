@@ -76,7 +76,11 @@ pub fn record_api_event(
             crate::sensitive::SensitiveIoError::CreateDir { path, source } => {
                 ObservabilityError::CreateDir { path, source }
             }
-            crate::sensitive::SensitiveIoError::Write { path, source }
+            // `ensure_sensitive_dir` never itself produces `Lock`/`Write`/`Append` --
+            // these arms exist only to keep the match exhaustive over the shared
+            // `SensitiveIoError` enum.
+            crate::sensitive::SensitiveIoError::Lock { path, source }
+            | crate::sensitive::SensitiveIoError::Write { path, source }
             | crate::sensitive::SensitiveIoError::Append { path, source } => {
                 ObservabilityError::Open { path, source }
             }
@@ -111,7 +115,11 @@ pub fn record_api_event(
         crate::sensitive::SensitiveIoError::CreateDir { path, source } => {
             ObservabilityError::CreateDir { path, source }
         }
-        crate::sensitive::SensitiveIoError::Write { path, source } => {
+        // `append_sensitive_file` never itself produces `Lock` -- this arm
+        // exists only to keep the match exhaustive over the shared
+        // `SensitiveIoError` enum.
+        crate::sensitive::SensitiveIoError::Lock { path, source }
+        | crate::sensitive::SensitiveIoError::Write { path, source } => {
             ObservabilityError::Open { path, source }
         }
         crate::sensitive::SensitiveIoError::Append { path, source } => {
