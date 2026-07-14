@@ -26,6 +26,7 @@ impl SafetyMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum CapabilityProvider {
     DesignerLocal,
     CloudRemote,
@@ -326,71 +327,13 @@ fn designer_capabilities() -> Vec<CapabilityRegistration> {
     ]
 }
 
-fn cloud_capabilities() -> Vec<CapabilityRegistration> {
-    vec![
-        CapabilityRegistration {
-            descriptor: CapabilityDescriptor {
-                id: "cloud.docs.search",
-                summary: "Search cloud-side documentation capabilities when remote support is available.",
-                tags: &["cloud", "docs", "search", "remote"],
-                safety: SafetyMode::ReadOnly,
-                provider: CapabilityProvider::CloudRemote,
-                input_schema: json!({
-                    "type": "object",
-                    "required": ["query"],
-                    "properties": {
-                        "query": string_schema("Search query."),
-                        "limit": { "type": "integer", "minimum": 1 }
-                    }
-                }),
-                output_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "query": string_schema("Search query."),
-                        "results": { "type": "array" }
-                    }
-                }),
-                notes: &["Execution is gated behind remote capability discovery."],
-            },
-            executor: Box::new(FnCapabilityExecutor(execute_cloud_capability_stub)),
-        },
-        CapabilityRegistration {
-            descriptor: CapabilityDescriptor {
-                id: "cloud.workflow.summarize",
-                summary: "Summarize cloud workflow posture when the remote contract is available.",
-                tags: &["cloud", "workflow", "hybrid"],
-                safety: SafetyMode::ReadOnly,
-                provider: CapabilityProvider::Hybrid,
-                input_schema: json!({
-                    "type": "object",
-                    "required": ["workflow_id"],
-                    "properties": {
-                        "workflow_id": string_schema("Cloud workflow id.")
-                    }
-                }),
-                output_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "workflow_id": string_schema("Cloud workflow id."),
-                        "summary": { "type": "object" }
-                    }
-                }),
-                notes: &["Execution is gated behind remote capability discovery."],
-            },
-            executor: Box::new(FnCapabilityExecutor(execute_cloud_capability_stub)),
-        },
-    ]
-}
-
 /// Does a capability with this id exist in the registry?
 pub fn has_capability(id: &str) -> bool {
     registry().into_iter().any(|reg| reg.descriptor.id == id)
 }
 
 fn registry() -> Vec<CapabilityRegistration> {
-    let mut all = designer_capabilities();
-    all.extend(cloud_capabilities());
-    all
+    designer_capabilities()
 }
 
 pub fn list_capabilities(tag: Option<&str>, full: bool) -> Result<Vec<Value>> {
@@ -751,17 +694,6 @@ fn execute_designer_tool_replace_connections(input: &Value, dry_run: bool) -> Re
     Ok(result)
 }
 
-fn execute_cloud_capability_stub(input: &Value, dry_run: bool) -> Result<Value> {
-    if dry_run {
-        return Ok(json!({
-            "mode": "dry-run",
-            "message": "remote capability invocation is not performed during dry-run",
-            "input": input,
-        }));
-    }
-    bail!("remote capability execution is not yet implemented")
-}
-
 fn complete_mutation_result(
     workflow_path: &Path,
     updated_xml: String,
@@ -906,17 +838,23 @@ mod tests {
     }
 
     #[test]
-    fn cloud_run_is_gated_when_capability_missing() {
+    fn removed_cloud_capability_is_not_registered() {
+        assert!(!has_capability("cloud.workflow.summarize"));
+        assert!(
+            describe("cloud.workflow.summarize")
+                .expect("describe")
+                .is_none()
+        );
         let error = run(
             "cloud.workflow.summarize",
             &json!({"workflow_id": "abc"}),
             false,
         )
-        .expect_err("cloud capability should be gated");
+        .expect_err("cloud capability should not be registered");
         assert!(
             error
                 .to_string()
-                .contains("is not available in the current environment")
+                .contains("capability 'cloud.workflow.summarize' not found")
         );
     }
 }

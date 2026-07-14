@@ -3,25 +3,20 @@
 //! Useful as a first call for an operator or agent that wants the headline
 //! shape of cluster activity in a single hop.
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use chrono::Utc;
 use serde_json::{Value, json};
 
 use super::jobs::{fetch_job_groups, is_failure_status, is_running_status, within_window};
-use super::source::TelemetrySource;
 use super::window::Window;
-use super::{TelemetryArgs, load_and_pick_source};
+use super::{OneTelemetryArgs, TelemetryArgs, load_and_pick_source};
 
-pub fn summary(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelope> {
-    let (config, src) = load_and_pick_source(args, environment)?;
-    if src != TelemetrySource::One {
-        return Err(anyhow!(
-            "validation: telemetry summary on `server` source not implemented in this phase; pass --source one"
-        ));
-    }
+pub fn summary(environment: Option<&str>, args: &OneTelemetryArgs) -> Result<Envelope> {
+    let telemetry_args = TelemetryArgs::from(args);
+    let (config, src) = load_and_pick_source(&telemetry_args, environment)?;
     let window = Window::parse(&args.since)?;
-    let page = fetch_job_groups(&config, args)?;
+    let page = fetch_job_groups(&config, &telemetry_args)?;
     let in_window: Vec<_> = page
         .items
         .iter()

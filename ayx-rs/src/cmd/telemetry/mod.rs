@@ -51,6 +51,42 @@ pub struct TelemetryArgs {
     pub max_pages: Option<u32>,
 }
 
+/// Shared flags for telemetry subcommands that currently support only Alteryx One.
+#[derive(Args, Debug, Clone)]
+pub struct OneTelemetryArgs {
+    /// Central profile name. Defaults to the active central profile.
+    #[arg(long, global = false)]
+    pub profile: Option<String>,
+    /// Backend selection for this command.
+    #[arg(long, value_parser = ["one"], default_value = "one")]
+    pub source: String,
+    /// Time window for history queries: <N>{h,d,w} (default: 7d).
+    #[arg(long, default_value = "7d")]
+    pub since: String,
+    /// Cap top-N listings (default: 10).
+    #[arg(long, default_value = "10")]
+    pub top: usize,
+    /// Auto-paginate One list endpoints until exhausted.
+    #[arg(long)]
+    pub all: bool,
+    /// Cap pages when --all is set (default: 50 from `OneListParams`).
+    #[arg(long)]
+    pub max_pages: Option<u32>,
+}
+
+impl From<&OneTelemetryArgs> for TelemetryArgs {
+    fn from(args: &OneTelemetryArgs) -> Self {
+        Self {
+            profile: args.profile.clone(),
+            source: args.source.clone(),
+            since: args.since.clone(),
+            top: args.top,
+            all: args.all,
+            max_pages: args.max_pages,
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum TelemetryCommand {
     /// Job-group telemetry: running, history, top.
@@ -92,7 +128,7 @@ pub enum TelemetryCommand {
     /// One-shot overview composing the above into a single envelope.
     Summary {
         #[command(flatten)]
-        args: TelemetryArgs,
+        args: OneTelemetryArgs,
     },
 }
 
@@ -120,7 +156,7 @@ pub enum TelemetryWorkflowsCommand {
     /// Top flows by run count, failure rate, or duration over --since window.
     Top {
         #[command(flatten)]
-        args: TelemetryArgs,
+        args: OneTelemetryArgs,
         /// Sort key: run-count | failure-rate | p95-duration (default run-count).
         #[arg(long, default_value = "run-count")]
         by: String,
@@ -128,12 +164,12 @@ pub enum TelemetryWorkflowsCommand {
     /// Per-flow duration percentiles (p50/p95/p99) over --since window.
     Performance {
         #[command(flatten)]
-        args: TelemetryArgs,
+        args: OneTelemetryArgs,
     },
     /// Flows ordered by failure count over --since window.
     Errors {
         #[command(flatten)]
-        args: TelemetryArgs,
+        args: OneTelemetryArgs,
     },
 }
 
@@ -215,7 +251,7 @@ pub enum TelemetryWeeklyCommand {
     /// Emit a stable 168-bucket run-count matrix (day_of_week × hour).
     RunCounts {
         #[command(flatten)]
-        args: TelemetryArgs,
+        args: OneTelemetryArgs,
     },
 }
 
