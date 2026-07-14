@@ -258,8 +258,8 @@ fn resolve_workspace_name(
     bail!("workspace {workspace_gid} not found in /v4/auth/accounts (not a member?)")
 }
 
-/// Read the workspace password from `AYX_ONE_WS_PASSWORD`, prompting on stdin if
-/// it is not set.
+/// Read the workspace password from `AYX_ONE_WS_PASSWORD`, prompting on the
+/// terminal (masked, no echo) if it is not set.
 fn resolve_workspace_password() -> Result<String> {
     if let Ok(pw) = std::env::var("AYX_ONE_WS_PASSWORD")
         && !pw.is_empty()
@@ -268,10 +268,10 @@ fn resolve_workspace_password() -> Result<String> {
     }
     eprint!("Workspace password: ");
     std::io::stderr().flush().ok();
-    let mut pw = String::new();
-    std::io::stdin()
-        .read_line(&mut pw)
-        .context("failed to read workspace password from stdin")?;
+    let pw = rpassword::read_password().context(
+        "failed to read workspace password (no interactive terminal available — \
+         set AYX_ONE_WS_PASSWORD instead)",
+    )?;
     let pw = pw.trim().to_string();
     if pw.is_empty() {
         bail!("workspace password is required (set AYX_ONE_WS_PASSWORD or enter it when prompted)");
@@ -442,7 +442,10 @@ fn cookie_value_from_jar(jar: &Jar, url: &url::Url, name: &str) -> Option<String
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_interaction_id, host_allowed, is_valid_interaction_id};
+    use super::{
+        extract_interaction_id, host_allowed, is_valid_interaction_id, resolve_workspace_password,
+    };
+    use serial_test::serial;
 
     // ── host_allowed ──────────────────────────────────────────────────────────
 
@@ -570,5 +573,112 @@ mod tests {
     #[test]
     fn extract_returns_none_for_empty_chain() {
         assert_eq!(extract_interaction_id(&[]), None);
+    }
+
+    // ── resolve_workspace_password ───────────────────────────────────────────
+
+    #[test]
+    #[serial]
+    fn resolve_workspace_password_env_var_short_circuit() {
+        // nextest process-isolates each test; #[serial] additionally guards
+        // against a non-nextest (threaded) runner racing on the shared env var.
+        unsafe { std::env::set_var("AYX_ONE_WS_PASSWORD", "test-secret-pw") };
+        let result = resolve_workspace_password();
+        unsafe { std::env::remove_var("AYX_ONE_WS_PASSWORD") };
+        assert_eq!(result.unwrap(), "test-secret-pw");
+    }
+
+    /// Returns `true` if this process has a real controlling terminal
+    /// attached. Probed with a plain, read-only file open of the OS's
+    /// canonical "current controlling terminal" path — `/dev/tty` on
+    /// Unix, `CONIN$` on Windows (the same name `rpassword`'s own Windows
+    /// backend opens internally via `CreateFileW`; see
+    /// `rpassword-7.5.4/src/windows.rs::open_file_or_console`).
+    ///
+    /// Deliberately just an `open()`, nothing else: on Unix, only
+    /// `tcsetattr` (not `open`) changes termios state, so this can never
+    /// disable local echo or otherwise disturb the terminal — unlike
+    /// actually calling `rpassword::read_password()`, which immediately
+    /// clears `ECHO` on open and only restores it via a `Drop` impl that
+    /// never runs if the read is abandoned mid-block (see the history
+    /// note on the caller below). The handle is dropped (closed) right
+    /// after the check.
+    #[cfg(unix)]
+    fn has_controlling_terminal_for_test() -> bool {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .open("/dev/tty")
+            .is_ok()
+    }
+
+    #[cfg(windows)]
+    fn has_controlling_terminal_for_test() -> bool {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .open("CONIN$")
+            .is_ok()
+    }
+
+    // Neither this crate nor its CI matrix (ubuntu/macos/windows) targets any
+    // other platform; this conservative fallback just proceeds to exercise
+    // the real call, matching the only environment such a target would run
+    // tests in (headless).
+    #[cfg(not(any(unix, windows)))]
+    fn has_controlling_terminal_for_test() -> bool {
+        false
+    }
+
+    #[test]
+    #[serial]
+    fn resolve_workspace_password_no_tty_fails_cleanly() {
+        // With AYX_ONE_WS_PASSWORD unset, this falls through to the masked
+        // terminal read. In a headless environment (no controlling terminal
+        // — true for CI on all three OSes this crate's test matrix covers)
+        // rpassword returns an `Err` almost instantly, which is what this
+        // test asserts. But if this test runs from a real interactive
+        // terminal (a developer's local `cargo nextest run`), rpassword
+        // successfully opens the terminal and blocks waiting for actual
+        // keystrokes, with no timeout of its own.
+        //
+        // Two other approaches were tried and rejected during review:
+        //   1. An unconditional, Unix-only `/dev/tty` probe-and-skip — wrong
+        //      because this crate's CI runs on windows-latest too, where the
+        //      real mechanism is `CONIN$`, not a filesystem path; a literal
+        //      `/dev/tty` check would misreport "no terminal" on Windows
+        //      unconditionally.
+        //   2. Running the call on a worker thread bounded by
+        //      `recv_timeout` — this avoided hanging the test, but left a
+        //      real, reproducible bug: when a terminal *is* attached and the
+        //      timeout fires, the abandoned thread is still parked inside
+        //      `rpassword::read_password()`, which already cleared `ECHO`
+        //      via `tcsetattr` on open; since the thread is never joined and
+        //      the process exits without the read completing, `rpassword`'s
+        //      `Drop`-based terminal restoration never runs. Verified with
+        //      `forkpty`: after that test exited, the pty was left with
+        //      `ECHO OFF (not restored)` — i.e. this "fix" would have
+        //      silently broken a developer's shell the moment they ran
+        //      `cargo nextest run` from their own terminal.
+        //
+        // The correct fix is to never call `rpassword` at all unless we've
+        // first confirmed (non-destructively) that there's no controlling
+        // terminal to corrupt.
+        if has_controlling_terminal_for_test() {
+            eprintln!(
+                "note: resolve_workspace_password_no_tty_fails_cleanly skipped — \
+                 a real controlling terminal is attached to this test process, \
+                 so the no-TTY path can't be exercised here without risking a \
+                 blocked read that leaves local echo disabled"
+            );
+            return;
+        }
+
+        unsafe { std::env::remove_var("AYX_ONE_WS_PASSWORD") };
+        let err = resolve_workspace_password()
+            .expect_err("expected an error with no TTY and no env var set");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("AYX_ONE_WS_PASSWORD"),
+            "error should point at AYX_ONE_WS_PASSWORD as the alternative, got: {msg}"
+        );
     }
 }
