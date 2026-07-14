@@ -581,6 +581,38 @@ mod tests {
             assert!(parsed.is_ok(), "clap should accept --output {fmt}");
         }
     }
+
+    #[test]
+    fn one_only_telemetry_commands_reject_server_source_at_parse_time() {
+        for args in [
+            ["ayx", "telemetry", "summary", "--source", "server"].as_slice(),
+            [
+                "ayx",
+                "telemetry",
+                "weekly",
+                "run-counts",
+                "--source",
+                "server",
+            ]
+            .as_slice(),
+            ["ayx", "telemetry", "workflows", "top", "--source", "server"].as_slice(),
+        ] {
+            let err = Cli::try_parse_from(args).expect_err("server source should not parse");
+            let rendered = err.to_string();
+            assert!(rendered.contains("invalid value 'server'"));
+            assert!(rendered.contains("possible values: one"));
+        }
+    }
+
+    #[test]
+    fn server_capable_telemetry_commands_still_accept_server_source() {
+        let parsed =
+            Cli::try_parse_from(["ayx", "telemetry", "queue", "status", "--source", "server"]);
+        assert!(
+            parsed.is_ok(),
+            "server-capable telemetry commands should still parse --source server"
+        );
+    }
 }
 
 #[derive(Subcommand, Debug)]

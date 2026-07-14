@@ -4,7 +4,7 @@
 //! All flavors pull job groups via `jobs::fetch_job_groups` and group by
 //! `flow_id` client-side.
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::types::JobGroupSummary;
 use chrono::Utc;
@@ -13,19 +13,14 @@ use serde_json::{Value, json};
 use super::jobs::{
     fetch_job_groups, is_failure_status, job_to_row, pct, per_flow_stats, within_window,
 };
-use super::source::TelemetrySource;
 use super::window::Window;
-use super::{TelemetryArgs, load_and_pick_source};
+use super::{OneTelemetryArgs, TelemetryArgs, load_and_pick_source};
 
-pub fn top(environment: Option<&str>, args: &TelemetryArgs, by: &str) -> Result<Envelope> {
-    let (config, src) = load_and_pick_source(args, environment)?;
-    if src != TelemetrySource::One {
-        return Err(anyhow!(
-            "validation: telemetry workflows on `server` source not implemented in this phase; pass --source one"
-        ));
-    }
+pub fn top(environment: Option<&str>, args: &OneTelemetryArgs, by: &str) -> Result<Envelope> {
+    let telemetry_args = TelemetryArgs::from(args);
+    let (config, src) = load_and_pick_source(&telemetry_args, environment)?;
     let window = Window::parse(&args.since)?;
-    let page = fetch_job_groups(&config, args)?;
+    let page = fetch_job_groups(&config, &telemetry_args)?;
     let stats = per_flow_stats(&page, &window);
 
     let mut rows: Vec<Value> = stats
@@ -84,15 +79,11 @@ pub fn top(environment: Option<&str>, args: &TelemetryArgs, by: &str) -> Result<
     ))
 }
 
-pub fn performance(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelope> {
-    let (config, src) = load_and_pick_source(args, environment)?;
-    if src != TelemetrySource::One {
-        return Err(anyhow!(
-            "validation: telemetry workflows on `server` source not implemented in this phase; pass --source one"
-        ));
-    }
+pub fn performance(environment: Option<&str>, args: &OneTelemetryArgs) -> Result<Envelope> {
+    let telemetry_args = TelemetryArgs::from(args);
+    let (config, src) = load_and_pick_source(&telemetry_args, environment)?;
     let window = Window::parse(&args.since)?;
-    let page = fetch_job_groups(&config, args)?;
+    let page = fetch_job_groups(&config, &telemetry_args)?;
     let stats = per_flow_stats(&page, &window);
     let mut rows: Vec<Value> = stats
         .iter()
@@ -137,15 +128,11 @@ pub fn performance(environment: Option<&str>, args: &TelemetryArgs) -> Result<En
     ))
 }
 
-pub fn errors(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelope> {
-    let (config, src) = load_and_pick_source(args, environment)?;
-    if src != TelemetrySource::One {
-        return Err(anyhow!(
-            "validation: telemetry workflows on `server` source not implemented in this phase; pass --source one"
-        ));
-    }
+pub fn errors(environment: Option<&str>, args: &OneTelemetryArgs) -> Result<Envelope> {
+    let telemetry_args = TelemetryArgs::from(args);
+    let (config, src) = load_and_pick_source(&telemetry_args, environment)?;
     let window = Window::parse(&args.since)?;
-    let page = fetch_job_groups(&config, args)?;
+    let page = fetch_job_groups(&config, &telemetry_args)?;
     let mut failed_jobs: Vec<&JobGroupSummary> = page
         .items
         .iter()

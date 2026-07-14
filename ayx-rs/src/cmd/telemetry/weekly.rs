@@ -4,25 +4,20 @@
 //! Per user direction the rendering of the heatmap itself is the next phase;
 //! this command's job is to lock in a stable data contract.
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use chrono::Utc;
 use serde_json::json;
 
 use super::jobs::weekly_matrix;
-use super::source::TelemetrySource;
 use super::window::Window;
-use super::{TelemetryArgs, load_and_pick_source};
+use super::{OneTelemetryArgs, TelemetryArgs, load_and_pick_source};
 
-pub fn run_counts(environment: Option<&str>, args: &TelemetryArgs) -> Result<Envelope> {
-    let (config, src) = load_and_pick_source(args, environment)?;
-    if src != TelemetrySource::One {
-        return Err(anyhow!(
-            "validation: telemetry weekly on `server` source not implemented in this phase; pass --source one"
-        ));
-    }
+pub fn run_counts(environment: Option<&str>, args: &OneTelemetryArgs) -> Result<Envelope> {
+    let telemetry_args = TelemetryArgs::from(args);
+    let (config, src) = load_and_pick_source(&telemetry_args, environment)?;
     let window = Window::parse(&args.since)?;
-    let m = weekly_matrix(&config, args, &window)?;
+    let m = weekly_matrix(&config, &telemetry_args, &window)?;
     let matrix: Vec<_> = m
         .buckets
         .iter()

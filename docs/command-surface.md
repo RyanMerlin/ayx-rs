@@ -1,6 +1,8 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-14 00:17:06 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-14 01:06:29 UTC._
+
+This is the curated **catalog** view — the agent-facing capability surface, not the complete command tree. For every command and flag, use `ayx --help`, `ayx <group> --help`, or `ayx discover --deep`.
 
 This file is generated. Refresh it with:
 
@@ -11,7 +13,7 @@ cargo run -q -p xtask -- refresh-command-surface
 ## Summary
 
 - Commands: 207
-- Capabilities: 8
+- Capabilities: 6
 
 ## Commands
 
@@ -276,8 +278,6 @@ cargo run -q -p xtask -- refresh-command-surface
 
 | Id | Provider | Safety | Available | Tags | Summary |
 | --- | --- | --- | --- | --- | --- |
-| `cloud.docs.search` | cloud_remote | read-only | no | cloud<br />docs<br />search<br />remote | Search cloud-side documentation capabilities when remote support is available. |
-| `cloud.workflow.summarize` | hybrid | read-only | no | cloud<br />workflow<br />hybrid | Summarize cloud workflow posture when the remote contract is available. |
 | `designer.tool.add` | designer_local | mutating | yes | designer<br />tool<br />mutating<br />local | Add a tool node to a local workflow XML document. |
 | `designer.tool.edit` | designer_local | mutating | yes | designer<br />tool<br />mutating<br />local | Replace a tool node in a local workflow XML document. |
 | `designer.tool.remove` | designer_local | mutating | yes | designer<br />tool<br />mutating<br />local | Remove a tool node and related connections from a local workflow XML document. |

@@ -140,6 +140,8 @@ fn render_command_surface(catalog: &Value) -> Result<String> {
         generated_utc
     ));
     lines.push(String::new());
+    lines.push("This is the curated **catalog** view — the agent-facing capability surface, not the complete command tree. For every command and flag, use `ayx --help`, `ayx <group> --help`, or `ayx discover --deep`.".to_string());
+    lines.push(String::new());
     lines.push("This file is generated. Refresh it with:".to_string());
     lines.push(String::new());
     lines.push("```powershell".to_string());

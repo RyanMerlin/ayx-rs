@@ -47,29 +47,7 @@ The fastest path is onboarding:
 ayx onboard
 ```
 
-That writes the active profile to the central profile store. If you prefer to edit YAML directly, create a profile file under `profiles/default.yaml` in the config home with the minimum fields:
-
-```yaml
-profile_name: demo
-alteryx_one:
-  base_url: https://us1.alteryxcloud.com
-  account_email: you@example.com
-server:
-  api:
-    base_url: https://your-server.example.com
-    client_id: your-client-id
-    client_secret: your-client-secret
-  storage:
-    kind: embedded-mongo
-    mongo:
-      mode: embedded
-```
-
-The onboarding flow reuses existing values on later runs, masks stored secrets in its summary, and auto-discovers embedded Server runtime settings when `RuntimeSettings.xml` is available.
-For automation or agents, add `--non-interactive` to validate an existing profile without prompting.
-
-For multi-environment setups, use a central `environments.yaml` file with named environments and select the active one with `--environment <name>`.
-`ayx onboard --environments` writes a starter environments file with `dev` and `prod` entries.
+`ayx onboard` is the fastest path to a working setup: it reuses existing values on later runs, masks stored secrets in its summary, and auto-discovers embedded Server settings when `RuntimeSettings.xml` is available.  For automation or agents, add `--non-interactive` to validate an existing profile without prompting.  If you'd rather hand-edit YAML or wire up multiple environments, see [Configuration](#configuration) below.
 
 3. Run a first quick query:
 
@@ -87,14 +65,6 @@ cargo install --locked --path ayx-rs
 ```
 
 5. Use `--output json` when another tool should consume the result. For `workflow yxdb`, pair `--csv <path>` with top-level `--output json` if you want both export and structured metadata.
-
-If you want the shortest path from zero to useful output, start with:
-
-```bash
-ayx one platform workspace current --output json
-ayx one connections list --output json
-ayx server api status --output json
-```
 
 ## Quick Examples
 
