@@ -6,10 +6,12 @@ on:
     paths:
       - 'site/**'
       - 'docs/**'
+      - 'Cargo.toml'
   pull_request:
     paths:
       - 'site/**'
       - 'docs/**'
+      - 'Cargo.toml'
   workflow_dispatch:
 
 permissions:
