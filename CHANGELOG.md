@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.13.0 — 2026-07-14
+
 ### Added
 
 - **Command help backfill across the stable surface** (`#103`): every stable-family command (`server`, `sqlserver`, `mongo`, `doctor`, `tools`, `license`, ...) now carries a one-line `about`, so `--help` no longer renders blank description columns. The `one` subtree is excluded, reserved for its in-flight primitive-first redesign.
