@@ -6,7 +6,7 @@
 
 ### Fixed
 
-- **Bare command groups now print real help, not a flat string.** Running any group without a subcommand (`ayx one`, `ayx one flows`, `ayx sqlserver`, `ayx workflow`, ~34 groups) previously emitted a hand-rolled `"… commands available: a, b, c"` line; it now renders clap's styled Usage/Commands/Options help (Alteryx-blue on a terminal) via `arg_required_else_help`. `ayx one token` and `ayx one person` keep their existing default-to-list behavior.
+- **Bare command groups now print real help, not a flat string.** Running any group without a subcommand (`ayx one` and every subgroup, `ayx server`, `ayx sqlserver`, `ayx workflow`, ~35 groups) previously emitted a hand-rolled `"… commands available: a, b, c"` line; it now renders clap's styled Usage/Commands/Options help (Alteryx-blue on a terminal) via `arg_required_else_help`. The only groups that still act on bare invocation are the three with a real default: `ayx doctor` (runs the full suite) and `ayx one token` / `ayx one person` (list).
 - **Backfilled `one` subcommand descriptions.** The `one` subtree (deferred from the #103 help backfill pending its redesign) now carries a one-line `about` on every command, sourced from the command catalog, so `ayx one <group> --help` shows an informative Commands table instead of blank rows.
 
 ## 0.13.0 — 2026-07-14

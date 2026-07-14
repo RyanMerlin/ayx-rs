@@ -308,11 +308,12 @@ enum Command {
         command: WorkflowCommand,
     },
     #[command(
-        about = "Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls"
+        about = "Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls",
+        arg_required_else_help = true
     )]
     Server {
         #[command(subcommand)]
-        command: Option<ServerCommand>,
+        command: ServerCommand,
     },
     #[command(about = "Mongo inventory, backup, restore, query, and doctor helpers")]
     Mongo {

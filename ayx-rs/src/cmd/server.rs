@@ -35,7 +35,7 @@ use crate::{
 };
 
 #[allow(clippy::too_many_lines)]
-pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Result<Envelope> {
+pub fn execute(environment: Option<&str>, command: ServerCommand) -> Result<Envelope> {
     let runtime = crate::cmd::RuntimeCtx::new(environment);
     macro_rules! load_profile {
         ($profile:expr, $environment:expr) => {
@@ -43,10 +43,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
         };
     }
     Ok(match command {
-        None => Envelope::ok(
-            "server commands: api, system-info, runtime-settings, ayx-paths, server-logs, backup-plan, backup",
-        ),
-        Some(ServerCommand::Api { command }) => match command {
+        ServerCommand::Api { command } => match command {
             ServerApiCommand::Status { profile } => {
                 let config = load_profile!(profile.as_deref(), environment)?;
                 let server = server_profile(&config)?;
@@ -133,7 +130,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                 )?
             }
         },
-        Some(ServerCommand::SystemInfo { output_file }) => {
+        ServerCommand::SystemInfo { output_file } => {
             let system_info = capture_system_info()?;
             fs::write(&output_file, serde_json::to_string_pretty(&system_info)?)
                 .with_context(|| format!("failed to write '{}'", output_file.display()))?;
@@ -142,7 +139,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                 json!({ "output": output_file.display().to_string(), "data": system_info }),
             )
         }
-        Some(ServerCommand::RuntimeSettings { path, output_file }) => {
+        ServerCommand::RuntimeSettings { path, output_file } => {
             let summary = runtime_settings_summary(&path)?;
             if let Some(ref output_path) = output_file {
                 write_runtime_settings_json(&path, output_path)?;
@@ -156,11 +153,11 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                 }),
             )
         }
-        Some(ServerCommand::AyxPaths) => {
+        ServerCommand::AyxPaths => {
             let paths = ayx_paths();
             Envelope::ok_with_data("ayx paths resolved", paths)
         }
-        Some(ServerCommand::ServerLogs { command }) => match command {
+        ServerCommand::ServerLogs { command } => match command {
             ServerLogsCommand::Discover { profile } => {
                 let config = load_profile!(profile.as_deref(), environment)?;
                 Envelope::ok_with_data("log sources discovered", discover_log_inventory(&config))
@@ -206,7 +203,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                 )
             }
         },
-        Some(ServerCommand::Diagnose { command }) => match command {
+        ServerCommand::Diagnose { command } => match command {
             ServerDiagnoseCommand::Startup {
                 profile,
                 error,
@@ -398,7 +395,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                 )
             }
         },
-        Some(ServerCommand::Auth { command }) => match command {
+        ServerCommand::Auth { command } => match command {
             ServerAuthCommand::Status { profile } => {
                 let config = load_profile!(profile.as_deref(), environment)?;
                 Envelope::ok_with_data(
@@ -569,7 +566,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                 }
             },
         },
-        Some(ServerCommand::Doctor { command }) => match command {
+        ServerCommand::Doctor { command } => match command {
             ServerDoctorCommand::Startup {
                 profile,
                 error,
@@ -745,7 +742,7 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                 )
             }
         },
-        Some(ServerCommand::Upgrade { command }) => match command {
+        ServerCommand::Upgrade { command } => match command {
             UpgradeCommand::Path {
                 from,
                 to,
@@ -804,16 +801,16 @@ pub fn execute(environment: Option<&str>, command: Option<ServerCommand>) -> Res
                 Envelope::ok_with_data("upgrade bundle created", detail)
             }
         },
-        Some(ServerCommand::BackupPlan { backup_dir }) => {
+        ServerCommand::BackupPlan { backup_dir } => {
             let plan = backup_plan(&backup_dir)?;
             Envelope::ok_with_data("backup plan generated", plan)
         }
-        Some(ServerCommand::Backup {
+        ServerCommand::Backup {
             profile,
             backup_dir,
             apply,
             audit_dir,
-        }) => {
+        } => {
             let config = load_profile!(profile.as_deref(), environment)?;
             let data = run_server_backup(&config, &backup_dir, apply, &audit_dir)?;
             Envelope::ok_with_data(
