@@ -82,10 +82,24 @@ fn ayx_help_renders() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     // Banner is now clap-generated from the Cli #[command(about=...)] attribute.
     assert!(stdout.contains("operator CLI") || stdout.contains("Alteryx"));
+    let commands_section = stdout
+        .split("Options:")
+        .next()
+        .unwrap_or(&stdout)
+        .split("Commands:")
+        .nth(1)
+        .unwrap_or(&stdout);
+    assert!(
+        commands_section
+            .lines()
+            .any(|line| line.trim_start().starts_with("designer "))
+    );
+    assert!(!commands_section
+        .lines()
+        .any(|line| line.trim_start().starts_with("workflow ")));
     assert!(stdout.contains("one"));
     assert!(stdout.contains("server"));
     assert!(stdout.contains("mongo"));
-    assert!(stdout.contains("workflow"));
     assert!(stdout.contains("tui"));
 }
 
@@ -472,7 +486,7 @@ fn output_json_works_when_flag_is_trailing_for_workflows_list() {
 #[test]
 fn workflow_help_renders() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["workflow", "--help"])
+        .args(["designer", "workflow", "--help"])
         .output()
         .expect("ayx binary should run");
 
@@ -491,7 +505,7 @@ fn workflow_help_renders() {
 #[test]
 fn workflow_yxdb_help_renders() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["workflow", "yxdb", "--help"])
+        .args(["designer", "workflow", "yxdb", "--help"])
         .output()
         .expect("ayx binary should run");
 
@@ -514,6 +528,7 @@ fn workflow_convert_cloud_smoke() {
 
     let result = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([
+            "designer",
             "workflow",
             "convert-cloud",
             "--input",

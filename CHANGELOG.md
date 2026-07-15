@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- **BREAKING** — `ayx workflow` moved to `ayx designer workflow`. No back-compat alias; update scripts and CI that reference the old path.
+
 ## 0.13.2 — 2026-07-15
 
 ### Fixed

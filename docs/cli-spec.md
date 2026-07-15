@@ -124,7 +124,7 @@ The CLI is product-first. The stable top-level commands and families are:
 - `workflows`
 - `telemetry`
 - `whoami`
-- `workflow`
+- `designer workflow`
 - `tools`
 - `sqlserver`
 - `update`
