@@ -94,9 +94,11 @@ fn ayx_help_renders() {
             .lines()
             .any(|line| line.trim_start().starts_with("designer "))
     );
-    assert!(!commands_section
-        .lines()
-        .any(|line| line.trim_start().starts_with("workflow ")));
+    assert!(
+        !commands_section
+            .lines()
+            .any(|line| line.trim_start().starts_with("workflow "))
+    );
     assert!(stdout.contains("one"));
     assert!(stdout.contains("server"));
     assert!(stdout.contains("mongo"));
