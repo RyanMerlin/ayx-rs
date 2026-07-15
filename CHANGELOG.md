@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.13.2 — 2026-07-15
+
+### Fixed
+
+- **Windows: successful live commands no longer crash on exit.** `ayx one flows list/count` (and any other command that made a live One API call) printed correct output on Windows and then aborted with `thread local panicked on drop, aborting`, corrupting the process exit code even though the command succeeded. Root cause: `reqwest::blocking::Client` is a thin handle over a background thread running its own tokio runtime; caching it in a thread-local meant its `Drop` (which joins that thread) ran from inside an OS-invoked thread-local destructor callback during process exit (on Windows, via FLS) — fragile, and the actual cause of the abort. Fixed by wrapping the cached client in `ManuallyDrop`, so no destructor is ever registered for it; the client (and its background thread) is intentionally leaked for the life of the process, which is harmless for a short-lived CLI invocation. Added a subprocess-based regression test that exercises this exact path — the only prior test that made a real network round-trip through the compiled binary was gated to a live-credentials-only nightly job that never ran on Windows, which is why this shipped in 0.13.1 undetected.
+- **Sensitive-file writes (profiles, onboard config, audit logs) are now atomic and lock-protected.** The shared write helper previously truncated files in place with no temp file, no fsync, and no lock — a crash mid-write could destroy an entire credential profile, and two concurrent writers (e.g. two `ayx one login` runs) could tear the same file. Writes now go through a same-directory temp file, fsync, atomic rename, and an advisory lock on a stable sibling path, so a crash or a concurrent writer can no longer corrupt the target file.
+- **The interactive workspace-password prompt no longer echoes to the terminal.** `ayx one login`'s workspace-password step used a plain stdin read, so the password appeared in plain text as it was typed — visible in terminal scrollback, screen recordings, or over-the-shoulder. It's now read via a masked, no-echo terminal read; the `AYX_ONE_WS_PASSWORD` non-interactive path is unchanged.
+- **`one flows` vs. `one flows library` help text no longer reads as redundant.** Both had near-identical descriptions ("List One flows." vs. "List the One flow library.") that gave no indication `flows library` is a folder-aware combined view (flows and folders together — its count breaks down by `all`/`flow`/`folder`) while plain `flows` is a flat, folder-less collection. `--help` and the agent-facing command catalog (`ayx catalog list --format full`, `docs/command-surface.md`) now state the distinction explicitly.
+
 ## 0.13.1 — 2026-07-14
 
 ### Fixed
