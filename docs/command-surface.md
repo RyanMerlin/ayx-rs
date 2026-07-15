@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-14 13:39:30 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-15 00:43:44 UTC._
 
 This is the curated **catalog** view — the agent-facing capability surface, not the complete command tree. For every command and flag, use `ayx --help`, `ayx <group> --help`, or `ayx discover --deep`.
 
@@ -100,7 +100,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one doctor plans | `one/doctor/plans` | read-only | no | Run the One plans doctor workflow. |
 | one doctor scheduling | `one/doctor/scheduling` | read-only | no | Run the One scheduling doctor workflow. |
 | one flows copy | `one/flows/copy` | mutating | yes | Copy a One flow using a JSON payload. |
-| one flows count | `one/flows/count` | read-only | no | Count One flows. |
+| one flows count | `one/flows/count` | read-only | no | Count One flows (flat). |
 | one flows create | `one/flows/create` | mutating | yes | Create a One flow from JSON payload. |
 | one flows delete | `one/flows/delete` | mutating | yes | Delete a One flow. |
 | one flows detail | `one/flows/detail` | read-only | no | Inspect a One flow by id. |
@@ -117,9 +117,9 @@ cargo run -q -p xtask -- refresh-command-surface
 | one flows import | `one/flows/import` | mutating | yes | Import a flow package. |
 | one flows import-dry-run | `one/flows/import-dry-run` | read-only | no | Dry-run import of a flow package. |
 | one flows inputs | `one/flows/inputs` | read-only | no | List inputs for a One flow. |
-| one flows library count | `one/flows/library/count` | read-only | no | Count the One flow library. |
-| one flows library list | `one/flows/library/list` | read-only | no | List the One flow library. |
-| one flows list | `one/flows/list` | read-only | no | List One flows. |
+| one flows library count | `one/flows/library/count` | read-only | no | Count the One flow library (folder-aware: separate flow/folder/total counts). |
+| one flows library list | `one/flows/library/list` | read-only | no | List the One flow library (folder-aware: flows and folders together). |
+| one flows list | `one/flows/list` | read-only | no | List One flows (flat — no folder structure). |
 | one flows move | `one/flows/move` | mutating | yes | Move a One flow from JSON payload. |
 | one flows outputs | `one/flows/outputs` | read-only | no | List outputs for a One flow. |
 | one flows parameters | `one/flows/parameters` | read-only | no | Inspect flow-level parameters and overrides. |
