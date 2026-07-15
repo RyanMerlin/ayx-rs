@@ -1,6 +1,6 @@
 //! Cross-validation: every `cmd:` and `capability:` reference in an action
 //! should resolve to a real entry in the CLI's command catalog. Run this
-//! out-of-band (via `ayx actions validate`) rather than at load time so a
+//! out-of-band (via `ayx actions validate`) rather than at load time so an
 //! action that drifts ahead of the binary doesn't bork the whole tool.
 //!
 //! The validator is intentionally permissive: it consumes a `Catalog` trait

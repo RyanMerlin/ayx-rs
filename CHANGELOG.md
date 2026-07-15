@@ -10,7 +10,7 @@
   - **On-disk registry files.** The recognized extension is now `*.action.yaml` / `*.action.yml` (was `*.tactic.yaml` / `*.tactic.yml`), and the bundled directory moved from `tactics/` to `actions/`. Custom files under `$AYX_REGISTRY_DIR` or `${AYX_CONFIG_HOME}/registry/` must be renamed to be found.
   - **YAML wire format.** Composition steps change from `- kind: tactic` to `- kind: action`, and a workflow's `tactics:` list key is now `actions:`. The registry schema version is bumped `1` → `2` to mark the break.
 
-  No back-compat alias and no dual-read: a v1 file is not loaded. Subcommands (`list`, `describe`, `resolve`, `run`, `validate`, `export`) are unchanged.
+  No back-compat alias and no dual-read. A pre-0.14.0 `*.tactic.yaml` in your registry search path is **not loaded** — it is skipped with a warning naming the file, because staying silent would let a bundled action quietly reclaim an id you had overridden (and if your override tightened `safety`, the gate would silently relax). Rename the file and update any `kind: tactic` step to `kind: action`. Subcommands (`list`, `describe`, `resolve`, `run`, `validate`, `export`) are unchanged.
 
 ## 0.13.2 — 2026-07-15
 

@@ -20,10 +20,10 @@ trigger:
     - governance
 steps:
   - kind: command
-    cmd: "ayx --environment <source> one platform workspace current --output json"
+    cmd: "ayx --environment <source> one workspace current --output json"
     why: "Confirm the source workspace id matches expectations."
   - kind: command
-    cmd: "ayx --environment <target> one platform workspace current --output json"
+    cmd: "ayx --environment <target> one workspace current --output json"
     why: "Confirm the target workspace id matches expectations. Both should be pinned in alteryx_one.expected_workspace_id."
   - kind: command
     cmd: "ayx --environment <source> one flows list --all --output json"

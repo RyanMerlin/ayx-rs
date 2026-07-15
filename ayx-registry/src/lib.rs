@@ -180,15 +180,24 @@ pub struct Validation {
     pub check_cmd: Option<String>,
 }
 
-/// Wire-format version for action YAML files. Bump only on a breaking
-/// change to the schema; readers compare against `CURRENT_ACTION_SCHEMA`.
+/// Wire-format version for action YAML files. Bump only on a breaking change
+/// to the schema. `2` marks the 0.14.0 `tactic` → `action` rename, which
+/// changed both the `kind:` step tag and a workflow's `actions:` key.
+///
+/// NOTE: nothing currently *compares* against this — it is descriptive
+/// metadata, not an enforced gate. What actually keeps a pre-0.14.0 file out
+/// is the `.action.yaml` extension match in `load_dir` (a legacy
+/// `*.tactic.yaml` is skipped with a warning), plus serde rejecting a stale
+/// `kind: tactic` step. Enforcement is tracked separately; do not read this
+/// constant as a guarantee.
 pub const CURRENT_ACTION_SCHEMA: u32 = 2;
 
 /// An action — one named playbook.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Action {
-    /// Wire-format version. Defaults to 1; bumped if the schema gains a
-    /// breaking change. Readers should accept any version up to
+    /// Wire-format version. Omitted in a file means "current"
+    /// (`CURRENT_ACTION_SCHEMA`), not 1 — so this field cannot by itself
+    /// identify an older file. Not currently compared by any reader; see
     /// `CURRENT_ACTION_SCHEMA`.
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
@@ -317,6 +326,21 @@ impl Registry {
                 workflow.source_path = p.display().to_string();
                 self.insert_workflow(workflow)?;
                 self.sources.push(p.to_path_buf());
+            } else if name.ends_with(".tactic.yaml") || name.ends_with(".tactic.yml") {
+                // 0.14.0 renamed the `tactic` noun to `action`, including this
+                // file extension. Staying silent here would let a bundled action
+                // quietly reclaim the id an operator had overridden — and if
+                // their override tightened `safety`, the gate would silently
+                // relax. Say so loudly instead; the file is still not loaded.
+                eprintln!(
+                    "warning: ignoring legacy registry file '{}' — the `tactic` \
+                     concept was renamed to `action` in 0.14.0. Rename it to \
+                     '*.action.yaml' and change any `kind: tactic` step to \
+                     `kind: action` (a workflow's `tactics:` key is now `actions:`). \
+                     Until then this file is NOT loaded and any bundled action \
+                     sharing its id will be used instead.",
+                    p.display()
+                );
             }
         }
         Ok(())
@@ -458,6 +482,64 @@ mod tests {
         // The stdlib bundle is expected to ship at least these actions.
         assert!(reg.action("mongo.backup-restore").is_ok());
         assert!(reg.action("one.workspace-migrate").is_ok());
+    }
+
+    /// A pre-0.14.0 `*.tactic.yaml` must NOT be loaded: the 0.14.0 rename
+    /// changed the extension, the `kind:` step tag, and the workflow key, so
+    /// the file's contents are no longer valid. Loading it would be wrong;
+    /// loading it *silently* would be worse — an operator override that
+    /// tightened `safety` would be dropped and the bundled action would
+    /// reclaim the id with a weaker gate. `load_dir` skips it and warns.
+    #[test]
+    fn legacy_tactic_yaml_is_not_loaded() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("legacy-override.tactic.yaml"),
+            "id: legacy.override\n\
+             title: Legacy override\n\
+             summary: Should not load\n\
+             safety: destructive\n\
+             steps:\n\
+             \x20 - kind: note\n\
+             \x20   text: nope\n",
+        )
+        .expect("write legacy file");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path())
+            .expect("load_dir skips, never errors");
+
+        assert!(
+            reg.action("legacy.override").is_err(),
+            "legacy *.tactic.yaml must not be loaded"
+        );
+        assert!(
+            reg.sources.is_empty(),
+            "a skipped legacy file must not be recorded as a source"
+        );
+    }
+
+    /// The new extension must still load, so the test above is proving the
+    /// extension gate rather than a broken loader.
+    #[test]
+    fn action_yaml_extension_still_loads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("fresh.action.yaml"),
+            "id: fresh.one\n\
+             title: Fresh action\n\
+             summary: Should load\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: note\n\
+             \x20   text: yep\n",
+        )
+        .expect("write action file");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path()).expect("loads");
+
+        assert!(reg.action("fresh.one").is_ok(), "*.action.yaml must load");
     }
 
     #[test]
