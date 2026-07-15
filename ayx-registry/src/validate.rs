@@ -1,7 +1,7 @@
-//! Cross-validation: every `cmd:` and `capability:` reference in a tactic
+//! Cross-validation: every `cmd:` and `capability:` reference in an action
 //! should resolve to a real entry in the CLI's command catalog. Run this
-//! out-of-band (via `ayx tactics validate`) rather than at load time so a
-//! tactic that drifts ahead of the binary doesn't bork the whole tool.
+//! out-of-band (via `ayx actions validate`) rather than at load time so a
+//! action that drifts ahead of the binary doesn't bork the whole tool.
 //!
 //! The validator is intentionally permissive: it consumes a `Catalog` trait
 //! the CLI implements over `COMMAND_SPECS`, so the registry crate doesn't
@@ -25,7 +25,7 @@ pub trait CatalogLookup {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ValidationFinding {
-    pub tactic_id: String,
+    pub action_id: String,
     pub step_index: usize,
     pub kind: FindingKind,
     pub detail: String,
@@ -37,8 +37,8 @@ pub enum FindingKind {
     UnknownCommand,
     UnknownCapability,
     MalformedCommand,
-    UnknownInnerTactic,
-    /// A mutating-or-destructive tactic's command step looks like it WOULD
+    UnknownInnerAction,
+    /// A mutating-or-destructive action's command step looks like it WOULD
     /// mutate (POST/PUT/PATCH/DELETE for an API, or `mutate`/`backup`/
     /// `restore`/`apply` keyword) but the cmd string does not include
     /// `--apply`. The executor's safety gate catches this at runtime, but
@@ -49,24 +49,24 @@ pub enum FindingKind {
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct ValidationReport {
     pub findings: Vec<ValidationFinding>,
-    pub tactics_checked: usize,
+    pub actions_checked: usize,
     pub workflows_checked: usize,
-    /// Tactics that workflows reference but the registry doesn't contain.
-    pub workflow_dangling_tactics: Vec<(String, String)>,
+    /// Actions that workflows reference but the registry doesn't contain.
+    pub workflow_dangling_actions: Vec<(String, String)>,
 }
 
 impl ValidationReport {
     pub fn ok(&self) -> bool {
-        self.findings.is_empty() && self.workflow_dangling_tactics.is_empty()
+        self.findings.is_empty() && self.workflow_dangling_actions.is_empty()
     }
 }
 
 pub fn validate<C: CatalogLookup>(registry: &Registry, catalog: &C) -> ValidationReport {
     let mut report = ValidationReport::default();
 
-    for tactic in registry.tactics.values() {
-        report.tactics_checked += 1;
-        for (index, step) in tactic.steps.iter().enumerate() {
+    for action in registry.actions.values() {
+        report.actions_checked += 1;
+        for (index, step) in action.steps.iter().enumerate() {
             match step {
                 Step::Command {
                     cmd, capability, ..
@@ -79,18 +79,18 @@ pub fn validate<C: CatalogLookup>(registry: &Registry, catalog: &C) -> Validatio
                         Some(path) if !path.is_empty() => {
                             if !catalog.has_command_path(&path) {
                                 report.findings.push(ValidationFinding {
-                                    tactic_id: tactic.id.clone(),
+                                    action_id: action.id.clone(),
                                     step_index: index,
                                     kind: FindingKind::UnknownCommand,
                                     detail: format!(
-                                        "command path '{path}' is not in the catalog; check tactic step or rename"
+                                        "command path '{path}' is not in the catalog; check action step or rename"
                                     ),
                                 });
                             }
                         }
                         _ => {
                             report.findings.push(ValidationFinding {
-                                tactic_id: tactic.id.clone(),
+                                action_id: action.id.clone(),
                                 step_index: index,
                                 kind: FindingKind::MalformedCommand,
                                 detail: format!(
@@ -103,39 +103,39 @@ pub fn validate<C: CatalogLookup>(registry: &Registry, catalog: &C) -> Validatio
                         && !catalog.has_capability(cap)
                     {
                         report.findings.push(ValidationFinding {
-                            tactic_id: tactic.id.clone(),
+                            action_id: action.id.clone(),
                             step_index: index,
                             kind: FindingKind::UnknownCapability,
                             detail: format!("capability id '{cap}' is not in the catalog"),
                         });
                     }
-                    // Apply-missing lint: a mutating-or-destructive tactic
+                    // Apply-missing lint: a mutating-or-destructive action
                     // step whose command looks like it would mutate state
                     // must include `--apply` in the cmd. The runtime gate
                     // catches missing `--apply` too, but flagging it at
                     // lint time saves a wasted execution turn.
-                    if tactic.safety != Safety::ReadOnly
+                    if action.safety != Safety::ReadOnly
                         && step_looks_mutating(cmd)
                         && !cmd.contains("--apply")
                     {
                         report.findings.push(ValidationFinding {
-                            tactic_id: tactic.id.clone(),
+                            action_id: action.id.clone(),
                             step_index: index,
                             kind: FindingKind::ApplyMissing,
                             detail: format!(
-                                "tactic safety is '{}' and step appears to mutate state, but cmd does not include --apply: '{cmd}'",
-                                tactic.safety.as_str()
+                                "action safety is '{}' and step appears to mutate state, but cmd does not include --apply: '{cmd}'",
+                                action.safety.as_str()
                             ),
                         });
                     }
                 }
-                Step::Tactic { id, .. } => {
-                    if registry.tactic(id).is_err() {
+                Step::Action { id, .. } => {
+                    if registry.action(id).is_err() {
                         report.findings.push(ValidationFinding {
-                            tactic_id: tactic.id.clone(),
+                            action_id: action.id.clone(),
                             step_index: index,
-                            kind: FindingKind::UnknownInnerTactic,
-                            detail: format!("composition references unknown tactic '{id}'"),
+                            kind: FindingKind::UnknownInnerAction,
+                            detail: format!("composition references unknown action '{id}'"),
                         });
                     }
                 }
@@ -146,10 +146,10 @@ pub fn validate<C: CatalogLookup>(registry: &Registry, catalog: &C) -> Validatio
 
     for w in registry.workflows.values() {
         report.workflows_checked += 1;
-        for tid in &w.tactics {
-            if registry.tactic(tid).is_err() {
+        for tid in &w.actions {
+            if registry.action(tid).is_err() {
                 report
-                    .workflow_dangling_tactics
+                    .workflow_dangling_actions
                     .push((w.id.clone(), tid.clone()));
             }
         }
@@ -204,7 +204,7 @@ fn step_looks_mutating(cmd: &str) -> bool {
 }
 
 /// Global flags that may appear *before* the subcommand chain. The
-/// extractor skips these (and their values, where applicable) so a tactic
+/// extractor skips these (and their values, where applicable) so an action
 /// like `ayx --environment <env> --apply one flows list` resolves to
 /// `one flows list`, not the empty string.
 ///
@@ -294,7 +294,7 @@ mod tests {
         let reg = Registry::load_default().unwrap();
         let report = validate(&reg, &EmptyCatalog);
         assert!(!report.ok());
-        assert!(report.tactics_checked > 0);
+        assert!(report.actions_checked > 0);
         // Every command step should produce an UnknownCommand finding.
         let unknown_cmds = report
             .findings
@@ -308,7 +308,7 @@ mod tests {
     fn permissive_catalog_passes() {
         let reg = Registry::load_default().unwrap();
         let report = validate(&reg, &PermissiveCatalog);
-        // Workflow → tactic refs still need to resolve, but those are
+        // Workflow → action refs still need to resolve, but those are
         // already in the bundled stdlib, so the report should be clean.
         assert!(report.ok(), "findings: {:?}", report.findings);
     }

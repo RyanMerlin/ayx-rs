@@ -466,11 +466,11 @@ fn output_json_works_when_flag_is_trailing_for_catalog_list() {
 }
 
 #[test]
-fn output_json_works_when_flag_is_trailing_for_tactics_list() {
-    assert_json_output_works_before_and_after(&["tactics", "list"], |json| {
+fn output_json_works_when_flag_is_trailing_for_actions_list() {
+    assert_json_output_works_before_and_after(&["actions", "list"], |json| {
         assert_eq!(json["ok"], serde_json::json!(true));
-        let tactics = json["data"]["tactics"].as_array().expect("tactics array");
-        assert!(!tactics.is_empty());
+        let actions = json["data"]["actions"].as_array().expect("actions array");
+        assert!(!actions.is_empty());
     });
 }
 

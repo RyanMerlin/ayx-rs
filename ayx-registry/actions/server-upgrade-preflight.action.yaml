@@ -24,7 +24,7 @@ steps:
   - kind: command
     cmd: "ayx server auth status --profile <profile> --output json"
     why: "Snapshot auth posture so post-upgrade comparison is possible."
-  - kind: tactic
+  - kind: action
     id: mongo.backup-restore
     why: "Take the snapshot. Mandatory before any upgrade."
   - kind: command
@@ -35,10 +35,10 @@ steps:
     why: "Compute the upgrade plan envelope (rules, version graph, expected migrations). Read-only."
   - kind: note
     text: |
-      Active-job draining is checked via the Mongo `mongo.queue.stuck` tactic
+      Active-job draining is checked via the Mongo `mongo.queue.stuck` action
       below — the AS_Queue queue depth and per-state counts are what actually
       matter, not a single status RPC.
-  - kind: tactic
+  - kind: action
     id: mongo.queue.stuck
     why: "Confirm the AS_Queue is empty or only holds Queued (not Running) jobs before kicking off the upgrade."
 validations:

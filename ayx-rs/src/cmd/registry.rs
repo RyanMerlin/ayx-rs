@@ -1,4 +1,4 @@
-//! Dispatch for `ayx tactics` and `ayx workflows`.
+//! Dispatch for `ayx actions` and `ayx workflows`.
 //!
 //! Moved out of `main.rs` because the registry surface is a self-contained
 //! feature with no `load_profile` closure dependency — easy to lift into
@@ -16,7 +16,7 @@ use serde_json::Value;
 use serde_json::json;
 
 use crate::capability;
-use crate::{COMMAND_SPECS, TacticsCommand, WorkflowsCommand};
+use crate::{ActionsCommand, COMMAND_SPECS, WorkflowsCommand};
 
 /// Catalog adapter — let the registry's validator query the CLI's
 /// `COMMAND_SPECS` and capability registry without depending on either.
@@ -30,9 +30,9 @@ impl ayx_registry::validate::CatalogLookup for LiveCatalog {
     }
 }
 
-pub fn execute_tactics(apply: bool, command: TacticsCommand) -> Result<Envelope> {
+pub fn execute_actions(apply: bool, command: ActionsCommand) -> Result<Envelope> {
     match command {
-        TacticsCommand::List { tag, safety } => {
+        ActionsCommand::List { tag, safety } => {
             let reg = ayx_registry::Registry::load_default()?;
             // Normalize the safety filter once. Unrecognized values bail
             // with a validation error so the user knows their filter never
@@ -51,8 +51,8 @@ pub fn execute_tactics(apply: bool, command: TacticsCommand) -> Result<Envelope>
                     "unknown --safety value '{s}'; expected one of: read_only, mutating, destructive"
                 ),
             };
-            let mut tactics: Vec<_> = reg
-                .tactics
+            let mut actions: Vec<_> = reg
+                .actions
                 .values()
                 .filter(|t| match &tag {
                     Some(needle) => t.trigger.tags.iter().any(|tag| {
@@ -75,41 +75,41 @@ pub fn execute_tactics(apply: bool, command: TacticsCommand) -> Result<Envelope>
                     })
                 })
                 .collect();
-            tactics.sort_by(|a, b| {
+            actions.sort_by(|a, b| {
                 a["id"]
                     .as_str()
                     .unwrap_or("")
                     .cmp(b["id"].as_str().unwrap_or(""))
             });
             Ok(Envelope::ok_with_data(
-                format!("{} tactic(s)", tactics.len()),
-                json!({ "tactics": tactics }),
+                format!("{} action(s)", actions.len()),
+                json!({ "actions": actions }),
             ))
         }
-        TacticsCommand::Describe { id } => {
+        ActionsCommand::Describe { id } => {
             let reg = ayx_registry::Registry::load_default()?;
-            let tactic = reg.tactic(&id)?;
+            let action = reg.action(&id)?;
             Ok(Envelope::ok_with_data(
-                format!("tactic '{}'", tactic.id),
-                serde_json::to_value(tactic)?,
+                format!("action '{}'", action.id),
+                serde_json::to_value(action)?,
             ))
         }
-        TacticsCommand::Resolve { task, limit } => {
+        ActionsCommand::Resolve { task, limit } => {
             let reg = ayx_registry::Registry::load_default()?;
             let mut hits = reg.resolve(&task);
             hits.truncate(limit);
-            // Enrich each hit with the tactic's summary so text-mode tables
-            // are self-explanatory (no follow-up `tactics describe` needed
+            // Enrich each hit with the action's summary so text-mode tables
+            // are self-explanatory (no follow-up `actions describe` needed
             // just to know what each candidate does).
             let enriched: Vec<Value> = hits
                 .iter()
                 .map(|h| {
                     let summary = reg
-                        .tactic(&h.tactic_id)
+                        .action(&h.action_id)
                         .map(|t| t.summary.lines().next().unwrap_or("").to_string())
                         .unwrap_or_default();
                     json!({
-                        "tactic_id": h.tactic_id,
+                        "action_id": h.action_id,
                         "title": h.title,
                         "safety": h.safety.as_str(),
                         "score": h.score,
@@ -118,11 +118,11 @@ pub fn execute_tactics(apply: bool, command: TacticsCommand) -> Result<Envelope>
                 })
                 .collect();
             Ok(Envelope::ok_with_data(
-                format!("{} candidate tactic(s) for '{}'", enriched.len(), task),
+                format!("{} candidate action(s) for '{}'", enriched.len(), task),
                 json!({ "task": task, "hits": enriched }),
             ))
         }
-        TacticsCommand::Run {
+        ActionsCommand::Run {
             id,
             param,
             param_file,
@@ -142,14 +142,14 @@ pub fn execute_tactics(apply: bool, command: TacticsCommand) -> Result<Envelope>
                 cfg.params.insert(k, v);
             }
             if prompt_missing {
-                prompt_missing_tactic_params(&reg, &id, &mut cfg)?;
+                prompt_missing_action_params(&reg, &id, &mut cfg)?;
             }
-            let run = ayx_registry::executor::run_tactic(&reg, &id, &cfg)?;
+            let run = ayx_registry::executor::run_action(&reg, &id, &cfg)?;
             let mode = run.mode;
             Ok(Envelope::ok_with_data(
                 format!(
-                    "tactic '{}' {}: {} step(s){}",
-                    run.tactic_id,
+                    "action '{}' {}: {} step(s){}",
+                    run.action_id,
                     mode,
                     run.steps.len(),
                     if apply {
@@ -161,33 +161,33 @@ pub fn execute_tactics(apply: bool, command: TacticsCommand) -> Result<Envelope>
                 serde_json::to_value(run)?,
             ))
         }
-        TacticsCommand::Export { id } => {
+        ActionsCommand::Export { id } => {
             let reg = ayx_registry::Registry::load_default()?;
-            let tactic = reg.tactic(&id)?;
-            let yaml = serde_yaml::to_string(tactic)
-                .map_err(|e| anyhow!("failed to serialize tactic: {e}"))?;
+            let action = reg.action(&id)?;
+            let yaml = serde_yaml::to_string(action)
+                .map_err(|e| anyhow!("failed to serialize action: {e}"))?;
             print!("{}", yaml);
             Ok(Envelope::ok_with_data(
-                format!("tactic '{}' exported", id),
+                format!("action '{}' exported", id),
                 json!({
-                    "tactic_id": id,
-                    "source": tactic.source_path.clone(),
+                    "action_id": id,
+                    "source": action.source_path.clone(),
                     "bytes": yaml.len(),
                     "save_hint": format!(
-                        "Redirect this output into ${{AYX_CONFIG_HOME}}/registry/{}.tactic.yaml to fork the bundled stdlib version.",
+                        "Redirect this output into ${{AYX_CONFIG_HOME}}/registry/{}.action.yaml to fork the bundled stdlib version.",
                         id.replace('.', "-")
                     ),
                 }),
             ))
         }
-        TacticsCommand::Validate => {
+        ActionsCommand::Validate => {
             let reg = ayx_registry::Registry::load_default()?;
             let report = ayx_registry::validate::validate(&reg, &LiveCatalog);
             Ok(Envelope::ok_with_data(
                 format!(
-                    "validate: {} finding(s) across {} tactic(s), {} workflow(s)",
+                    "validate: {} finding(s) across {} action(s), {} workflow(s)",
                     report.findings.len(),
-                    report.tactics_checked,
+                    report.actions_checked,
                     report.workflows_checked
                 ),
                 serde_json::to_value(&report)?,
@@ -215,7 +215,7 @@ pub fn execute_workflows(apply: bool, command: WorkflowsCommand) -> Result<Envel
                         "id": w.id,
                         "title": w.title,
                         "safety": w.safety.as_str(),
-                        "tactic_count": w.tactics.len(),
+                        "action_count": w.actions.len(),
                         "tags": w.tags,
                         "source": w.source_path,
                     })
@@ -235,11 +235,11 @@ pub fn execute_workflows(apply: bool, command: WorkflowsCommand) -> Result<Envel
         WorkflowsCommand::Explain { id } => {
             let reg = ayx_registry::Registry::load_default()?;
             let workflow = reg.workflow(&id)?;
-            let mut tactic_details = Vec::new();
+            let mut action_details = Vec::new();
             let mut missing = Vec::new();
-            for tid in &workflow.tactics {
-                match reg.tactic(tid) {
-                    Ok(t) => tactic_details.push(json!({
+            for tid in &workflow.actions {
+                match reg.action(tid) {
+                    Ok(t) => action_details.push(json!({
                         "id": t.id,
                         "title": t.title,
                         "safety": t.safety.as_str(),
@@ -253,8 +253,8 @@ pub fn execute_workflows(apply: bool, command: WorkflowsCommand) -> Result<Envel
                 format!("workflow '{}'", workflow.id),
                 json!({
                     "workflow": workflow,
-                    "tactics_resolved": tactic_details,
-                    "tactics_missing": missing,
+                    "actions_resolved": action_details,
+                    "actions_missing": missing,
                 }),
             ))
         }
@@ -284,10 +284,10 @@ pub fn execute_workflows(apply: bool, command: WorkflowsCommand) -> Result<Envel
             let mode = run.mode;
             Ok(Envelope::ok_with_data(
                 format!(
-                    "workflow '{}' {}: {} tactic(s){}",
+                    "workflow '{}' {}: {} action(s){}",
                     run.workflow_id,
                     mode,
-                    run.tactics.len(),
+                    run.actions.len(),
                     if apply {
                         ""
                     } else {
@@ -328,18 +328,18 @@ fn load_params_from_file(path: &Path, out: &mut BTreeMap<String, String>) -> Res
     Ok(())
 }
 
-fn prompt_missing_tactic_params(
+fn prompt_missing_action_params(
     reg: &ayx_registry::Registry,
-    tactic_id: &str,
+    action_id: &str,
     cfg: &mut ayx_registry::executor::ExecutionConfig,
 ) -> Result<()> {
     use std::io::{IsTerminal, Write};
     if !std::io::stdin().is_terminal() {
         return Ok(());
     }
-    let tactic = reg.tactic(tactic_id)?;
+    let action = reg.action(action_id)?;
     let mut required: Vec<String> = Vec::new();
-    collect_tactic_params(reg, tactic, &mut required);
+    collect_action_params(reg, action, &mut required);
     required.sort();
     required.dedup();
     for key in required {
@@ -365,9 +365,9 @@ fn prompt_missing_workflow_params(
 ) -> Result<()> {
     let workflow = reg.workflow(workflow_id)?;
     let mut required: Vec<String> = Vec::new();
-    for tid in &workflow.tactics {
-        if let Ok(t) = reg.tactic(tid) {
-            collect_tactic_params(reg, t, &mut required);
+    for tid in &workflow.actions {
+        if let Ok(t) = reg.action(tid) {
+            collect_action_params(reg, t, &mut required);
         }
     }
     required.sort();
@@ -392,12 +392,12 @@ fn prompt_missing_workflow_params(
     Ok(())
 }
 
-fn collect_tactic_params(
+fn collect_action_params(
     reg: &ayx_registry::Registry,
-    tactic: &ayx_registry::Tactic,
+    action: &ayx_registry::Action,
     out: &mut Vec<String>,
 ) {
-    for step in &tactic.steps {
+    for step in &action.steps {
         match step {
             ayx_registry::Step::Command { cmd, .. } => {
                 let mut chars = cmd.chars().peekable();
@@ -416,9 +416,9 @@ fn collect_tactic_params(
                     }
                 }
             }
-            ayx_registry::Step::Tactic { id, .. } => {
-                if let Ok(inner) = reg.tactic(id) {
-                    collect_tactic_params(reg, inner, out);
+            ayx_registry::Step::Action { id, .. } => {
+                if let Ok(inner) = reg.action(id) {
+                    collect_action_params(reg, inner, out);
                 }
             }
             ayx_registry::Step::Note { .. } => {}

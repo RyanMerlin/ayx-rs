@@ -57,10 +57,10 @@ Review the plan file before proceeding.
 
 ### 3. Run the pre-upgrade preflight
 
-The bundled `server.upgrade.preflight` tactic automates steps 1–4 of the manual sequence. It validates config, captures auth posture, takes a Mongo snapshot, and checks that the job queue is empty:
+The bundled `server.upgrade.preflight` action automates steps 1–4 of the manual sequence. It validates config, captures auth posture, takes a Mongo snapshot, and checks that the job queue is empty:
 
 ```sh
-ayx tactics run server.upgrade.preflight
+ayx actions run server.upgrade.preflight
 ```
 
 To run the precheck command directly:
@@ -141,4 +141,4 @@ ayx --output json server upgrade plan --from 2023.1 --to 2024.2
 - [Alteryx Server overview](/server/)
 - [MongoDB](/server/mongo/)
 - [Diagnose & auth](/server/diagnose/)
-- [Tactics & workflows](/telemetry/tactics/) — see `server.upgrade.preflight`
+- [Actions & workflows](/telemetry/actions/) — see `server.upgrade.preflight`

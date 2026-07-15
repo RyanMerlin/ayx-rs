@@ -4,8 +4,8 @@
 //! so the renderers are pure/testable.
 //!
 //! Text mode used to print just `envelope.message` — a single line that
-//! discarded the entire `data` payload. That meant `ayx tactics list` in
-//! text mode gave "10 tactic(s)" and nothing else. This module renders
+//! discarded the entire `data` payload. That meant `ayx actions list` in
+//! text mode gave "10 action(s)" and nothing else. This module renders
 //! known data shapes (`{items: [...]}` lists, single objects, scalar
 //! arrays) into something operators can actually read at the terminal.
 //!
@@ -188,9 +188,9 @@ fn render_data_text(data: &Value) -> String {
         }
         return render_scalar_array(items);
     }
-    // { "tactics": [...] } / { "workflows": [...] } / { "hits": [...] } — same shape, different key.
+    // { "actions": [...] } / { "workflows": [...] } / { "hits": [...] } — same shape, different key.
     for key in [
-        "tactics",
+        "actions",
         "workflows",
         "hits",
         "endpoints",
@@ -248,14 +248,14 @@ pub fn render_object_array(items: &[Value]) -> String {
     // Preferred column ordering — most-useful fields first.
     const PREFERRED: &[&str] = &[
         "id",
-        "tactic_id",
+        "action_id",
         "workflow_id",
         "name",
         "title",
         "safety",
         "status",
         "score",
-        "tactic_count",
+        "action_count",
         "step_count",
         "email",
         "tags",
@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn items_array_renders_table_with_header() {
         let env = env_with(
-            "2 tactic(s)",
+            "2 action(s)",
             json!({
                 "items": [
                     {"id": "a.b", "title": "A", "safety": "read_only"},
@@ -441,11 +441,11 @@ mod tests {
     }
 
     #[test]
-    fn tactics_key_renders_table() {
+    fn actions_key_renders_table() {
         let env = env_with(
-            "1 tactic(s)",
+            "1 action(s)",
             json!({
-                "tactics": [{"id": "mongo.doctor", "safety": "read_only"}]
+                "actions": [{"id": "mongo.doctor", "safety": "read_only"}]
             }),
         );
         let text = render_text(&env);
@@ -484,7 +484,7 @@ mod tests {
 
     #[test]
     fn empty_items_renders_no_items() {
-        let env = env_with("0 tactic(s)", json!({"items": []}));
+        let env = env_with("0 action(s)", json!({"items": []}));
         let text = render_text(&env);
         assert!(text.contains("no items"));
     }

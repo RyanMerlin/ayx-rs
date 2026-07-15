@@ -4,8 +4,8 @@ Status: active
 
 ## Current Scope
 
-- Tactical registries should describe small playbooks.
-- Higher-level workflows should compose tactics, commands, validation, and
+- Action registries should describe small playbooks.
+- Higher-level workflows should compose actions, commands, validation, and
   rollback behavior.
 - The runtime resolver should return the minimum context an agent needs for a
   task.
@@ -18,6 +18,6 @@ Status: active
 
 ## Exit Criteria
 
-- Tactics and workflows are machine-readable and lazily loaded.
+- Actions and workflows are machine-readable and lazily loaded.
 - Validation and rollback steps live beside the flow they protect.
 - The resolver can support end-to-end tasks without inventing a second model.

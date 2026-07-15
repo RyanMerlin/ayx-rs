@@ -359,13 +359,13 @@ enum Command {
         command: AuditCommand,
     },
     #[command(
-        about = "Tactical registry — named playbooks with safety, validation, and rollback notes"
+        about = "Action registry — named playbooks with safety, validation, and rollback notes"
     )]
-    Tactics {
+    Actions {
         #[command(subcommand)]
-        command: TacticsCommand,
+        command: ActionsCommand,
     },
-    #[command(about = "Workflow registry — higher-order skills composing tactics")]
+    #[command(about = "Workflow registry — higher-order skills composing actions")]
     Workflows {
         #[command(subcommand)]
         command: WorkflowsCommand,
@@ -452,8 +452,8 @@ enum AuditCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub(crate) enum TacticsCommand {
-    /// List every tactic, with title, safety classification, and tags.
+pub(crate) enum ActionsCommand {
+    /// List every action, with title, safety classification, and tags.
     List {
         /// Filter by tag (substring match).
         #[arg(long)]
@@ -462,12 +462,12 @@ pub(crate) enum TacticsCommand {
         #[arg(long)]
         safety: Option<String>,
     },
-    /// Describe a single tactic: steps, validations, rollback.
+    /// Describe a single action: steps, validations, rollback.
     Describe {
-        /// Tactic id, e.g. `mongo.backup-restore`.
+        /// Action id, e.g. `mongo.backup-restore`.
         id: String,
     },
-    /// Resolve a free-text task description to a ranked list of candidate tactics.
+    /// Resolve a free-text task description to a ranked list of candidate actions.
     Resolve {
         /// The task description, e.g. "back up mongo before a migration".
         #[arg(long)]
@@ -476,14 +476,14 @@ pub(crate) enum TacticsCommand {
         #[arg(long, default_value = "5")]
         limit: usize,
     },
-    /// Execute a tactic. Without `--apply`, mutating/destructive tactics
+    /// Execute an action. Without `--apply`, mutating/destructive actions
     /// emit a structured plan and never invoke a subprocess. Read-only
-    /// tactics always run.
+    /// actions always run.
     Run {
-        /// Tactic id.
+        /// Action id.
         id: String,
         /// Provide a placeholder value, e.g. `--param profile=prod`. Repeat
-        /// for each placeholder referenced by the tactic.
+        /// for each placeholder referenced by the action.
         #[arg(long = "param", value_parser = parse_param_kv, action = clap::ArgAction::Append)]
         param: Vec<(String, String)>,
         /// Load params from a YAML file (`key: value` map). Merged with
@@ -494,39 +494,39 @@ pub(crate) enum TacticsCommand {
         /// Default: ${AYX_CONFIG_HOME}/audits/.
         #[arg(long)]
         audit_dir: Option<PathBuf>,
-        /// On a TTY, prompt interactively for any params that the tactic
+        /// On a TTY, prompt interactively for any params that the action
         /// requires but were not provided via --param or --param-file.
         /// Always off on stdin redirection / CI (we detect TTY).
         #[arg(long)]
         prompt_missing: bool,
     },
-    /// Cross-check every step in every loaded tactic against the catalog.
+    /// Cross-check every step in every loaded action against the catalog.
     /// Emits warnings for unknown command paths, capability ids, and
-    /// dangling workflow → tactic references. Read-only.
+    /// dangling workflow → action references. Read-only.
     Validate,
-    /// Print a tactic's full YAML so an operator can fork it into their
+    /// Print an action's full YAML so an operator can fork it into their
     /// config home (`${AYX_CONFIG_HOME}/registry/`) to override the bundled
     /// stdlib version.
     Export {
-        /// Tactic id.
+        /// Action id.
         id: String,
     },
 }
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum WorkflowsCommand {
-    /// List every workflow with its title, safety, and tactic count.
+    /// List every workflow with its title, safety, and action count.
     List {
         #[arg(long)]
         tag: Option<String>,
     },
-    /// Explain a workflow: title, safety, ordered tactic ids with summaries.
+    /// Explain a workflow: title, safety, ordered action ids with summaries.
     Explain {
         /// Workflow id, e.g. `governance.go-live`.
         id: String,
     },
-    /// Execute a workflow as an ordered chain of tactics. Honors the same
-    /// `--apply` semantics as `tactics run`.
+    /// Execute a workflow as an ordered chain of actions. Honors the same
+    /// `--apply` semantics as `actions run`.
     Run {
         /// Workflow id.
         id: String,
@@ -5946,7 +5946,7 @@ fn execute(cli: Cli) -> Result<Envelope> {
                 )
             }
         },
-        Command::Tactics { command } => cmd::registry::execute_tactics(cli.apply, command)?,
+        Command::Actions { command } => cmd::registry::execute_actions(cli.apply, command)?,
         Command::Workflows { command } => cmd::registry::execute_workflows(cli.apply, command)?,
         Command::Telemetry { command } => cmd::telemetry::execute(environment.as_deref(), command)?,
     };

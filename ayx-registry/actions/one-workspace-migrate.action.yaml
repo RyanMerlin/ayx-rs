@@ -38,9 +38,9 @@ steps:
       orchestrator is on the roadmap (see docs/roadmap/workspace-and-registry-tooling.md) — once it ships, the loop
       collapses to a single `tools workspace migrate --source <source> --target <target>`
       invocation with the same safety/audit guarantees.
-  - kind: tactic
+  - kind: action
     id: one.flow.promote
-    why: "Promote each flow individually so every step is gated and audited. Use this tactic in a shell loop seeded from the flow list above."
+    why: "Promote each flow individually so every step is gated and audited. Use this action in a shell loop seeded from the flow list above."
   - kind: note
     text: "Migration emits per-object audit artifacts under $AYX_CONFIG_HOME/audits/. Keep them — they are the rollback ledger."
 validations:

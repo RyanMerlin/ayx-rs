@@ -119,10 +119,10 @@ Run a structured health sweep to surface configuration issues, replication lag, 
 ayx mongo doctor --profile prod
 ```
 
-For the guided backup-then-restore tactic:
+For the guided backup-then-restore action:
 
 ```sh
-ayx tactics run mongo.backup-restore
+ayx actions run mongo.backup-restore
 ```
 
 ## Common flags
@@ -149,4 +149,4 @@ ayx --output json mongo status --profile prod
 
 - [Alteryx Server overview](/server/)
 - [Upgrade](/server/upgrade/)
-- [Tactics & workflows](/telemetry/tactics/) — see `mongo.backup-restore`, `mongo.doctor`, `mongo.queue.stuck`
+- [Actions & workflows](/telemetry/actions/) — see `mongo.backup-restore`, `mongo.doctor`, `mongo.queue.stuck`

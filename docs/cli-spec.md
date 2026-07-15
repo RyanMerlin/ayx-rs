@@ -120,7 +120,7 @@ The CLI is product-first. The stable top-level commands and families are:
 - `server`
 - `secret`
 - `audit`
-- `tactics`
+- `actions`
 - `workflows`
 - `telemetry`
 - `whoami`
@@ -148,7 +148,7 @@ The exact leaf inventory can expand, but the design rules are stable:
 - `ayx catalog describe <id>` resolves either a command path or capability id.
 - `catalog` remains the registry view for commands and capabilities.
 - If `catalog` is ever deprecated, it should get a clear compatibility window or alias path rather than vanishing before discovery exposes an equivalent stable registry surface.
-- The discovery ladder grows from commands to capabilities to tactics and
+- The discovery ladder grows from commands to capabilities to actions and
   workflows without changing the public ids.
 
 Capability ids should remain more stable than help text or internal module
