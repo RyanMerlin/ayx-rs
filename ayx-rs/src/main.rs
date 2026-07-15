@@ -1886,7 +1886,7 @@ pub(crate) enum OnePlansCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneFlowsCommand {
-    /// List One flows.
+    /// List One flows (flat — no folder structure; see `flows library` for a folder-aware view).
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -1907,13 +1907,13 @@ pub(crate) enum OneFlowsCommand {
         #[arg(long)]
         max_pages: Option<u32>,
     },
-    /// Count One flows.
+    /// Count One flows (flat — see `flows library count` for a breakdown that includes folders).
     Count {
         #[arg(long)]
         profile: Option<String>,
     },
     #[command(arg_required_else_help = true)]
-    /// Browse the One flow library (list, count).
+    /// Browse the One flow library: flows AND their containing folders together, unlike the flat `flows list`/`flows count` (list, count).
     Library {
         #[command(subcommand)]
         command: OneFlowLibraryCommand,
@@ -2152,7 +2152,7 @@ pub(crate) enum OneDatasetsImportedCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneFlowLibraryCommand {
-    /// List the One flow library.
+    /// List the One flow library — a folder-aware view combining flows and folders, unlike the flat `flows list`.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -2161,7 +2161,7 @@ pub(crate) enum OneFlowLibraryCommand {
         #[arg(long)]
         offset: Option<u32>,
     },
-    /// Count the One flow library.
+    /// Count the One flow library — returns separate flow/folder/total counts, unlike the flat `flows count`.
     Count {
         #[arg(long)]
         profile: Option<String>,
@@ -3927,42 +3927,59 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         name: "one flows list",
         path: "one/flows/list",
-        summary: "List One flows.",
+        summary: "List One flows (flat — no folder structure).",
         output: "one flows list envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /v4/flows in the One API docs."],
+        notes: &[
+            "Maps to GET /v4/flows in the One API docs.",
+            "Flat list of flow resources only — does not include folders. Use \
+             `one flows library list` for a folder-aware view that combines \
+             flows and folders.",
+        ],
     },
     CommandSpec {
         name: "one flows count",
         path: "one/flows/count",
-        summary: "Count One flows.",
+        summary: "Count One flows (flat).",
         output: "one flows count envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /v4/flows/count in the One API docs."],
+        notes: &[
+            "Maps to GET /v4/flows/count in the One API docs.",
+            "Returns a single flat count. Use `one flows library count` for a \
+             breakdown that includes folder counts.",
+        ],
     },
     CommandSpec {
         name: "one flows library list",
         path: "one/flows/library/list",
-        summary: "List the One flow library.",
+        summary: "List the One flow library (folder-aware: flows and folders together).",
         output: "one flows library list envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /v4/flowsLibrary in the One API docs."],
+        notes: &[
+            "Maps to GET /v4/flowsLibrary in the One API docs.",
+            "Unlike `one flows list`, this includes folders alongside flows — \
+             a combined, hierarchical view for browsing.",
+        ],
     },
     CommandSpec {
         name: "one flows library count",
         path: "one/flows/library/count",
-        summary: "Count the One flow library.",
+        summary: "Count the One flow library (folder-aware: separate flow/folder/total counts).",
         output: "one flows library count envelope",
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /v4/flowsLibrary/count in the One API docs."],
+        notes: &[
+            "Maps to GET /v4/flowsLibrary/count in the One API docs.",
+            "Response includes separate counts for flows, folders, and their \
+             total — unlike the single flat number from `one flows count`.",
+        ],
     },
     CommandSpec {
         name: "one flows folders list",
