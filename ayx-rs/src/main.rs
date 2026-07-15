@@ -1037,6 +1037,7 @@ pub(crate) enum WorkflowCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum DesignerCommand {
+    /// Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb
     #[command(subcommand)]
     Workflow(WorkflowCommand),
 }
