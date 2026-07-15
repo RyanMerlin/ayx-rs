@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-15 00:43:44 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-15 21:30:25 UTC._
 
 This is the curated **catalog** view — the agent-facing capability surface, not the complete command tree. For every command and flag, use `ayx --help`, `ayx <group> --help`, or `ayx discover --deep`.
 
@@ -23,6 +23,20 @@ cargo run -q -p xtask -- refresh-command-surface
 | --- | --- | --- | --- | --- |
 | catalog describe | `catalog/describe` | read-only | no | Describe a single command in the catalog. |
 | catalog list | `catalog/list` | read-only | no | List machine-readable command metadata. |
+
+### `designer`
+
+| Name | Path | Safety | Mutating | Summary |
+| --- | --- | --- | --- | --- |
+| designer workflow inspect | `designer/workflow/inspect` | read-only | no | Inspect Alteryx workflow, macro, package, or data artifacts. |
+| designer workflow migrate | `designer/workflow/migrate` | mutating | yes | Perform an end-to-end workflow XML migration pass. |
+| designer workflow publish | `designer/workflow/publish` | mutating | yes | Republish a workflow package through the Server API. |
+| designer workflow recurse | `designer/workflow/recurse` | mutating | yes | Recursively apply XML replacement rules across workflow artifacts. |
+| designer workflow repackage | `designer/workflow/repackage` | mutating | yes | Rebuild a .yxzp package from a directory tree. |
+| designer workflow replace | `designer/workflow/replace` | mutating | yes | Find and replace text in workflow XML or packages. |
+| designer workflow scan | `designer/workflow/scan` | read-only | no | Preflight scan workflow artifacts for rule matches without rewriting. |
+| designer workflow unpack | `designer/workflow/unpack` | read-only | no | Unpack a .yxzp workflow package. |
+| designer workflow validate | `designer/workflow/validate` | read-only | no | Validate workflow and macro XML structures. |
 
 ### `discover`
 
@@ -258,20 +272,6 @@ cargo run -q -p xtask -- refresh-command-surface
 | server-logs discover | `server-logs/discover` | read-only | no | Inventory every Server log file the profile knows about. |
 | server-logs inventory | `server-logs/inventory` | read-only | no | Aggregate counts and time ranges across all Server logs. |
 | server-logs summary | `server-logs/summary` | read-only | no | Summarize a single log file (line count, error count, time range). |
-
-### `workflow`
-
-| Name | Path | Safety | Mutating | Summary |
-| --- | --- | --- | --- | --- |
-| workflow inspect | `workflow/inspect` | read-only | no | Inspect Alteryx workflow, macro, package, or data artifacts. |
-| workflow migrate | `workflow/migrate` | mutating | yes | Perform an end-to-end workflow XML migration pass. |
-| workflow publish | `workflow/publish` | mutating | yes | Republish a workflow package through the Server API. |
-| workflow recurse | `workflow/recurse` | mutating | yes | Recursively apply XML replacement rules across workflow artifacts. |
-| workflow repackage | `workflow/repackage` | mutating | yes | Rebuild a .yxzp package from a directory tree. |
-| workflow replace | `workflow/replace` | mutating | yes | Find and replace text in workflow XML or packages. |
-| workflow scan | `workflow/scan` | read-only | no | Preflight scan workflow artifacts for rule matches without rewriting. |
-| workflow unpack | `workflow/unpack` | read-only | no | Unpack a .yxzp workflow package. |
-| workflow validate | `workflow/validate` | read-only | no | Validate workflow and macro XML structures. |
 
 ## Capabilities
 

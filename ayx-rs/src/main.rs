@@ -300,12 +300,12 @@ enum Command {
         command: SecretCommand,
     },
     #[command(
-        about = "Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb",
+        about = "Alteryx Designer / Server artifact tooling — .yxmd/.yxmc/.yxzp/.yxdb",
         arg_required_else_help = true
     )]
-    Workflow {
+    Designer {
         #[command(subcommand)]
-        command: WorkflowCommand,
+        command: DesignerCommand,
     },
     #[command(
         about = "Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls",
@@ -1033,6 +1033,13 @@ pub(crate) enum WorkflowCommand {
         #[arg(long)]
         csv: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum DesignerCommand {
+    /// Workflow package and XML tooling for .yxmd, .yxmc, .yxzp, and .yxdb
+    #[command(subcommand)]
+    Workflow(WorkflowCommand),
 }
 
 #[cfg(feature = "ui")]
@@ -3014,8 +3021,8 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Product branch ready; API subcommands are the primary entry point."],
     },
     CommandSpec {
-        name: "workflow inspect",
-        path: "workflow/inspect",
+        name: "designer workflow inspect",
+        path: "designer/workflow/inspect",
         summary: "Inspect Alteryx workflow, macro, package, or data artifacts.",
         output: "workflow inspection envelope",
         safety: "read-only",
@@ -3027,8 +3034,8 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
-        name: "workflow unpack",
-        path: "workflow/unpack",
+        name: "designer workflow unpack",
+        path: "designer/workflow/unpack",
         summary: "Unpack a .yxzp workflow package.",
         output: "workflow unpack envelope",
         safety: "read-only",
@@ -3037,8 +3044,8 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Preserves the archive contents in a directory tree for XML-level edits."],
     },
     CommandSpec {
-        name: "workflow validate",
-        path: "workflow/validate",
+        name: "designer workflow validate",
+        path: "designer/workflow/validate",
         summary: "Validate workflow and macro XML structures.",
         output: "workflow validation envelope",
         safety: "read-only",
@@ -3047,8 +3054,8 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Validates .yxmd, .yxmc, .yxzp, or directories of workflow artifacts."],
     },
     CommandSpec {
-        name: "workflow replace",
-        path: "workflow/replace",
+        name: "designer workflow replace",
+        path: "designer/workflow/replace",
         summary: "Find and replace text in workflow XML or packages.",
         output: "workflow replacement envelope",
         safety: "mutating",
@@ -3060,8 +3067,8 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
-        name: "workflow repackage",
-        path: "workflow/repackage",
+        name: "designer workflow repackage",
+        path: "designer/workflow/repackage",
         summary: "Rebuild a .yxzp package from a directory tree.",
         output: "workflow repackage envelope",
         safety: "mutating",
@@ -3070,8 +3077,8 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &["Useful after XML-level edits to workflow package contents."],
     },
     CommandSpec {
-        name: "workflow migrate",
-        path: "workflow/migrate",
+        name: "designer workflow migrate",
+        path: "designer/workflow/migrate",
         summary: "Perform an end-to-end workflow XML migration pass.",
         output: "workflow migration envelope",
         safety: "mutating",
@@ -3083,8 +3090,8 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
-        name: "workflow recurse",
-        path: "workflow/recurse",
+        name: "designer workflow recurse",
+        path: "designer/workflow/recurse",
         summary: "Recursively apply XML replacement rules across workflow artifacts.",
         output: "workflow recurse envelope",
         safety: "mutating",
@@ -3099,8 +3106,8 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
-        name: "workflow scan",
-        path: "workflow/scan",
+        name: "designer workflow scan",
+        path: "designer/workflow/scan",
         summary: "Preflight scan workflow artifacts for rule matches without rewriting.",
         output: "workflow scan envelope",
         safety: "read-only",
@@ -3115,8 +3122,8 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         ],
     },
     CommandSpec {
-        name: "workflow publish",
-        path: "workflow/publish",
+        name: "designer workflow publish",
+        path: "designer/workflow/publish",
         summary: "Republish a workflow package through the Server API.",
         output: "workflow publish envelope",
         safety: "mutating",
@@ -5600,7 +5607,11 @@ fn execute(cli: Cli) -> Result<Envelope> {
         Command::Mongo { command } => cmd::mongo::execute(environment.as_deref(), command)?,
         Command::Server { command } => cmd::server::execute(environment.as_deref(), command)?,
         Command::Sqlserver { command } => cmd::sqlserver::execute(environment.as_deref(), command)?,
-        Command::Workflow { command } => cmd::workflow::execute(environment.as_deref(), command)?,
+        Command::Designer { command } => match command {
+            DesignerCommand::Workflow(command) => {
+                cmd::workflow::execute(environment.as_deref(), command)?
+            }
+        },
         Command::Tools { command } => cmd::tools::execute(command)?,
         Command::Onboard {
             profile,

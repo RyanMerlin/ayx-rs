@@ -64,7 +64,7 @@ ayx server api status
 cargo install --locked --path ayx-rs
 ```
 
-5. Use `--output json` when another tool should consume the result. For `workflow yxdb`, pair `--csv <path>` with top-level `--output json` if you want both export and structured metadata.
+5. Use `--output json` when another tool should consume the result. For `designer workflow yxdb`, pair `--csv <path>` with top-level `--output json` if you want both export and structured metadata.
 
 ## Quick Examples
 
@@ -250,7 +250,7 @@ The repository includes a `docs/fixtures/RuntimeSettings.xml` fixture for offlin
 - `one` — Alteryx One platform branch and API surface
 - `tools` — cross-environment tools for `environments.yaml` source/target workflows (`compare` and the migration helpers are preview / not yet implemented)
 - `secret` — keyring secret inspection and maintenance
-- `workflow` — workflow package and XML tooling for `.yxmd`, `.yxmc`, `.yxzp`, and `.yxdb`
+- `designer` — Alteryx Designer / Server artifact tooling; `designer workflow` handles `.yxmd`, `.yxmc`, `.yxzp`, and `.yxdb`
 - `server` — Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls
 - `mongo` — embedded and managed Mongo inventory, backup, restore, query, and doctor helpers (`mutate` is preview / not yet implemented)
 - `sqlserver` — SQL Server status, prechecks, connection helpers, and migration planning
