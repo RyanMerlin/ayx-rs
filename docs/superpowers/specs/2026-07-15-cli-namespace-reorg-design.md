@@ -96,9 +96,11 @@ only the top-level wrapping structure changes:
   command: DesignerCommand }`; `DesignerCommand` has one variant, `Workflow
   { command: WorkflowCommand }`, reusing the existing type. Old top-level
   `Workflow` variant removed.
-- **A2 (`tactics` → `actions`):** rename the variant and the underlying
-  `TacticsCommand` type to `ActionsCommand` (rename the Rust type too, not
-  just the CLI string), plus `cmd::tactics` module → `cmd::actions`.
+- **A2 (`tactics` → `actions`):** **full rename of the noun** — see the
+  "A2 scope amendment" below. `TacticsCommand` → `ActionsCommand`, and the
+  `tactic` domain vocabulary is renamed to `action` throughout: the
+  `ayx-registry` public types, the on-disk YAML directory, the JSON envelope
+  keys, and all human-readable strings.
 - **A3 (`workflows` → `actions workflows`):** remove the standalone
   `Command::Workflows` variant; add `Workflows { command: WorkflowsCommand
   }` *inside* `ActionsCommand`, reusing the existing `WorkflowsCommand` type.
@@ -106,6 +108,39 @@ only the top-level wrapping structure changes:
 **Sequencing:** A2 must land before A3 (A3's `ActionsCommand` type doesn't
 exist until A2 creates it). A1 is fully independent and can land in any
 order relative to A2/A3.
+
+### A2 scope amendment (2026-07-15, approved by Merlin)
+
+Two corrections to A2 as originally written, found during implementation prep:
+
+**1. `cmd::tactics` does not exist.** The original text prescribed renaming a
+`cmd::tactics` module to `cmd::actions`. There is no such module — dispatch
+lives in `cmd::registry::execute_tactics` (`ayx-rs/src/cmd/registry.rs`,
+which serves both `tactics` and `workflows`). Rename the function to
+`execute_actions`; the `cmd::registry` module keeps its name.
+
+**2. The rename is the noun, not just the surface.** `tactic` is a domain
+term with four layers, and the original A2 text scoped only the first:
+
+| Layer | Renamed? |
+|---|---|
+| CLI word + `TacticsCommand` → `ActionsCommand` | yes |
+| Human strings (`"12 tactic(s)"`, error text) | yes |
+| JSON envelope keys (`tactics`, `tactic_id`, `tactic_count`) | yes |
+| `ayx-registry` public API (`Tactic`, `TacticNotFound`, `Step::Tactic`) | yes |
+| On-disk YAML dir (`tactics/*.yaml`) + search path | yes → `actions/*.yaml` |
+
+**Why full, not surface-only:** this spec's own approved structure requires
+it. Mapping `tactics` → `actions` *and* `workflows` → `actions workflows`
+only coheres if `action` == `tactic` (actions are the leaf things; "actions
+workflows" are compositions of them). A surface-only rename ships
+`ayx actions list` printing `12 tactic(s)` and emitting `{"tactics": [...]}`.
+
+**Why now:** this breaks the on-disk YAML contract and the agent-facing JSON
+contract. ayx-rs is public but **not yet announced**, so the installed base
+with custom tactic YAML is effectively zero. This is the cheapest this rename
+will ever be; after the announce it becomes a permanent migration burden.
+The 0.14.0 announce gate is precisely why the surface must be coherent.
 
 Also touched per rename: the `CommandSpec` catalog entries in `main.rs`
 (name/path fields), `docs/command-surface.md` regeneration (`cargo run -p
