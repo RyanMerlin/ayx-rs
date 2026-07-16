@@ -494,8 +494,15 @@ fn old_top_level_workflows_command_no_longer_resolves() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("unexpected argument 'workflows'"));
-    assert!(stderr.contains("workflows"));
+    // Which message clap emits depends on its parse path: the hidden global
+    // `environment_tail` positional makes it report an unexpected argument
+    // rather than an unrecognized subcommand. Accept either — the contract
+    // under test is that the old top-level path no longer resolves, not the
+    // wording clap happens to pick.
+    assert!(
+        stderr.contains("unexpected argument 'workflows'")
+            || stderr.contains("unrecognized subcommand 'workflows'")
+    );
 }
 
 #[test]
