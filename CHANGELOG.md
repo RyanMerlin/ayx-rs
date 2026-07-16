@@ -13,6 +13,10 @@
 
   No back-compat alias and no dual-read. A pre-0.14.0 `*.tactic.yaml` in your registry search path is **not loaded** — it is skipped with a warning naming the file, because staying silent would let a bundled action quietly reclaim an id you had overridden (and if your override tightened `safety`, the gate would silently relax). Rename the file and update any `kind: tactic` step to `kind: action`. Subcommands (`list`, `describe`, `resolve`, `run`, `validate`, `export`) are unchanged.
 
+### Fixed
+
+- **`ayx one login`'s email-OTP flow no longer treats a transient network blip or a typo as a full restart.** Every HTTP call in the flow (sendPasscode, validatePasscode, the OIDC redirect chain, the workspace-password submission, the PAT mint) previously had zero retry logic, and a wrong OTP code or wrong workspace password was an immediate, unrecoverable failure — any of these forced starting over from `sendPasscode`, which means a brand-new OTP email every time. Calls with no duplication risk (validatePasscode, the workspace-password POST, read-only lookups) now retry transient network failures and 429/5xx responses; calls with a real side effect (sendPasscode, the PAT mint) retry only when we're confident the request never reached the server, never on an ambiguous timeout or 5xx, so a retry can't send a second OTP email or mint an orphaned second PAT. A wrong OTP gets up to 3 local re-prompts against the same passcode reference before one fresh passcode is sent automatically (capped at 2 sends total); a wrong interactively-typed workspace password gets up to 3 re-prompts (a password sourced from `AYX_ONE_WS_PASSWORD` fails fast instead, since retrying a fixed value that's wrong just wastes requests).
+
 ## 0.13.2 — 2026-07-15
 
 ### Fixed

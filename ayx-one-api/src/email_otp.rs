@@ -11,13 +11,111 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use ayx_core::observability::redact_text;
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 use reqwest::cookie::{CookieStore as _, Jar};
 use reqwest::redirect::Policy;
 use serde_json::Value;
 
 const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
     (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+
+/// Attempts for HTTP calls where repeating the same request has no
+/// duplication risk (either it's read-only, or a retried POST like
+/// validatePasscode/session has no side effect beyond the first success).
+/// Calls where a retry COULD duplicate a side effect (sendPasscode,
+/// apiAccessTokens mint) use a narrower retry predicate instead of a
+/// separate constant — see `is_pre_send_failure`.
+const TRANSIENT_RETRY_ATTEMPTS: u32 = 3;
+/// Local re-prompt attempts against a single passcodeReferenceId before
+/// falling back to sending a fresh passcode.
+const OTP_ATTEMPTS_PER_REFERENCE: u32 = 3;
+/// Total passcode emails sent per login() call before giving up entirely.
+const MAX_OTP_SENDS: u32 = 2;
+/// Workspace-password re-prompt attempts before bailing (interactive path
+/// only — see workspace_login_with_reprompt).
+const WORKSPACE_PASSWORD_ATTEMPTS: u32 = 3;
+
+/// Retries `attempt_once` up to `max_attempts` times. `should_retry_err`
+/// decides whether a returned error is worth retrying; `should_retry_ok`
+/// does the same for a value that came back successfully but still
+/// warrants another try (e.g. an HTTP 429/5xx that round-tripped fine at
+/// the transport level). Sleeps between attempts using the crate's
+/// existing jittered backoff (`crate::retry_delay`), the same pacing
+/// already used by the rest of this crate's One API request loop.
+///
+/// Generic over `T`/`E` so the retry mechanics can be unit tested without
+/// constructing real `reqwest` types (which have no public test
+/// constructors) — callers plug in `reqwest::blocking::Response` /
+/// `reqwest::Error` at the call site.
+fn retry_transient<T, E>(
+    max_attempts: u32,
+    should_retry_err: impl Fn(&E) -> bool,
+    should_retry_ok: impl Fn(&T) -> bool,
+    mut attempt_once: impl FnMut() -> Result<T, E>,
+) -> Result<T, E> {
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        match attempt_once() {
+            Ok(value) => {
+                if attempt >= max_attempts || !should_retry_ok(&value) {
+                    return Ok(value);
+                }
+            }
+            Err(err) => {
+                if attempt >= max_attempts || !should_retry_err(&err) {
+                    return Err(err);
+                }
+            }
+        }
+        std::thread::sleep(crate::retry_delay(attempt, None));
+    }
+}
+
+/// A transport failure where we're confident the request never reached the
+/// server — an immediate, synchronous connect-phase failure (DNS resolution
+/// failure, TCP connection refused, TLS handshake rejected). Safe to retry
+/// even for calls with a side effect (an OTP email send, a PAT mint) because
+/// there is no risk the server already processed the request.
+///
+/// Deliberately checks connection-phase only (`reqwest::Error::is_connect`),
+/// NOT `is_timeout`: for the client this crate builds (a general `.timeout()`
+/// with no separate `.connect_timeout()` — see `email_otp_login`), a
+/// connect-phase timeout does not set `is_connect()`. reqwest's overall
+/// `.timeout()` fires ahead of hyper_util's connect-wrapped error path, so a
+/// connect attempt that itself times out (e.g. TCP SYN never ACKed) reports
+/// as a bare `is_timeout() == true` / `is_connect() == false` failure under
+/// this client's configuration, not as `is_connect()`. That case is
+/// deliberately excluded from this predicate — it is NOT known to be
+/// pre-send, since a request could plausibly have been in flight when the
+/// overall timeout fired. Only genuinely synchronous, immediate connect
+/// failures are covered here. If this client ever adds `.connect_timeout()`,
+/// this predicate's coverage should be re-verified.
+fn is_pre_send_failure(err: &reqwest::Error) -> bool {
+    err.is_connect()
+}
+
+/// Any transport-level failure — connect or timeout, pre-send or
+/// post-send — treated as retryable for calls with no duplication risk
+/// (repeating the request has no side effect beyond the first successful
+/// attempt). Deliberately broader than `is_pre_send_failure`: it also
+/// covers a post-send timeout (waiting on a response after the connection
+/// was already established), which is fine here because the caller has
+/// already been classified as duplication-safe to retry regardless of
+/// whether the prior attempt's request reached the server.
+fn is_transient_transport_error(err: &reqwest::Error) -> bool {
+    err.is_connect() || err.is_timeout()
+}
+
+/// Whether a *successfully received* response (any status) is worth
+/// retrying. Reuses this crate's existing status-based retry policy
+/// (`crate::should_retry_status`, already covered by
+/// `retry_policy_retries_gets_but_not_mutations` in `lib.rs`) with
+/// `mutating = false` — every call site that uses this predicate has
+/// already been classified as duplication-safe to retry.
+fn retryable_status_response(response: &Response) -> bool {
+    crate::should_retry_status(response.status(), false)
+}
 
 /// Result of a successful email OTP login.
 pub struct OtpAuthResult {
@@ -27,6 +125,171 @@ pub struct OtpAuthResult {
     pub workspace_gid: String,
     /// ISO 8601 expiry from `tokenInfo.expiredAt`, if present.
     pub token_expires_at: Option<String>,
+}
+
+/// `POST /v4/auth/sendPasscode`. Retries only on a pre-send failure — see
+/// `is_pre_send_failure` — because a retry after the request reached the
+/// server risks sending a second passcode email for the same login attempt.
+fn send_passcode(client: &Client, base: &str, email: &str) -> Result<String> {
+    let response = retry_transient(
+        TRANSIENT_RETRY_ATTEMPTS,
+        is_pre_send_failure,
+        |_: &Response| false,
+        || {
+            client
+                .post(format!("{base}/v4/auth/sendPasscode"))
+                .json(&serde_json::json!({ "email": email }))
+                .send()
+        },
+    )
+    .context("sendPasscode request failed")?
+    .error_for_status()
+    .context("sendPasscode returned an error status")?;
+    let send: Value = response
+        .json()
+        .context("sendPasscode response was not JSON")?;
+    let reference_id = send["passcodeReferenceId"]
+        .as_str()
+        .context("sendPasscode response missing passcodeReferenceId")?
+        .to_string();
+    Ok(reference_id)
+}
+
+/// `POST /v4/auth/validatePasscode`. Retries on any transient transport
+/// failure or retryable status — resubmitting the same code has no
+/// duplication risk, unlike sendPasscode.
+fn validate_passcode(
+    client: &Client,
+    base: &str,
+    email: &str,
+    reference_id: &str,
+    code: &str,
+) -> Result<()> {
+    let response = retry_transient(
+        TRANSIENT_RETRY_ATTEMPTS,
+        is_transient_transport_error,
+        retryable_status_response,
+        || {
+            client
+                .post(format!("{base}/v4/auth/validatePasscode"))
+                .json(&serde_json::json!({
+                    "email": email,
+                    "passcode": code.trim(),
+                    "passcodeReferenceId": reference_id,
+                }))
+                .send()
+        },
+    )
+    .context("validatePasscode request failed")?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().unwrap_or_default();
+        bail!(
+            "validatePasscode failed: HTTP {status}: {}",
+            redact_text(&body.chars().take(200).collect::<String>())
+        );
+    }
+    Ok(())
+}
+
+/// `POST /session` (workspace password). Retries on any transient
+/// transport failure or retryable status — resubmitting the same password
+/// has no duplication risk.
+fn submit_workspace_password(
+    client: &Client,
+    base: &str,
+    email: &str,
+    password: &str,
+) -> Result<()> {
+    let response = retry_transient(
+        TRANSIENT_RETRY_ATTEMPTS,
+        is_transient_transport_error,
+        retryable_status_response,
+        || {
+            client
+                .post(format!("{base}/session"))
+                .form(&[("email", email), ("password", password)])
+                .send()
+        },
+    )
+    .context("POST /session (workspace password) failed")?;
+    if !response.status().is_success() {
+        bail!(
+            "workspace password rejected: POST /session returned HTTP {}",
+            response.status()
+        );
+    }
+    Ok(())
+}
+
+/// What to do after a `validate_passcode` rejection, given how many local
+/// attempts have been made against the current reference (`attempt`, 1-
+/// indexed, already includes the failing one) and how many passcodes have
+/// been sent so far (`sends`, 1-indexed).
+#[derive(Debug, PartialEq, Eq)]
+enum OtpAction {
+    /// Attempts remain against the current reference — ask for the code again.
+    Reprompt,
+    /// The local attempt budget for this reference is exhausted, but
+    /// there's sends budget left — send a fresh passcode and reset.
+    Resend,
+    /// Both budgets are exhausted — bail.
+    GiveUp,
+}
+
+fn next_otp_action(attempt: u32, sends: u32) -> OtpAction {
+    if attempt < OTP_ATTEMPTS_PER_REFERENCE {
+        OtpAction::Reprompt
+    } else if sends < MAX_OTP_SENDS {
+        OtpAction::Resend
+    } else {
+        OtpAction::GiveUp
+    }
+}
+
+/// Sends a passcode and validates it, re-prompting on a wrong/expired code
+/// (up to `OTP_ATTEMPTS_PER_REFERENCE` times against the same reference)
+/// and automatically sending a fresh passcode if that budget is exhausted
+/// (up to `MAX_OTP_SENDS` sends total). See the module-level design note
+/// on why this doesn't need to parse the API's exact rejection reason.
+fn otp_login_with_reprompt<F>(client: &Client, base: &str, email: &str, get_otp: &F) -> Result<()>
+where
+    F: Fn() -> Result<String>,
+{
+    let mut sends = 0u32;
+    loop {
+        sends += 1;
+        let reference_id = send_passcode(client, base, email)?;
+        if sends > 1 {
+            eprintln!("Sent a new passcode to {email}.");
+        }
+        let mut attempt = 0u32;
+        loop {
+            attempt += 1;
+            let otp = get_otp()?;
+            match validate_passcode(client, base, email, &reference_id, &otp) {
+                Ok(()) => return Ok(()),
+                Err(err) => match next_otp_action(attempt, sends) {
+                    OtpAction::Reprompt => {
+                        eprintln!(
+                            "Incorrect or expired passcode ({attempt}/{OTP_ATTEMPTS_PER_REFERENCE}) — try again."
+                        );
+                    }
+                    OtpAction::Resend => {
+                        eprintln!(
+                            "Still not accepted after {OTP_ATTEMPTS_PER_REFERENCE} tries — sending a new passcode..."
+                        );
+                        break;
+                    }
+                    OtpAction::GiveUp => {
+                        return Err(err.context(format!(
+                            "passcode rejected {OTP_ATTEMPTS_PER_REFERENCE} times across {sends} passcode(s) sent"
+                        )));
+                    }
+                },
+            }
+        }
+    }
 }
 
 /// Authenticate via email OTP and return a 30-day PAT.
@@ -92,40 +355,9 @@ where
         let _ = client.get(warm_url).send();
     }
 
-    // 1. Send the passcode.
-    let send: Value = client
-        .post(format!("{base}/v4/auth/sendPasscode"))
-        .json(&serde_json::json!({ "email": email }))
-        .send()
-        .context("sendPasscode request failed")?
-        .error_for_status()
-        .context("sendPasscode returned an error status")?
-        .json()
-        .context("sendPasscode response was not JSON")?;
-    let reference_id = send["passcodeReferenceId"]
-        .as_str()
-        .context("sendPasscode response missing passcodeReferenceId")?
-        .to_string();
-
-    // 2. Prompt for the OTP and validate it.
-    let otp = get_otp()?;
-    let validate = client
-        .post(format!("{base}/v4/auth/validatePasscode"))
-        .json(&serde_json::json!({
-            "email": email,
-            "passcode": otp.trim(),
-            "passcodeReferenceId": reference_id,
-        }))
-        .send()
-        .context("validatePasscode request failed")?;
-    let validate_status = validate.status();
-    if !validate_status.is_success() {
-        let body = validate.text().unwrap_or_default();
-        bail!(
-            "validatePasscode failed: HTTP {validate_status}: {}",
-            redact_text(&body.chars().take(200).collect::<String>())
-        );
-    }
+    // 1-2. Send the passcode and validate it, retrying wrong entries and
+    //      automatically requesting a fresh passcode if the reference dies.
+    otp_login_with_reprompt(&client, base, email, get_otp)?;
 
     // 3. Enter the workspace; follow redirects to the password page and capture
     //    the OIDC interaction id.
@@ -148,19 +380,8 @@ where
          the auth flow may have changed",
     )?;
 
-    // 4. Submit the workspace password.
-    let ws_password = resolve_workspace_password()?;
-    let session = client
-        .post(format!("{base}/session"))
-        .form(&[("email", email), ("password", ws_password.as_str())])
-        .send()
-        .context("POST /session (workspace password) failed")?;
-    if !session.status().is_success() {
-        bail!(
-            "workspace password rejected: POST /session returned HTTP {}",
-            session.status()
-        );
-    }
+    // 4. Submit the workspace password, re-prompting on rejection.
+    workspace_login_with_reprompt(&client, base, email)?;
 
     // 5. Resume the OIDC interaction; the BFF exchanges the code server-side and
     //    sets the local-auth-workspace cookie.
@@ -174,23 +395,33 @@ where
         .context("local-auth-workspace cookie was not set — authentication did not complete")?;
     let bearer = decode_local_auth_workspace(&law)?;
 
-    // 7. Mint a 30-day PAT.
+    // 7. Mint a 30-day PAT. Retries only on a pre-send failure — a retry
+    //    after the request reached the server risks minting a second,
+    //    orphaned PAT the caller never sees (see is_pre_send_failure).
     let csrf = cookie_value_from_jar(&jar, &base_for_cookies, "x-csrf-token").unwrap_or_default();
-    let pat: Value = client
-        .post(format!("{base}/v4/apiAccessTokens"))
-        .header("x-csrf-token", csrf)
-        .header("x-alteryx-workspace-gid", workspace_gid)
-        .bearer_auth(&bearer)
-        .json(&serde_json::json!({
-            "name": "ayx-rs-cli",
-            "lifetimeSeconds": 2_592_000,
-        }))
-        .send()
-        .context("apiAccessTokens request failed")?
-        .error_for_status()
-        .context("apiAccessTokens returned an error status")?
-        .json()
-        .context("apiAccessTokens response was not JSON")?;
+    let pat_payload = serde_json::json!({
+        "name": "ayx-rs-cli",
+        "lifetimeSeconds": 2_592_000,
+    });
+    let pat: Value = retry_transient(
+        TRANSIENT_RETRY_ATTEMPTS,
+        is_pre_send_failure,
+        |_: &Response| false,
+        || {
+            client
+                .post(format!("{base}/v4/apiAccessTokens"))
+                .header("x-csrf-token", csrf.as_str())
+                .header("x-alteryx-workspace-gid", workspace_gid)
+                .bearer_auth(&bearer)
+                .json(&pat_payload)
+                .send()
+        },
+    )
+    .context("apiAccessTokens request failed")?
+    .error_for_status()
+    .context("apiAccessTokens returned an error status")?
+    .json()
+    .context("apiAccessTokens response was not JSON")?;
 
     let access_token = pat["tokenValue"]
         .as_str()
@@ -223,12 +454,19 @@ fn resolve_workspace_name(
         &[("includeInvited", "workspaces,accounts")],
     )
     .context("failed to build accounts URL")?;
-    let accounts_resp = client
-        .get(accounts_url)
-        // The accounts endpoint identifies the caller via this header, not session cookies.
-        .header("x-alteryx-auth-email", email)
-        .send()
-        .context("failed to fetch /v4/auth/accounts")?;
+    let accounts_resp = retry_transient(
+        TRANSIENT_RETRY_ATTEMPTS,
+        is_transient_transport_error,
+        retryable_status_response,
+        || {
+            client
+                .get(accounts_url.clone())
+                // The accounts endpoint identifies the caller via this header, not session cookies.
+                .header("x-alteryx-auth-email", email)
+                .send()
+        },
+    )
+    .context("failed to fetch /v4/auth/accounts")?;
     if !accounts_resp.status().is_success() {
         let status = accounts_resp.status();
         let body = accounts_resp.text().unwrap_or_default();
@@ -258,14 +496,15 @@ fn resolve_workspace_name(
     bail!("workspace {workspace_gid} not found in /v4/auth/accounts (not a member?)")
 }
 
-/// Read the workspace password from `AYX_ONE_WS_PASSWORD`, prompting on the
-/// terminal (masked, no echo) if it is not set.
-fn resolve_workspace_password() -> Result<String> {
-    if let Ok(pw) = std::env::var("AYX_ONE_WS_PASSWORD")
-        && !pw.is_empty()
-    {
-        return Ok(pw);
-    }
+/// The workspace password from `AYX_ONE_WS_PASSWORD`, if set and non-empty.
+fn workspace_password_from_env() -> Option<String> {
+    std::env::var("AYX_ONE_WS_PASSWORD")
+        .ok()
+        .filter(|pw| !pw.is_empty())
+}
+
+/// Prompt on the terminal for the workspace password (masked, no echo).
+fn prompt_workspace_password() -> Result<String> {
     eprint!("Workspace password: ");
     std::io::stderr().flush().ok();
     let pw = rpassword::read_password().context(
@@ -277,6 +516,51 @@ fn resolve_workspace_password() -> Result<String> {
         bail!("workspace password is required (set AYX_ONE_WS_PASSWORD or enter it when prompted)");
     }
     Ok(pw)
+}
+
+/// Whether to try the workspace password again after a rejection.
+/// A password sourced from `AYX_ONE_WS_PASSWORD` never gets retried — a
+/// fixed environment value will fail identically every time, so retrying
+/// it would just burn attempts (and requests against the live auth
+/// endpoint) for nothing. Only an interactively-typed password, which
+/// could have been mistyped, gets the retry budget.
+fn should_retry_workspace_password(attempt: u32, from_env: bool) -> bool {
+    !from_env && attempt < WORKSPACE_PASSWORD_ATTEMPTS
+}
+
+/// Submits the workspace password, re-prompting on rejection when the
+/// password came from interactive input (see should_retry_workspace_password).
+fn workspace_login_with_reprompt(client: &Client, base: &str, email: &str) -> Result<()> {
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        let password_source = workspace_password_from_env();
+        let from_env = password_source.is_some();
+        let password = match password_source {
+            Some(pw) => pw,
+            None => prompt_workspace_password()?,
+        };
+        match submit_workspace_password(client, base, email, &password) {
+            Ok(()) => return Ok(()),
+            Err(err) if from_env => {
+                return Err(err.context(
+                    "AYX_ONE_WS_PASSWORD was rejected — not retrying, since a fixed \
+                     environment value won't change between attempts; check the secret",
+                ));
+            }
+            Err(err) if !should_retry_workspace_password(attempt, from_env) => {
+                return Err(err.context(format!(
+                    "workspace password rejected {WORKSPACE_PASSWORD_ATTEMPTS} times — \
+                     run `ayx one login` again"
+                )));
+            }
+            Err(_) => {
+                eprintln!(
+                    "Workspace password rejected ({attempt}/{WORKSPACE_PASSWORD_ATTEMPTS}) — try again."
+                );
+            }
+        }
+    }
 }
 
 /// Returns `true` if `host` is allowed given the auth base host.
@@ -322,14 +606,21 @@ fn follow_redirects(client: &Client, start: reqwest::Url, max_hops: usize) -> Re
     let mut visited = vec![start.to_string()];
     let mut current = start;
     for _ in 0..max_hops {
-        let resp = client
-            .get(current.clone())
-            .header(
-                reqwest::header::ACCEPT,
-                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            )
-            .send()
-            .with_context(|| format!("request to {current} failed"))?;
+        let resp = retry_transient(
+            TRANSIENT_RETRY_ATTEMPTS,
+            is_transient_transport_error,
+            retryable_status_response,
+            || {
+                client
+                    .get(current.clone())
+                    .header(
+                        reqwest::header::ACCEPT,
+                        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    )
+                    .send()
+            },
+        )
+        .with_context(|| format!("request to {current} failed"))?;
         let status = resp.status();
         if !status.is_redirection() {
             return Ok(visited);
@@ -442,10 +733,200 @@ fn cookie_value_from_jar(jar: &Jar, url: &url::Url, name: &str) -> Option<String
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        extract_interaction_id, host_allowed, is_valid_interaction_id, resolve_workspace_password,
-    };
+    use super::OtpAction;
+    use super::retry_transient;
+    use super::should_retry_workspace_password;
+    use super::{extract_interaction_id, host_allowed, is_valid_interaction_id, next_otp_action};
+    use super::{prompt_workspace_password, workspace_password_from_env};
     use serial_test::serial;
+
+    #[test]
+    fn next_otp_action_reprompts_when_attempts_remain() {
+        assert_eq!(next_otp_action(1, 1), OtpAction::Reprompt);
+        assert_eq!(next_otp_action(2, 1), OtpAction::Reprompt);
+    }
+
+    #[test]
+    fn next_otp_action_resends_when_attempts_and_sends_exhausted_but_sends_remain() {
+        assert_eq!(next_otp_action(3, 1), OtpAction::Resend);
+    }
+
+    #[test]
+    fn next_otp_action_gives_up_when_attempts_and_sends_both_exhausted() {
+        assert_eq!(next_otp_action(3, 2), OtpAction::GiveUp);
+    }
+
+    #[test]
+    fn retry_transient_returns_ok_on_first_success() {
+        let mut calls = 0u32;
+        let result: Result<u32, &'static str> = retry_transient(
+            3,
+            |_: &&'static str| true,
+            |_: &u32| false,
+            || {
+                calls += 1;
+                Ok(7)
+            },
+        );
+        assert_eq!(result, Ok(7));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn retry_transient_retries_on_retryable_err_then_succeeds() {
+        let mut calls = 0u32;
+        let result: Result<u32, &'static str> = retry_transient(
+            3,
+            |_: &&'static str| true,
+            |_: &u32| false,
+            || {
+                calls += 1;
+                if calls < 3 { Err("transient") } else { Ok(42) }
+            },
+        );
+        assert_eq!(result, Ok(42));
+        assert_eq!(calls, 3);
+    }
+
+    #[test]
+    fn retry_transient_stops_at_max_attempts_on_persistent_err() {
+        let mut calls = 0u32;
+        let result: Result<u32, &'static str> = retry_transient(
+            3,
+            |_: &&'static str| true,
+            |_: &u32| false,
+            || {
+                calls += 1;
+                Err("still broken")
+            },
+        );
+        assert_eq!(result, Err("still broken"));
+        assert_eq!(calls, 3);
+    }
+
+    #[test]
+    fn retry_transient_does_not_retry_non_retryable_err() {
+        let mut calls = 0u32;
+        let result: Result<u32, &'static str> = retry_transient(
+            3,
+            |_: &&'static str| false,
+            |_: &u32| false,
+            || {
+                calls += 1;
+                Err("terminal")
+            },
+        );
+        assert_eq!(result, Err("terminal"));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn retry_transient_retries_retryable_ok_value_then_stops() {
+        let mut calls = 0u32;
+        let result: Result<u32, &'static str> = retry_transient(
+            3,
+            |_: &&'static str| true,
+            |v: &u32| *v == 429,
+            || {
+                calls += 1;
+                if calls < 2 { Ok(429) } else { Ok(200) }
+            },
+        );
+        assert_eq!(result, Ok(200));
+        assert_eq!(calls, 2);
+    }
+
+    /// A `reqwest::dns::Resolve` that always fails resolution, synchronously
+    /// and without touching the network.
+    struct AlwaysFailResolver;
+
+    impl reqwest::dns::Resolve for AlwaysFailResolver {
+        fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+            Box::pin(async {
+                Err("synthetic DNS failure — deliberately unresolvable for this test".into())
+            })
+        }
+    }
+
+    fn connect_refused_error() -> reqwest::Error {
+        // Two prior versions of this helper synthesized a real TCP
+        // connection-refused error: first a fixed low port (127.0.0.1:1),
+        // then bind-then-drop an ephemeral port to free it. Both were tried
+        // against live CI and both failed identically on windows-latest --
+        // every failure landed at ~2.0s, exactly the client's configured
+        // timeout, meaning the SYN to the closed loopback port was silently
+        // dropped rather than RST'd, so the client's own timeout fired
+        // first instead of an immediate connection-refused error. This is
+        // an environment/network-stack difference, not something either
+        // port strategy could fix.
+        //
+        // A resolver that always fails sidesteps TCP entirely: it errors
+        // synchronously, in-process, with no OS network-stack or firewall
+        // involved, so behavior is identical on every platform.
+        // `Error::is_connect()` classifies both DNS and TCP connect
+        // failures as "connect" errors (both happen before the request is
+        // sent), so this still exercises exactly the boundary these tests
+        // care about.
+        let client = reqwest::blocking::Client::builder()
+            .dns_resolver(std::sync::Arc::new(AlwaysFailResolver))
+            .build()
+            .expect("client build");
+        client
+            .get("http://example.invalid/")
+            .send()
+            .expect_err("a resolver that always fails must produce a connect error")
+    }
+
+    #[test]
+    fn is_pre_send_failure_true_for_connection_refused() {
+        assert!(super::is_pre_send_failure(&connect_refused_error()));
+    }
+
+    #[test]
+    fn is_transient_transport_error_true_for_connection_refused() {
+        assert!(super::is_transient_transport_error(&connect_refused_error()));
+    }
+
+    fn post_send_timeout_error() -> reqwest::Error {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        std::thread::spawn(move || {
+            // Accept the connection but never write a response — the client's
+            // own request timeout fires while waiting, not during connect.
+            // Bind (not `let _ =`) so the accepted TcpStream stays open for
+            // the sleep duration instead of being dropped immediately, which
+            // would close the connection and produce a spurious
+            // connection-reset error instead of the intended timeout.
+            let _held_conn = listener.accept();
+            std::thread::sleep(std::time::Duration::from_secs(5));
+        });
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .expect("client build");
+        client
+            .get(format!("http://{addr}/"))
+            .send()
+            .expect_err("a server that never responds must time out")
+    }
+
+    #[test]
+    fn is_pre_send_failure_false_for_post_send_timeout() {
+        let err = post_send_timeout_error();
+        assert!(err.is_timeout(), "expected is_timeout() true, got: {err:?}");
+        assert!(
+            !err.is_connect(),
+            "expected is_connect() false, got: {err:?}"
+        );
+        assert!(!super::is_pre_send_failure(&err));
+    }
+
+    #[test]
+    fn is_transient_transport_error_true_for_post_send_timeout() {
+        assert!(super::is_transient_transport_error(
+            &post_send_timeout_error()
+        ));
+    }
 
     // ── host_allowed ──────────────────────────────────────────────────────────
 
@@ -575,17 +1056,34 @@ mod tests {
         assert_eq!(extract_interaction_id(&[]), None);
     }
 
-    // ── resolve_workspace_password ───────────────────────────────────────────
+    // ── workspace_password_from_env / prompt_workspace_password ─────────────
+
+    #[test]
+    fn should_retry_workspace_password_false_when_from_env() {
+        assert!(!should_retry_workspace_password(1, true));
+        assert!(!should_retry_workspace_password(3, true));
+    }
+
+    #[test]
+    fn should_retry_workspace_password_true_while_attempts_remain_interactively() {
+        assert!(should_retry_workspace_password(1, false));
+        assert!(should_retry_workspace_password(2, false));
+    }
+
+    #[test]
+    fn should_retry_workspace_password_false_when_interactive_attempts_exhausted() {
+        assert!(!should_retry_workspace_password(3, false));
+    }
 
     #[test]
     #[serial]
-    fn resolve_workspace_password_env_var_short_circuit() {
+    fn workspace_password_from_env_short_circuit() {
         // nextest process-isolates each test; #[serial] additionally guards
         // against a non-nextest (threaded) runner racing on the shared env var.
         unsafe { std::env::set_var("AYX_ONE_WS_PASSWORD", "test-secret-pw") };
-        let result = resolve_workspace_password();
+        let result = workspace_password_from_env();
         unsafe { std::env::remove_var("AYX_ONE_WS_PASSWORD") };
-        assert_eq!(result.unwrap(), "test-secret-pw");
+        assert_eq!(result, Some("test-secret-pw".to_string()));
     }
 
     /// Returns `true` if this process has a real controlling terminal
@@ -630,15 +1128,17 @@ mod tests {
 
     #[test]
     #[serial]
-    fn resolve_workspace_password_no_tty_fails_cleanly() {
-        // With AYX_ONE_WS_PASSWORD unset, this falls through to the masked
-        // terminal read. In a headless environment (no controlling terminal
-        // — true for CI on all three OSes this crate's test matrix covers)
-        // rpassword returns an `Err` almost instantly, which is what this
-        // test asserts. But if this test runs from a real interactive
-        // terminal (a developer's local `cargo nextest run`), rpassword
-        // successfully opens the terminal and blocks waiting for actual
-        // keystrokes, with no timeout of its own.
+    fn prompt_workspace_password_no_tty_fails_cleanly() {
+        // This directly exercises the masked terminal read — in production,
+        // `prompt_workspace_password` is only reached once
+        // `workspace_password_from_env` has already come back empty. In a
+        // headless environment (no controlling terminal — true for CI on all
+        // three OSes this crate's test matrix covers) rpassword returns an
+        // `Err` almost instantly, which is what this test asserts. But if
+        // this test runs from a real interactive terminal (a developer's
+        // local `cargo nextest run`), rpassword successfully opens the
+        // terminal and blocks waiting for actual keystrokes, with no timeout
+        // of its own.
         //
         // Two other approaches were tried and rejected during review:
         //   1. An unconditional, Unix-only `/dev/tty` probe-and-skip — wrong
@@ -664,7 +1164,7 @@ mod tests {
         // terminal to corrupt.
         if has_controlling_terminal_for_test() {
             eprintln!(
-                "note: resolve_workspace_password_no_tty_fails_cleanly skipped — \
+                "note: prompt_workspace_password_no_tty_fails_cleanly skipped — \
                  a real controlling terminal is attached to this test process, \
                  so the no-TTY path can't be exercised here without risking a \
                  blocked read that leaves local echo disabled"
@@ -672,8 +1172,7 @@ mod tests {
             return;
         }
 
-        unsafe { std::env::remove_var("AYX_ONE_WS_PASSWORD") };
-        let err = resolve_workspace_password()
+        let err = prompt_workspace_password()
             .expect_err("expected an error with no TTY and no env var set");
         let msg = err.to_string();
         assert!(
