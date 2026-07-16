@@ -837,17 +837,26 @@ mod tests {
     }
 
     fn connect_refused_error() -> reqwest::Error {
-        // Port 1 on loopback is always unbound — connecting to it fails
-        // immediately with ECONNREFUSED, deterministically and without any
-        // real network access (loopback-only, no DNS involved).
+        // Bind then immediately drop a listener to free a port the OS will
+        // actively RST future connections to. A port that was never bound at
+        // all (e.g. a fixed low port like 127.0.0.1:1) is not reliable across
+        // platforms — Windows Defender Firewall's default behavior for
+        // unsolicited connections to a never-bound port is often a silent drop
+        // rather than an active reject, so the client's own timeout fires
+        // first instead of getting an immediate connection-refused error.
+        let addr = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+            listener.local_addr().expect("local_addr")
+            // listener dropped here, freeing the port for the RST behavior above
+        };
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(2))
             .build()
             .expect("client build");
         client
-            .get("http://127.0.0.1:1/")
+            .get(format!("http://{addr}/"))
             .send()
-            .expect_err("connecting to a closed loopback port must fail")
+            .expect_err("connecting to a freed loopback port must fail")
     }
 
     #[test]
