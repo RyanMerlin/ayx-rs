@@ -1502,6 +1502,7 @@ pub struct PreparedUndoApply {
     pub field_paths: Vec<String>,
     pub approval_digest: String,
     pub approval_artifact: PathBuf,
+    pub connection: Value,
 }
 
 /// Read-only prepare phase for `mongo undo --apply`: CLI gate validation,
@@ -1556,6 +1557,8 @@ fn prepare_undo_apply_with_runner(
     let approval_digest =
         load_and_validate_undo_approval(approval_path, &loaded, &candidates, requested_approve)?;
 
+    let connection = resolve_connection_detail(config)?;
+
     Ok(PreparedUndoApply {
         mutation_audit_artifact: request.mutation_audit_artifact.clone(),
         loaded,
@@ -1563,6 +1566,7 @@ fn prepare_undo_apply_with_runner(
         field_paths,
         approval_digest,
         approval_artifact: approval_path.to_path_buf(),
+        connection,
     })
 }
 
@@ -1843,6 +1847,7 @@ pub struct UndoExecutionAudit {
     pub collection: String,
     pub approval_digest: String,
     pub approval_artifact: PathBuf,
+    pub connection: Value,
     pub candidates: Vec<UndoCandidate>,
     #[serde(flatten)]
     pub outcome: UndoExecutionOutcome,
@@ -1903,6 +1908,7 @@ fn execute_undo_apply_with_runner(
         field_paths,
         approval_digest,
         approval_artifact,
+        connection,
     } = prepared;
 
     let mut audit = UndoExecutionAudit {
@@ -1918,6 +1924,7 @@ fn execute_undo_apply_with_runner(
         collection: loaded.audit.collection.clone(),
         approval_digest,
         approval_artifact,
+        connection,
         candidates: candidates.clone(),
         outcome: UndoExecutionOutcome::Prepared,
     };
@@ -7501,6 +7508,51 @@ mod tests {
             json_entries.len(),
             1,
             "the prepared write and the terminal update must land on the SAME undo artifact file"
+        );
+    }
+
+    #[test]
+    fn execute_undo_apply_with_runner_no_secrets_in_the_persisted_artifact() {
+        let (_dir, _config, request, _mutation_path) = valid_undo_apply_fixture();
+        // A managed config with real-looking credentials, so this test can
+        // prove they never leak into the undo execution artifact via its
+        // (Task 4 completeness addition) `connection` field.
+        let creds_config =
+            test_managed_config(managed_with_userpass("svc_account", "hunter2-secret"));
+
+        let probe_invocation =
+            prepare_mongosh_invocation(&creds_config, "print('probe');".to_string()).unwrap();
+        let real_password_file_path = probe_invocation
+            .invocation
+            .args
+            .iter()
+            .position(|a| a == "--config")
+            .map(|i| probe_invocation.invocation.args[i + 1].clone())
+            .expect("managed username/password must produce a --config arg");
+        drop(probe_invocation);
+
+        let prepare_runner = fresh_undo_preview_runner();
+        let prepared = prepare_undo_apply_with_runner(&prepare_runner, &creds_config, &request)
+            .expect("prepare should succeed");
+
+        let apply_runner = FakeMongoshRunner::returning_stdout(&applied_undo_apply_stdout(1, 1));
+        let envelope =
+            execute_undo_apply_with_runner(&apply_runner, &creds_config, prepared, &request)
+                .expect("apply should succeed");
+        let audit_path = PathBuf::from(envelope.data["audit_artifact"].as_str().unwrap());
+        let raw = fs::read_to_string(&audit_path).unwrap();
+
+        assert!(
+            !raw.contains("hunter2-secret"),
+            "raw password must never appear in the undo artifact"
+        );
+        assert!(
+            !raw.contains(&real_password_file_path),
+            "the real (un-redacted) temp password-file path must never appear in the undo artifact"
+        );
+        assert!(
+            !raw.contains("--eval"),
+            "no raw mongosh invocation is ever stored in the undo execution audit"
         );
     }
 

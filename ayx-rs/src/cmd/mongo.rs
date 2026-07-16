@@ -372,6 +372,7 @@ mod tests {
             field_paths: vec!["value".to_string()],
             approval_digest: "sha256:ffff".to_string(),
             approval_artifact: PathBuf::from("/tmp/undo-approval.json"),
+            connection: serde_json::json!({}),
         }
     }
 
