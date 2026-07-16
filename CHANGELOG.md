@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **`ayx mongo mutate --apply` and `ayx mongo undo --apply` now execute live** against named, bounded templates from the mutation registry (`knowledge/mongo/mutations.yaml`) — no free-form filter/update, and no template runs until an owner deliberately promotes it from `preview_only` to `executable`. Applying requires `--accept-mutation-risk`, `--backup-audit-artifact` (a current, successful `mongo backup` audit artifact), `--approval-artifact` (the artifact a prior preview run wrote), and `--approve <sha256:digest>` (the digest that preview printed, re-derived and checked against the artifact's stored snapshot at apply time) — all four together, with `--apply` itself; missing pieces are reported all at once, not one at a time. `--yes` is required outside an interactive TTY. Every preview and every apply, success or failure, writes a JSON audit artifact with Mongo connection details (URI, password-file path) always redacted. `mongo undo` reverses an applied mutation via its recorded pre-mutation `$set` values (`guarded_set_inverse`, the only rollback strategy supported); it is guarded, not automatic — it live-checks that every affected field on every candidate document still holds its recorded post-mutation value immediately before restoring, and refuses the entire batch if even one document has drifted. Undo is not a substitute for backup/restore and does not repair a mutation with an unknown transaction outcome.
+
 ### Changed
 
 - **BREAKING** — `ayx workflows` moved to `ayx actions workflows`. No back-compat alias; update scripts and CI that reference the old path. Subcommands (`list`, `explain`, `run`) are unchanged.

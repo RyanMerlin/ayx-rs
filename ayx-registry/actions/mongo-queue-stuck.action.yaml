@@ -30,9 +30,17 @@ steps:
     why: "Cross-references the queue against worker registration, license posture, and orphan detection in one shot."
   - kind: note
     text: |
-      Mutating remediation is gated behind `ayx mongo mutate` (preview-only
-      today). Do not bulk-update AS_Queue without an explicit change record
-      and a backup taken via `mongo.backup-restore`.
+      `ayx mongo mutate` is live: a named, bounded template preview/approve/
+      apply flow (see `ayx mongo mutate --help` and the MongoDB docs page),
+      not free-form remediation. The bundled registry ships no AS_Queue
+      remediation template today — the only shipped template
+      (`user_email_domain_migration`) targets `AlteryxGallery.users` and
+      stays `preview_only` on purpose. Do not bulk-update AS_Queue by hand.
+      Remediation requires an owner-reviewed, `executable`-promoted template
+      with a blast radius capped to the real incident (`max_affected`), a
+      current backup proven via `--backup-audit-artifact` (take one first
+      with `mongo.backup-restore`), a reviewed preview diff, and its digest
+      passed to `--approve`. Never skip the preview step.
 validations:
   - describe: "Doctor results array has zero entries with ok=false."
   - describe: "Running-jobs query length matches what the dashboards show; mismatches indicate cache lag, not a real bug."

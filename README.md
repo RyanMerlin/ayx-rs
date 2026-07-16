@@ -252,7 +252,7 @@ The repository includes a `docs/fixtures/RuntimeSettings.xml` fixture for offlin
 - `secret` — keyring secret inspection and maintenance
 - `designer` — Alteryx Designer / Server artifact tooling; `designer workflow` handles `.yxmd`, `.yxmc`, `.yxzp`, and `.yxdb`
 - `server` — Server discovery, logs, auth, diagnose, doctor, upgrade, and low-level API calls
-- `mongo` — embedded and managed Mongo inventory, backup, restore, query, and doctor helpers (`mutate` is preview / not yet implemented)
+- `mongo` — embedded and managed Mongo inventory, backup, restore, query, and doctor helpers, plus a guarded template-based `mutate`/`undo` for live, named remediation writes (preview-first: `--apply` requires `--accept-mutation-risk`, `--backup-audit-artifact`, `--approval-artifact`, and `--approve` together)
 - `sqlserver` — SQL Server status, prechecks, connection helpers, and migration planning
 - `onboard` — interactive first-run setup for `config.yaml` or `environments.yaml`
 - `tui` — interactive TUI for profile selection, editing, credentials, and connectivity checks

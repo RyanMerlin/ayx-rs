@@ -20,9 +20,8 @@ steps:
   - kind: command
     cmd: "ayx mongo status --profile <profile>"
     why: "Confirm we know which Mongo mode (embedded/managed) we are operating on before mutating anything."
-  - kind: command
-    cmd: "ayx mongo backup --profile <profile> --output-dir backups/<ts> --dry-run"
-    why: "Explicit dry-run. Inspect the plan envelope before re-running with --apply."
+  - kind: note
+    text: "Preview first: run `ayx mongo backup --profile <profile> --output-dir backups/<ts>` with no --apply and inspect the plan envelope it prints. There is no --dry-run flag on the Mongo command tree — omitting --apply is the preview. Only re-run with --apply (below) once the plan looks right."
   - kind: command
     cmd: "ayx mongo backup --profile <profile> --output-dir backups/<ts> --apply"
     why: "Take the actual snapshot. Audit artifact is written to the audit dir."
