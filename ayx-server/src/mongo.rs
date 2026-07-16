@@ -7,8 +7,9 @@ use anyhow::{Context, Result};
 use ayx_core::audit::write_audit_artifact;
 use ayx_core::envelope::Envelope;
 use ayx_core::profile::{Config, MongoMode};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use roxmltree::Document;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -886,17 +887,49 @@ pub struct ResolvedMutation {
 /// A snapshot of the documents a mutation preview matched — just enough to
 /// bind an approval digest to the exact candidate set at preview time.
 ///
-/// Task 2 parses this from live `mongosh` preview output and is expected to
-/// extend it with per-document field-diff data once that program exists;
-/// the shape here is deliberately the minimum `canonical_mutation_digest`
-/// needs so Task 1 can ship a deterministic digest function without a live
-/// Mongo connection.
-#[derive(Clone, Debug, Default, Serialize)]
+/// Extended by Task 2 (`build_candidate_snapshot`) with the raw projected
+/// documents and a derived per-field diff, once the live `mongosh` preview
+/// program exists. `raw_docs` is the ground truth the apply transaction
+/// re-queries and compares against byte-for-byte (see
+/// `build_apply_eval_js`); `field_diffs` is redundant with it but kept
+/// alongside for human/audit display, matching the plan's
+/// `preflight.field_diffs` audit artifact shape. Both are folded into
+/// `canonical_mutation_digest` below, so an operator's `--approve` binds to
+/// the exact diff they reviewed, not just the candidate identities.
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
 pub struct CandidateSnapshot {
     pub matched_count: u64,
     /// Extended-JSON `_id` values, in the same deterministic order the
     /// preview query used.
     pub candidate_ids: Vec<Value>,
+    /// Exact Extended-JSON projected documents (`_id` + every `$set` field
+    /// path) returned by the preview query, in the same deterministic
+    /// `_id`-ascending order as `candidate_ids`.
+    #[serde(default)]
+    pub raw_docs: Vec<Value>,
+    /// Per-candidate field-level diff (old presence/value vs. the resolved
+    /// `$set` value), derived from `raw_docs` by `build_candidate_snapshot`.
+    #[serde(default)]
+    pub field_diffs: Vec<CandidateDiff>,
+}
+
+/// One candidate document's field-level diff: its `_id` plus the diff for
+/// every `$set` field path.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct CandidateDiff {
+    pub id: Value,
+    pub fields: Vec<FieldDiff>,
+}
+
+/// One field's before/after diff for a single candidate document.
+/// `old_present` disambiguates "field absent" from "field present and
+/// literally `null`" — both give `old_value: Value::Null`.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct FieldDiff {
+    pub path: String,
+    pub old_present: bool,
+    pub old_value: Value,
+    pub new_value: Value,
 }
 
 /// Parse repeated `--param key=value` values into a `BTreeMap`, rejecting a
@@ -1044,6 +1077,8 @@ pub fn canonical_mutation_digest(
         "candidates": {
             "matched_count": candidates.matched_count,
             "candidate_ids": candidates.candidate_ids,
+            "raw_docs": candidates.raw_docs,
+            "field_diffs": candidates.field_diffs,
         },
     });
     digest_with_prefix(&payload)
@@ -1877,6 +1912,754 @@ fn redact_mongo_uri(uri: &str) -> String {
     uri.to_string()
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Mutation execution: structured mongosh preview + transactional apply
+// (plan Task 2)
+//
+// Two mongosh programs, both built from serde-serialized values only (never
+// string-concatenated JS): a read-only preflight/diff program
+// (`build_preview_eval_js`) and a single no-retry transactional apply
+// program (`build_apply_eval_js`). Each emits exactly one versioned JSON
+// "sentinel" object on stdout; Rust parses that sentinel (rejecting
+// malformed/additional output) into `MutationPreview` or
+// `MutationExecutionResult`.
+//
+// The diff itself (`FieldDiff`/`CandidateDiff`) is computed in Rust from
+// the raw documents mongosh returns, not in JS, so it is covered by pure
+// unit tests with no runner at all. The apply program's live re-comparison
+// against the approved snapshot has to run inside `session.withTransaction`
+// (a Mongo transaction is session-scoped; Rust can't participate in it from
+// a separate process), so that specific comparison only exists as generated
+// JS text — exercised via string assertions on the generated program plus
+// fake-runner tests of Rust's own sentinel classification, never a real
+// mongosh process.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Hard ceiling on how long a preview's approval digest remains valid,
+/// regardless of what the template's `max_backup_age_minutes` declares:
+/// `expires_at_utc = created_at_utc + min(max_backup_age_minutes, this)`.
+/// Task 3/4 enforce the actual expiry check at apply time; this only bounds
+/// the window a stale diff could be replayed against drifted data.
+const MONGO_MUTATION_PREVIEW_MAX_EXPIRY_MINUTES: u32 = 240; // 4 hours
+
+/// Why a mutation apply attempt made no commit. Maps 1:1 to the five
+/// no-commit conditions plan Task 2 Step 3 requires the apply program to
+/// detect before it would otherwise write.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MutationAbortReason {
+    /// The deployment is not a replica set or mongos;
+    /// `session.withTransaction` was never attempted.
+    TransactionUnsupported,
+    /// The re-queried candidate identities and/or prior field values no
+    /// longer match the approved preview snapshot.
+    PreflightMismatch,
+    /// The resolved filter now matches zero documents.
+    ZeroMatchApply,
+    /// The re-queried candidate count differs from the approved snapshot's
+    /// `matched_count`, or `updateMany`'s `matchedCount` differs from the
+    /// re-queried candidate count.
+    CountMismatch,
+    /// Every affected field's post-update value did not equal the expected
+    /// `$set` value.
+    PostVerificationMismatch,
+}
+
+/// The outcome of one apply attempt — exactly one of three terminal
+/// classes, never retried, per plan Task 2 Step 3.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum MutationExecutionResult {
+    /// The transaction committed. `modified_count` may be less than
+    /// `matched_count` when some matched documents already held the target
+    /// `$set` value (a legitimate no-op for those fields).
+    Applied {
+        matched_count: u64,
+        modified_count: u64,
+    },
+    /// The transaction made no commit, for a known, named reason.
+    Aborted {
+        reason: MutationAbortReason,
+        detail: String,
+    },
+    /// The process failed, or its output could not be trusted, after
+    /// `mongosh` had already started. Whether a write committed is
+    /// genuinely unknown — never retried; the operator must inspect the
+    /// target and the audit artifact directly.
+    FailedOrUnknown { detail: String },
+}
+
+/// A read-only mutation preview, parsed from a single `mongosh` preview
+/// sentinel. `Ok` with `snapshot.matched_count == 0` is a valid artifact —
+/// it is simply not approvable for `--apply` (Task 3's gate, not enforced
+/// here).
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum MutationPreview {
+    Ok {
+        schema_version: u32,
+        template_id: String,
+        template_revision: u32,
+        database: String,
+        collection: String,
+        max_affected: u32,
+        snapshot: CandidateSnapshot,
+        approval_digest: String,
+        created_at_utc: DateTime<Utc>,
+        expires_at_utc: DateTime<Utc>,
+    },
+    /// The preview query saw `max_affected + 1` (or more) documents; no
+    /// candidate/diff data was computed and there is nothing to approve.
+    CapExceeded {
+        schema_version: u32,
+        template_id: String,
+        template_revision: u32,
+        database: String,
+        collection: String,
+        max_affected: u32,
+        matched_at_least: u64,
+        created_at_utc: DateTime<Utc>,
+    },
+}
+
+/// An owned `mongosh` invocation: resolved binary path plus the full
+/// argument vector (`--quiet --eval <js>` plus `attach_connection_args`'s
+/// connection flags).
+///
+/// Never render this directly for display/logging — `args` may contain an
+/// unredacted `--uri` value and/or a temporary `--config` password-file
+/// path. Use `render_redacted_mongosh`.
+#[derive(Debug)]
+pub struct MongoshInvocation {
+    binary: PathBuf,
+    args: Vec<String>,
+}
+
+/// A `MongoshInvocation` plus its (optional) live password-file guard. The
+/// guard must stay alive for exactly as long as the process reading it —
+/// this struct's ownership is that lifetime. Unlike
+/// `build_mongosh_mutation_eval` (which drops the guard immediately after
+/// building its display string), every constructor here binds it for the
+/// caller.
+pub struct PreparedMongoshInvocation {
+    invocation: MongoshInvocation,
+    _password_file: Option<MongoPasswordFile>,
+}
+
+#[cfg(test)]
+impl PreparedMongoshInvocation {
+    /// The generated `--eval` JS text, exactly as it will run. Test-only:
+    /// scans `args` for the `--eval` flag's value so callers/tests can
+    /// assert on the exact program a real `mongosh` process would receive.
+    fn eval_js(&self) -> &str {
+        self.invocation
+            .args
+            .iter()
+            .position(|a| a == "--eval")
+            .and_then(|i| self.invocation.args.get(i + 1))
+            .map(String::as_str)
+            .expect("every prepared invocation includes --eval <js>")
+    }
+}
+
+/// Build the `mongosh` invocation for one generated eval program: assembles
+/// `--quiet --eval <js>` plus this profile's connection args, and keeps the
+/// resulting password-file guard (if any) alive on the returned value.
+pub fn prepare_mongosh_invocation(
+    config: &Config,
+    eval_js: String,
+) -> Result<PreparedMongoshInvocation> {
+    let mut args: Vec<String> = vec!["--quiet".to_string(), "--eval".to_string(), eval_js];
+    let password_file = attach_connection_args(config, &mut args)?;
+    let binary = PathBuf::from(if cfg!(target_os = "windows") {
+        "mongosh.exe"
+    } else {
+        "mongosh"
+    });
+    Ok(PreparedMongoshInvocation {
+        invocation: MongoshInvocation { binary, args },
+        _password_file: password_file,
+    })
+}
+
+/// Render a `PreparedMongoshInvocation` for human/audit display. Clones and
+/// sanitizes the argument vector — the returned string never contains an
+/// unredacted `--uri` value or the temporary `--config` password-file path
+/// (only its host-preserving redaction / a `***` mask, respectively).
+pub fn render_redacted_mongosh(invocation: &PreparedMongoshInvocation) -> String {
+    let args = &invocation.invocation.args;
+    let mut rendered: Vec<String> = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        let lower = arg.to_ascii_lowercase();
+        if lower == "--uri" && i + 1 < args.len() {
+            rendered.push(arg.clone());
+            rendered.push(redact_mongo_uri(&args[i + 1]));
+            i += 2;
+            continue;
+        }
+        if lower == "--config" && i + 1 < args.len() {
+            // Never display the temporary password-file path, per the
+            // plan's "temp credential-file contents/paths" constraint —
+            // even though the path alone carries no credential, exposing
+            // it is out of scope for what a display string should reveal.
+            rendered.push(arg.clone());
+            rendered.push("***".to_string());
+            i += 2;
+            continue;
+        }
+        rendered.push(arg.clone());
+        i += 1;
+    }
+    let cmd = invocation.invocation.binary.display().to_string();
+    let quoted = rendered
+        .into_iter()
+        .map(|a| {
+            if a.contains(' ') || a.contains('\n') {
+                format!("\"{}\"", a.replace('"', "\\\""))
+            } else {
+                a
+            }
+        })
+        .collect::<Vec<String>>()
+        .join(" ");
+    format!("{cmd} {quoted}")
+}
+
+/// Redact any embedded Mongo URI credentials from free-form diagnostic text
+/// (e.g. `mongosh` stderr) before it is returned in a result or error. This
+/// codebase never passes `--password` on argv, but a managed connection may
+/// be configured via a full `--uri` containing credentials, and a failed
+/// connection's stderr can echo that URI back verbatim.
+fn sanitize_shell_diagnostic(text: &str) -> String {
+    const SCHEMES: [&str; 2] = ["mongodb+srv://", "mongodb://"];
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        let mut best: Option<(usize, &str)> = None;
+        for scheme in SCHEMES {
+            if let Some(pos) = rest.find(scheme) {
+                best = match best {
+                    None => Some((pos, scheme)),
+                    Some((best_pos, _)) if pos < best_pos => Some((pos, scheme)),
+                    other => other,
+                };
+            }
+        }
+        let Some((pos, scheme)) = best else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..pos]);
+        let tail = &rest[pos + scheme.len()..];
+        let end = tail
+            .find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+            .unwrap_or(tail.len());
+        let full_uri = format!("{scheme}{}", &tail[..end]);
+        out.push_str(&redact_mongo_uri(&full_uri));
+        rest = &tail[end..];
+    }
+    out
+}
+
+/// Serialize `value` and write `const {name} = <json>;\n` into `js`. The
+/// only way any resolved mutation data (filter, `$set` values, parameters)
+/// enters a generated program — never raw string interpolation.
+fn write_const<T: Serialize>(js: &mut String, name: &str, value: &T) -> Result<()> {
+    js.push_str("const ");
+    js.push_str(name);
+    js.push_str(" = ");
+    js.push_str(&serde_json::to_string(value)?);
+    js.push_str(";\n");
+    Ok(())
+}
+
+/// The declared `$set` field paths (sorted for determinism) and the `$set`
+/// value document itself, from an already-resolved (and therefore already
+/// `validate_mutation_template`-checked) mutation. Re-checked defensively
+/// here too, matching `resolve_mutation_template_from`'s belt-and-suspenders
+/// style.
+fn extract_set_fields(mutation: &ResolvedMutation) -> Result<(Vec<String>, Value)> {
+    if mutation.filter.as_object().is_none_or(|o| o.is_empty()) {
+        anyhow::bail!("resolved mutation filter must be a non-empty object");
+    }
+    let set_obj = mutation
+        .update
+        .get("$set")
+        .and_then(Value::as_object)
+        .ok_or_else(|| anyhow::anyhow!("resolved mutation update is not a $set document"))?;
+    if set_obj.is_empty() {
+        anyhow::bail!("resolved mutation $set document is empty");
+    }
+    let mut fields: Vec<String> = set_obj.keys().cloned().collect();
+    fields.sort();
+    Ok((fields, Value::Object(set_obj.clone())))
+}
+
+fn build_projection(fields: &[String]) -> Value {
+    let mut map = serde_json::Map::new();
+    map.insert("_id".to_string(), json!(1));
+    for field in fields {
+        map.insert(field.clone(), json!(1));
+    }
+    Value::Object(map)
+}
+
+/// Walk a dotted field path (`"profile.email"`) through a JSON document,
+/// returning `None` if any segment is absent. Mirrors how MongoDB itself
+/// interprets a dotted projection/field path.
+fn get_json_path<'a>(doc: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut cur = doc;
+    for part in path.split('.') {
+        cur = cur.as_object()?.get(part)?;
+    }
+    Some(cur)
+}
+
+/// Build the full `CandidateSnapshot` — including the derived per-field
+/// diff — from the raw Extended-JSON documents a preview query returned.
+/// Pure: no I/O, directly unit-testable with hand-built `Value` documents.
+fn build_candidate_snapshot(
+    mutation: &ResolvedMutation,
+    raw_docs: Vec<Value>,
+) -> Result<CandidateSnapshot> {
+    let (fields, set_value) = extract_set_fields(mutation)?;
+    let set_obj = set_value
+        .as_object()
+        .expect("extract_set_fields always returns a JSON object for a validated $set update");
+
+    let candidate_ids: Vec<Value> = raw_docs
+        .iter()
+        .map(|doc| doc.get("_id").cloned().unwrap_or(Value::Null))
+        .collect();
+
+    let field_diffs: Vec<CandidateDiff> = raw_docs
+        .iter()
+        .map(|doc| {
+            let id = doc.get("_id").cloned().unwrap_or(Value::Null);
+            let diff_fields = fields
+                .iter()
+                .map(|path| {
+                    let old = get_json_path(doc, path);
+                    let old_present = old.is_some();
+                    let old_value = old.cloned().unwrap_or(Value::Null);
+                    let new_value = set_obj.get(path).cloned().unwrap_or(Value::Null);
+                    FieldDiff {
+                        path: path.clone(),
+                        old_present,
+                        old_value,
+                        new_value,
+                    }
+                })
+                .collect();
+            CandidateDiff {
+                id,
+                fields: diff_fields,
+            }
+        })
+        .collect();
+
+    let matched_count = raw_docs.len() as u64;
+    Ok(CandidateSnapshot {
+        matched_count,
+        candidate_ids,
+        raw_docs,
+        field_diffs,
+    })
+}
+
+/// Shared JS helper the apply program uses for post-update field
+/// verification — the only place JS still needs to walk a dotted path,
+/// since that comparison must happen live inside the transaction.
+const AYX_GET_PATH_JS: &str = r#"function ayxGetPath(obj, path) {
+  var parts = path.split('.');
+  var cur = obj;
+  for (var i = 0; i < parts.length; i++) {
+    if (cur === undefined || cur === null) { return undefined; }
+    cur = cur[parts[i]];
+  }
+  return cur;
+}
+"#;
+
+const PREVIEW_QUERY_JS: &str = r#"const coll = db.getSiblingDB(dbName).getCollection(collName);
+const docs = coll.find(filter, projection).sort({ _id: 1 }).limit(maxAffected + 1).toArray();
+let result;
+if (docs.length > maxAffected) {
+  result = { schema_version: 1, kind: "mongo_mutation_preview_result", status: "cap_exceeded", max_affected: maxAffected, matched_at_least: docs.length };
+} else {
+  result = { schema_version: 1, kind: "mongo_mutation_preview_result", status: "ok", matched_count: docs.length, docs: docs };
+}
+print(JSON.stringify(result));
+"#;
+
+/// Build the read-only preflight/diff program (plan Task 2 Step 2). Queries
+/// the resolved filter with a deterministic `_id` sort and
+/// `limit(max_affected + 1)`, projecting only `_id` plus the `$set` field
+/// paths, and emits one versioned sentinel. All diff computation happens in
+/// Rust afterward (`build_candidate_snapshot`) — this program's only job is
+/// the live DB read and the cap check.
+fn build_preview_eval_js(mutation: &ResolvedMutation) -> Result<String> {
+    let (fields, _set_value) = extract_set_fields(mutation)?;
+    let projection = build_projection(&fields);
+
+    let mut js = String::new();
+    write_const(&mut js, "dbName", &mutation.database)?;
+    write_const(&mut js, "collName", &mutation.collection)?;
+    write_const(&mut js, "filter", &mutation.filter)?;
+    write_const(&mut js, "projection", &projection)?;
+    write_const(&mut js, "maxAffected", &mutation.max_affected)?;
+    js.push_str(PREVIEW_QUERY_JS);
+    Ok(js)
+}
+
+const APPLY_TRANSACTION_JS: &str = r#"function ayxAbort(reason, detail) {
+  var err = new Error("ayx_mutation_abort:" + reason);
+  err.ayxSentinel = { schema_version: 1, kind: "mongo_mutation_apply_result", status: "aborted", reason: reason, detail: detail };
+  throw err;
+}
+
+let finalSentinel = null;
+const hello = (typeof db.hello === "function") ? db.hello() : db.runCommand({ hello: 1 });
+const supportsTransactions = !!(hello.setName || hello.msg === "isdbgrid");
+
+if (!supportsTransactions) {
+  finalSentinel = { schema_version: 1, kind: "mongo_mutation_apply_result", status: "aborted", reason: "transaction_unsupported", detail: "deployment is not a replica set or mongos; transactions require a replica set or sharded cluster" };
+} else {
+  const session = db.getMongo().startSession();
+  try {
+    session.withTransaction(function () {
+      const sessionColl = session.getDatabase(dbName).getCollection(collName);
+      const preDocs = sessionColl.find(filter, projection).sort({ _id: 1 }).limit(maxAffected + 1).toArray();
+
+      if (preDocs.length > maxAffected) {
+        ayxAbort("count_mismatch", "candidate set now exceeds max_affected");
+      }
+      if (preDocs.length === 0) {
+        ayxAbort("zero_match_apply", "no documents currently match the resolved filter");
+      }
+      if (preDocs.length !== approvedMatchedCount) {
+        ayxAbort("count_mismatch", "expected " + approvedMatchedCount + " candidates, found " + preDocs.length);
+      }
+      if (JSON.stringify(preDocs) !== JSON.stringify(approvedDocs)) {
+        ayxAbort("preflight_mismatch", "candidate identities or prior field values changed since the approved preview");
+      }
+
+      const ids = preDocs.map(function (d) { return d._id; });
+      const updateResult = sessionColl.updateMany({ _id: { $in: ids } }, { $set: newValues });
+
+      if (updateResult.matchedCount !== ids.length) {
+        ayxAbort("count_mismatch", "update matched " + updateResult.matchedCount + ", expected " + ids.length);
+      }
+
+      const postDocs = sessionColl.find({ _id: { $in: ids } }, projection).sort({ _id: 1 }).toArray();
+      const postOk = postDocs.length === ids.length && postDocs.every(function (doc) {
+        return setFields.every(function (path) {
+          return JSON.stringify(ayxGetPath(doc, path)) === JSON.stringify(newValues[path]);
+        });
+      });
+      if (!postOk) {
+        ayxAbort("post_verification_mismatch", "post-update field values did not match the expected $set values");
+      }
+
+      finalSentinel = { schema_version: 1, kind: "mongo_mutation_apply_result", status: "applied", matched_count: preDocs.length, modified_count: updateResult.modifiedCount };
+    });
+  } catch (e) {
+    if (e && e.ayxSentinel) {
+      finalSentinel = e.ayxSentinel;
+    } else {
+      const msg = (e && e.message) ? String(e.message) : String(e);
+      finalSentinel = { schema_version: 1, kind: "mongo_mutation_apply_result", status: "failed_or_unknown", detail: msg };
+    }
+  } finally {
+    session.endSession();
+  }
+}
+print(JSON.stringify(finalSentinel));
+"#;
+
+/// Build the single no-retry transactional apply program (plan Task 2 Step
+/// 3). Re-queries the target with the same deterministic ordering and
+/// projection as the approved preview, compares raw documents byte-for-byte
+/// against `approved.raw_docs`, applies the bounded `$set` scoped to
+/// exactly the re-verified `_id`s, then re-queries and verifies every
+/// post-value before letting the transaction commit. Never falls back to a
+/// non-transactional write.
+fn build_apply_eval_js(
+    mutation: &ResolvedMutation,
+    approved: &CandidateSnapshot,
+) -> Result<String> {
+    if approved.raw_docs.len() as u64 != approved.matched_count {
+        anyhow::bail!(
+            "approved candidate snapshot is internally inconsistent: matched_count {} but {} raw_docs",
+            approved.matched_count,
+            approved.raw_docs.len()
+        );
+    }
+    let (fields, set_value) = extract_set_fields(mutation)?;
+    let projection = build_projection(&fields);
+
+    let mut js = String::new();
+    js.push_str(AYX_GET_PATH_JS);
+    write_const(&mut js, "dbName", &mutation.database)?;
+    write_const(&mut js, "collName", &mutation.collection)?;
+    write_const(&mut js, "filter", &mutation.filter)?;
+    write_const(&mut js, "projection", &projection)?;
+    write_const(&mut js, "maxAffected", &mutation.max_affected)?;
+    write_const(&mut js, "setFields", &fields)?;
+    write_const(&mut js, "newValues", &set_value)?;
+    write_const(&mut js, "approvedMatchedCount", &approved.matched_count)?;
+    write_const(&mut js, "approvedDocs", &approved.raw_docs)?;
+    js.push_str(APPLY_TRANSACTION_JS);
+    Ok(js)
+}
+
+/// One executed (or attempted) `mongosh` process's raw result. Unlike
+/// `run_command_capture`, a non-zero exit status does NOT become an `Err`
+/// here — preview/apply classification must inspect `stdout`/`status_code`
+/// even when the process failed, since a `mongosh` program that traps its
+/// own errors still prints a structured JSON sentinel on stdout and
+/// commonly still exits 0 on a known no-write outcome. Only a genuine spawn
+/// failure (binary missing, permission denied) becomes an `Err`, matching
+/// `run_command_capture`'s own spawn-failure convention.
+#[derive(Clone, Debug)]
+pub struct MongoshRunOutput {
+    pub status_code: Option<i32>,
+    pub success: bool,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Testable boundary between mutation preview/apply logic and the real
+/// `mongosh` subprocess. Production code always uses `CommandMongoshRunner`;
+/// tests inject a fake that returns canned output without touching PATH or
+/// spawning any process.
+trait MongoshRunner {
+    fn run(&self, invocation: &PreparedMongoshInvocation) -> Result<MongoshRunOutput>;
+}
+
+struct CommandMongoshRunner;
+
+impl MongoshRunner for CommandMongoshRunner {
+    fn run(&self, invocation: &PreparedMongoshInvocation) -> Result<MongoshRunOutput> {
+        run_mongosh(invocation)
+    }
+}
+
+/// Spawn the prepared `mongosh` invocation and capture its raw output.
+/// Production entry point for both preview and apply; see `MongoshRunner`
+/// for the fake-runner test seam that avoids calling this at all.
+pub fn run_mongosh(invocation: &PreparedMongoshInvocation) -> Result<MongoshRunOutput> {
+    let binary = &invocation.invocation.binary;
+    let tool_name = binary.to_string_lossy();
+    ensure_tool_available(&tool_name)?;
+    let mut cmd = Command::new(binary);
+    cmd.args(&invocation.invocation.args);
+    let output = cmd
+        .output()
+        .with_context(|| format!("failed to execute '{}'", binary.display()))?;
+    Ok(MongoshRunOutput {
+        status_code: output.status.code(),
+        success: output.status.success(),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct SentinelEnvelope {
+    schema_version: u32,
+    kind: String,
+}
+
+/// Parse mongosh's single-line JSON sentinel: the whole (trimmed) stdout
+/// must be exactly one JSON object with the expected `schema_version`/
+/// `kind`, or this rejects it — covering both malformed and "additional
+/// output" cases (a trailing non-whitespace byte after the JSON object
+/// makes `serde_json::from_str` itself fail).
+fn parse_mongosh_sentinel<T: DeserializeOwned>(stdout: &str, expected_kind: &str) -> Result<T> {
+    let value: Value = serde_json::from_str(stdout.trim())
+        .map_err(|e| anyhow::anyhow!("mongosh did not emit a single valid JSON sentinel: {e}"))?;
+    let envelope: SentinelEnvelope = serde_json::from_value(value.clone()).map_err(|e| {
+        anyhow::anyhow!("mongosh sentinel is missing required schema_version/kind fields: {e}")
+    })?;
+    if envelope.schema_version != 1 {
+        anyhow::bail!(
+            "unsupported mongo mutation sentinel schema_version {}",
+            envelope.schema_version
+        );
+    }
+    if envelope.kind != expected_kind {
+        anyhow::bail!(
+            "unexpected mongosh sentinel kind '{}', expected '{expected_kind}'",
+            envelope.kind
+        );
+    }
+    serde_json::from_value(value).map_err(|e| {
+        anyhow::anyhow!("mongosh sentinel did not match the expected '{expected_kind}' shape: {e}")
+    })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum PreviewWireResult {
+    Ok {
+        matched_count: u64,
+        docs: Vec<Value>,
+    },
+    CapExceeded {
+        max_affected: u32,
+        matched_at_least: u64,
+    },
+}
+
+fn build_mutation_preview(
+    mutation: &ResolvedMutation,
+    stdout: &str,
+    created_at: DateTime<Utc>,
+) -> Result<MutationPreview> {
+    let wire: PreviewWireResult = parse_mongosh_sentinel(stdout, "mongo_mutation_preview_result")?;
+    match wire {
+        PreviewWireResult::Ok {
+            matched_count,
+            docs,
+        } => {
+            if docs.len() as u64 != matched_count {
+                anyhow::bail!(
+                    "mongosh preview sentinel matched_count {matched_count} does not match returned doc count {}",
+                    docs.len()
+                );
+            }
+            let snapshot = build_candidate_snapshot(mutation, docs)?;
+            let approval_digest = canonical_mutation_digest(mutation, &snapshot);
+            let expiry_minutes = mutation
+                .max_backup_age_minutes
+                .min(MONGO_MUTATION_PREVIEW_MAX_EXPIRY_MINUTES);
+            let expires_at = created_at + chrono::Duration::minutes(i64::from(expiry_minutes));
+            Ok(MutationPreview::Ok {
+                schema_version: 1,
+                template_id: mutation.template_id.clone(),
+                template_revision: mutation.template_revision,
+                database: mutation.database.clone(),
+                collection: mutation.collection.clone(),
+                max_affected: mutation.max_affected,
+                snapshot,
+                approval_digest,
+                created_at_utc: created_at,
+                expires_at_utc: expires_at,
+            })
+        }
+        PreviewWireResult::CapExceeded {
+            max_affected,
+            matched_at_least,
+        } => Ok(MutationPreview::CapExceeded {
+            schema_version: 1,
+            template_id: mutation.template_id.clone(),
+            template_revision: mutation.template_revision,
+            database: mutation.database.clone(),
+            collection: mutation.collection.clone(),
+            max_affected,
+            matched_at_least,
+            created_at_utc: created_at,
+        }),
+    }
+}
+
+/// Apply defensive sanitization to any diagnostic text embedded in a parsed
+/// `MutationExecutionResult`, in case a `mongosh`-side error message ever
+/// echoed connection details back. Belt-and-suspenders: the generated JS
+/// never touches the URI, but this costs nothing and closes the gap if
+/// mongosh's own error text ever did.
+fn sanitize_execution_result(result: MutationExecutionResult) -> MutationExecutionResult {
+    match result {
+        MutationExecutionResult::Aborted { reason, detail } => MutationExecutionResult::Aborted {
+            reason,
+            detail: sanitize_shell_diagnostic(&detail),
+        },
+        MutationExecutionResult::FailedOrUnknown { detail } => {
+            MutationExecutionResult::FailedOrUnknown {
+                detail: sanitize_shell_diagnostic(&detail),
+            }
+        }
+        applied @ MutationExecutionResult::Applied { .. } => applied,
+    }
+}
+
+fn preview_mutation_with_runner(
+    runner: &dyn MongoshRunner,
+    config: &Config,
+    mutation: &ResolvedMutation,
+) -> Result<MutationPreview> {
+    let js = build_preview_eval_js(mutation)?;
+    let invocation = prepare_mongosh_invocation(config, js)?;
+    let output = runner.run(&invocation)?;
+    if !output.success {
+        anyhow::bail!(
+            "mongosh preview exited with status {:?}: {}",
+            output.status_code,
+            sanitize_shell_diagnostic(&output.stderr)
+        );
+    }
+    build_mutation_preview(mutation, &output.stdout, Utc::now())
+}
+
+/// Run the read-only preflight/diff preview for a resolved mutation
+/// template against a live Mongo target. Zero matches is a valid
+/// `MutationPreview::Ok` — not an error — but is not approvable for
+/// `--apply` (Task 3 enforces that gate).
+pub fn preview_mutation(config: &Config, mutation: &ResolvedMutation) -> Result<MutationPreview> {
+    preview_mutation_with_runner(&CommandMongoshRunner, config, mutation)
+}
+
+fn apply_mutation_with_runner(
+    runner: &dyn MongoshRunner,
+    config: &Config,
+    mutation: &ResolvedMutation,
+    approved: &CandidateSnapshot,
+) -> Result<MutationExecutionResult> {
+    let js = build_apply_eval_js(mutation, approved)?;
+    let invocation = prepare_mongosh_invocation(config, js)?;
+    // A spawn failure here means mongosh never started — nothing ambiguous
+    // happened, so this propagates as a plain error rather than
+    // `FailedOrUnknown`.
+    let output = runner.run(&invocation)?;
+    if !output.success {
+        return Ok(MutationExecutionResult::FailedOrUnknown {
+            detail: sanitize_shell_diagnostic(&format!(
+                "mongosh apply exited with status {:?}: {}",
+                output.status_code, output.stderr
+            )),
+        });
+    }
+    let result = match parse_mongosh_sentinel::<MutationExecutionResult>(
+        &output.stdout,
+        "mongo_mutation_apply_result",
+    ) {
+        Ok(result) => result,
+        Err(_) => MutationExecutionResult::FailedOrUnknown {
+            detail:
+                "mongosh apply program did not emit a valid result sentinel; commit status is unknown"
+                    .to_string(),
+        },
+    };
+    Ok(sanitize_execution_result(result))
+}
+
+/// Run the single no-retry transactional apply for a resolved mutation
+/// template against a live Mongo target, having the apply program
+/// re-verify the `approved` preview snapshot inside
+/// `session.withTransaction` before writing. Never retried by this function
+/// or its caller — a transport/process failure after `mongosh` starts is
+/// classified `MutationExecutionResult::FailedOrUnknown`, not retried.
+pub fn apply_mutation(
+    config: &Config,
+    mutation: &ResolvedMutation,
+    approved: &CandidateSnapshot,
+) -> Result<MutationExecutionResult> {
+    apply_mutation_with_runner(&CommandMongoshRunner, config, mutation, approved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2223,6 +3006,8 @@ mod tests {
         let candidates = CandidateSnapshot {
             matched_count: 2,
             candidate_ids: vec![json!("a"), json!("b")],
+            raw_docs: vec![],
+            field_diffs: vec![],
         };
 
         let digest_a = canonical_mutation_digest(&resolved, &candidates);
@@ -2236,11 +3021,811 @@ mod tests {
         let different_candidates = CandidateSnapshot {
             matched_count: 3,
             candidate_ids: vec![json!("a"), json!("b"), json!("c")],
+            raw_docs: vec![],
+            field_diffs: vec![],
         };
         let digest_c = canonical_mutation_digest(&resolved, &different_candidates);
         assert_ne!(
             digest_a, digest_c,
             "digest must change when the candidate set changes"
         );
+    }
+
+    #[test]
+    fn canonical_mutation_digest_reacts_to_field_diff_changes_alone() {
+        // Same template, same matched_count/candidate_ids — only the
+        // derived field_diffs differ. If canonical_mutation_digest didn't
+        // fold field_diffs into its payload, this would (wrongly) produce
+        // the same digest for two materially different diffs, letting a
+        // tampered/edited preview artifact pass an `--approve` check that
+        // only compared candidate identity.
+        let mut params = BTreeMap::new();
+        params.insert("new_value".to_string(), "42".to_string());
+        let resolved = resolve_mutation_template_from(
+            vec![test_executable_template()],
+            "test_fixture_set_value",
+            &params,
+        )
+        .expect("fixture should resolve");
+
+        let base = CandidateSnapshot {
+            matched_count: 1,
+            candidate_ids: vec![json!("a")],
+            raw_docs: vec![json!({"_id": "a", "value": "old"})],
+            field_diffs: vec![CandidateDiff {
+                id: json!("a"),
+                fields: vec![FieldDiff {
+                    path: "value".to_string(),
+                    old_present: true,
+                    old_value: json!("old"),
+                    new_value: json!("42"),
+                }],
+            }],
+        };
+        let mut tampered = base.clone();
+        tampered.raw_docs = vec![json!({"_id": "a", "value": "different"})];
+        tampered.field_diffs = vec![CandidateDiff {
+            id: json!("a"),
+            fields: vec![FieldDiff {
+                path: "value".to_string(),
+                old_present: true,
+                old_value: json!("different"),
+                new_value: json!("42"),
+            }],
+        }];
+
+        let digest_base = canonical_mutation_digest(&resolved, &base);
+        let digest_tampered = canonical_mutation_digest(&resolved, &tampered);
+        assert_ne!(
+            digest_base, digest_tampered,
+            "digest must react to a changed field diff even when candidate_ids/matched_count are unchanged"
+        );
+    }
+
+    // ── Mutation execution tests (plan Task 2, Step 4) ─────────────────────
+
+    use ayx_core::profile::{MongoDatabases, MongoManaged, MongoProfile, TlsConfig};
+    use std::cell::RefCell;
+
+    fn test_managed_config(managed: MongoManaged) -> Config {
+        Config {
+            profile_name: "test".to_string(),
+            mongo: MongoProfile {
+                mode: MongoMode::Managed,
+                databases: MongoDatabases {
+                    gallery_name: "AlteryxGallery".to_string(),
+                    service_name: "AlteryxService".to_string(),
+                },
+                embedded: None,
+                managed: Some(managed),
+            },
+            alteryx_one: None,
+            observability: None,
+            server_api: None,
+            api: None,
+            server: None,
+            sqlserver: None,
+            upgrade: None,
+        }
+    }
+
+    fn managed_with_url(url: &str) -> MongoManaged {
+        MongoManaged {
+            url: Some(url.to_string()),
+            host: None,
+            port: 27017,
+            auth_database: None,
+            username: None,
+            password: None,
+            password_ref: None,
+            tls: TlsConfig::default(),
+            timeout_ms: None,
+            retry_count: None,
+            max_pool_size: None,
+        }
+    }
+
+    fn managed_with_userpass(username: &str, password: &str) -> MongoManaged {
+        MongoManaged {
+            url: None,
+            host: Some("localhost".to_string()),
+            port: 27017,
+            auth_database: None,
+            username: Some(username.to_string()),
+            password: Some(password.to_string()),
+            password_ref: None,
+            tls: TlsConfig::default(),
+            timeout_ms: None,
+            retry_count: None,
+            max_pool_size: None,
+        }
+    }
+
+    fn resolved_fixture(new_value: &str) -> ResolvedMutation {
+        let mut params = BTreeMap::new();
+        params.insert("new_value".to_string(), new_value.to_string());
+        resolve_mutation_template_from(
+            vec![test_executable_template()],
+            "test_fixture_set_value",
+            &params,
+        )
+        .expect("fixture should resolve")
+    }
+
+    fn approved_snapshot_fixture() -> CandidateSnapshot {
+        let resolved = resolved_fixture("42");
+        let docs = vec![json!({"_id": "doc1", "value": "old"})];
+        build_candidate_snapshot(&resolved, docs).expect("fixture snapshot should build")
+    }
+
+    // ── Pure: candidate diff construction (no runner) ──────────────────────
+
+    #[test]
+    fn candidate_diff_flags_missing_field() {
+        let resolved = resolved_fixture("42");
+        let docs = vec![json!({"_id": "doc1"})];
+        let snapshot = build_candidate_snapshot(&resolved, docs).expect("should build snapshot");
+        assert_eq!(snapshot.matched_count, 1);
+        let diff = &snapshot.field_diffs[0].fields[0];
+        assert_eq!(diff.path, "value");
+        assert!(!diff.old_present);
+        assert_eq!(diff.old_value, Value::Null);
+        assert_eq!(diff.new_value, json!("42"));
+    }
+
+    #[test]
+    fn candidate_diff_flags_changed_field() {
+        let resolved = resolved_fixture("42");
+        let docs = vec![json!({"_id": "doc1", "value": "old"})];
+        let snapshot = build_candidate_snapshot(&resolved, docs).expect("should build snapshot");
+        let diff = &snapshot.field_diffs[0].fields[0];
+        assert!(diff.old_present);
+        assert_eq!(diff.old_value, json!("old"));
+        assert_eq!(diff.new_value, json!("42"));
+    }
+
+    #[test]
+    fn candidate_diff_flags_noop_value() {
+        let resolved = resolved_fixture("42");
+        let docs = vec![json!({"_id": "doc1", "value": "42"})];
+        let snapshot = build_candidate_snapshot(&resolved, docs).expect("should build snapshot");
+        let diff = &snapshot.field_diffs[0].fields[0];
+        assert!(diff.old_present);
+        assert_eq!(
+            diff.old_value, diff.new_value,
+            "a no-op diff still records equal old/new values rather than being suppressed"
+        );
+    }
+
+    #[test]
+    fn candidate_diff_handles_nested_dotted_field_path() {
+        let mut parameters = BTreeMap::new();
+        parameters.insert(
+            "new_email".to_string(),
+            MutationParameter {
+                type_: MutationParameterType::String,
+                required: true,
+            },
+        );
+        let template = MongoMutationTemplate {
+            id: "nested_fixture".to_string(),
+            revision: 1,
+            mode: MutationTemplateMode::Executable,
+            database: "TestDb".to_string(),
+            collection: "widgets".to_string(),
+            filter: json!({ "status": "pending" }),
+            update: json!({ "$set": { "profile.email": "${new_email}" } }),
+            parameters,
+            max_affected: 10,
+            max_backup_age_minutes: 60,
+            purpose: "test-only nested-path fixture".to_string(),
+            kba_refs: vec![],
+            rollback: "guarded_set_inverse".to_string(),
+        };
+        let mut params = BTreeMap::new();
+        params.insert("new_email".to_string(), "b@y.com".to_string());
+        let resolved = resolve_mutation_template_from(vec![template], "nested_fixture", &params)
+            .expect("nested fixture should resolve");
+
+        let docs = vec![json!({"_id": "doc1", "profile": {"email": "a@x.com"}})];
+        let snapshot = build_candidate_snapshot(&resolved, docs).expect("should build snapshot");
+        let diff = &snapshot.field_diffs[0].fields[0];
+        assert_eq!(diff.path, "profile.email");
+        assert!(diff.old_present);
+        assert_eq!(diff.old_value, json!("a@x.com"));
+        assert_eq!(diff.new_value, json!("b@y.com"));
+    }
+
+    #[test]
+    fn get_json_path_walks_nested_objects_and_reports_absence() {
+        let doc = json!({"a": {"b": {"c": 1}}, "x": 2});
+        assert_eq!(get_json_path(&doc, "a.b.c"), Some(&json!(1)));
+        assert_eq!(get_json_path(&doc, "x"), Some(&json!(2)));
+        assert_eq!(get_json_path(&doc, "a.b.missing"), None);
+        assert_eq!(get_json_path(&doc, "missing"), None);
+        assert_eq!(
+            get_json_path(&doc, "a.b.c.d"),
+            None,
+            "walking a path past a scalar value must report absence, not panic"
+        );
+    }
+
+    // ── Pure: digest stability and redaction ────────────────────────────────
+
+    #[test]
+    fn canonical_mutation_digest_is_stable_regardless_of_param_order() {
+        let mut parameters = BTreeMap::new();
+        parameters.insert(
+            "first".to_string(),
+            MutationParameter {
+                type_: MutationParameterType::String,
+                required: true,
+            },
+        );
+        parameters.insert(
+            "second".to_string(),
+            MutationParameter {
+                type_: MutationParameterType::String,
+                required: true,
+            },
+        );
+        let template = MongoMutationTemplate {
+            id: "two_param_fixture".to_string(),
+            revision: 1,
+            mode: MutationTemplateMode::Executable,
+            database: "TestDb".to_string(),
+            collection: "widgets".to_string(),
+            filter: json!({ "status": "pending" }),
+            update: json!({ "$set": { "a": "${first}", "b": "${second}" } }),
+            parameters,
+            max_affected: 10,
+            max_backup_age_minutes: 60,
+            purpose: "test-only two-parameter fixture".to_string(),
+            kba_refs: vec![],
+            rollback: "guarded_set_inverse".to_string(),
+        };
+
+        let params_order_1 =
+            parse_mutation_params(&["first=1".to_string(), "second=2".to_string()]).unwrap();
+        let params_order_2 =
+            parse_mutation_params(&["second=2".to_string(), "first=1".to_string()]).unwrap();
+
+        let resolved_1 = resolve_mutation_template_from(
+            vec![template.clone()],
+            "two_param_fixture",
+            &params_order_1,
+        )
+        .unwrap();
+        let resolved_2 =
+            resolve_mutation_template_from(vec![template], "two_param_fixture", &params_order_2)
+                .unwrap();
+
+        let docs = vec![json!({"_id": "doc1", "a": "old", "b": "old2"})];
+        let snapshot_1 = build_candidate_snapshot(&resolved_1, docs.clone()).unwrap();
+        let snapshot_2 = build_candidate_snapshot(&resolved_2, docs).unwrap();
+
+        let digest_1 = canonical_mutation_digest(&resolved_1, &snapshot_1);
+        let digest_2 = canonical_mutation_digest(&resolved_2, &snapshot_2);
+        assert_eq!(
+            digest_1, digest_2,
+            "digest must be stable regardless of --param CLI order"
+        );
+    }
+
+    #[test]
+    fn sanitize_shell_diagnostic_redacts_embedded_uri() {
+        let text = "MongoServerSelectionError: connect ECONNREFUSED mongodb://admin:s3cr3t@10.0.0.5:27017/admin?authSource=admin";
+        let sanitized = sanitize_shell_diagnostic(text);
+        assert!(!sanitized.contains("s3cr3t"));
+        assert!(!sanitized.contains("admin:s3cr3t"));
+        assert!(sanitized.contains("mongodb://***:***@10.0.0.5:27017"));
+        assert!(sanitized.starts_with("MongoServerSelectionError: connect ECONNREFUSED"));
+    }
+
+    #[test]
+    fn sanitize_shell_diagnostic_passes_through_text_without_a_uri() {
+        let text = "connection timed out after 30000ms";
+        assert_eq!(sanitize_shell_diagnostic(text), text);
+    }
+
+    #[test]
+    fn sanitize_shell_diagnostic_redacts_srv_uri() {
+        let text = "failed: mongodb+srv://user:pw@cluster0.example.mongodb.net/db and nothing else";
+        let sanitized = sanitize_shell_diagnostic(text);
+        assert!(!sanitized.contains("user:pw"));
+        assert!(sanitized.contains("mongodb+srv://***:***@cluster0.example.mongodb.net"));
+        assert!(sanitized.ends_with("and nothing else"));
+    }
+
+    #[test]
+    fn sanitize_shell_diagnostic_redacts_multiple_and_mixed_scheme_uris() {
+        let text = "first mongodb://a:b@h1/db then mongodb+srv://c:d@h2/db end";
+        let sanitized = sanitize_shell_diagnostic(text);
+        assert!(!sanitized.contains("a:b"));
+        assert!(!sanitized.contains("c:d"));
+        assert!(sanitized.contains("mongodb://***:***@h1/db"));
+        assert!(sanitized.contains("mongodb+srv://***:***@h2/db"));
+        assert!(sanitized.ends_with("end"));
+    }
+
+    #[test]
+    fn render_redacted_mongosh_masks_uri_credentials() {
+        let config = test_managed_config(managed_with_url(
+            "mongodb://admin:s3cr3t@10.0.0.5:27017/admin",
+        ));
+        let invocation = prepare_mongosh_invocation(&config, "print('hi');".to_string()).unwrap();
+        let rendered = render_redacted_mongosh(&invocation);
+        assert!(!rendered.contains("s3cr3t"));
+        assert!(rendered.contains("***:***@10.0.0.5"));
+    }
+
+    #[test]
+    fn render_redacted_mongosh_masks_password_file_path() {
+        let config = test_managed_config(managed_with_userpass("svc_account", "hunter2"));
+        let invocation = prepare_mongosh_invocation(&config, "print('hi');".to_string()).unwrap();
+        let real_path = invocation
+            .invocation
+            .args
+            .iter()
+            .position(|a| a == "--config")
+            .map(|i| invocation.invocation.args[i + 1].clone())
+            .expect("managed username/password must produce a --config arg");
+        assert!(
+            std::path::Path::new(&real_path).exists(),
+            "password file must still exist while the invocation is alive"
+        );
+
+        let rendered = render_redacted_mongosh(&invocation);
+        assert!(!rendered.contains("hunter2"));
+        assert!(!rendered.contains(&real_path));
+        assert!(rendered.contains("--config ***"));
+    }
+
+    #[test]
+    fn prepared_invocation_eval_js_matches_the_generated_apply_program() {
+        let resolved = resolved_fixture("42");
+        let approved = approved_snapshot_fixture();
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let js = build_apply_eval_js(&resolved, &approved).unwrap();
+        let invocation = prepare_mongosh_invocation(&config, js.clone()).unwrap();
+        assert_eq!(invocation.eval_js(), js);
+    }
+
+    #[test]
+    fn build_apply_eval_js_uses_with_transaction_and_no_raw_uri() {
+        let resolved = resolved_fixture("42");
+        let approved = approved_snapshot_fixture();
+        let js = build_apply_eval_js(&resolved, &approved).expect("should build apply js");
+        assert!(js.contains("withTransaction"));
+        assert!(!js.contains("mongodb://"));
+        assert!(!js.contains("mongodb+srv://"));
+    }
+
+    #[test]
+    fn build_preview_eval_js_has_no_raw_uri() {
+        let resolved = resolved_fixture("42");
+        let js = build_preview_eval_js(&resolved).expect("should build preview js");
+        assert!(!js.contains("mongodb://"));
+        assert!(js.contains("cap_exceeded"));
+    }
+
+    #[test]
+    fn build_apply_eval_js_never_raw_interpolates_a_hostile_parameter() {
+        // A parameter value containing JS-meaningful characters must only
+        // ever appear inside a properly JSON-escaped string literal
+        // (produced by write_const/serde_json::to_string) — never spliced
+        // in raw. If this regressed to `format!("...{value}...")`, the
+        // exact escaped form asserted below would not appear.
+        let hostile = r#"a"); db.dropDatabase(); ("#;
+        let resolved = resolved_fixture(hostile);
+        let approved = approved_snapshot_fixture();
+        let js = build_apply_eval_js(&resolved, &approved).expect("should build apply js");
+
+        let escaped = serde_json::to_string(hostile).expect("hostile string should serialize");
+        assert!(
+            js.contains(&escaped),
+            "hostile parameter value must appear only in its JSON-escaped form"
+        );
+        assert_ne!(
+            escaped.trim_matches('"'),
+            hostile,
+            "sanity check: the hostile value must actually require escaping for this test to mean anything"
+        );
+    }
+
+    // ── Fake-runner: preview_mutation ───────────────────────────────────────
+
+    #[derive(Clone)]
+    enum FakeOutcome {
+        SpawnFailure(String),
+        Ran(MongoshRunOutput),
+    }
+
+    struct FakeMongoshRunner {
+        outcome: FakeOutcome,
+        captured_eval_js: RefCell<Option<String>>,
+    }
+
+    impl FakeMongoshRunner {
+        fn returning_stdout(stdout: &str) -> Self {
+            FakeMongoshRunner {
+                outcome: FakeOutcome::Ran(MongoshRunOutput {
+                    status_code: Some(0),
+                    success: true,
+                    stdout: stdout.to_string(),
+                    stderr: String::new(),
+                }),
+                captured_eval_js: RefCell::new(None),
+            }
+        }
+
+        fn failing_exit(status_code: i32, stderr: &str) -> Self {
+            FakeMongoshRunner {
+                outcome: FakeOutcome::Ran(MongoshRunOutput {
+                    status_code: Some(status_code),
+                    success: false,
+                    stdout: String::new(),
+                    stderr: stderr.to_string(),
+                }),
+                captured_eval_js: RefCell::new(None),
+            }
+        }
+
+        fn spawn_failure(message: &str) -> Self {
+            FakeMongoshRunner {
+                outcome: FakeOutcome::SpawnFailure(message.to_string()),
+                captured_eval_js: RefCell::new(None),
+            }
+        }
+
+        fn eval_js(&self) -> Option<String> {
+            self.captured_eval_js.borrow().clone()
+        }
+    }
+
+    impl MongoshRunner for FakeMongoshRunner {
+        fn run(&self, invocation: &PreparedMongoshInvocation) -> Result<MongoshRunOutput> {
+            *self.captured_eval_js.borrow_mut() = Some(invocation.eval_js().to_string());
+            match &self.outcome {
+                FakeOutcome::SpawnFailure(msg) => Err(anyhow::anyhow!(msg.clone())),
+                FakeOutcome::Ran(out) => Ok(out.clone()),
+            }
+        }
+    }
+
+    fn ok_preview_stdout(docs: &[Value]) -> String {
+        json!({
+            "schema_version": 1,
+            "kind": "mongo_mutation_preview_result",
+            "status": "ok",
+            "matched_count": docs.len(),
+            "docs": docs,
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn fake_runner_captures_the_exact_program_preview_mutation_sent() {
+        let resolved = resolved_fixture("42");
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let runner = FakeMongoshRunner::returning_stdout(&ok_preview_stdout(&[]));
+        let _ = preview_mutation_with_runner(&runner, &config, &resolved).unwrap();
+        let captured = runner
+            .eval_js()
+            .expect("runner should have captured the eval js");
+        assert_eq!(captured, build_preview_eval_js(&resolved).unwrap());
+    }
+
+    #[test]
+    fn preview_mutation_ok_builds_snapshot_and_digest() {
+        let resolved = resolved_fixture("42");
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let docs = vec![
+            json!({"_id": "doc1", "value": "old"}),
+            json!({"_id": "doc2"}),
+        ];
+        let runner = FakeMongoshRunner::returning_stdout(&ok_preview_stdout(&docs));
+        let preview = preview_mutation_with_runner(&runner, &config, &resolved)
+            .expect("well-formed ok sentinel should parse");
+        match preview {
+            MutationPreview::Ok {
+                snapshot,
+                approval_digest,
+                template_id,
+                ..
+            } => {
+                assert_eq!(template_id, "test_fixture_set_value");
+                assert_eq!(snapshot.matched_count, 2);
+                assert_eq!(snapshot.candidate_ids, vec![json!("doc1"), json!("doc2")]);
+                assert!(approval_digest.starts_with("sha256:"));
+                assert_eq!(snapshot.field_diffs.len(), 2);
+            }
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preview_mutation_zero_matches_is_a_valid_ok_preview() {
+        let resolved = resolved_fixture("42");
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let runner = FakeMongoshRunner::returning_stdout(&ok_preview_stdout(&[]));
+        let preview = preview_mutation_with_runner(&runner, &config, &resolved)
+            .expect("zero matches is a valid, non-error preview");
+        match preview {
+            MutationPreview::Ok { snapshot, .. } => assert_eq!(snapshot.matched_count, 0),
+            other => panic!("expected Ok, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preview_mutation_cap_exceeded_is_a_structured_non_error_outcome() {
+        let resolved = resolved_fixture("42");
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let stdout = json!({
+            "schema_version": 1,
+            "kind": "mongo_mutation_preview_result",
+            "status": "cap_exceeded",
+            "max_affected": resolved.max_affected,
+            "matched_at_least": u64::from(resolved.max_affected) + 1,
+        })
+        .to_string();
+        let runner = FakeMongoshRunner::returning_stdout(&stdout);
+        let preview = preview_mutation_with_runner(&runner, &config, &resolved)
+            .expect("cap_exceeded is a structured, non-error preview outcome");
+        match preview {
+            MutationPreview::CapExceeded {
+                matched_at_least,
+                max_affected,
+                ..
+            } => {
+                assert_eq!(max_affected, resolved.max_affected);
+                assert_eq!(matched_at_least, u64::from(resolved.max_affected) + 1);
+            }
+            other => panic!("expected CapExceeded, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preview_mutation_rejects_malformed_sentinel() {
+        let resolved = resolved_fixture("42");
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let runner = FakeMongoshRunner::returning_stdout("not json at all");
+        let err = preview_mutation_with_runner(&runner, &config, &resolved)
+            .expect_err("garbage stdout must be rejected");
+        assert!(
+            err.to_string()
+                .contains("did not emit a single valid JSON sentinel")
+        );
+    }
+
+    #[test]
+    fn preview_mutation_rejects_wrong_kind() {
+        let resolved = resolved_fixture("42");
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let stdout = json!({
+            "schema_version": 1, "kind": "something_else", "status": "ok",
+            "matched_count": 0, "docs": [],
+        })
+        .to_string();
+        let runner = FakeMongoshRunner::returning_stdout(&stdout);
+        let err = preview_mutation_with_runner(&runner, &config, &resolved)
+            .expect_err("wrong kind must be rejected");
+        assert!(err.to_string().contains("unexpected mongosh sentinel kind"));
+    }
+
+    #[test]
+    fn preview_mutation_rejects_unsupported_schema_version() {
+        let resolved = resolved_fixture("42");
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let stdout = json!({
+            "schema_version": 2, "kind": "mongo_mutation_preview_result", "status": "ok",
+            "matched_count": 0, "docs": [],
+        })
+        .to_string();
+        let runner = FakeMongoshRunner::returning_stdout(&stdout);
+        let err = preview_mutation_with_runner(&runner, &config, &resolved)
+            .expect_err("unsupported schema_version must be rejected");
+        assert!(
+            err.to_string()
+                .contains("unsupported mongo mutation sentinel schema_version")
+        );
+    }
+
+    #[test]
+    fn preview_mutation_rejects_trailing_output_after_sentinel() {
+        let resolved = resolved_fixture("42");
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let stdout = format!("{}\nEXTRA GARBAGE LINE", ok_preview_stdout(&[]));
+        let runner = FakeMongoshRunner::returning_stdout(&stdout);
+        let err = preview_mutation_with_runner(&runner, &config, &resolved)
+            .expect_err("trailing output after the sentinel must be rejected");
+        assert!(
+            err.to_string()
+                .contains("did not emit a single valid JSON sentinel")
+        );
+    }
+
+    #[test]
+    fn preview_mutation_propagates_process_failure_as_plain_error() {
+        let resolved = resolved_fixture("42");
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let runner = FakeMongoshRunner::failing_exit(1, "connection refused");
+        let err = preview_mutation_with_runner(&runner, &config, &resolved)
+            .expect_err("a failed preview process is a plain error, not ambiguous");
+        assert!(err.to_string().contains("mongosh preview exited"));
+    }
+
+    // ── Fake-runner: apply_mutation ─────────────────────────────────────────
+
+    fn applied_apply_stdout(matched: u64, modified: u64) -> String {
+        json!({
+            "schema_version": 1,
+            "kind": "mongo_mutation_apply_result",
+            "status": "applied",
+            "matched_count": matched,
+            "modified_count": modified,
+        })
+        .to_string()
+    }
+
+    fn aborted_apply_stdout(reason: &str, detail: &str) -> String {
+        json!({
+            "schema_version": 1,
+            "kind": "mongo_mutation_apply_result",
+            "status": "aborted",
+            "reason": reason,
+            "detail": detail,
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn apply_mutation_applied_success() {
+        let resolved = resolved_fixture("42");
+        let approved = approved_snapshot_fixture();
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let runner = FakeMongoshRunner::returning_stdout(&applied_apply_stdout(1, 1));
+        let result = apply_mutation_with_runner(&runner, &config, &resolved, &approved)
+            .expect("well-formed applied sentinel should parse");
+        assert_eq!(
+            result,
+            MutationExecutionResult::Applied {
+                matched_count: 1,
+                modified_count: 1
+            }
+        );
+    }
+
+    #[test]
+    fn apply_mutation_aborted_preflight_mismatch() {
+        let resolved = resolved_fixture("42");
+        let approved = approved_snapshot_fixture();
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let runner = FakeMongoshRunner::returning_stdout(&aborted_apply_stdout(
+            "preflight_mismatch",
+            "candidate identities or prior field values changed since the approved preview",
+        ));
+        let result = apply_mutation_with_runner(&runner, &config, &resolved, &approved)
+            .expect("aborted is a structured, non-error result");
+        match result {
+            MutationExecutionResult::Aborted { reason, .. } => {
+                assert_eq!(reason, MutationAbortReason::PreflightMismatch);
+            }
+            other => panic!("expected Aborted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_mutation_aborted_transaction_unsupported() {
+        let resolved = resolved_fixture("42");
+        let approved = approved_snapshot_fixture();
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let runner = FakeMongoshRunner::returning_stdout(&aborted_apply_stdout(
+            "transaction_unsupported",
+            "deployment is not a replica set or mongos",
+        ));
+        let result = apply_mutation_with_runner(&runner, &config, &resolved, &approved)
+            .expect("should parse");
+        match result {
+            MutationExecutionResult::Aborted { reason, .. } => {
+                assert_eq!(reason, MutationAbortReason::TransactionUnsupported);
+            }
+            other => panic!("expected Aborted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_mutation_aborted_count_mismatch_covers_preflight_count_check() {
+        let resolved = resolved_fixture("42");
+        let approved = approved_snapshot_fixture();
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let runner = FakeMongoshRunner::returning_stdout(&aborted_apply_stdout(
+            "count_mismatch",
+            "expected 1 candidates, found 2",
+        ));
+        let result = apply_mutation_with_runner(&runner, &config, &resolved, &approved)
+            .expect("should parse");
+        match result {
+            MutationExecutionResult::Aborted { reason, .. } => {
+                assert_eq!(reason, MutationAbortReason::CountMismatch);
+            }
+            other => panic!("expected Aborted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_mutation_aborted_zero_match_and_post_verification_mismatch() {
+        let resolved = resolved_fixture("42");
+        let approved = approved_snapshot_fixture();
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+
+        let runner = FakeMongoshRunner::returning_stdout(&aborted_apply_stdout(
+            "zero_match_apply",
+            "no documents currently match the resolved filter",
+        ));
+        let result = apply_mutation_with_runner(&runner, &config, &resolved, &approved)
+            .expect("should parse");
+        assert!(matches!(
+            result,
+            MutationExecutionResult::Aborted {
+                reason: MutationAbortReason::ZeroMatchApply,
+                ..
+            }
+        ));
+
+        let runner2 = FakeMongoshRunner::returning_stdout(&aborted_apply_stdout(
+            "post_verification_mismatch",
+            "post-update field values did not match",
+        ));
+        let result2 = apply_mutation_with_runner(&runner2, &config, &resolved, &approved)
+            .expect("should parse");
+        assert!(matches!(
+            result2,
+            MutationExecutionResult::Aborted {
+                reason: MutationAbortReason::PostVerificationMismatch,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn apply_mutation_failed_or_unknown_on_nonzero_exit() {
+        let resolved = resolved_fixture("42");
+        let approved = approved_snapshot_fixture();
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let runner = FakeMongoshRunner::failing_exit(1, "connection reset by peer");
+        let result = apply_mutation_with_runner(&runner, &config, &resolved, &approved)
+            .expect("a process failure after start is ambiguous, not a hard error");
+        match result {
+            MutationExecutionResult::FailedOrUnknown { detail } => {
+                assert!(detail.contains("connection reset"));
+            }
+            other => panic!("expected FailedOrUnknown, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_mutation_failed_or_unknown_on_malformed_sentinel() {
+        let resolved = resolved_fixture("42");
+        let approved = approved_snapshot_fixture();
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let runner = FakeMongoshRunner::returning_stdout("{not valid json");
+        let result = apply_mutation_with_runner(&runner, &config, &resolved, &approved)
+            .expect("a malformed sentinel after mongosh started is ambiguous, not a hard error");
+        assert!(matches!(
+            result,
+            MutationExecutionResult::FailedOrUnknown { .. }
+        ));
+    }
+
+    #[test]
+    fn apply_mutation_propagates_spawn_failure_as_plain_error() {
+        let resolved = resolved_fixture("42");
+        let approved = approved_snapshot_fixture();
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let runner = FakeMongoshRunner::spawn_failure("required tool 'mongosh' not found on PATH");
+        let err = apply_mutation_with_runner(&runner, &config, &resolved, &approved)
+            .expect_err("mongosh never starting is unambiguous, not FailedOrUnknown");
+        assert!(err.to_string().contains("not found on PATH"));
     }
 }
