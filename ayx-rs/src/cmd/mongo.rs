@@ -4,22 +4,36 @@
 //! to helpers in `ayx_server::mongo`. The mutate path's TTY confirmation
 //! prompt is raised here, not inside `ayx_server::mongo::mutate_envelope` —
 //! `require_tty_confirmation` lives in this crate (`cmd::confirm`), not in
-//! `ayx-server`. Confirmation deliberately does not depend on the template
-//! actually resolving: it fires as soon as the CLI-level gate tuple is
-//! complete (`validate_mutation_apply_gates`), and `mutate_envelope` does
-//! its own template resolution afterward as the real source of truth. This
-//! keeps "did the operator agree to attempt this" independent of "did the
-//! template turn out to be valid" — the latter can fail for reasons (a
-//! demoted template, a typo, an unbound parameter) that have nothing to do
-//! with whether the request should have been confirmed in the first place.
+//! `ayx-server`.
+//!
+//! `--apply` is a **prepare / confirm / execute** split (plan Task 4's
+//! required restructure), not a single call into `mutate_envelope`:
+//!
+//!   1. `prepare_mutation_apply` (read-only: CLI gates, template
+//!      resolution, backup/approval artifact loading + validation) runs
+//!      FIRST, before any prompt.
+//!   2. Only once that has succeeded — so the confirmation message can name
+//!      the *real* target database/collection and the approved
+//!      matched-document count, not just the raw request — does
+//!      `require_tty_confirmation` fire.
+//!   3. `execute_mutation_apply` (the only phase that writes anything: the
+//!      prepared execution audit artifact, then `mongosh`, then the
+//!      terminal status update) runs last.
+//!
+//! This replaces Task 3's interim shape, where confirmation fired before
+//! the template even resolved and could only echo back the raw
+//! `--backup-audit-artifact`/`--approval-artifact` *paths* rather than
+//! anything a loaded artifact actually proved. `mutate_envelope` itself
+//! still runs the whole apply flow end-to-end (prepare then execute, no
+//! confirmation) for print/preview modes and any other direct caller.
 
 use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_server::mongo::{
-    MongoMutateRequest, backup_envelope, doctor_envelope as mongo_doctor_envelope,
-    inventory_envelope, mutate_envelope, parse_mutation_params,
+    MongoMutateRequest, PreparedMutationApply, backup_envelope,
+    doctor_envelope as mongo_doctor_envelope, execute_mutation_apply, inventory_envelope,
+    mutate_envelope, parse_mutation_params, prepare_mutation_apply,
     query_envelope as mongo_query_envelope, restore_envelope, status_envelope,
-    validate_mutation_apply_gates,
 };
 
 use crate::MongoCommand;
@@ -110,17 +124,19 @@ pub fn execute(environment: Option<&str>, yes: bool, command: MongoCommand) -> R
             };
 
             if request.apply {
-                // Reject an incomplete apply tuple before ever prompting —
-                // the operator should not be asked to confirm a request
-                // that can't execute anyway.
-                validate_mutation_apply_gates(&request)?;
+                // Read-only first: CLI gates, template resolution, and
+                // backup/approval artifact loading + validation. Nothing
+                // has been written and mongosh has not been touched by the
+                // time this returns.
+                let prepared = prepare_mutation_apply(&profile_cfg, &request)?;
                 cmd::confirm::require_tty_confirmation(
                     yes,
-                    &mongo_mutation_apply_warning(&request, &profile_cfg.profile_name),
+                    &mongo_mutation_apply_warning(&profile_cfg.profile_name, &prepared),
                 )?;
+                execute_mutation_apply(&profile_cfg, prepared, &request)
+            } else {
+                mutate_envelope(&profile_cfg, &request)
             }
-
-            mutate_envelope(&profile_cfg, &request)
         }
         MongoCommand::Undo { .. } => {
             anyhow::bail!(
@@ -131,35 +147,98 @@ pub fn execute(environment: Option<&str>, yes: bool, command: MongoCommand) -> R
     }
 }
 
-/// Build the TTY confirmation prompt for `mongo mutate --apply`. Names the
-/// template (which uniquely determines the target database/collection in
-/// the remediation registry), the bound-parameter count, and the approval
-/// digest being confirmed. Deliberately built from the raw request only —
-/// see the module doc comment for why this must not depend on the template
-/// actually resolving. The real matched-document count isn't shown because
-/// it isn't independently re-verified yet; that lands with the backup/
-/// approval artifact loader (plan Task 4), which can enrich this message
-/// once it has a loaded snapshot to read the count from.
-fn mongo_mutation_apply_warning(request: &MongoMutateRequest, profile_name: &str) -> String {
+/// Build the TTY confirmation prompt for `mongo mutate --apply`. Built from
+/// the *prepared* apply (loaded and validated backup/approval artifacts, a
+/// resolved template, and the approved candidate snapshot) — so, unlike
+/// Task 3's interim version, this names the real target database and
+/// collection and the real approved matched-document count, not just the
+/// raw request. Only called once `prepare_mutation_apply` has already
+/// succeeded — see the module doc comment for the full prepare/confirm/
+/// execute ordering.
+fn mongo_mutation_apply_warning(profile_name: &str, prepared: &PreparedMutationApply) -> String {
     format!(
-        "About to APPLY mongo mutation template '{template}' on profile '{profile_name}' \
-         ({param_count} bound parameter(s)). Approving digest: {digest}. Backup artifact: \
-         {backup}. Approval artifact: {approval}. This runs a single no-retry transactional \
-         Mongo write against the template's configured database/collection and cannot be \
-         undone without a guarded `mongo undo`. Review the approved preview diff before \
-         proceeding.",
-        template = request.template.as_deref().unwrap_or("<missing>"),
-        param_count = request.params.len(),
-        digest = request.approve.as_deref().unwrap_or("<missing>"),
-        backup = request
-            .backup_audit_artifact
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "<missing>".to_string()),
-        approval = request
-            .approval_artifact
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "<missing>".to_string()),
+        "About to APPLY mongo mutation template '{template}' (rev {revision}) on profile \
+         '{profile_name}': {matched_count} approved candidate document(s) in \
+         '{database}.{collection}'. Approving digest: {digest}. Backup artifact: {backup} \
+         (recorded {backup_age}). Approval artifact: {approval}. This runs a single no-retry \
+         transactional Mongo write and cannot be undone without a guarded `mongo undo`. Review \
+         the approved preview diff before proceeding.",
+        template = prepared.mutation.template_id,
+        revision = prepared.mutation.template_revision,
+        matched_count = prepared.snapshot.matched_count,
+        database = prepared.mutation.database,
+        collection = prepared.mutation.collection,
+        digest = prepared.approval_digest,
+        backup = prepared.backup_audit_artifact.display(),
+        backup_age = prepared.backup_timestamp_utc,
+        approval = prepared.approval_artifact.display(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ayx_server::mongo::{CandidateSnapshot, ResolvedMutation};
+    use chrono::Utc;
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    /// A hand-built `PreparedMutationApply` — everything `mongo_mutation_apply_warning`
+    /// needs, without going through `prepare_mutation_apply` (which requires
+    /// an executable template; the shipped registry ships only a
+    /// `preview_only` one, so this is the only way to unit test the
+    /// confirmation message's content at the ayx-rs crate level).
+    fn fixture_prepared() -> PreparedMutationApply {
+        PreparedMutationApply {
+            mutation: ResolvedMutation {
+                template_id: "test_template".to_string(),
+                template_revision: 3,
+                template_source_digest: "sha256:aaaa".to_string(),
+                database: "TestDb".to_string(),
+                collection: "widgets".to_string(),
+                filter: serde_json::json!({"status": "pending"}),
+                update: serde_json::json!({"$set": {"value": "x"}}),
+                max_affected: 10,
+                max_backup_age_minutes: 60,
+                parameters: BTreeMap::new(),
+                parameter_digest: "sha256:bbbb".to_string(),
+                purpose: "test".to_string(),
+                kba_refs: vec![],
+                rollback: "guarded_set_inverse".to_string(),
+            },
+            snapshot: CandidateSnapshot {
+                matched_count: 7,
+                candidate_ids: vec![],
+                raw_docs: vec![],
+                field_diffs: vec![],
+            },
+            approval_digest: "sha256:cccc".to_string(),
+            connection: serde_json::json!({}),
+            backup_audit_artifact: PathBuf::from("/tmp/backup.json"),
+            backup_timestamp_utc: Utc::now(),
+            approval_artifact: PathBuf::from("/tmp/approval.json"),
+        }
+    }
+
+    #[test]
+    fn mongo_mutation_apply_warning_names_the_real_target_and_matched_count() {
+        // This is the crux of Task 4's required restructure: the
+        // confirmation prompt must name the REAL resolved target and the
+        // REAL approved matched-document count -- not just echo back raw
+        // request paths (Task 3's interim shape).
+        let prepared = fixture_prepared();
+        let message = mongo_mutation_apply_warning("myprofile", &prepared);
+        assert!(
+            message.contains("TestDb.widgets"),
+            "must name the real resolved database.collection: {message}"
+        );
+        assert!(
+            message.contains("7 approved candidate"),
+            "must name the real approved matched-document count: {message}"
+        );
+        assert!(message.contains("test_template"), "{message}");
+        assert!(message.contains("rev 3"), "{message}");
+        assert!(message.contains("myprofile"), "{message}");
+        assert!(message.contains("sha256:cccc"), "{message}");
+    }
 }

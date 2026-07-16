@@ -4,8 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
-use ayx_core::audit::write_audit_artifact;
-use ayx_core::envelope::Envelope;
+use ayx_core::audit::{
+    create_sensitive_audit_artifact, update_sensitive_audit_artifact, write_audit_artifact,
+};
+use ayx_core::envelope::{Envelope, ErrorCode};
 use ayx_core::profile::{Config, MongoMode};
 use chrono::{DateTime, Utc};
 use roxmltree::Document;
@@ -311,21 +313,29 @@ pub fn mutate_envelope(config: &Config, request: &MongoMutateRequest) -> Result<
             } => Some(approval_digest.clone()),
             MutationPreview::CapExceeded { .. } => None,
         };
-        let audit_payload = json!({
-            "command": "mongo mutate",
-            "mode": "preview",
-            "timestamp_utc": Utc::now(),
-            "profile": config.profile_name,
-            "dry_run": true,
-            "applied": false,
-            "template": mutation.template_id,
-            "template_revision": mutation.template_revision,
-            "parameters": mutation.parameters,
-            "preview": preview,
-            "mongosh": redacted,
-        });
-        let audit_path =
-            write_audit_artifact(&request.audit_dir, "mongo-mutate-preview", &audit_payload)?;
+        // Typed artifact (Task 4 Step 3) rather than an ad hoc `json!` blob
+        // — this is exactly the shape `load_and_validate_preview_approval`
+        // parses back at apply time. The *response envelope* below is
+        // unchanged from Task 3's shape; only the on-disk artifact changed.
+        let preview_audit = MutationPreviewAudit {
+            schema_version: 1,
+            command: "mongo mutate".to_string(),
+            timestamp_utc: Utc::now(),
+            profile: config.profile_name.clone(),
+            template_id: mutation.template_id.clone(),
+            template_revision: mutation.template_revision,
+            template_source_digest: mutation.template_source_digest.clone(),
+            parameter_digest: mutation.parameter_digest.clone(),
+            database: mutation.database.clone(),
+            collection: mutation.collection.clone(),
+            mongosh: redacted.clone(),
+            outcome: MutationPreviewOutcome::from(&preview),
+        };
+        let audit_path = write_audit_artifact(
+            &request.audit_dir,
+            "mongo-mutate-preview",
+            &serde_json::to_value(&preview_audit)?,
+        )?;
         return Ok(Envelope::ok_with_data(
             "mongo mutation preview generated",
             json!({
@@ -352,46 +362,563 @@ pub fn mutate_envelope(config: &Config, request: &MongoMutateRequest) -> Result<
     }
 
     // ── request.apply ───────────────────────────────────────────────────
-    // Step 1: reject an incomplete apply tuple before anything else — no
-    // database call, no confirmation prompt, no partial audit artifact.
+    // Direct callers (tests, and any future non-CLI caller) get the whole
+    // apply flow end-to-end here: `prepare_mutation_apply` (read-only) then
+    // `execute_mutation_apply` (the only phase that writes anything). The
+    // CLI dispatcher (`ayx-rs/src/cmd/mongo.rs`) calls those two functions
+    // directly instead of this branch, so it can raise the TTY confirmation
+    // prompt *between* them — once `prepare_mutation_apply` has loaded the
+    // real target database/collection and matched-document count, but
+    // before `execute_mutation_apply` writes the prepared audit artifact or
+    // touches mongosh. See that module's doc comment for the full
+    // rationale (this is the plan's "required restructure").
+    let prepared = prepare_mutation_apply(config, request)?;
+    execute_mutation_apply(config, prepared, request)
+}
+
+/// Facts extracted from a validated `mongo backup` audit artifact — just
+/// enough to record backup linkage in the mutation execution audit.
+#[derive(Clone, Debug)]
+pub struct BackupAuditFacts {
+    pub timestamp_utc: DateTime<Utc>,
+    pub output_dir: PathBuf,
+}
+
+/// Schema `load_and_validate_backup_audit` parses against — the exact shape
+/// `backup_envelope`'s audit payload has produced since Task 1. Deliberately
+/// typed (not an untyped `Value`) so a missing/mistyped required field is a
+/// single clear parse error rather than a silent `None`.
+#[derive(Debug, Deserialize)]
+struct BackupAuditFile {
+    command: String,
+    timestamp_utc: DateTime<Utc>,
+    profile: String,
+    dry_run: bool,
+    applied: bool,
+    output_dir: PathBuf,
+    #[serde(default)]
+    execution: Option<Value>,
+}
+
+/// Validate a `--backup-audit-artifact` path against plan Task 4 Step 2's
+/// strict rules. Parses JSON — never trusts the filename — and requires
+/// `command == "mongo backup"`, `applied == true`, `dry_run == false`, a
+/// non-null `execution` (a completed backup always records one — a backup
+/// artifact merely *existing* is never treated as evidence a backup ran), a
+/// matching `profile`, an existing `output_dir`, and a parseable
+/// `timestamp_utc` no older than `max_backup_age_minutes` (and not in the
+/// future, which would indicate a tampered or clock-skewed artifact). Every
+/// problem is collected and reported together, mirroring
+/// `validate_mutation_apply_gates`'s style, without echoing the artifact's
+/// full contents.
+pub fn load_and_validate_backup_audit(
+    path: &Path,
+    profile_name: &str,
+    max_backup_age_minutes: u32,
+) -> Result<BackupAuditFacts> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read backup audit artifact '{}'", path.display()))?;
+    let file: BackupAuditFile = serde_json::from_str(&raw).with_context(|| {
+        format!(
+            "backup audit artifact '{}' is not valid JSON in the expected 'mongo backup' shape",
+            path.display()
+        )
+    })?;
+
+    let mut problems: Vec<String> = Vec::new();
+    if file.command != "mongo backup" {
+        problems.push(format!(
+            "'command' must be 'mongo backup', found '{}'",
+            file.command
+        ));
+    }
+    if !file.applied {
+        problems.push("'applied' must be true (a dry-run backup is not a backup)".to_string());
+    }
+    if file.dry_run {
+        problems.push("'dry_run' must be false".to_string());
+    }
+    if file.execution.as_ref().is_none_or(Value::is_null) {
+        problems.push("'execution' is missing — not a completed backup run".to_string());
+    }
+    if file.profile != profile_name {
+        problems.push(format!(
+            "'profile' is '{}', expected '{profile_name}'",
+            file.profile
+        ));
+    }
+    if !file.output_dir.is_dir() {
+        problems.push(format!(
+            "'output_dir' '{}' does not exist or is not a directory",
+            file.output_dir.display()
+        ));
+    }
+    let now = Utc::now();
+    if file.timestamp_utc > now {
+        problems.push("'timestamp_utc' is in the future".to_string());
+    } else {
+        let age_minutes = (now - file.timestamp_utc).num_minutes();
+        if age_minutes > i64::from(max_backup_age_minutes) {
+            problems.push(format!(
+                "backup is {age_minutes} minute(s) old, exceeding this template's \
+                 max_backup_age_minutes ({max_backup_age_minutes})"
+            ));
+        }
+    }
+
+    if !problems.is_empty() {
+        anyhow::bail!(
+            "backup audit artifact '{}' failed validation: {}",
+            path.display(),
+            problems.join("; ")
+        );
+    }
+
+    Ok(BackupAuditFacts {
+        timestamp_utc: file.timestamp_utc,
+        output_dir: file.output_dir,
+    })
+}
+
+/// Validate a `--approval-artifact` path against a resolved mutation and the
+/// caller's `--approve` digest (plan Task 4 Step 2). Parses the artifact as
+/// a `MutationPreviewAudit` — never trusts the filename or an untyped blob
+/// — then requires: an approvable (`Previewed`, not `cap_exceeded`)
+/// outcome; an unexpired *originally recorded* `expires_at_utc` (never a
+/// freshly recomputed one); a matching `template_id` / `template_revision`
+/// / `template_source_digest` / `parameter_digest` / `database` /
+/// `collection` against the just-resolved `mutation`; a non-zero
+/// `snapshot.matched_count`; the artifact's own recorded `approval_digest`
+/// re-derived from its own stored `snapshot` via `canonical_mutation_digest`
+/// (this alone catches a hand-edited/tampered snapshot whose digest was
+/// never recomputed to match); and finally that `requested_approve` equals
+/// that internally-verified digest. Returns the validated `CandidateSnapshot`
+/// for use as `apply_mutation`'s `approved` argument.
+pub fn load_and_validate_preview_approval(
+    path: &Path,
+    mutation: &ResolvedMutation,
+    requested_approve: &str,
+) -> Result<CandidateSnapshot> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read approval artifact '{}'", path.display()))?;
+    let audit: MutationPreviewAudit = serde_json::from_str(&raw).with_context(|| {
+        format!(
+            "approval artifact '{}' is not valid JSON in the expected mongo mutation preview shape",
+            path.display()
+        )
+    })?;
+
+    if audit.schema_version != 1 {
+        anyhow::bail!(
+            "approval artifact '{}' has unsupported schema_version {}",
+            path.display(),
+            audit.schema_version
+        );
+    }
+
+    let (snapshot, approval_digest, expires_at_utc) = match audit.outcome {
+        MutationPreviewOutcome::Previewed {
+            snapshot,
+            approval_digest,
+            expires_at_utc,
+            ..
+        } => (snapshot, approval_digest, expires_at_utc),
+        MutationPreviewOutcome::CapExceeded { .. } => anyhow::bail!(
+            "approval artifact '{}' recorded a cap_exceeded preview; there is no approvable \
+             candidate set",
+            path.display()
+        ),
+    };
+
+    let mut problems: Vec<String> = Vec::new();
+    if expires_at_utc <= Utc::now() {
+        problems.push(format!("approval expired at {expires_at_utc}"));
+    }
+    if audit.template_id != mutation.template_id {
+        problems.push(format!(
+            "template_id mismatch: approval is for '{}', resolved mutation is '{}'",
+            audit.template_id, mutation.template_id
+        ));
+    }
+    if audit.template_revision != mutation.template_revision {
+        problems.push(format!(
+            "template_revision mismatch: approval is for rev {}, resolved mutation is rev {}",
+            audit.template_revision, mutation.template_revision
+        ));
+    }
+    if audit.template_source_digest != mutation.template_source_digest {
+        problems.push(
+            "template_source_digest mismatch — the template changed since this preview was \
+             approved"
+                .to_string(),
+        );
+    }
+    if audit.parameter_digest != mutation.parameter_digest {
+        problems.push(
+            "parameter_digest mismatch — --param values differ from the approved preview"
+                .to_string(),
+        );
+    }
+    if audit.database != mutation.database || audit.collection != mutation.collection {
+        problems.push(format!(
+            "target mismatch: approval is for {}.{}, resolved mutation targets {}.{}",
+            audit.database, audit.collection, mutation.database, mutation.collection
+        ));
+    }
+    if snapshot.matched_count == 0 {
+        problems.push("approved preview matched zero documents; nothing to apply".to_string());
+    }
+
+    // Internal-consistency / tamper check: as long as the template/parameter
+    // digests above matched, `mutation`'s filter/update/max_affected are
+    // byte-identical to what generated this preview, so recomputing the
+    // canonical digest from the *loaded* snapshot must reproduce the
+    // artifact's own recorded `approval_digest` exactly.
+    let recomputed = canonical_mutation_digest(mutation, &snapshot);
+    if recomputed != approval_digest {
+        problems.push(
+            "approval artifact is internally inconsistent: its recorded approval_digest does \
+             not match its own recorded snapshot — treat this artifact as tampered"
+                .to_string(),
+        );
+    }
+    if requested_approve != approval_digest {
+        problems
+            .push("--approve does not match the approval artifact's recorded digest".to_string());
+    }
+
+    if !problems.is_empty() {
+        anyhow::bail!(
+            "approval artifact '{}' failed validation: {}",
+            path.display(),
+            problems.join("; ")
+        );
+    }
+
+    Ok(snapshot)
+}
+
+/// Everything the TTY confirmation prompt and `execute_mutation_apply` need,
+/// already validated read-only (Task 4's required restructure): no audit
+/// artifact write yet, no confirmation, no Mongo write anywhere in
+/// `prepare_mutation_apply`.
+#[derive(Debug)]
+pub struct PreparedMutationApply {
+    pub mutation: ResolvedMutation,
+    pub snapshot: CandidateSnapshot,
+    pub approval_digest: String,
+    pub connection: Value,
+    pub backup_audit_artifact: PathBuf,
+    pub backup_timestamp_utc: DateTime<Utc>,
+    pub approval_artifact: PathBuf,
+}
+
+/// Read-only prepare phase for `mongo mutate --apply` (Task 4's required
+/// restructure): CLI-level gate validation, template resolution, and
+/// backup/approval artifact loading + validation. No audit write, no
+/// confirmation prompt, and no Mongo write anywhere in this function —
+/// callers (the CLI dispatcher, or `mutate_envelope` directly) build the
+/// confirmation message from the returned `PreparedMutationApply` and only
+/// then call `execute_mutation_apply`.
+pub fn prepare_mutation_apply(
+    config: &Config,
+    request: &MongoMutateRequest,
+) -> Result<PreparedMutationApply> {
+    prepare_mutation_apply_from(mongo_mutation_templates()?, config, request)
+}
+
+/// Same contract as `prepare_mutation_apply`, but takes the candidate
+/// template list as a parameter — mirrors `resolve_mutation_template_from`'s
+/// seam so tests can exercise the *entire* prepare pipeline (gates →
+/// resolution → backup/approval validation) against a safe, test-only
+/// executable fixture template, without adding a fake `executable` entry to
+/// the shipped `mutations.yaml` (which ships only a `preview_only`
+/// template, so `prepare_mutation_apply`'s public entry point can never
+/// reach this function's later steps in a test).
+fn prepare_mutation_apply_from(
+    templates: Vec<MongoMutationTemplate>,
+    config: &Config,
+    request: &MongoMutateRequest,
+) -> Result<PreparedMutationApply> {
     validate_mutation_apply_gates(request)?;
+    let template_name = request
+        .template
+        .as_deref()
+        .expect("validate_mutation_apply_gates already required --template");
+    let mutation = resolve_mutation_template_from(templates, template_name, &request.params)?;
 
-    // Step 2: current template binding. Resolving is pure (embedded YAML +
-    // JSON substitution, no I/O) and independently re-derives the same
-    // template_id / template_revision / template_source_digest /
-    // parameter_digest that fed the approved preview's approval_digest —
-    // this alone rejects a stale template revision, a different --param
-    // set, or a demoted/removed template, even before Task 4's
-    // stored-artifact comparison exists.
-    let mutation = resolve_mutation_template(template_name, &request.params)?;
+    let backup_path = request
+        .backup_audit_artifact
+        .as_deref()
+        .expect("validate_mutation_apply_gates already required --backup-audit-artifact");
+    let backup_facts = load_and_validate_backup_audit(
+        backup_path,
+        &config.profile_name,
+        mutation.max_backup_age_minutes,
+    )?;
 
-    // Step 3 (plan Task 4, not yet implemented — see module doc above):
-    // `load_and_validate_backup_audit` and `load_and_validate_preview_approval`
-    // must read `request.backup_audit_artifact` and
-    // `request.approval_artifact` from disk, confirm the backup is recent
-    // enough (within the template's `max_backup_age_minutes`) and marked
-    // successful, confirm the approval artifact's own recorded
-    // `approval_digest` equals `request.approve` and has not passed its
-    // *original* `expires_at_utc` (not a freshly recomputed one), and
-    // confirm both artifacts were written for this exact resolved mutation
-    // (`template_source_digest` + `parameter_digest`). Only once all of
-    // that succeeds should the prepared execution artifact be persisted and
-    // `apply_mutation` called with the loaded `CandidateSnapshot`. The TTY
-    // confirmation prompt for this path already runs in
-    // `ayx-rs/src/cmd/mongo.rs` before this function is even called, using
-    // `cmd::confirm::require_tty_confirmation` — Task 4 does not need to add
-    // it again, only to slot the real matched-document count into that
-    // prompt's message once it has a loaded snapshot to read it from.
-    anyhow::bail!(
-        "mongo mutate --apply for template '{}' (rev {}) passed every CLI-level safety gate \
-         (--accept-mutation-risk, --backup-audit-artifact, --approval-artifact, --approve) and \
-         the template resolved successfully, but backup/approval artifact loading and the \
-         transactional apply are not yet implemented — this lands in a follow-up task \
-         (load_and_validate_backup_audit / load_and_validate_preview_approval). No write was \
-         attempted and no mongosh process was started.",
-        mutation.template_id,
-        mutation.template_revision,
-    );
+    let approval_path = request
+        .approval_artifact
+        .as_deref()
+        .expect("validate_mutation_apply_gates already required --approval-artifact");
+    let requested_approve = request
+        .approve
+        .as_deref()
+        .expect("validate_mutation_apply_gates already required --approve");
+    let snapshot = load_and_validate_preview_approval(approval_path, &mutation, requested_approve)?;
+
+    let connection = resolve_connection_detail(config)?;
+
+    Ok(PreparedMutationApply {
+        mutation,
+        snapshot,
+        approval_digest: requested_approve.to_string(),
+        connection,
+        backup_audit_artifact: backup_path.to_path_buf(),
+        backup_timestamp_utc: backup_facts.timestamp_utc,
+        approval_artifact: approval_path.to_path_buf(),
+    })
+}
+
+/// Persisted lifecycle status of a `mongo mutate --apply` execution audit
+/// (Task 4 Steps 1/3). `Prepared` is written before `mongosh` starts; exactly
+/// one of the other four variants replaces it afterward and is never itself
+/// replaced again — a mutation is never retried. `Failed` covers a
+/// Rust-level error before/without `mongosh` ever producing a result (e.g.
+/// the binary is missing — nothing ambiguous happened, no write was
+/// attempted), distinct from `FailedOrUnknown`, where `mongosh` started but
+/// its outcome could not be trusted.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum MutationExecutionOutcome {
+    Prepared,
+    Applied {
+        matched_count: u64,
+        modified_count: u64,
+    },
+    Aborted {
+        reason: MutationAbortReason,
+        detail: String,
+    },
+    Failed {
+        detail: String,
+    },
+    FailedOrUnknown {
+        detail: String,
+    },
+}
+
+impl From<MutationExecutionResult> for MutationExecutionOutcome {
+    fn from(result: MutationExecutionResult) -> Self {
+        match result {
+            MutationExecutionResult::Applied {
+                matched_count,
+                modified_count,
+            } => MutationExecutionOutcome::Applied {
+                matched_count,
+                modified_count,
+            },
+            MutationExecutionResult::Aborted { reason, detail } => {
+                MutationExecutionOutcome::Aborted { reason, detail }
+            }
+            MutationExecutionResult::FailedOrUnknown { detail } => {
+                MutationExecutionOutcome::FailedOrUnknown { detail }
+            }
+        }
+    }
+}
+
+/// Persisted execution audit for one `mongo mutate --apply` attempt (Task 4
+/// Step 3). Created with `outcome: Prepared` before `mongosh` starts and
+/// atomically updated in place to its terminal `outcome` afterward.
+/// `candidates` is the exact approved snapshot the transaction re-verified
+/// against — the durable "capped diff" record — and `rollback` is carried
+/// from the template so a later `mongo undo` can confirm
+/// `guarded_set_inverse` support without re-resolving the template.
+/// `undo_artifact` starts `None` and is backlinked in place by a later
+/// successful `mongo undo`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MutationExecutionAudit {
+    pub schema_version: u32,
+    pub command: String,
+    pub timestamp_utc: DateTime<Utc>,
+    pub profile: String,
+    pub template_id: String,
+    pub template_revision: u32,
+    pub template_source_digest: String,
+    pub parameter_digest: String,
+    pub database: String,
+    pub collection: String,
+    pub max_affected: u32,
+    pub rollback: String,
+    pub approval_digest: String,
+    pub approval_artifact: PathBuf,
+    pub backup_audit_artifact: PathBuf,
+    pub backup_timestamp_utc: DateTime<Utc>,
+    pub connection: Value,
+    pub candidates: CandidateSnapshot,
+    #[serde(flatten)]
+    pub outcome: MutationExecutionOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undo_artifact: Option<PathBuf>,
+}
+
+/// Attempt the final atomic status update for a mutation execution audit
+/// artifact (Task 4 Step 1). If the write itself fails, escalates to a
+/// high-severity error naming the operation id and the in-memory outcome
+/// that could not be durably recorded — callers must propagate this, never
+/// swallow it, since the on-disk artifact is left reading `"prepared"`
+/// forever otherwise even though the mutation attempt already concluded.
+fn finalize_execution_audit(
+    handle: &ayx_core::audit::AuditArtifactHandle,
+    audit: &MutationExecutionAudit,
+) -> Result<()> {
+    let payload = serde_json::to_value(audit)?;
+    if let Err(update_err) = update_sensitive_audit_artifact(&handle.path, &payload) {
+        anyhow::bail!(
+            "CRITICAL: mongo mutate --apply operation '{op}' reached the point of calling \
+             mongosh and was classified in-memory as {outcome:?}, but the final audit artifact \
+             update at '{path}' FAILED ({update_err}) — the on-disk artifact still reads status \
+             \"prepared\". The mutation may have succeeded; do NOT retry. Inspect the target \
+             database directly and hand-correct or annotate the artifact once resolved.",
+            op = handle.operation_id,
+            outcome = audit.outcome,
+            path = handle.path.display(),
+        );
+    }
+    Ok(())
+}
+
+/// Execute phase for `mongo mutate --apply` (Task 4's required restructure)
+/// — the only phase that writes anything. Persists the `Prepared` execution
+/// audit artifact before ever invoking `mongosh` (Step 1): if that first
+/// write fails, this returns before any Mongo command runs. Always attempts
+/// a final atomic status update to the terminal outcome afterward; if that
+/// final write itself fails, this returns a high-severity error naming the
+/// operation id and the mutation's true in-memory outcome, rather than
+/// silently leaving the on-disk artifact reading "prepared" forever.
+pub fn execute_mutation_apply(
+    config: &Config,
+    prepared: PreparedMutationApply,
+    request: &MongoMutateRequest,
+) -> Result<Envelope> {
+    execute_mutation_apply_with_runner(&CommandMongoshRunner, config, prepared, request)
+}
+
+/// Same contract as `execute_mutation_apply`, but takes the `mongosh` runner
+/// as a parameter — the same fake-runner test seam `apply_mutation_with_runner`
+/// already uses, so the artifact create → terminal-update lifecycle and the
+/// resulting envelope shape can be tested for every `MutationExecutionResult`
+/// outcome without a live `mongosh`.
+fn execute_mutation_apply_with_runner(
+    runner: &dyn MongoshRunner,
+    config: &Config,
+    prepared: PreparedMutationApply,
+    request: &MongoMutateRequest,
+) -> Result<Envelope> {
+    let PreparedMutationApply {
+        mutation,
+        snapshot,
+        approval_digest,
+        connection,
+        backup_audit_artifact,
+        backup_timestamp_utc,
+        approval_artifact,
+    } = prepared;
+
+    let mut audit = MutationExecutionAudit {
+        schema_version: 1,
+        command: "mongo mutate".to_string(),
+        timestamp_utc: Utc::now(),
+        profile: config.profile_name.clone(),
+        template_id: mutation.template_id.clone(),
+        template_revision: mutation.template_revision,
+        template_source_digest: mutation.template_source_digest.clone(),
+        parameter_digest: mutation.parameter_digest.clone(),
+        database: mutation.database.clone(),
+        collection: mutation.collection.clone(),
+        max_affected: mutation.max_affected,
+        rollback: mutation.rollback.clone(),
+        approval_digest,
+        approval_artifact,
+        backup_audit_artifact,
+        backup_timestamp_utc,
+        connection,
+        candidates: snapshot.clone(),
+        outcome: MutationExecutionOutcome::Prepared,
+        undo_artifact: None,
+    };
+
+    let handle = create_sensitive_audit_artifact(
+        &request.audit_dir,
+        "mongo-mutate-execute",
+        &serde_json::to_value(&audit)?,
+    )
+    .context(
+        "failed to persist the prepared mutation execution audit artifact; returning before any \
+         Mongo write was attempted",
+    )?;
+
+    let apply_result = apply_mutation_with_runner(runner, config, &mutation, &snapshot);
+    let (outcome, propagate_err) = match apply_result {
+        Ok(result) => (MutationExecutionOutcome::from(result), None),
+        Err(err) => {
+            let detail = err.to_string();
+            (MutationExecutionOutcome::Failed { detail }, Some(err))
+        }
+    };
+
+    audit.outcome = outcome.clone();
+    audit.timestamp_utc = Utc::now();
+    finalize_execution_audit(&handle, &audit)?;
+
+    let data = json!({
+        "profile": config.profile_name,
+        "template": mutation.template_id,
+        "template_revision": mutation.template_revision,
+        "database": mutation.database,
+        "collection": mutation.collection,
+        "applied": matches!(outcome, MutationExecutionOutcome::Applied { .. }),
+        "result": &outcome,
+        "audit_artifact": handle.path,
+    });
+
+    match outcome {
+        MutationExecutionOutcome::Applied {
+            matched_count,
+            modified_count,
+        } => Ok(Envelope::ok_with_data(
+            format!(
+                "mongo mutation applied: {modified_count} of {matched_count} matched \
+                 document(s) modified"
+            ),
+            data,
+        )),
+        MutationExecutionOutcome::Aborted { reason, .. } => Ok(Envelope::ok_with_data(
+            format!("mongo mutation aborted before any write committed (reason: {reason:?})"),
+            data,
+        )),
+        MutationExecutionOutcome::FailedOrUnknown { .. } => Ok(Envelope::err_coded(
+            ErrorCode::Internal,
+            "mongo mutation outcome is UNKNOWN after mongosh started — inspect the target \
+             database and this audit artifact directly before taking any further action"
+                .to_string(),
+            data,
+        )),
+        MutationExecutionOutcome::Failed { .. } => Ok(Envelope::err_coded(
+            ErrorCode::Internal,
+            format!(
+                "mongo mutate --apply did not run: {}",
+                propagate_err
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "unknown error".to_string())
+            ),
+            data,
+        )),
+        MutationExecutionOutcome::Prepared => {
+            unreachable!("outcome is always overwritten to a terminal state above")
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -996,7 +1523,7 @@ pub struct ResolvedMutation {
 /// `preflight.field_diffs` audit artifact shape. Both are folded into
 /// `canonical_mutation_digest` below, so an operator's `--approve` binds to
 /// the exact diff they reviewed, not just the candidate identities.
-#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct CandidateSnapshot {
     pub matched_count: u64,
     /// Extended-JSON `_id` values, in the same deterministic order the
@@ -1015,7 +1542,7 @@ pub struct CandidateSnapshot {
 
 /// One candidate document's field-level diff: its `_id` plus the diff for
 /// every `$set` field path.
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CandidateDiff {
     pub id: Value,
     pub fields: Vec<FieldDiff>,
@@ -1024,7 +1551,7 @@ pub struct CandidateDiff {
 /// One field's before/after diff for a single candidate document.
 /// `old_present` disambiguates "field absent" from "field present and
 /// literally `null`" — both give `old_value: Value::Null`.
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct FieldDiff {
     pub path: String,
     pub old_present: bool,
@@ -2120,6 +2647,86 @@ pub enum MutationPreview {
         matched_at_least: u64,
         created_at_utc: DateTime<Utc>,
     },
+}
+
+/// The outcome half of a persisted `mongo mutate` preview artifact (Task 4
+/// Step 3) — `status == "previewed"` is the only outcome
+/// `load_and_validate_preview_approval` treats as approvable; `cap_exceeded`
+/// has no candidate snapshot to bind an approval digest to and is refused
+/// outright. Deliberately a distinct type from `MutationPreview` (which also
+/// carries `template_id`/`database`/etc.) so the persisted
+/// `MutationPreviewAudit` records each of those common fields exactly once,
+/// at the outer struct level, rather than duplicating them here too.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum MutationPreviewOutcome {
+    Previewed {
+        max_affected: u32,
+        snapshot: CandidateSnapshot,
+        approval_digest: String,
+        created_at_utc: DateTime<Utc>,
+        expires_at_utc: DateTime<Utc>,
+    },
+    CapExceeded {
+        max_affected: u32,
+        matched_at_least: u64,
+        created_at_utc: DateTime<Utc>,
+    },
+}
+
+impl From<&MutationPreview> for MutationPreviewOutcome {
+    fn from(preview: &MutationPreview) -> Self {
+        match preview {
+            MutationPreview::Ok {
+                max_affected,
+                snapshot,
+                approval_digest,
+                created_at_utc,
+                expires_at_utc,
+                ..
+            } => MutationPreviewOutcome::Previewed {
+                max_affected: *max_affected,
+                snapshot: snapshot.clone(),
+                approval_digest: approval_digest.clone(),
+                created_at_utc: *created_at_utc,
+                expires_at_utc: *expires_at_utc,
+            },
+            MutationPreview::CapExceeded {
+                max_affected,
+                matched_at_least,
+                created_at_utc,
+                ..
+            } => MutationPreviewOutcome::CapExceeded {
+                max_affected: *max_affected,
+                matched_at_least: *matched_at_least,
+                created_at_utc: *created_at_utc,
+            },
+        }
+    }
+}
+
+/// Persisted shape of a `mongo mutate` preview run (Task 4 Step 3) —
+/// replaces the ad hoc `json!` previously assembled inline by
+/// `mutate_envelope`'s preview branch. `#[serde(flatten)]`s
+/// `MutationPreviewOutcome` so the on-disk artifact carries a single
+/// top-level `status` field (`"previewed"` / `"cap_exceeded"`) alongside the
+/// outcome's own fields — exactly the shape `load_and_validate_preview_approval`
+/// parses back at apply time.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MutationPreviewAudit {
+    pub schema_version: u32,
+    pub command: String,
+    pub timestamp_utc: DateTime<Utc>,
+    pub profile: String,
+    pub template_id: String,
+    pub template_revision: u32,
+    pub template_source_digest: String,
+    pub parameter_digest: String,
+    pub database: String,
+    pub collection: String,
+    pub mongosh: String,
+    #[serde(flatten)]
+    pub outcome: MutationPreviewOutcome,
 }
 
 /// An owned `mongosh` invocation: resolved binary path plus the full
@@ -3604,6 +4211,11 @@ mod tests {
     struct FakeMongoshRunner {
         outcome: FakeOutcome,
         captured_eval_js: RefCell<Option<String>>,
+        // Task 4: proves the no-retry contract directly — every
+        // apply/undo-apply test that cares can assert `call_count() == 1`
+        // rather than only inferring "no retry" from the absence of a
+        // second captured program.
+        call_count: RefCell<u32>,
     }
 
     impl FakeMongoshRunner {
@@ -3616,6 +4228,7 @@ mod tests {
                     stderr: String::new(),
                 }),
                 captured_eval_js: RefCell::new(None),
+                call_count: RefCell::new(0),
             }
         }
 
@@ -3628,6 +4241,7 @@ mod tests {
                     stderr: stderr.to_string(),
                 }),
                 captured_eval_js: RefCell::new(None),
+                call_count: RefCell::new(0),
             }
         }
 
@@ -3635,17 +4249,23 @@ mod tests {
             FakeMongoshRunner {
                 outcome: FakeOutcome::SpawnFailure(message.to_string()),
                 captured_eval_js: RefCell::new(None),
+                call_count: RefCell::new(0),
             }
         }
 
         fn eval_js(&self) -> Option<String> {
             self.captured_eval_js.borrow().clone()
         }
+
+        fn call_count(&self) -> u32 {
+            *self.call_count.borrow()
+        }
     }
 
     impl MongoshRunner for FakeMongoshRunner {
         fn run(&self, invocation: &PreparedMongoshInvocation) -> Result<MongoshRunOutput> {
             *self.captured_eval_js.borrow_mut() = Some(invocation.eval_js().to_string());
+            *self.call_count.borrow_mut() += 1;
             match &self.outcome {
                 FakeOutcome::SpawnFailure(msg) => Err(anyhow::anyhow!(msg.clone())),
                 FakeOutcome::Ran(out) => Ok(out.clone()),
@@ -4146,5 +4766,757 @@ mod tests {
         let request = complete_apply_request("does_not_exist_in_the_registry", BTreeMap::new());
         let err = mutate_envelope(&config, &request).expect_err("template does not exist");
         assert!(err.to_string().contains("unknown mongo mutation template"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Task 4: lifecycle-safe mutation audits (backup/approval validation,
+    // typed audit persistence, and the prepare/execute apply split)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ── Backup artifact validation (Step 2) ─────────────────────────────────
+
+    fn write_json(dir: &Path, name: &str, value: &Value) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, serde_json::to_string_pretty(value).unwrap()).expect("write fixture json");
+        path
+    }
+
+    fn valid_backup_json(profile: &str, output_dir: &Path, age: chrono::Duration) -> Value {
+        json!({
+            "command": "mongo backup",
+            "timestamp_utc": Utc::now() - age,
+            "profile": profile,
+            "dry_run": false,
+            "applied": true,
+            "output_dir": output_dir,
+            "connection": {"host": "example.internal"},
+            "execution": {"archive": "backup.tar"},
+            "safety_gate": {"apply": true},
+        })
+    }
+
+    #[test]
+    fn load_and_validate_backup_audit_accepts_a_valid_fresh_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("out");
+        fs::create_dir_all(&output_dir).unwrap();
+        let path = write_json(
+            dir.path(),
+            "backup.json",
+            &valid_backup_json("test", &output_dir, chrono::Duration::minutes(5)),
+        );
+        let facts = load_and_validate_backup_audit(&path, "test", 60)
+            .expect("valid, fresh backup should pass validation");
+        assert_eq!(facts.output_dir, output_dir);
+    }
+
+    #[test]
+    fn load_and_validate_backup_audit_rejects_dry_run_and_missing_execution_together() {
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("out");
+        fs::create_dir_all(&output_dir).unwrap();
+        let mut payload = valid_backup_json("test", &output_dir, chrono::Duration::minutes(1));
+        payload["dry_run"] = json!(true);
+        payload["applied"] = json!(false);
+        payload["execution"] = Value::Null;
+        let path = write_json(dir.path(), "backup.json", &payload);
+
+        let err = load_and_validate_backup_audit(&path, "test", 60)
+            .expect_err("a dry-run backup must be rejected");
+        let msg = err.to_string();
+        assert!(msg.contains("'applied' must be true"), "{msg}");
+        assert!(msg.contains("'dry_run' must be false"), "{msg}");
+        assert!(msg.contains("'execution' is missing"), "{msg}");
+    }
+
+    #[test]
+    fn load_and_validate_backup_audit_rejects_wrong_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("out");
+        fs::create_dir_all(&output_dir).unwrap();
+        let path = write_json(
+            dir.path(),
+            "backup.json",
+            &valid_backup_json("other-profile", &output_dir, chrono::Duration::minutes(1)),
+        );
+        let err = load_and_validate_backup_audit(&path, "test", 60)
+            .expect_err("profile mismatch must be rejected");
+        assert!(err.to_string().contains("'profile' is 'other-profile'"));
+    }
+
+    #[test]
+    fn load_and_validate_backup_audit_rejects_missing_output_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("does-not-exist");
+        let path = write_json(
+            dir.path(),
+            "backup.json",
+            &valid_backup_json("test", &output_dir, chrono::Duration::minutes(1)),
+        );
+        let err = load_and_validate_backup_audit(&path, "test", 60)
+            .expect_err("a missing output_dir must be rejected");
+        assert!(
+            err.to_string()
+                .contains("does not exist or is not a directory")
+        );
+    }
+
+    #[test]
+    fn load_and_validate_backup_audit_rejects_stale_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("out");
+        fs::create_dir_all(&output_dir).unwrap();
+        let path = write_json(
+            dir.path(),
+            "backup.json",
+            &valid_backup_json("test", &output_dir, chrono::Duration::minutes(120)),
+        );
+        let err = load_and_validate_backup_audit(&path, "test", 60)
+            .expect_err("a backup older than max_backup_age_minutes must be rejected");
+        assert!(
+            err.to_string()
+                .contains("exceeding this template's max_backup_age_minutes")
+        );
+    }
+
+    #[test]
+    fn load_and_validate_backup_audit_rejects_future_timestamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("out");
+        fs::create_dir_all(&output_dir).unwrap();
+        let path = write_json(
+            dir.path(),
+            "backup.json",
+            &valid_backup_json("test", &output_dir, chrono::Duration::minutes(-60)),
+        );
+        let err = load_and_validate_backup_audit(&path, "test", 60)
+            .expect_err("a backup timestamped in the future must be rejected");
+        assert!(err.to_string().contains("is in the future"));
+    }
+
+    #[test]
+    fn load_and_validate_backup_audit_rejects_wrong_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("out");
+        fs::create_dir_all(&output_dir).unwrap();
+        let mut payload = valid_backup_json("test", &output_dir, chrono::Duration::minutes(1));
+        payload["command"] = json!("mongo restore");
+        let path = write_json(dir.path(), "backup.json", &payload);
+        let err = load_and_validate_backup_audit(&path, "test", 60)
+            .expect_err("a non-backup command must be rejected");
+        assert!(err.to_string().contains("must be 'mongo backup'"));
+    }
+
+    #[test]
+    fn load_and_validate_backup_audit_rejects_malformed_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backup.json");
+        fs::write(&path, "not json at all").unwrap();
+        let err = load_and_validate_backup_audit(&path, "test", 60)
+            .expect_err("malformed JSON must be rejected, never trusted by filename alone");
+        assert!(err.to_string().contains("not valid JSON"));
+    }
+
+    #[test]
+    fn load_and_validate_backup_audit_rejects_missing_file() {
+        let err = load_and_validate_backup_audit(Path::new("/nonexistent/backup.json"), "test", 60)
+            .expect_err("a missing file must be rejected, not treated as evidence of anything");
+        assert!(
+            err.to_string()
+                .contains("failed to read backup audit artifact")
+        );
+    }
+
+    // ── Approval (preview) artifact validation (Step 2) ─────────────────────
+
+    fn preview_ok_for(resolved: &ResolvedMutation, docs: &[Value]) -> MutationPreview {
+        build_mutation_preview(resolved, &ok_preview_stdout(docs), Utc::now())
+            .expect("preview should build from a well-formed sentinel")
+    }
+
+    fn preview_approval_digest(preview: &MutationPreview) -> String {
+        match preview {
+            MutationPreview::Ok {
+                approval_digest, ..
+            } => approval_digest.clone(),
+            MutationPreview::CapExceeded { .. } => panic!("fixture must be an Ok preview"),
+        }
+    }
+
+    fn preview_audit_for(
+        profile: &str,
+        mutation: &ResolvedMutation,
+        preview: &MutationPreview,
+    ) -> MutationPreviewAudit {
+        MutationPreviewAudit {
+            schema_version: 1,
+            command: "mongo mutate".to_string(),
+            timestamp_utc: Utc::now(),
+            profile: profile.to_string(),
+            template_id: mutation.template_id.clone(),
+            template_revision: mutation.template_revision,
+            template_source_digest: mutation.template_source_digest.clone(),
+            parameter_digest: mutation.parameter_digest.clone(),
+            database: mutation.database.clone(),
+            collection: mutation.collection.clone(),
+            mongosh: "mongosh --quiet --eval ***".to_string(),
+            outcome: MutationPreviewOutcome::from(preview),
+        }
+    }
+
+    fn write_preview_audit(
+        dir: &Path,
+        profile: &str,
+        mutation: &ResolvedMutation,
+        preview: &MutationPreview,
+    ) -> PathBuf {
+        let audit = preview_audit_for(profile, mutation, preview);
+        write_json(dir, "approval.json", &serde_json::to_value(&audit).unwrap())
+    }
+
+    #[test]
+    fn load_and_validate_preview_approval_accepts_a_valid_previewed_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = resolved_fixture("42");
+        let docs = vec![json!({"_id": "doc1", "value": "old"})];
+        let preview = preview_ok_for(&resolved, &docs);
+        let digest = preview_approval_digest(&preview);
+        let path = write_preview_audit(dir.path(), "test", &resolved, &preview);
+
+        let snapshot = load_and_validate_preview_approval(&path, &resolved, &digest)
+            .expect("a valid, unexpired, matching approval must load");
+        assert_eq!(snapshot.matched_count, 1);
+    }
+
+    #[test]
+    fn load_and_validate_preview_approval_rejects_mismatched_approve_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = resolved_fixture("42");
+        let docs = vec![json!({"_id": "doc1", "value": "old"})];
+        let preview = preview_ok_for(&resolved, &docs);
+        let path = write_preview_audit(dir.path(), "test", &resolved, &preview);
+
+        let err = load_and_validate_preview_approval(&path, &resolved, "sha256:deadbeef")
+            .expect_err("a wrong --approve digest must be rejected");
+        assert!(
+            err.to_string()
+                .contains("--approve does not match the approval artifact's recorded digest")
+        );
+    }
+
+    #[test]
+    fn load_and_validate_preview_approval_rejects_expired_approval() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = resolved_fixture("42");
+        let docs = vec![json!({"_id": "doc1", "value": "old"})];
+        let snapshot = build_candidate_snapshot(&resolved, docs).unwrap();
+        let digest = canonical_mutation_digest(&resolved, &snapshot);
+        let now = Utc::now();
+        let audit = preview_audit_for(
+            "test",
+            &resolved,
+            &MutationPreview::Ok {
+                schema_version: 1,
+                template_id: resolved.template_id.clone(),
+                template_revision: resolved.template_revision,
+                database: resolved.database.clone(),
+                collection: resolved.collection.clone(),
+                max_affected: resolved.max_affected,
+                snapshot: snapshot.clone(),
+                approval_digest: digest.clone(),
+                created_at_utc: now - chrono::Duration::hours(5),
+                expires_at_utc: now - chrono::Duration::hours(1),
+            },
+        );
+        let path = write_json(
+            dir.path(),
+            "approval.json",
+            &serde_json::to_value(&audit).unwrap(),
+        );
+
+        let err = load_and_validate_preview_approval(&path, &resolved, &digest)
+            .expect_err("an approval past its recorded expires_at_utc must be rejected");
+        assert!(err.to_string().contains("expired"));
+    }
+
+    #[test]
+    fn load_and_validate_preview_approval_rejects_a_tampered_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = resolved_fixture("42");
+        let docs = vec![json!({"_id": "doc1", "value": "old"})];
+        let snapshot = build_candidate_snapshot(&resolved, docs).unwrap();
+        // Digest computed against the ORIGINAL snapshot...
+        let digest = canonical_mutation_digest(&resolved, &snapshot);
+        let mut tampered_snapshot = snapshot.clone();
+        // ...but the persisted snapshot was hand-edited afterward without
+        // recomputing the digest -- exactly what a tampered artifact looks
+        // like on disk.
+        tampered_snapshot.matched_count = 99;
+        let now = Utc::now();
+        let audit = preview_audit_for(
+            "test",
+            &resolved,
+            &MutationPreview::Ok {
+                schema_version: 1,
+                template_id: resolved.template_id.clone(),
+                template_revision: resolved.template_revision,
+                database: resolved.database.clone(),
+                collection: resolved.collection.clone(),
+                max_affected: resolved.max_affected,
+                snapshot: tampered_snapshot,
+                approval_digest: digest.clone(),
+                created_at_utc: now,
+                expires_at_utc: now + chrono::Duration::hours(1),
+            },
+        );
+        let path = write_json(
+            dir.path(),
+            "approval.json",
+            &serde_json::to_value(&audit).unwrap(),
+        );
+
+        let err = load_and_validate_preview_approval(&path, &resolved, &digest)
+            .expect_err("a snapshot/digest mismatch must be treated as tampering");
+        assert!(err.to_string().contains("treat this artifact as tampered"));
+    }
+
+    #[test]
+    fn load_and_validate_preview_approval_rejects_cap_exceeded_outcome() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = resolved_fixture("42");
+        let preview = MutationPreview::CapExceeded {
+            schema_version: 1,
+            template_id: resolved.template_id.clone(),
+            template_revision: resolved.template_revision,
+            database: resolved.database.clone(),
+            collection: resolved.collection.clone(),
+            max_affected: resolved.max_affected,
+            matched_at_least: u64::from(resolved.max_affected) + 1,
+            created_at_utc: Utc::now(),
+        };
+        let path = write_preview_audit(dir.path(), "test", &resolved, &preview);
+
+        let err = load_and_validate_preview_approval(&path, &resolved, "sha256:anything")
+            .expect_err("cap_exceeded has no approvable candidate set");
+        assert!(err.to_string().contains("cap_exceeded"));
+    }
+
+    #[test]
+    fn load_and_validate_preview_approval_rejects_zero_matched_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = resolved_fixture("42");
+        let preview = preview_ok_for(&resolved, &[]);
+        let digest = preview_approval_digest(&preview);
+        let path = write_preview_audit(dir.path(), "test", &resolved, &preview);
+
+        let err = load_and_validate_preview_approval(&path, &resolved, &digest)
+            .expect_err("a zero-match preview must not be approvable for apply");
+        assert!(err.to_string().contains("nothing to apply"));
+    }
+
+    #[test]
+    fn load_and_validate_preview_approval_rejects_parameter_digest_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved_a = resolved_fixture("42");
+        let resolved_b = resolved_fixture("99");
+        let docs = vec![json!({"_id": "doc1", "value": "old"})];
+        let preview = preview_ok_for(&resolved_a, &docs);
+        let digest = preview_approval_digest(&preview);
+        let path = write_preview_audit(dir.path(), "test", &resolved_a, &preview);
+
+        let err = load_and_validate_preview_approval(&path, &resolved_b, &digest)
+            .expect_err("a different --param value at apply time must be rejected");
+        assert!(err.to_string().contains("parameter_digest mismatch"));
+    }
+
+    #[test]
+    fn load_and_validate_preview_approval_rejects_unsupported_schema_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolved = resolved_fixture("42");
+        let docs = vec![json!({"_id": "doc1", "value": "old"})];
+        let preview = preview_ok_for(&resolved, &docs);
+        let mut audit_value =
+            serde_json::to_value(preview_audit_for("test", &resolved, &preview)).unwrap();
+        audit_value["schema_version"] = json!(2);
+        let path = write_json(dir.path(), "approval.json", &audit_value);
+
+        let err = load_and_validate_preview_approval(&path, &resolved, "sha256:anything")
+            .expect_err("an unsupported schema_version must be rejected");
+        assert!(err.to_string().contains("unsupported schema_version"));
+    }
+
+    #[test]
+    fn load_and_validate_preview_approval_rejects_missing_file() {
+        let resolved = resolved_fixture("42");
+        let err = load_and_validate_preview_approval(
+            Path::new("/nonexistent/approval.json"),
+            &resolved,
+            "sha256:anything",
+        )
+        .expect_err("a missing approval artifact must be rejected");
+        assert!(err.to_string().contains("failed to read approval artifact"));
+    }
+
+    #[test]
+    fn mutation_preview_audit_no_secrets_in_serialized_form() {
+        let config = test_managed_config(managed_with_userpass("svc_account", "hunter2-secret"));
+        let resolved = resolved_fixture("42");
+        let invocation =
+            prepare_mongosh_invocation(&config, build_preview_eval_js(&resolved).unwrap()).unwrap();
+        let real_password_file_path = invocation
+            .invocation
+            .args
+            .iter()
+            .position(|a| a == "--config")
+            .map(|i| invocation.invocation.args[i + 1].clone())
+            .expect("managed username/password must produce a --config arg");
+        let redacted = render_redacted_mongosh(&invocation);
+        let preview = preview_ok_for(&resolved, &[json!({"_id": "doc1", "value": "old"})]);
+        let mut audit = preview_audit_for("test", &resolved, &preview);
+        audit.mongosh = redacted;
+
+        let raw = serde_json::to_string(&audit).unwrap();
+        assert!(
+            !raw.contains("hunter2-secret"),
+            "raw password must never appear in a preview audit artifact"
+        );
+        assert!(
+            !raw.contains(&real_password_file_path),
+            "the real (un-redacted) temp password-file path must never appear in a preview audit \
+             artifact -- only render_redacted_mongosh's '***' mask may"
+        );
+    }
+
+    // ── prepare_mutation_apply / execute_mutation_apply (required restructure) ─
+
+    fn apply_request_from_artifacts(
+        backup_path: PathBuf,
+        approval_path: PathBuf,
+        approve: String,
+        audit_dir: PathBuf,
+    ) -> MongoMutateRequest {
+        MongoMutateRequest {
+            template: Some("test_fixture_set_value".to_string()),
+            params: BTreeMap::from([("new_value".to_string(), "42".to_string())]),
+            print: false,
+            apply: true,
+            accept_mutation_risk: true,
+            backup_audit_artifact: Some(backup_path),
+            approval_artifact: Some(approval_path),
+            approve: Some(approve),
+            audit_dir,
+        }
+    }
+
+    /// Full valid fixture setup for the prepare/execute pipeline: a fresh
+    /// `mongo backup` artifact, an approved `mongo mutate` preview for the
+    /// `test_fixture_set_value` fixture template (one candidate, `value`
+    /// `"old"` -> `"42"`), and a request tying them together. Returns the
+    /// tempdir (kept alive for the artifact paths), the managed test config,
+    /// and the assembled request.
+    fn valid_apply_fixture() -> (tempfile::TempDir, Config, MongoMutateRequest) {
+        let dir = tempfile::tempdir().unwrap();
+        let output_dir = dir.path().join("backup-out");
+        fs::create_dir_all(&output_dir).unwrap();
+        let backup_path = write_json(
+            dir.path(),
+            "backup.json",
+            &valid_backup_json("test", &output_dir, chrono::Duration::minutes(1)),
+        );
+
+        let resolved = resolved_fixture("42");
+        let docs = vec![json!({"_id": "doc1", "value": "old"})];
+        let preview = preview_ok_for(&resolved, &docs);
+        let digest = preview_approval_digest(&preview);
+        let approval_path = write_preview_audit(dir.path(), "test", &resolved, &preview);
+
+        let audit_dir = dir.path().join("audits");
+        let request = apply_request_from_artifacts(backup_path, approval_path, digest, audit_dir);
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        (dir, config, request)
+    }
+
+    #[test]
+    fn prepare_mutation_apply_from_succeeds_end_to_end_with_valid_artifacts() {
+        let (_dir, config, request) = valid_apply_fixture();
+        let prepared =
+            prepare_mutation_apply_from(vec![test_executable_template()], &config, &request)
+                .expect("prepare should succeed against a valid backup + approved preview");
+        assert_eq!(prepared.mutation.template_id, "test_fixture_set_value");
+        assert_eq!(prepared.snapshot.matched_count, 1);
+        assert_eq!(prepared.approval_digest, request.approve.clone().unwrap());
+    }
+
+    #[test]
+    fn prepare_mutation_apply_from_fails_closed_on_stale_backup() {
+        let (dir, config, mut request) = valid_apply_fixture();
+        let output_dir = dir.path().join("backup-out");
+        let stale_backup = write_json(
+            dir.path(),
+            "backup.json",
+            &valid_backup_json("test", &output_dir, chrono::Duration::minutes(120)),
+        );
+        request.backup_audit_artifact = Some(stale_backup);
+
+        let err = prepare_mutation_apply_from(vec![test_executable_template()], &config, &request)
+            .expect_err("a stale backup must fail the prepare phase closed");
+        assert!(
+            err.to_string()
+                .contains("exceeding this template's max_backup_age_minutes")
+        );
+    }
+
+    #[test]
+    fn prepare_mutation_apply_from_fails_closed_on_wrong_backup_profile() {
+        let (dir, config, mut request) = valid_apply_fixture();
+        let output_dir = dir.path().join("backup-out");
+        let wrong_profile_backup = write_json(
+            dir.path(),
+            "backup.json",
+            &valid_backup_json(
+                "some-other-profile",
+                &output_dir,
+                chrono::Duration::minutes(1),
+            ),
+        );
+        request.backup_audit_artifact = Some(wrong_profile_backup);
+
+        let err = prepare_mutation_apply_from(vec![test_executable_template()], &config, &request)
+            .expect_err("a backup for a different profile must fail the prepare phase closed");
+        assert!(
+            err.to_string()
+                .contains("'profile' is 'some-other-profile'")
+        );
+    }
+
+    #[test]
+    fn prepare_mutation_apply_from_fails_closed_on_wrong_approve_digest() {
+        let (_dir, config, mut request) = valid_apply_fixture();
+        request.approve = Some("sha256:wrongdigest".to_string());
+
+        let err = prepare_mutation_apply_from(vec![test_executable_template()], &config, &request)
+            .expect_err("a wrong --approve digest must fail the prepare phase closed");
+        assert!(
+            err.to_string()
+                .contains("--approve does not match the approval artifact's recorded digest")
+        );
+    }
+
+    #[test]
+    fn execute_mutation_apply_with_runner_applied_creates_then_updates_one_artifact() {
+        let (dir, config, request) = valid_apply_fixture();
+        let prepared =
+            prepare_mutation_apply_from(vec![test_executable_template()], &config, &request)
+                .expect("prepare should succeed");
+        let runner = FakeMongoshRunner::returning_stdout(&applied_apply_stdout(1, 1));
+
+        let envelope = execute_mutation_apply_with_runner(&runner, &config, prepared, &request)
+            .expect("a well-formed applied sentinel should produce a successful envelope");
+
+        assert!(envelope.ok);
+        assert_eq!(envelope.data["applied"], true);
+        assert_eq!(envelope.data["result"]["status"], "applied");
+        assert_eq!(envelope.data["result"]["matched_count"], 1);
+        assert_eq!(envelope.data["result"]["modified_count"], 1);
+        assert_eq!(runner.call_count(), 1, "apply must never be retried");
+
+        let audit_path = PathBuf::from(envelope.data["audit_artifact"].as_str().unwrap());
+        let on_disk: Value =
+            serde_json::from_str(&fs::read_to_string(&audit_path).unwrap()).unwrap();
+        assert_eq!(on_disk["status"], "applied");
+        assert_eq!(on_disk["candidates"]["matched_count"], 1);
+        assert_eq!(on_disk["rollback"], "guarded_set_inverse");
+
+        let audits_dir = dir.path().join("audits");
+        // `write_sensitive_file` also leaves a stable `<path>.lock` sibling
+        // behind (by design -- see ayx-core/src/sensitive.rs); only count
+        // the `.json` artifacts themselves.
+        let json_entries: Vec<_> = fs::read_dir(&audits_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
+            .collect();
+        assert_eq!(
+            json_entries.len(),
+            1,
+            "the prepared write and the terminal update must land on the SAME file"
+        );
+    }
+
+    #[test]
+    fn execute_mutation_apply_with_runner_aborted_is_a_successful_structured_envelope() {
+        let (_dir, config, request) = valid_apply_fixture();
+        let prepared =
+            prepare_mutation_apply_from(vec![test_executable_template()], &config, &request)
+                .expect("prepare should succeed");
+        let runner = FakeMongoshRunner::returning_stdout(&aborted_apply_stdout(
+            "preflight_mismatch",
+            "candidate identities or prior field values changed since the approved preview",
+        ));
+
+        let envelope = execute_mutation_apply_with_runner(&runner, &config, prepared, &request)
+            .expect("aborted is a structured, non-error outcome (Task 2/3 precedent)");
+
+        assert!(
+            envelope.ok,
+            "aborted must still be ok=true, matching the preview cap_exceeded precedent"
+        );
+        assert_eq!(envelope.data["applied"], false);
+        assert_eq!(envelope.data["result"]["status"], "aborted");
+        assert_eq!(envelope.data["result"]["reason"], "preflight_mismatch");
+    }
+
+    #[test]
+    fn execute_mutation_apply_with_runner_failed_or_unknown_is_an_error_envelope() {
+        let (_dir, config, request) = valid_apply_fixture();
+        let prepared =
+            prepare_mutation_apply_from(vec![test_executable_template()], &config, &request)
+                .expect("prepare should succeed");
+        let runner = FakeMongoshRunner::failing_exit(1, "connection reset by peer");
+
+        let envelope = execute_mutation_apply_with_runner(&runner, &config, prepared, &request)
+            .expect("a well-formed envelope must still be returned, never a Rust Err");
+
+        assert!(
+            !envelope.ok,
+            "an unknown commit status must surface as ok=false, never silently succeed"
+        );
+        assert_eq!(envelope.data["result"]["status"], "failed_or_unknown");
+
+        let audit_path = PathBuf::from(envelope.data["audit_artifact"].as_str().unwrap());
+        let on_disk: Value =
+            serde_json::from_str(&fs::read_to_string(&audit_path).unwrap()).unwrap();
+        assert_eq!(on_disk["status"], "failed_or_unknown");
+    }
+
+    #[test]
+    fn execute_mutation_apply_with_runner_spawn_failure_is_failed_not_failed_or_unknown() {
+        let (_dir, config, request) = valid_apply_fixture();
+        let prepared =
+            prepare_mutation_apply_from(vec![test_executable_template()], &config, &request)
+                .expect("prepare should succeed");
+        let runner = FakeMongoshRunner::spawn_failure("required tool 'mongosh' not found on PATH");
+
+        let envelope = execute_mutation_apply_with_runner(&runner, &config, prepared, &request)
+            .expect("a spawn failure is unambiguous and must still produce a well-formed envelope");
+
+        assert!(!envelope.ok);
+        assert_eq!(
+            envelope.data["result"]["status"], "failed",
+            "a spawn failure (mongosh never started) is unambiguous -- distinct from failed_or_unknown"
+        );
+        assert!(envelope.message.contains("not found on PATH"));
+
+        let audit_path = PathBuf::from(envelope.data["audit_artifact"].as_str().unwrap());
+        let on_disk: Value =
+            serde_json::from_str(&fs::read_to_string(&audit_path).unwrap()).unwrap();
+        assert_eq!(on_disk["status"], "failed");
+    }
+
+    #[test]
+    fn execute_mutation_apply_with_runner_no_secrets_in_the_persisted_artifact() {
+        let (_dir, _config, request) = valid_apply_fixture();
+        // A managed config with real-looking credentials, so this test can
+        // prove they never leak into the artifact.
+        let creds_config =
+            test_managed_config(managed_with_userpass("svc_account", "hunter2-secret"));
+
+        // Capture the real (un-redacted) `--config` temp password-file path
+        // this profile would produce, so the assertion below checks for the
+        // literal secret path -- not just the flag name, which
+        // `render_redacted_mongosh` deliberately keeps visible (only its
+        // *value* is masked; see `render_redacted_mongosh_masks_password_file_path`).
+        let probe_invocation =
+            prepare_mongosh_invocation(&creds_config, "print('probe');".to_string()).unwrap();
+        let real_password_file_path = probe_invocation
+            .invocation
+            .args
+            .iter()
+            .position(|a| a == "--config")
+            .map(|i| probe_invocation.invocation.args[i + 1].clone())
+            .expect("managed username/password must produce a --config arg");
+        drop(probe_invocation);
+
+        let prepared =
+            prepare_mutation_apply_from(vec![test_executable_template()], &creds_config, &request)
+                .expect("prepare should succeed");
+        let runner = FakeMongoshRunner::returning_stdout(&applied_apply_stdout(1, 1));
+
+        let envelope =
+            execute_mutation_apply_with_runner(&runner, &creds_config, prepared, &request)
+                .expect("apply should succeed");
+        let audit_path = PathBuf::from(envelope.data["audit_artifact"].as_str().unwrap());
+        let raw = fs::read_to_string(&audit_path).unwrap();
+
+        assert!(
+            !raw.contains("hunter2-secret"),
+            "raw password must never appear in the artifact"
+        );
+        assert!(
+            !raw.contains(&real_password_file_path),
+            "the real (un-redacted) temp password-file path must never appear in the artifact"
+        );
+        assert!(
+            !raw.contains("--eval"),
+            "no raw mongosh invocation is ever stored in the execution audit"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn finalize_execution_audit_escalates_when_the_final_write_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let handle = create_sensitive_audit_artifact(
+            dir.path(),
+            "mongo-mutate-execute",
+            &json!({"status": "prepared"}),
+        )
+        .expect("create should succeed");
+
+        let resolved = resolved_fixture("42");
+        let audit = MutationExecutionAudit {
+            schema_version: 1,
+            command: "mongo mutate".to_string(),
+            timestamp_utc: Utc::now(),
+            profile: "test".to_string(),
+            template_id: resolved.template_id.clone(),
+            template_revision: resolved.template_revision,
+            template_source_digest: resolved.template_source_digest.clone(),
+            parameter_digest: resolved.parameter_digest.clone(),
+            database: resolved.database.clone(),
+            collection: resolved.collection.clone(),
+            max_affected: resolved.max_affected,
+            rollback: resolved.rollback.clone(),
+            approval_digest: "sha256:deadbeef".to_string(),
+            approval_artifact: PathBuf::from("/tmp/approval.json"),
+            backup_audit_artifact: PathBuf::from("/tmp/backup.json"),
+            backup_timestamp_utc: Utc::now(),
+            connection: json!({}),
+            candidates: approved_snapshot_fixture(),
+            outcome: MutationExecutionOutcome::Applied {
+                matched_count: 1,
+                modified_count: 1,
+            },
+            undo_artifact: None,
+        };
+
+        // Force the final atomic update to fail: replace the artifact
+        // file with a directory at the exact same path. `write_sensitive_file`
+        // still successfully writes and syncs its `.tmp` file (the parent
+        // directory is untouched and stays writable -- unlike a
+        // permission-bit approach, this survives `ensure_sensitive_dir`
+        // unconditionally re-tightening the *directory's* own permissions
+        // on every call), but the final `fs::rename(tmp, path)` fails with
+        // EISDIR because `path` is now a non-empty directory, giving a
+        // realistic "the write itself failed" case to escalate from.
+        fs::remove_file(&handle.path).expect("remove the prepared artifact file");
+        fs::create_dir(&handle.path).expect("replace it with a directory");
+
+        let err = finalize_execution_audit(&handle, &audit)
+            .expect_err("a failed final write must escalate, never report clean");
+        let msg = err.to_string();
+        assert!(msg.contains("CRITICAL"), "{msg}");
+        assert!(msg.contains(&handle.operation_id), "{msg}");
+        assert!(msg.contains("may have succeeded"), "{msg}");
     }
 }

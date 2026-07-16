@@ -1,4 +1,4 @@
-//! CLI-level gate/dispatch tests for `ayx mongo mutate` (plan Task 3).
+//! CLI-level gate/dispatch tests for `ayx mongo mutate` (plan Tasks 3-4).
 //!
 //! Every test spawns the compiled `ayx` binary against a throwaway
 //! `AYX_CONFIG_HOME` with a `managed`-mode Mongo profile, so connection-
@@ -14,6 +14,21 @@
 //! each mode's wiring reached the server crate; see
 //! `ayx-server/src/mongo.rs`'s `mutate_envelope_*` unit tests for the same
 //! guarantee at the library level.
+//!
+//! **Task 4 ordering change:** `--apply` now runs `prepare_mutation_apply`
+//! (CLI gates → template resolution → backup/approval artifact loading) in
+//! full BEFORE the TTY confirmation prompt — see
+//! `ayx-rs/src/cmd/mongo.rs`'s module doc comment. Because the shipped
+//! registry has no `executable` template, `prepare_mutation_apply` can
+//! never succeed via this black-box harness, which means the confirmation
+//! prompt itself is now structurally unreachable from these tests — it
+//! always fails at template resolution first, `--yes` or not. That is
+//! itself the invariant `apply_without_yes_reaches_prepare_before_confirmation`
+//! below proves. The confirmation message's *content* (real target
+//! database/collection/matched-count) is unit-tested directly in
+//! `ayx-rs/src/cmd/mongo.rs`'s own `#[cfg(test)]` module instead, using a
+//! hand-built `PreparedMutationApply` — see
+//! `mongo_mutation_apply_warning_names_the_real_target_and_matched_count`.
 
 use std::fs;
 use std::process::{Command, Stdio};
@@ -324,35 +339,50 @@ fn complete_apply_tuple_args() -> Vec<&'static str> {
 }
 
 #[test]
-fn non_tty_apply_without_yes_is_rejected_by_require_tty_confirmation() {
+fn apply_without_yes_reaches_prepare_before_confirmation() {
+    // Task 4: prepare_mutation_apply (gates -> template resolution ->
+    // backup/approval loading) now runs in full BEFORE
+    // require_tty_confirmation is ever called. With a preview_only fixture
+    // template, prepare always fails at template resolution -- so the
+    // request fails with that error, NOT the confirmation-declined error,
+    // even with no --yes and no TTY. This is the direct, observable proof
+    // of the new ordering: if confirmation ran first (Task 3's interim
+    // shape), this would instead see "destructive operation requires
+    // confirmation".
     let fixture = MongoFixture::new();
     let output = fixture.run(&complete_apply_tuple_args());
     assert!(
         !output.status.success(),
-        "a complete gate tuple without --yes and without a TTY must still be rejected"
+        "a preview_only template must still fail closed"
     );
     let err = stderr(&output);
     assert!(
-        err.contains("destructive operation requires confirmation"),
-        "expected the require_tty_confirmation non-TTY rejection, got: {err}"
+        err.contains(PREVIEW_ONLY_REJECTION),
+        "expected to reach prepare_mutation_apply's template-resolution step \
+         even without --yes/a TTY, got: {err}"
     );
-    assert!(err.contains("--yes"), "{err}");
+    assert!(
+        !err.contains("destructive operation requires confirmation"),
+        "confirmation must never be reached when prepare itself already failed: {err}"
+    );
     assert_never_touched_mongosh(&err);
-    // Confirms the request never got far enough to reach mutate_envelope's
-    // gate/template-resolution logic — confirmation is the very next gate
-    // after the CLI-level presence check.
-    assert!(!err.contains(PREVIEW_ONLY_REJECTION), "{err}");
 }
 
 #[test]
-fn yes_flag_bypasses_confirmation_and_reaches_the_server_request_boundary() {
+fn apply_with_yes_reaches_the_same_prepare_boundary() {
+    // With --yes, the observable outcome is identical to the no --yes case
+    // above: prepare_mutation_apply fails at template resolution before
+    // confirmation is ever consulted, so --yes has nothing to bypass yet.
+    // This is the CLI-level proof that prepare runs unconditionally ahead
+    // of the confirmation gate, matching
+    // `apply_without_yes_reaches_prepare_before_confirmation`.
     let fixture = MongoFixture::new();
     let mut args = complete_apply_tuple_args();
     args.push("--yes");
     let output = fixture.run(&args);
     assert!(
         !output.status.success(),
-        "the only shipped template is preview_only, so this still fails — just past confirmation"
+        "the only shipped template is preview_only, so this still fails at prepare"
     );
     let err = stderr(&output);
     // The old terminal message this replaces must be gone entirely.
@@ -362,15 +392,15 @@ fn yes_flag_bypasses_confirmation_and_reaches_the_server_request_boundary() {
     );
     assert!(
         !err.contains("destructive operation requires confirmation"),
-        "confirmation should have been bypassed by --yes: {err}"
+        "confirmation is never reached (prepare fails first): {err}"
     );
     assert!(
         !err.contains("missing required safety gate"),
         "the apply tuple was complete: {err}"
     );
-    // Reached ayx_server::mongo::mutate_envelope's template-resolution step
-    // — proof the request crossed the CLI -> server boundary with every
-    // gate satisfied.
+    // Reached ayx_server::mongo::prepare_mutation_apply's template-resolution
+    // step — proof the request crossed the CLI -> server boundary with
+    // every CLI-level gate satisfied.
     assert!(
         err.contains(PREVIEW_ONLY_REJECTION),
         "expected to reach template resolution in the server crate, got: {err}"
