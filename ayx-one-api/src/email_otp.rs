@@ -95,7 +95,6 @@ fn is_pre_send_failure(err: &reqwest::Error) -> bool {
 /// was already established), which is fine here because the caller has
 /// already been classified as duplication-safe to retry regardless of
 /// whether the prior attempt's request reached the server.
-#[allow(dead_code)] // wired up at call sites in Task 2+ of the auth-hardening plan
 fn is_transient_transport_error(err: &reqwest::Error) -> bool {
     err.is_connect() || err.is_timeout()
 }
@@ -106,7 +105,6 @@ fn is_transient_transport_error(err: &reqwest::Error) -> bool {
 /// `retry_policy_retries_gets_but_not_mutations` in `lib.rs`) with
 /// `mutating = false` — every call site that uses this predicate has
 /// already been classified as duplication-safe to retry.
-#[allow(dead_code)] // wired up at call sites in Task 2+ of the auth-hardening plan
 fn retryable_status_response(response: &Response) -> bool {
     crate::should_retry_status(response.status(), false)
 }
@@ -147,6 +145,73 @@ fn send_passcode(client: &Client, base: &str, email: &str) -> Result<String> {
         .context("sendPasscode response missing passcodeReferenceId")?
         .to_string();
     Ok(reference_id)
+}
+
+/// `POST /v4/auth/validatePasscode`. Retries on any transient transport
+/// failure or retryable status — resubmitting the same code has no
+/// duplication risk, unlike sendPasscode.
+fn validate_passcode(
+    client: &Client,
+    base: &str,
+    email: &str,
+    reference_id: &str,
+    code: &str,
+) -> Result<()> {
+    let response = retry_transient(
+        TRANSIENT_RETRY_ATTEMPTS,
+        is_transient_transport_error,
+        retryable_status_response,
+        || {
+            client
+                .post(format!("{base}/v4/auth/validatePasscode"))
+                .json(&serde_json::json!({
+                    "email": email,
+                    "passcode": code.trim(),
+                    "passcodeReferenceId": reference_id,
+                }))
+                .send()
+        },
+    )
+    .context("validatePasscode request failed")?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().unwrap_or_default();
+        bail!(
+            "validatePasscode failed: HTTP {status}: {}",
+            redact_text(&body.chars().take(200).collect::<String>())
+        );
+    }
+    Ok(())
+}
+
+/// `POST /session` (workspace password). Retries on any transient
+/// transport failure or retryable status — resubmitting the same password
+/// has no duplication risk.
+fn submit_workspace_password(
+    client: &Client,
+    base: &str,
+    email: &str,
+    password: &str,
+) -> Result<()> {
+    let response = retry_transient(
+        TRANSIENT_RETRY_ATTEMPTS,
+        is_transient_transport_error,
+        retryable_status_response,
+        || {
+            client
+                .post(format!("{base}/session"))
+                .form(&[("email", email), ("password", password)])
+                .send()
+        },
+    )
+    .context("POST /session (workspace password) failed")?;
+    if !response.status().is_success() {
+        bail!(
+            "workspace password rejected: POST /session returned HTTP {}",
+            response.status()
+        );
+    }
+    Ok(())
 }
 
 /// Authenticate via email OTP and return a 30-day PAT.
@@ -217,23 +282,7 @@ where
 
     // 2. Prompt for the OTP and validate it.
     let otp = get_otp()?;
-    let validate = client
-        .post(format!("{base}/v4/auth/validatePasscode"))
-        .json(&serde_json::json!({
-            "email": email,
-            "passcode": otp.trim(),
-            "passcodeReferenceId": reference_id,
-        }))
-        .send()
-        .context("validatePasscode request failed")?;
-    let validate_status = validate.status();
-    if !validate_status.is_success() {
-        let body = validate.text().unwrap_or_default();
-        bail!(
-            "validatePasscode failed: HTTP {validate_status}: {}",
-            redact_text(&body.chars().take(200).collect::<String>())
-        );
-    }
+    validate_passcode(&client, base, email, &reference_id, &otp)?;
 
     // 3. Enter the workspace; follow redirects to the password page and capture
     //    the OIDC interaction id.
@@ -258,17 +307,7 @@ where
 
     // 4. Submit the workspace password.
     let ws_password = resolve_workspace_password()?;
-    let session = client
-        .post(format!("{base}/session"))
-        .form(&[("email", email), ("password", ws_password.as_str())])
-        .send()
-        .context("POST /session (workspace password) failed")?;
-    if !session.status().is_success() {
-        bail!(
-            "workspace password rejected: POST /session returned HTTP {}",
-            session.status()
-        );
-    }
+    submit_workspace_password(&client, base, email, &ws_password)?;
 
     // 5. Resume the OIDC interaction; the BFF exchanges the code server-side and
     //    sets the local-auth-workspace cookie.
@@ -341,12 +380,19 @@ fn resolve_workspace_name(
         &[("includeInvited", "workspaces,accounts")],
     )
     .context("failed to build accounts URL")?;
-    let accounts_resp = client
-        .get(accounts_url)
-        // The accounts endpoint identifies the caller via this header, not session cookies.
-        .header("x-alteryx-auth-email", email)
-        .send()
-        .context("failed to fetch /v4/auth/accounts")?;
+    let accounts_resp = retry_transient(
+        TRANSIENT_RETRY_ATTEMPTS,
+        is_transient_transport_error,
+        retryable_status_response,
+        || {
+            client
+                .get(accounts_url.clone())
+                // The accounts endpoint identifies the caller via this header, not session cookies.
+                .header("x-alteryx-auth-email", email)
+                .send()
+        },
+    )
+    .context("failed to fetch /v4/auth/accounts")?;
     if !accounts_resp.status().is_success() {
         let status = accounts_resp.status();
         let body = accounts_resp.text().unwrap_or_default();
@@ -440,14 +486,21 @@ fn follow_redirects(client: &Client, start: reqwest::Url, max_hops: usize) -> Re
     let mut visited = vec![start.to_string()];
     let mut current = start;
     for _ in 0..max_hops {
-        let resp = client
-            .get(current.clone())
-            .header(
-                reqwest::header::ACCEPT,
-                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            )
-            .send()
-            .with_context(|| format!("request to {current} failed"))?;
+        let resp = retry_transient(
+            TRANSIENT_RETRY_ATTEMPTS,
+            is_transient_transport_error,
+            retryable_status_response,
+            || {
+                client
+                    .get(current.clone())
+                    .header(
+                        reqwest::header::ACCEPT,
+                        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    )
+                    .send()
+            },
+        )
+        .with_context(|| format!("request to {current} failed"))?;
         let status = resp.status();
         if !status.is_redirection() {
             return Ok(visited);
