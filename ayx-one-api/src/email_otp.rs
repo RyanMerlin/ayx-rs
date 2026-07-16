@@ -551,7 +551,7 @@ fn workspace_login_with_reprompt(client: &Client, base: &str, email: &str) -> Re
             Err(err) if !should_retry_workspace_password(attempt, from_env) => {
                 return Err(err.context(format!(
                     "workspace password rejected {WORKSPACE_PASSWORD_ATTEMPTS} times — \
-                     run `ayx one platform auth login` again"
+                     run `ayx one login` again"
                 )));
             }
             Err(_) => {
