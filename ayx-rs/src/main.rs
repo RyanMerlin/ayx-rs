@@ -3025,7 +3025,7 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         name: "mongo mutate",
         path: "mongo/mutate",
         summary: "Apply a guarded, template-based Mongo mutation with mandatory preview approval.",
-        output: "mutation preview or (once Task 4 lands) execution result envelope",
+        output: "mutation preview envelope by default, or the terminal applied/aborted/failed_or_unknown execution result envelope with --apply",
         safety: "destructive",
         mutating: true,
         prerequisites: &[
@@ -3052,7 +3052,11 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
             "mongosh available on PATH",
             "the source mutation's execution audit artifact",
         ],
-        notes: &["Not yet implemented; execution lands in a follow-up task."],
+        notes: &[
+            "Preview-first: run without --apply to derive the guarded inverse from the source mutation's own recorded prior values, re-verify every candidate is still fresh, and write an approval artifact.",
+            "Requires --apply plus --accept-mutation-risk, --approval-artifact, and --approve together for live execution — the same gate tuple as mongo mutate, minus a backup artifact.",
+            "Refuses to run against a mutation that was not applied, was already undone, or used an unsupported rollback strategy, and aborts the whole batch if any candidate document is stale (missing, or no longer holding its recorded post-mutation value).",
+        ],
     },
     CommandSpec {
         name: "server api import-swagger",

@@ -261,17 +261,24 @@ pub fn validate_mutation_apply_gates(request: &MongoMutateRequest) -> Result<()>
 ///   - `!request.apply`: a live, read-only diff preview (`preview_mutation`)
 ///     against the current data, persisted as an audit artifact whose path
 ///     becomes the `--approval-artifact` value for a later `--apply` run.
-///   - `request.apply`: every safety gate must be present
-///     (`validate_mutation_apply_gates`) and the template must currently
-///     resolve before anything else happens. Loading and cross-validating
-///     the referenced backup/approval artifacts against that resolved
-///     mutation, persisting the prepared execution artifact, and calling
-///     `apply_mutation` with the loaded `CandidateSnapshot` are plan Task
-///     4's job (`load_and_validate_backup_audit` /
-///     `load_and_validate_preview_approval`) — not yet implemented. See the
-///     comment on that branch below for the exact handoff contract, and
-///     `ayx-rs/src/cmd/mongo.rs` for where the TTY confirmation prompt is
-///     already wired in ahead of this call.
+///   - `request.apply`: implemented as a read-only prepare phase
+///     (`prepare_mutation_apply`) followed by the single execute phase that
+///     writes anything (`execute_mutation_apply`), six steps in order: (1)
+///     every CLI-level safety gate must be present
+///     (`validate_mutation_apply_gates`); (2) the template must currently
+///     resolve; (3) `--backup-audit-artifact` is loaded and validated as a
+///     real, completed `mongo backup` for this profile within its freshness
+///     window (`load_and_validate_backup_audit`); (4) `--approval-artifact`
+///     is loaded and cross-validated against the resolved mutation and the
+///     `--approve` digest, yielding the approved `CandidateSnapshot`
+///     (`load_and_validate_preview_approval`); (5) `prepare_mutation_apply`
+///     returns that fully-validated, still-unwritten `PreparedMutationApply`
+///     — `ayx-rs/src/cmd/mongo.rs` uses it to build the TTY confirmation
+///     prompt before ever calling execute; (6) `execute_mutation_apply`
+///     persists a `Prepared` execution audit artifact before touching
+///     mongosh, calls `apply_mutation` inside a transaction, and atomically
+///     finalizes the artifact to its terminal outcome (`Applied` / `Aborted`
+///     / `Failed` / `FailedOrUnknown`).
 pub fn mutate_envelope(config: &Config, request: &MongoMutateRequest) -> Result<Envelope> {
     let template_name = request.template.as_deref().ok_or_else(|| {
         anyhow::anyhow!(
