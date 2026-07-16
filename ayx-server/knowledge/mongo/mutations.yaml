@@ -1,0 +1,42 @@
+# Typed remediation registry for `ayx mongo mutate --template <id>`.
+#
+# Every entry here describes a bounded, single-`$set` write. `mode:
+# executable` is a promotion an operator makes deliberately once a template
+# has an operation-specific, reviewed filter/update and a meaningful
+# `max_affected` cap — never a default. See
+# ayx-server/src/mongo.rs::validate_mutation_template for the full set of
+# structural constraints enforced at load time (non-empty id/database/
+# collection/purpose, positive revision/max_affected/max_backup_age_minutes,
+# global 1000-document cap, `$set`-only update with no `_id` target and no
+# nested/positional operators, whole-string `${param}` placeholders only,
+# and a supported `rollback` strategy).
+mutations:
+  - id: user_email_domain_migration
+    revision: 1
+    # Preview-only: the filter matches an entire email domain while the
+    # update assigns one literal new email to every matching document. That
+    # is only safe for a single specific account, not a bulk domain
+    # migration. Do not promote to `executable` until the remediation owner
+    # replaces this with an operation-specific filter/update and a cap sized
+    # to the real blast radius.
+    mode: preview_only
+    database: AlteryxGallery
+    collection: users
+    filter:
+      email:
+        $regex: "@companyA\\.com$"
+    update:
+      $set:
+        email: "${new_email}"
+    parameters:
+      new_email:
+        type: string
+        required: true
+    max_affected: 25
+    max_backup_age_minutes: 60
+    purpose: Bulk update Gallery user email domains during company migration
+    kba_refs:
+      - users
+      - bulk email domain migration
+      - user remediation
+    rollback: guarded_set_inverse

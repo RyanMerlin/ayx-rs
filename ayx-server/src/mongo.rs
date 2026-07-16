@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -11,8 +12,17 @@ use roxmltree::Document;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::upgrade::manifest::compute_sha256;
+
+/// A read-only support/diagnostic query template (`knowledge/mongo/queries.yaml`).
+///
+/// Deliberately has no `update` field and no `read_only` flag: this type
+/// cannot express a write, so no code path that only knows about
+/// `MongoSupportQueryTemplate` can accidentally treat a support template as
+/// a remediation. Writable templates live in `MongoMutationTemplate`
+/// (`knowledge/mongo/mutations.yaml`) instead.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MongoQueryTemplate {
+pub struct MongoSupportQueryTemplate {
     pub name: String,
     pub database: String,
     pub collection: String,
@@ -21,8 +31,6 @@ pub struct MongoQueryTemplate {
     #[serde(default)]
     pub projection: Option<Value>,
     #[serde(default)]
-    pub update: Option<Value>,
-    #[serde(default)]
     pub sort: Option<Value>,
     #[serde(default)]
     pub limit: Option<u32>,
@@ -30,8 +38,6 @@ pub struct MongoQueryTemplate {
     pub purpose: Option<String>,
     #[serde(default)]
     pub kba_refs: Vec<String>,
-    #[serde(default = "default_true")]
-    pub read_only: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -62,7 +68,7 @@ pub struct MongoQueryPlan {
 #[derive(Debug, Deserialize)]
 struct MongoQueryRegistry {
     #[serde(default)]
-    queries: Vec<MongoQueryTemplate>,
+    queries: Vec<MongoSupportQueryTemplate>,
 }
 
 pub fn status_envelope(config: &Config) -> Result<Envelope> {
@@ -641,7 +647,7 @@ fn execute_query_plan(plan: &MongoQueryPlan) -> Result<serde_json::Value> {
     }))
 }
 
-fn mongo_doctor_queries(config: &Config) -> Result<Vec<MongoQueryTemplate>> {
+fn mongo_doctor_queries(config: &Config) -> Result<Vec<MongoSupportQueryTemplate>> {
     let templates = mongo_query_templates()?;
     let mut queries = Vec::new();
     for name in [
@@ -731,27 +737,584 @@ fn build_mongosh_mutation_eval(config: &Config, spec: &MongoQuerySpec) -> Result
     Ok(format!("{cmd} {quoted}"))
 }
 
-fn mongo_query_spec_from_template(template: &MongoQueryTemplate) -> Result<MongoQuerySpec> {
+fn mongo_query_spec_from_template(template: &MongoSupportQueryTemplate) -> Result<MongoQuerySpec> {
     Ok(MongoQuerySpec {
         database: template.database.clone(),
         collection: template.collection.clone(),
         filter: template.filter.clone(),
         projection: template.projection.clone(),
-        update: template.update.clone(),
+        update: None,
         sort: template.sort.clone(),
         limit: template.limit,
         template_name: Some(template.name.clone()),
     })
 }
 
-pub fn mongo_query_templates() -> Result<Vec<MongoQueryTemplate>> {
+pub fn mongo_query_templates() -> Result<Vec<MongoSupportQueryTemplate>> {
     let registry: MongoQueryRegistry =
         serde_yaml::from_str(include_str!("../knowledge/mongo/queries.yaml"))?;
     Ok(registry.queries)
 }
 
-fn default_true() -> bool {
-    true
+// ─────────────────────────────────────────────────────────────────────────
+// Mutation remediation registry (knowledge/mongo/mutations.yaml)
+//
+// Support-query templates (`MongoSupportQueryTemplate`, above) can never
+// express a write. Named remediation templates live here instead, typed so
+// that:
+//   - a template's `update` is always exactly one non-empty `$set` document
+//     with no `_id` target and no nested/positional/JS-shaped operator;
+//   - parameter substitution is structural (a placeholder must occupy an
+//     entire JSON string) rather than string interpolation into `mongosh`;
+//   - a template stays `preview_only` until an owner deliberately promotes
+//     it to `executable`.
+//
+// `resolve_mutation_template` is the only supported way to turn a named,
+// executable template plus caller-supplied parameters into a
+// `ResolvedMutation`. Live preview/apply execution (Task 2) and CLI wiring
+// (Task 3) build on these types; this module does not call mongosh for
+// mutations.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Global hard cap on documents a single mutation may affect, enforced in
+/// code regardless of what a template's YAML declares.
+const MONGO_MUTATION_GLOBAL_MAX_AFFECTED: u32 = 1000;
+
+/// Rollback strategies the executor (Task 4) knows how to invert. A
+/// template that declares anything else fails validation at load time.
+const SUPPORTED_ROLLBACK_STRATEGIES: &[&str] = &["guarded_set_inverse"];
+
+/// Update-document keys that indicate server-side JavaScript execution.
+/// Banned anywhere in a template's `filter`.
+const JS_EXECUTION_OPERATOR_KEYS: &[&str] = &["$where", "$function", "$accumulator"];
+
+/// Whether a named mutation template is live-executable or preview-only.
+///
+/// Promotion from `PreviewOnly` to `Executable` is a deliberate, reviewed
+/// YAML edit by the remediation owner — never inferred from the shape of
+/// the filter/update.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MutationTemplateMode {
+    Executable,
+    PreviewOnly,
+}
+
+impl MutationTemplateMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            MutationTemplateMode::Executable => "executable",
+            MutationTemplateMode::PreviewOnly => "preview_only",
+        }
+    }
+}
+
+/// A typed parameter a mutation template accepts.
+///
+/// `type` intentionally supports only `string` today. `integer`, `boolean`,
+/// and `json` are a documented extension point (add a
+/// `MutationParameterType` variant plus a `bind_typed_parameter` match arm
+/// and validation tests) — do not add the YAML surface for them without
+/// tests, per plan Task 1 Step 2.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct MutationParameter {
+    #[serde(rename = "type")]
+    pub type_: MutationParameterType,
+    #[serde(default)]
+    pub required: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MutationParameterType {
+    String,
+}
+
+/// A named remediation template (`knowledge/mongo/mutations.yaml`).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct MongoMutationTemplate {
+    pub id: String,
+    pub revision: u32,
+    pub mode: MutationTemplateMode,
+    pub database: String,
+    pub collection: String,
+    #[serde(default)]
+    pub filter: Value,
+    #[serde(default)]
+    pub update: Value,
+    #[serde(default)]
+    pub parameters: BTreeMap<String, MutationParameter>,
+    pub max_affected: u32,
+    pub max_backup_age_minutes: u32,
+    pub purpose: String,
+    #[serde(default)]
+    pub kba_refs: Vec<String>,
+    pub rollback: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MongoMutationRegistry {
+    #[serde(default)]
+    mutations: Vec<MongoMutationTemplate>,
+}
+
+/// A named template plus caller-supplied parameters, fully resolved: every
+/// `${param}` placeholder in `filter`/`update` has been replaced with its
+/// bound typed value. Nothing downstream needs the original template or
+/// raw parameter strings again.
+#[derive(Clone, Debug, Serialize)]
+pub struct ResolvedMutation {
+    pub template_id: String,
+    pub template_revision: u32,
+    /// `sha256:<hex>` over the template's canonical (pre-substitution) shape.
+    pub template_source_digest: String,
+    pub database: String,
+    pub collection: String,
+    pub filter: Value,
+    /// Always `{"$set": {...}}` — see `validate_mutation_template`.
+    pub update: Value,
+    pub max_affected: u32,
+    pub max_backup_age_minutes: u32,
+    pub parameters: BTreeMap<String, Value>,
+    /// `sha256:<hex>` over the resolved parameter map.
+    pub parameter_digest: String,
+    pub purpose: String,
+    pub kba_refs: Vec<String>,
+    pub rollback: String,
+}
+
+/// A snapshot of the documents a mutation preview matched — just enough to
+/// bind an approval digest to the exact candidate set at preview time.
+///
+/// Task 2 parses this from live `mongosh` preview output and is expected to
+/// extend it with per-document field-diff data once that program exists;
+/// the shape here is deliberately the minimum `canonical_mutation_digest`
+/// needs so Task 1 can ship a deterministic digest function without a live
+/// Mongo connection.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct CandidateSnapshot {
+    pub matched_count: u64,
+    /// Extended-JSON `_id` values, in the same deterministic order the
+    /// preview query used.
+    pub candidate_ids: Vec<Value>,
+}
+
+/// Parse repeated `--param key=value` values into a `BTreeMap`, rejecting a
+/// duplicate key rather than silently letting the last one win.
+pub fn parse_mutation_params(items: &[String]) -> Result<BTreeMap<String, String>> {
+    let mut map = BTreeMap::new();
+    for item in items {
+        let (key, value) = item
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("invalid --param '{item}', expected key=value"))?;
+        if key.is_empty() {
+            anyhow::bail!("invalid --param '{item}', expected key=value with a non-empty key");
+        }
+        if map.insert(key.to_string(), value.to_string()).is_some() {
+            anyhow::bail!("duplicate --param key '{key}'");
+        }
+    }
+    Ok(map)
+}
+
+/// Resolve a named, `Executable` mutation template against caller-supplied
+/// parameters into a `ResolvedMutation`.
+///
+/// This is the only supported live-preview/apply resolver: it requires
+/// `--template` (there is no free-form `--database`/`--collection`/
+/// `--filter`/`--update` path here), binds only the template's declared
+/// typed parameters, and refuses a `PreviewOnly` template outright.
+pub fn resolve_mutation_template(
+    name: &str,
+    params: &BTreeMap<String, String>,
+) -> Result<ResolvedMutation> {
+    resolve_mutation_template_from(mongo_mutation_templates()?, name, params)
+}
+
+/// Same contract as `resolve_mutation_template`, but takes the candidate
+/// template list as a parameter instead of always reading the compiled-in
+/// registry. `resolve_mutation_template` is a thin wrapper over this with
+/// `mongo_mutation_templates()`; tests use this seam to resolve against a
+/// safe, test-only fixture template without adding a fake `executable`
+/// entry to the shipped `mutations.yaml`.
+fn resolve_mutation_template_from(
+    templates: Vec<MongoMutationTemplate>,
+    name: &str,
+    params: &BTreeMap<String, String>,
+) -> Result<ResolvedMutation> {
+    let template = templates
+        .into_iter()
+        .find(|t| t.id == name)
+        .ok_or_else(|| anyhow::anyhow!("unknown mongo mutation template '{name}'"))?;
+
+    // Belt-and-suspenders: `mongo_mutation_templates()` already validates
+    // every entry it loads, but this function is also reachable with an
+    // injected template list, so re-validate here too.
+    validate_mutation_template(&template)?;
+
+    if template.mode != MutationTemplateMode::Executable {
+        anyhow::bail!(
+            "mongo mutation template '{name}' is '{}' and cannot be resolved for live preview/apply",
+            template.mode.as_str()
+        );
+    }
+
+    for key in params.keys() {
+        if !template.parameters.contains_key(key) {
+            anyhow::bail!("mongo mutation template '{name}' does not declare parameter '{key}'");
+        }
+    }
+
+    let mut resolved_params: BTreeMap<String, Value> = BTreeMap::new();
+    for (param_name, decl) in &template.parameters {
+        match params.get(param_name) {
+            Some(raw) => {
+                resolved_params.insert(param_name.clone(), bind_typed_parameter(decl, raw));
+            }
+            None if decl.required => {
+                anyhow::bail!(
+                    "mongo mutation template '{name}' is missing required parameter '{param_name}'"
+                );
+            }
+            None => {}
+        }
+    }
+
+    // anyhow::Error's Display only shows the outermost message, not the
+    // full context chain, and this crate's callers surface errors via
+    // `err.to_string()` — so fold the underlying reason into the same
+    // top-level message rather than burying it behind `with_context`.
+    let resolved_filter = resolve_placeholders_in_tree(&template.filter, &resolved_params)
+        .map_err(|e| {
+            anyhow::anyhow!("failed to resolve filter for mongo mutation template '{name}': {e}")
+        })?;
+    let resolved_update = resolve_placeholders_in_tree(&template.update, &resolved_params)
+        .map_err(|e| {
+            anyhow::anyhow!("failed to resolve update for mongo mutation template '{name}': {e}")
+        })?;
+
+    let parameter_digest = digest_with_prefix(&json!(resolved_params));
+    let template_source_digest = digest_with_prefix(&serde_json::to_value(&template)?);
+
+    Ok(ResolvedMutation {
+        template_id: template.id.clone(),
+        template_revision: template.revision,
+        template_source_digest,
+        database: template.database.clone(),
+        collection: template.collection.clone(),
+        filter: resolved_filter,
+        update: resolved_update,
+        max_affected: template.max_affected,
+        max_backup_age_minutes: template.max_backup_age_minutes,
+        parameters: resolved_params,
+        parameter_digest,
+        purpose: template.purpose.clone(),
+        kba_refs: template.kba_refs.clone(),
+        rollback: template.rollback,
+    })
+}
+
+/// Bind one caller-supplied raw string to its template-declared typed
+/// value. Only `string` is implemented; see `MutationParameterType`.
+fn bind_typed_parameter(decl: &MutationParameter, raw: &str) -> Value {
+    match decl.type_ {
+        MutationParameterType::String => Value::String(raw.to_string()),
+    }
+}
+
+/// A deterministic digest binding a resolved mutation to the exact
+/// candidate set a preview matched. The caller's `--approve` at apply time
+/// must equal this value exactly (Task 3/4); any change to the template
+/// identity, resolved filter/update, parameters, or candidate set changes
+/// the digest.
+pub fn canonical_mutation_digest(
+    mutation: &ResolvedMutation,
+    candidates: &CandidateSnapshot,
+) -> String {
+    let payload = json!({
+        "template_id": mutation.template_id,
+        "template_revision": mutation.template_revision,
+        "template_source_digest": mutation.template_source_digest,
+        "database": mutation.database,
+        "collection": mutation.collection,
+        "filter": mutation.filter,
+        "update": mutation.update,
+        "max_affected": mutation.max_affected,
+        "parameter_digest": mutation.parameter_digest,
+        "candidates": {
+            "matched_count": candidates.matched_count,
+            "candidate_ids": candidates.candidate_ids,
+        },
+    });
+    digest_with_prefix(&payload)
+}
+
+fn digest_with_prefix(value: &Value) -> String {
+    format!("sha256:{}", compute_sha256(value))
+}
+
+/// Load and validate every mutation template in the registry. Validation
+/// happens here (not only when a specific template is resolved) so a
+/// malformed registry shape is rejected the moment it's read, before any
+/// subprocess could be created.
+pub fn mongo_mutation_templates() -> Result<Vec<MongoMutationTemplate>> {
+    let registry: MongoMutationRegistry =
+        serde_yaml::from_str(include_str!("../knowledge/mongo/mutations.yaml"))?;
+    let mut seen_ids = BTreeSet::new();
+    for template in &registry.mutations {
+        validate_mutation_template(template)?;
+        if !seen_ids.insert(template.id.clone()) {
+            anyhow::bail!("duplicate mongo mutation template id '{}'", template.id);
+        }
+    }
+    Ok(registry.mutations)
+}
+
+fn validate_mutation_template(template: &MongoMutationTemplate) -> Result<()> {
+    let id = template.id.trim();
+    if id.is_empty() {
+        anyhow::bail!("mongo mutation template has an empty id");
+    }
+    if template.database.trim().is_empty() {
+        anyhow::bail!("mongo mutation template '{id}' has an empty database");
+    }
+    if template.collection.trim().is_empty() {
+        anyhow::bail!("mongo mutation template '{id}' has an empty collection");
+    }
+    if template.purpose.trim().is_empty() {
+        anyhow::bail!("mongo mutation template '{id}' has an empty purpose");
+    }
+    if template.revision == 0 {
+        anyhow::bail!("mongo mutation template '{id}' must declare a positive revision");
+    }
+    if template.max_affected == 0 {
+        anyhow::bail!("mongo mutation template '{id}' must declare a positive max_affected");
+    }
+    if template.max_affected > MONGO_MUTATION_GLOBAL_MAX_AFFECTED {
+        anyhow::bail!(
+            "mongo mutation template '{id}' max_affected {} exceeds the global cap of {}",
+            template.max_affected,
+            MONGO_MUTATION_GLOBAL_MAX_AFFECTED
+        );
+    }
+    if template.max_backup_age_minutes == 0 {
+        anyhow::bail!(
+            "mongo mutation template '{id}' must declare a positive max_backup_age_minutes"
+        );
+    }
+    if !matches!(&template.filter, Value::Object(map) if !map.is_empty()) {
+        anyhow::bail!("mongo mutation template '{id}' must declare a non-empty object filter");
+    }
+    if contains_js_execution_operator(&template.filter) {
+        anyhow::bail!(
+            "mongo mutation template '{id}' filter contains a raw JavaScript-shaped operator"
+        );
+    }
+
+    let set_doc = validate_update_is_single_set(id, &template.update)?;
+    validate_set_document(id, set_doc)?;
+
+    if !SUPPORTED_ROLLBACK_STRATEGIES.contains(&template.rollback.as_str()) {
+        anyhow::bail!(
+            "mongo mutation template '{id}' declares unsupported rollback strategy '{}'",
+            template.rollback
+        );
+    }
+
+    for name in template.parameters.keys() {
+        if name.trim().is_empty() {
+            anyhow::bail!("mongo mutation template '{id}' declares a parameter with an empty name");
+        }
+    }
+
+    validate_placeholders_in_tree(id, &template.filter, &template.parameters)?;
+    validate_placeholders_in_tree(id, &template.update, &template.parameters)?;
+
+    Ok(())
+}
+
+/// Require `update` to be exactly `{"$set": {<non-empty>}}` — no pipeline
+/// (array) updates, no other operator alongside or instead of `$set`.
+fn validate_update_is_single_set<'a>(
+    id: &str,
+    update: &'a Value,
+) -> Result<&'a serde_json::Map<String, Value>> {
+    let update_obj = update.as_object().ok_or_else(|| {
+        anyhow::anyhow!(
+            "mongo mutation template '{id}' update must be a JSON object (pipeline-style array updates are not supported)"
+        )
+    })?;
+    if update_obj.len() != 1 {
+        anyhow::bail!(
+            "mongo mutation template '{id}' update must contain exactly one '$set' operator and nothing else"
+        );
+    }
+    let set_value = update_obj.get("$set").ok_or_else(|| {
+        anyhow::anyhow!(
+            "mongo mutation template '{id}' update must use '$set'; no other update operator is supported"
+        )
+    })?;
+    set_value
+        .as_object()
+        .filter(|m| !m.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!("mongo mutation template '{id}' '$set' must be a non-empty object")
+        })
+}
+
+/// Reject a `_id` target and any `$`-bearing key at any depth inside the
+/// `$set` document — this single rule covers dotted array-positional paths
+/// (`items.$.qty`), nested update operators, and JS-execution operator
+/// keys in one pass.
+fn validate_set_document(id: &str, set_doc: &serde_json::Map<String, Value>) -> Result<()> {
+    for (key, value) in set_doc {
+        if key == "_id" || key.starts_with("_id.") {
+            anyhow::bail!("mongo mutation template '{id}' update may not target _id");
+        }
+        if key.contains('$') {
+            anyhow::bail!(
+                "mongo mutation template '{id}' update path '{key}' uses an unsupported operator or positional syntax"
+            );
+        }
+        reject_dollar_keys_recursive(id, value)?;
+    }
+    Ok(())
+}
+
+fn reject_dollar_keys_recursive(id: &str, value: &Value) -> Result<()> {
+    match value {
+        Value::Object(map) => {
+            for (key, v) in map {
+                if key.starts_with('$') {
+                    anyhow::bail!(
+                        "mongo mutation template '{id}' update contains an unsupported nested operator '{key}'"
+                    );
+                }
+                reject_dollar_keys_recursive(id, v)?;
+            }
+            Ok(())
+        }
+        Value::Array(items) => {
+            for item in items {
+                reject_dollar_keys_recursive(id, item)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn contains_js_execution_operator(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => map.iter().any(|(key, v)| {
+            JS_EXECUTION_OPERATOR_KEYS.contains(&key.as_str()) || contains_js_execution_operator(v)
+        }),
+        Value::Array(items) => items.iter().any(contains_js_execution_operator),
+        _ => false,
+    }
+}
+
+/// Registry-shape check: every whole-string `${name}` placeholder in the
+/// tree must reference a declared parameter, and no placeholder may be
+/// embedded inline inside a larger string.
+fn validate_placeholders_in_tree(
+    id: &str,
+    value: &Value,
+    declared: &BTreeMap<String, MutationParameter>,
+) -> Result<()> {
+    match value {
+        Value::String(s) => {
+            // Fold the underlying reason into the same top-level message
+            // (see the note in `resolve_mutation_template_from`) rather
+            // than burying it behind `with_context`, since callers surface
+            // errors via `err.to_string()`.
+            let placeholder = whole_string_placeholder(s)
+                .map_err(|e| anyhow::anyhow!("mongo mutation template '{id}': {e}"))?;
+            if let Some(name) = placeholder
+                && !declared.contains_key(&name)
+            {
+                anyhow::bail!(
+                    "mongo mutation template '{id}' references unknown placeholder parameter '{name}'"
+                );
+            }
+            Ok(())
+        }
+        Value::Array(items) => {
+            for item in items {
+                validate_placeholders_in_tree(id, item, declared)?;
+            }
+            Ok(())
+        }
+        Value::Object(map) => {
+            for v in map.values() {
+                validate_placeholders_in_tree(id, v, declared)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Structural substitution: walk the tree and replace every whole-string
+/// `${name}` placeholder with its resolved typed JSON value. A string with
+/// no placeholder marker passes through unchanged; a string with
+/// placeholder syntax that doesn't occupy the entire value is rejected by
+/// `whole_string_placeholder` rather than string-interpolated.
+fn resolve_placeholders_in_tree(
+    value: &Value,
+    resolved_params: &BTreeMap<String, Value>,
+) -> Result<Value> {
+    match value {
+        Value::String(s) => match whole_string_placeholder(s)? {
+            Some(name) => resolved_params.get(&name).cloned().ok_or_else(|| {
+                anyhow::anyhow!("unresolved template placeholder parameter '{name}'")
+            }),
+            None => Ok(Value::String(s.clone())),
+        },
+        Value::Array(items) => Ok(Value::Array(
+            items
+                .iter()
+                .map(|v| resolve_placeholders_in_tree(v, resolved_params))
+                .collect::<Result<Vec<_>>>()?,
+        )),
+        Value::Object(map) => {
+            let mut out = serde_json::Map::with_capacity(map.len());
+            for (k, v) in map {
+                out.insert(k.clone(), resolve_placeholders_in_tree(v, resolved_params)?);
+            }
+            Ok(Value::Object(out))
+        }
+        other => Ok(other.clone()),
+    }
+}
+
+/// If `s` is exactly one placeholder occupying the whole string (e.g.
+/// `"${new_email}"`), returns `Ok(Some(name))`. If `s` has no `${` marker
+/// at all, returns `Ok(None)` — it's an ordinary literal. Anything else
+/// (inline interpolation like `"prefix-${x}"`, a malformed name, an
+/// unterminated marker) is rejected: parameter substitution is structural,
+/// not string interpolation.
+fn whole_string_placeholder(s: &str) -> Result<Option<String>> {
+    if !s.contains("${") {
+        return Ok(None);
+    }
+    if let Some(rest) = s.strip_prefix("${")
+        && let Some(name) = rest.strip_suffix('}')
+    {
+        let looks_valid = !name.is_empty()
+            && !name.contains("${")
+            && name
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        if looks_valid {
+            return Ok(Some(name.to_string()));
+        }
+    }
+    anyhow::bail!(
+        "template placeholder '{s}' is malformed or not a whole-string placeholder; a placeholder must occupy an entire string value, e.g. \"${{param_name}}\""
+    );
 }
 
 fn execute_restore(config: &Config, input_path: &Path) -> Result<serde_json::Value> {
@@ -1323,5 +1886,361 @@ mod tests {
         let input = "mongodb://user:secret@localhost:27017/admin";
         let redacted = redact_mongo_uri(input);
         assert_eq!(redacted, "mongodb://***:***@localhost:27017/admin");
+    }
+
+    // ── Mutation registry / resolver tests (plan Task 1, Step 4) ──────────
+
+    /// A safe, test-only executable `$set` template. Deliberately not part
+    /// of the shipped `mutations.yaml` — no shipped template is silently
+    /// made live just because a test needs an `executable` fixture.
+    fn test_executable_template() -> MongoMutationTemplate {
+        let mut parameters = BTreeMap::new();
+        parameters.insert(
+            "new_value".to_string(),
+            MutationParameter {
+                type_: MutationParameterType::String,
+                required: true,
+            },
+        );
+        MongoMutationTemplate {
+            id: "test_fixture_set_value".to_string(),
+            revision: 1,
+            mode: MutationTemplateMode::Executable,
+            database: "TestDb".to_string(),
+            collection: "widgets".to_string(),
+            filter: json!({ "status": "pending" }),
+            update: json!({ "$set": { "value": "${new_value}" } }),
+            parameters,
+            max_affected: 10,
+            max_backup_age_minutes: 60,
+            purpose: "test-only fixture for resolver unit tests".to_string(),
+            kba_refs: vec![],
+            rollback: "guarded_set_inverse".to_string(),
+        }
+    }
+
+    #[test]
+    fn fixture_template_passes_validation() {
+        validate_mutation_template(&test_executable_template())
+            .expect("well-formed fixture template should validate");
+    }
+
+    #[test]
+    fn resolves_executable_fixture_template_successfully() {
+        let mut params = BTreeMap::new();
+        params.insert("new_value".to_string(), "42".to_string());
+
+        let resolved = resolve_mutation_template_from(
+            vec![test_executable_template()],
+            "test_fixture_set_value",
+            &params,
+        )
+        .expect("fixture template should resolve");
+
+        assert_eq!(resolved.template_id, "test_fixture_set_value");
+        assert_eq!(resolved.database, "TestDb");
+        assert_eq!(resolved.collection, "widgets");
+        assert_eq!(resolved.filter, json!({ "status": "pending" }));
+        assert_eq!(resolved.update, json!({ "$set": { "value": "42" } }));
+        assert!(resolved.parameter_digest.starts_with("sha256:"));
+        assert!(resolved.template_source_digest.starts_with("sha256:"));
+    }
+
+    #[test]
+    fn rejects_unknown_template_name() {
+        let params = BTreeMap::new();
+        let err = resolve_mutation_template("does_not_exist_template", &params)
+            .expect_err("unknown template name should error");
+        assert!(err.to_string().contains("unknown mongo mutation template"));
+    }
+
+    #[test]
+    fn rejects_unknown_parameter() {
+        let mut params = BTreeMap::new();
+        params.insert("new_value".to_string(), "42".to_string());
+        params.insert("bogus".to_string(), "x".to_string());
+
+        let err = resolve_mutation_template_from(
+            vec![test_executable_template()],
+            "test_fixture_set_value",
+            &params,
+        )
+        .expect_err("unknown caller parameter should be rejected");
+        assert!(err.to_string().contains("does not declare parameter"));
+    }
+
+    #[test]
+    fn rejects_missing_required_parameter() {
+        let params = BTreeMap::new();
+
+        let err = resolve_mutation_template_from(
+            vec![test_executable_template()],
+            "test_fixture_set_value",
+            &params,
+        )
+        .expect_err("missing required parameter should be rejected");
+        assert!(err.to_string().contains("missing required parameter"));
+    }
+
+    #[test]
+    fn parse_mutation_params_rejects_duplicate_key() {
+        let items = vec!["new_value=1".to_string(), "new_value=2".to_string()];
+        let err =
+            parse_mutation_params(&items).expect_err("duplicate --param key should be rejected");
+        assert!(err.to_string().contains("duplicate --param key"));
+    }
+
+    #[test]
+    fn parse_mutation_params_rejects_malformed_entry() {
+        let items = vec!["no-equals-sign".to_string()];
+        assert!(parse_mutation_params(&items).is_err());
+    }
+
+    #[test]
+    fn parse_mutation_params_rejects_empty_key() {
+        let items = vec!["=value".to_string()];
+        assert!(parse_mutation_params(&items).is_err());
+    }
+
+    #[test]
+    fn parse_mutation_params_accepts_distinct_keys() {
+        let items = vec!["a=1".to_string(), "b=2".to_string()];
+        let map = parse_mutation_params(&items).expect("distinct keys should parse");
+        assert_eq!(map.get("a").map(String::as_str), Some("1"));
+        assert_eq!(map.get("b").map(String::as_str), Some("2"));
+    }
+
+    #[test]
+    fn rejects_inline_placeholder() {
+        let mut tmpl = test_executable_template();
+        tmpl.update = json!({ "$set": { "value": "prefix-${new_value}" } });
+        let err = validate_mutation_template(&tmpl)
+            .expect_err("inline (non-whole-string) placeholder should be rejected");
+        assert!(err.to_string().contains("whole-string placeholder"));
+    }
+
+    #[test]
+    fn rejects_unknown_placeholder() {
+        let mut tmpl = test_executable_template();
+        tmpl.update = json!({ "$set": { "value": "${undeclared_param}" } });
+        let err = validate_mutation_template(&tmpl)
+            .expect_err("placeholder referencing an undeclared parameter should be rejected");
+        assert!(err.to_string().contains("unknown placeholder parameter"));
+    }
+
+    #[test]
+    fn rejects_empty_filter() {
+        let mut tmpl = test_executable_template();
+        tmpl.filter = json!({});
+        let err = validate_mutation_template(&tmpl).expect_err("empty filter should be rejected");
+        assert!(err.to_string().contains("non-empty object filter"));
+    }
+
+    #[test]
+    fn rejects_non_object_filter() {
+        let mut tmpl = test_executable_template();
+        tmpl.filter = Value::Null;
+        assert!(validate_mutation_template(&tmpl).is_err());
+    }
+
+    #[test]
+    fn rejects_empty_set_document() {
+        let mut tmpl = test_executable_template();
+        tmpl.update = json!({ "$set": {} });
+        let err = validate_mutation_template(&tmpl).expect_err("empty $set should be rejected");
+        assert!(err.to_string().contains("non-empty object"));
+    }
+
+    #[test]
+    fn rejects_pipeline_style_array_update() {
+        let mut tmpl = test_executable_template();
+        tmpl.update = json!([{ "$set": { "value": 1 } }]);
+        let err = validate_mutation_template(&tmpl)
+            .expect_err("pipeline-style array update should be rejected");
+        assert!(err.to_string().contains("pipeline-style array updates"));
+    }
+
+    #[test]
+    fn rejects_non_set_update_operator() {
+        let mut tmpl = test_executable_template();
+        tmpl.update = json!({ "$inc": { "value": 1 } });
+        let err = validate_mutation_template(&tmpl)
+            .expect_err("a non-$set update operator should be rejected");
+        assert!(err.to_string().contains("must use '$set'"));
+    }
+
+    #[test]
+    fn rejects_extra_operator_alongside_set() {
+        let mut tmpl = test_executable_template();
+        tmpl.update = json!({ "$set": { "value": 1 }, "$inc": { "count": 1 } });
+        let err = validate_mutation_template(&tmpl)
+            .expect_err("an operator alongside $set should be rejected");
+        assert!(err.to_string().contains("exactly one '$set' operator"));
+    }
+
+    #[test]
+    fn rejects_id_target() {
+        let mut tmpl = test_executable_template();
+        tmpl.update = json!({ "$set": { "_id": "x" } });
+        let err = validate_mutation_template(&tmpl).expect_err("_id target should be rejected");
+        assert!(err.to_string().contains("may not target _id"));
+    }
+
+    #[test]
+    fn rejects_dotted_id_target() {
+        let mut tmpl = test_executable_template();
+        tmpl.update = json!({ "$set": { "_id.sub": "x" } });
+        assert!(validate_mutation_template(&tmpl).is_err());
+    }
+
+    #[test]
+    fn rejects_positional_operator_path() {
+        let mut tmpl = test_executable_template();
+        tmpl.update = json!({ "$set": { "items.$.qty": 1 } });
+        let err = validate_mutation_template(&tmpl)
+            .expect_err("array positional operator path should be rejected");
+        assert!(
+            err.to_string()
+                .contains("unsupported operator or positional syntax")
+        );
+    }
+
+    #[test]
+    fn rejects_nested_operator_inside_set_value() {
+        let mut tmpl = test_executable_template();
+        tmpl.update = json!({ "$set": { "profile": { "$rename": "x" } } });
+        let err = validate_mutation_template(&tmpl)
+            .expect_err("nested operator inside a $set value should be rejected");
+        assert!(err.to_string().contains("unsupported nested operator"));
+    }
+
+    #[test]
+    fn rejects_javascript_shaped_filter_operator() {
+        let mut tmpl = test_executable_template();
+        tmpl.filter = json!({ "$where": "this.a == this.b" });
+        let err =
+            validate_mutation_template(&tmpl).expect_err("$where in filter should be rejected");
+        assert!(err.to_string().contains("JavaScript-shaped operator"));
+    }
+
+    #[test]
+    fn rejects_max_affected_above_global_cap() {
+        let mut tmpl = test_executable_template();
+        tmpl.max_affected = 1001;
+        let err = validate_mutation_template(&tmpl)
+            .expect_err("max_affected above the global 1000-document cap should be rejected");
+        assert!(err.to_string().contains("exceeds the global cap"));
+    }
+
+    #[test]
+    fn allows_max_affected_at_global_cap_boundary() {
+        let mut tmpl = test_executable_template();
+        tmpl.max_affected = 1000;
+        validate_mutation_template(&tmpl).expect("max_affected == 1000 should be allowed");
+    }
+
+    #[test]
+    fn rejects_zero_max_affected() {
+        let mut tmpl = test_executable_template();
+        tmpl.max_affected = 0;
+        assert!(validate_mutation_template(&tmpl).is_err());
+    }
+
+    #[test]
+    fn rejects_zero_revision() {
+        let mut tmpl = test_executable_template();
+        tmpl.revision = 0;
+        assert!(validate_mutation_template(&tmpl).is_err());
+    }
+
+    #[test]
+    fn rejects_zero_max_backup_age_minutes() {
+        let mut tmpl = test_executable_template();
+        tmpl.max_backup_age_minutes = 0;
+        assert!(validate_mutation_template(&tmpl).is_err());
+    }
+
+    #[test]
+    fn rejects_unsupported_rollback_strategy() {
+        let mut tmpl = test_executable_template();
+        tmpl.rollback = "manual_only".to_string();
+        let err = validate_mutation_template(&tmpl)
+            .expect_err("unsupported rollback strategy should be rejected");
+        assert!(err.to_string().contains("unsupported rollback strategy"));
+    }
+
+    #[test]
+    fn support_query_registry_contains_no_mutation() {
+        let templates =
+            mongo_query_templates().expect("support query registry should load and parse");
+        assert!(
+            templates
+                .iter()
+                .all(|t| t.name != "user_email_domain_migration"),
+            "user_email_domain_migration must not remain in the read-only support-query registry"
+        );
+        assert!(!templates.is_empty());
+        // MongoSupportQueryTemplate has no `update` field at all (checked
+        // at compile time by the type itself), so no support template can
+        // structurally express a write.
+    }
+
+    #[test]
+    fn mutation_registry_loads_and_validates() {
+        let templates =
+            mongo_mutation_templates().expect("shipped mutations.yaml should load and validate");
+        assert!(!templates.is_empty());
+    }
+
+    #[test]
+    fn shipped_user_email_domain_migration_is_preview_only_and_not_resolvable() {
+        let templates =
+            mongo_mutation_templates().expect("mutation registry should load and validate");
+        let template = templates
+            .iter()
+            .find(|t| t.id == "user_email_domain_migration")
+            .expect("user_email_domain_migration should exist in the mutation registry");
+        assert_eq!(template.mode, MutationTemplateMode::PreviewOnly);
+
+        let mut params = BTreeMap::new();
+        params.insert("new_email".to_string(), "admin@companyB.com".to_string());
+        let err = resolve_mutation_template("user_email_domain_migration", &params)
+            .expect_err("preview_only template must not resolve for live preview/apply");
+        assert!(err.to_string().contains("preview_only"));
+    }
+
+    #[test]
+    fn canonical_mutation_digest_is_deterministic_and_reacts_to_candidate_changes() {
+        let mut params = BTreeMap::new();
+        params.insert("new_value".to_string(), "42".to_string());
+        let resolved = resolve_mutation_template_from(
+            vec![test_executable_template()],
+            "test_fixture_set_value",
+            &params,
+        )
+        .expect("fixture should resolve");
+
+        let candidates = CandidateSnapshot {
+            matched_count: 2,
+            candidate_ids: vec![json!("a"), json!("b")],
+        };
+
+        let digest_a = canonical_mutation_digest(&resolved, &candidates);
+        let digest_b = canonical_mutation_digest(&resolved, &candidates);
+        assert_eq!(
+            digest_a, digest_b,
+            "digest must be deterministic for identical input"
+        );
+        assert!(digest_a.starts_with("sha256:"));
+
+        let different_candidates = CandidateSnapshot {
+            matched_count: 3,
+            candidate_ids: vec![json!("a"), json!("b"), json!("c")],
+        };
+        let digest_c = canonical_mutation_digest(&resolved, &different_candidates);
+        assert_ne!(
+            digest_a, digest_c,
+            "digest must change when the candidate set changes"
+        );
     }
 }
