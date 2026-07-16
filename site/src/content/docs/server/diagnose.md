@@ -88,11 +88,11 @@ Simulate a login flow without making any actual changes — useful for validatin
 ayx server auth simulate --profile prod
 ```
 
-For SAML-specific diagnosis, use the bundled tactic directly:
+For SAML-specific diagnosis, use the bundled action directly:
 
 ```sh
-ayx tactics describe server.auth.saml-diagnose
-ayx tactics run server.auth.saml-diagnose
+ayx actions describe server.auth.saml-diagnose
+ayx actions run server.auth.saml-diagnose
 ```
 
 ## API health and raw calls
@@ -166,4 +166,4 @@ The envelope is always `{ ok, message, timestamp_utc, data }` on success; failur
 - [Alteryx Server overview](/server/)
 - [Logs & diagnostics](/server/logs/)
 - [Upgrade](/server/upgrade/)
-- [Tactics & workflows](/telemetry/tactics/)
+- [Actions & workflows](/telemetry/actions/)

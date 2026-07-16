@@ -132,10 +132,10 @@ ayx designer workflow convert-cloud \
   --fail-on-unsupported
 ```
 
-The bundled tactic for bulk cloud conversion is `workflow.cloud-convert.bulk`:
+The bundled action for bulk cloud conversion is `workflow.cloud-convert.bulk`:
 
 ```sh
-ayx tactics run workflow.cloud-convert.bulk
+ayx actions run workflow.cloud-convert.bulk
 ```
 
 ## Publishing
@@ -209,4 +209,4 @@ ayx --output json designer workflow inspect --input reports.yxzp
 
 - [Alteryx Server overview](/server/)
 - [Telemetry](/telemetry/)
-- [Tactics & workflows](/telemetry/tactics/) — see `workflow.cloud-convert.bulk`
+- [Actions & workflows](/telemetry/actions/) — see `workflow.cloud-convert.bulk`

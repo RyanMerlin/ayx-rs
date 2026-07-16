@@ -185,6 +185,6 @@ The envelope is always `{ ok, message, timestamp_utc, data }` on success; failur
 
 ## Related
 
-- [Tactics & workflows](/telemetry/tactics/)
+- [Actions & workflows](/telemetry/actions/)
 - [Alteryx Server overview](/server/)
 - [Safety model](/safety-model/)

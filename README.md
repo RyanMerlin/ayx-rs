@@ -7,7 +7,7 @@ It is designed to operate across the Alteryx surface and enable sophisticated op
 - automation-friendly: a single native binary with predictable output and no interpreter dependency
 - secure: explicit `--apply` gates, audit artifacts, and conservative defaults
 - portable: Windows, Linux, and macOS
-- agent-friendly: structured envelopes and a growing command/tactics/workflow registry
+- agent-friendly: structured envelopes and a growing command/actions/workflow registry
 
 > Status: `ayx` ships a stable CLI, a machine-readable command catalog, a first-class live `discover` entry point, and a live One surface inventory. The registry layer is still growing, but `catalog` remains the machine-readable view rather than a replacement for the live tree.
 
@@ -169,8 +169,8 @@ The long-term goal is not just a CLI. It is a secure, portable operator for the 
 
 That means:
 - a stable command catalog
-- a progressive discovery ladder from commands to capabilities to tactics to workflows
-- a tactical registry for repeatable playbooks
+- a progressive discovery ladder from commands to capabilities to actions to workflows
+- an action registry for repeatable playbooks
 - workflow/skill descriptions for multi-step operations
 - structured evidence after every run
 - documentation that stays aligned with the actual binary
@@ -258,7 +258,7 @@ The repository includes a `docs/fixtures/RuntimeSettings.xml` fixture for offlin
 - `tui` — interactive TUI for profile selection, editing, credentials, and connectivity checks
 - `catalog` — machine-readable command registry
 - `audit` — audit artifact management, retention, and cleanup
-- `tactics` — tactical registry with safety, validation, and rollback notes
+- `actions` — action registry with safety, validation, and rollback notes
 - `workflows` — workflow registry for higher-order skill chains
 - `license` — licensing portal branch and API surface
 - `whoami` — show the active profile, account email, workspace, and environment

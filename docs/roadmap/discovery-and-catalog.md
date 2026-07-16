@@ -5,7 +5,7 @@ Status: active
 ## Current Scope
 
 - `ayx discover` is the primary live-tree entry point.
-- Command, capability, tactic, and workflow discovery should stay aligned.
+- Command, capability, action, and workflow discovery should stay aligned.
 - `catalog` remains a supporting registry index until discovery exposes the
   same stable concepts directly.
 
@@ -20,7 +20,7 @@ Status: active
 
 ## Exit Criteria
 
-- `discover` can walk from command to capability to tactic to workflow without
+- `discover` can walk from command to capability to action to workflow without
   guesswork.
 - Discovery output and generated docs report the same surface truth.
 - Any deprecated helper commands have a compatibility story.

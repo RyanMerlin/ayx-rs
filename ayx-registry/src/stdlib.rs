@@ -1,11 +1,11 @@
-//! Crate-bundled stdlib of canonical tactics and workflows.
+//! Crate-bundled stdlib of canonical actions and workflows.
 //!
 //! Each YAML is `include_str!`'d so the binary ships with a working
 //! registry even when `${AYX_CONFIG_HOME}/registry/` is empty. Operators
 //! who want to override a recipe drop a same-id YAML in their config home
 //! and the loader (which walks operator dirs first) keeps their version.
 
-use crate::{Registry, RegistryError, Tactic, Workflow};
+use crate::{Action, Registry, RegistryError, Workflow};
 
 /// One bundled-resource pair: parsed body + its on-disk-like path label.
 struct Bundled {
@@ -13,46 +13,46 @@ struct Bundled {
     body: &'static str,
 }
 
-const TACTICS: &[Bundled] = &[
+const ACTIONS: &[Bundled] = &[
     Bundled {
-        path: "bundled:tactics/mongo-backup-restore.tactic.yaml",
-        body: include_str!("../tactics/mongo-backup-restore.tactic.yaml"),
+        path: "bundled:actions/mongo-backup-restore.action.yaml",
+        body: include_str!("../actions/mongo-backup-restore.action.yaml"),
     },
     Bundled {
-        path: "bundled:tactics/mongo-doctor.tactic.yaml",
-        body: include_str!("../tactics/mongo-doctor.tactic.yaml"),
+        path: "bundled:actions/mongo-doctor.action.yaml",
+        body: include_str!("../actions/mongo-doctor.action.yaml"),
     },
     Bundled {
-        path: "bundled:tactics/one-workspace-migrate.tactic.yaml",
-        body: include_str!("../tactics/one-workspace-migrate.tactic.yaml"),
+        path: "bundled:actions/one-workspace-migrate.action.yaml",
+        body: include_str!("../actions/one-workspace-migrate.action.yaml"),
     },
     Bundled {
-        path: "bundled:tactics/server-auth-saml-diagnose.tactic.yaml",
-        body: include_str!("../tactics/server-auth-saml-diagnose.tactic.yaml"),
+        path: "bundled:actions/server-auth-saml-diagnose.action.yaml",
+        body: include_str!("../actions/server-auth-saml-diagnose.action.yaml"),
     },
     Bundled {
-        path: "bundled:tactics/one-flow-promote.tactic.yaml",
-        body: include_str!("../tactics/one-flow-promote.tactic.yaml"),
+        path: "bundled:actions/one-flow-promote.action.yaml",
+        body: include_str!("../actions/one-flow-promote.action.yaml"),
     },
     Bundled {
-        path: "bundled:tactics/one-scheduling-pause.tactic.yaml",
-        body: include_str!("../tactics/one-scheduling-pause.tactic.yaml"),
+        path: "bundled:actions/one-scheduling-pause.action.yaml",
+        body: include_str!("../actions/one-scheduling-pause.action.yaml"),
     },
     Bundled {
-        path: "bundled:tactics/server-upgrade-preflight.tactic.yaml",
-        body: include_str!("../tactics/server-upgrade-preflight.tactic.yaml"),
+        path: "bundled:actions/server-upgrade-preflight.action.yaml",
+        body: include_str!("../actions/server-upgrade-preflight.action.yaml"),
     },
     Bundled {
-        path: "bundled:tactics/server-logs-triage.tactic.yaml",
-        body: include_str!("../tactics/server-logs-triage.tactic.yaml"),
+        path: "bundled:actions/server-logs-triage.action.yaml",
+        body: include_str!("../actions/server-logs-triage.action.yaml"),
     },
     Bundled {
-        path: "bundled:tactics/mongo-queue-stuck.tactic.yaml",
-        body: include_str!("../tactics/mongo-queue-stuck.tactic.yaml"),
+        path: "bundled:actions/mongo-queue-stuck.action.yaml",
+        body: include_str!("../actions/mongo-queue-stuck.action.yaml"),
     },
     Bundled {
-        path: "bundled:tactics/workflow-cloud-convert-bulk.tactic.yaml",
-        body: include_str!("../tactics/workflow-cloud-convert-bulk.tactic.yaml"),
+        path: "bundled:actions/workflow-cloud-convert-bulk.action.yaml",
+        body: include_str!("../actions/workflow-cloud-convert-bulk.action.yaml"),
     },
 ];
 
@@ -68,14 +68,14 @@ const WORKFLOWS: &[Bundled] = &[
 ];
 
 pub(crate) fn install_into(reg: &mut Registry) -> Result<(), RegistryError> {
-    for b in TACTICS {
-        let mut tactic: Tactic =
+    for b in ACTIONS {
+        let mut action: Action =
             serde_yaml::from_str(b.body).map_err(|source| RegistryError::Parse {
                 path: b.path.to_string(),
                 source,
             })?;
-        tactic.source_path = b.path.to_string();
-        reg.insert_tactic(tactic)?;
+        action.source_path = b.path.to_string();
+        reg.insert_action(action)?;
     }
     for b in WORKFLOWS {
         let mut workflow: Workflow =

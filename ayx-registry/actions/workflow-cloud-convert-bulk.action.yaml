@@ -18,14 +18,14 @@ trigger:
     - cloud
 steps:
   - kind: command
-    cmd: "ayx workflow scan --root <workflow_dir> --output json"
+    cmd: "ayx designer workflow scan --root <workflow_dir> --output json"
     why: "Inventory every .yxmd in the tree. Surfaces macros + dependencies before conversion."
   - kind: command
-    cmd: "ayx workflow inspect --path <workflow_path> --output json"
-    why: "Inspect one workflow's structure + tool inventory. The Cloud-convert action `workflow convert-cloud` is registered as a subcommand (see `ayx workflow --help`); aim it at the same path to produce the converted payload."
+    cmd: "ayx designer workflow inspect --path <workflow_path> --output json"
+    why: "Inspect one workflow's structure + tool inventory. The Cloud-convert action `designer workflow convert-cloud` is registered as a subcommand (see `ayx designer workflow --help`); aim it at the same path to produce the converted payload."
   - kind: note
     text: |
-      `workflow convert-cloud --input <workflow_path> --output ./cloud/<flow_name>.json`
+      `designer workflow convert-cloud --input <workflow_path> --output ./cloud/<flow_name>.json`
       is the workhorse here. It's not yet in the machine-readable catalog
       (validator will surface that gap), but it is wired in the binary —
       run it in a shell loop seeded from the scan output above.

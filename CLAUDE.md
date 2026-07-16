@@ -8,7 +8,7 @@ and automation. Apache-2.0. Created by Ryan Merlin.
 - ayx-core: shared primitives — envelope/JSON output contract, config/profile resolution, observability, audit, and sensitive-data helpers
 - ayx-one: Alteryx One command surface (re-exports from ayx-one-api)
 - ayx-one-api: HTTP client implementation for the Alteryx One API (auth, multipart uploads, retry logic)
-- ayx-registry: tactical, workflow, and capability registry — declarative playbooks and multi-step orchestrations for agent/LLM consumers
+- ayx-registry: action, workflow, and capability registry — declarative playbooks and multi-step orchestrations for agent/LLM consumers
 - ayx-rs: main binary entry point; assembles all subcommands into the `ayx` CLI
 - ayx-server: Alteryx Server command surface — logs, MongoDB, SQL Server, and upgrade subcommands
 - ayx-server-api: HTTP client implementation for the Alteryx Server API (token cache, multiple auth modes)

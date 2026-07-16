@@ -1,4 +1,4 @@
-//! Tactic / workflow executor.
+//! Action / workflow executor.
 //!
 //! The registry stores recipes declaratively; this module turns them into
 //! actual command invocations of the `ayx` binary itself. The execution
@@ -7,8 +7,8 @@
 //! 1. Parameter substitution. `<placeholder>` tokens in a step's `cmd` get
 //!    replaced from a caller-supplied `params` map. Unknown placeholders are
 //!    reported up-front, before anything runs.
-//! 2. Safety gate. `read_only` tactics run freely. `mutating` and
-//!    `destructive` tactics require `apply = true`; without it, the executor
+//! 2. Safety gate. `read_only` actions run freely. `mutating` and
+//!    `destructive` actions require `apply = true`; without it, the executor
 //!    returns a structured *plan* envelope describing every step that would
 //!    fire, never invokes anything, and never touches state.
 //! 3. Per-step execution. Each `Step::Command` is spawned as a subprocess of
@@ -19,10 +19,10 @@
 //!    returned to the caller. If an `audit_dir` is supplied, a JSON file is
 //!    written per step so the operator has a durable record.
 //!
-//! Workflows are executed by running their referenced tactics in order; the
-//! workflow's safety floor is the max of any referenced tactic's safety.
+//! Workflows are executed by running their referenced actions in order; the
+//! workflow's safety floor is the max of any referenced action's safety.
 //!
-//! Step::Tactic (composition) is resolved at execution time so a tactic
+//! Step::Action (composition) is resolved at execution time so an action
 //! authored to reuse `mongo.backup-restore` actually invokes its steps.
 //! Step::Note is surfaced in the plan and skipped at runtime.
 
@@ -34,18 +34,18 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use crate::{Registry, Safety, Step, Tactic};
+use crate::{Action, Registry, Safety, Step};
 
 #[derive(Debug, Error)]
 pub enum ExecutorError {
-    #[error("tactic '{id}' is {safety:?}; --apply required to execute")]
+    #[error("action '{id}' is {safety:?}; --apply required to execute")]
     ApplyRequired { id: String, safety: Safety },
     #[error(
-        "unknown parameter(s) referenced by tactic '{id}': {missing:?}. Provide via --param key=value."
+        "unknown parameter(s) referenced by action '{id}': {missing:?}. Provide via --param key=value."
     )]
     MissingParams { id: String, missing: Vec<String> },
-    #[error("tactic '{id}' referenced by composition step does not exist")]
-    InnerTacticNotFound { id: String },
+    #[error("action '{id}' referenced by composition step does not exist")]
+    InnerActionNotFound { id: String },
     #[error("failed to locate current ayx binary: {0}")]
     SelfBinary(String),
     #[error("failed to spawn step #{index} ({cmd}): {source}")]
@@ -83,7 +83,7 @@ pub enum ExecutorError {
 pub struct StepOutcome {
     pub index: usize,
     pub kind: &'static str,
-    /// The command line *after* parameter substitution. None for note/tactic steps.
+    /// The command line *after* parameter substitution. None for note/action steps.
     pub cmd: Option<String>,
     pub why: Option<String>,
     /// `planned` for dry-run, `ok` / `failed` / `skipped` for executions.
@@ -101,10 +101,10 @@ pub struct StepOutcome {
     pub exit_code: Option<i32>,
 }
 
-/// Aggregate result of running (or planning) a tactic.
+/// Aggregate result of running (or planning) an action.
 #[derive(Debug, Clone, Serialize)]
-pub struct TacticRun {
-    pub tactic_id: String,
+pub struct ActionRun {
+    pub action_id: String,
     pub title: String,
     pub safety: Safety,
     pub apply: bool,
@@ -125,20 +125,20 @@ pub struct WorkflowRun {
     pub safety: Safety,
     pub apply: bool,
     pub mode: &'static str,
-    pub tactics: Vec<TacticRun>,
+    pub actions: Vec<ActionRun>,
 }
 
 /// Configuration knobs for an execution.
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionConfig {
-    /// When false (the default), tactics with safety > ReadOnly produce a
+    /// When false (the default), actions with safety > ReadOnly produce a
     /// plan envelope and never invoke a subprocess.
     pub apply: bool,
-    /// Provided parameters. Missing parameters that the tactic references
+    /// Provided parameters. Missing parameters that the action references
     /// abort the run before any subprocess fires.
     pub params: BTreeMap<String, String>,
     /// When set, every step's envelope is written as JSON to
-    /// `audit_dir/<tactic-id>-<ts>-step-<n>.json`. Inherits the standard
+    /// `audit_dir/<action-id>-<ts>-step-<n>.json`. Inherits the standard
     /// `ayx-core::audit::resolve_audit_dir` behavior when set to the default
     /// `audits` path.
     pub audit_dir: Option<PathBuf>,
@@ -149,17 +149,17 @@ pub struct ExecutionConfig {
     pub global_args: Vec<String>,
 }
 
-pub fn run_tactic(
+pub fn run_action(
     registry: &Registry,
-    tactic_id: &str,
+    action_id: &str,
     cfg: &ExecutionConfig,
-) -> Result<TacticRun, ExecutorError> {
-    let tactic = registry
-        .tactic(tactic_id)
-        .map_err(|_| ExecutorError::InnerTacticNotFound {
-            id: tactic_id.to_string(),
+) -> Result<ActionRun, ExecutorError> {
+    let action = registry
+        .action(action_id)
+        .map_err(|_| ExecutorError::InnerActionNotFound {
+            id: action_id.to_string(),
         })?;
-    run_tactic_inner(registry, tactic, cfg)
+    run_action_inner(registry, action, cfg)
 }
 
 pub fn run_workflow(
@@ -170,16 +170,16 @@ pub fn run_workflow(
     let workflow =
         registry
             .workflow(workflow_id)
-            .map_err(|_| ExecutorError::InnerTacticNotFound {
+            .map_err(|_| ExecutorError::InnerActionNotFound {
                 id: workflow_id.to_string(),
             })?;
     let mode = if cfg.apply { "execute" } else { "plan" };
-    let mut runs = Vec::with_capacity(workflow.tactics.len());
-    for tid in &workflow.tactics {
-        let tactic = registry
-            .tactic(tid)
-            .map_err(|_| ExecutorError::InnerTacticNotFound { id: tid.clone() })?;
-        runs.push(run_tactic_inner(registry, tactic, cfg)?);
+    let mut runs = Vec::with_capacity(workflow.actions.len());
+    for tid in &workflow.actions {
+        let action = registry
+            .action(tid)
+            .map_err(|_| ExecutorError::InnerActionNotFound { id: tid.clone() })?;
+        runs.push(run_action_inner(registry, action, cfg)?);
     }
     Ok(WorkflowRun {
         workflow_id: workflow.id.clone(),
@@ -187,20 +187,20 @@ pub fn run_workflow(
         safety: workflow.safety,
         apply: cfg.apply,
         mode,
-        tactics: runs,
+        actions: runs,
     })
 }
 
-fn run_tactic_inner(
+fn run_action_inner(
     registry: &Registry,
-    tactic: &Tactic,
+    action: &Action,
     cfg: &ExecutionConfig,
-) -> Result<TacticRun, ExecutorError> {
+) -> Result<ActionRun, ExecutorError> {
     // Up-front parameter validation. We scan every Command step (and inline
-    // any Tactic composition steps) before running so we fail loud, not
+    // any Action composition steps) before running so we fail loud, not
     // halfway through.
     let mut required: Vec<String> = Vec::new();
-    collect_required_params(registry, tactic, &mut required);
+    collect_required_params(registry, action, &mut required);
     required.sort();
     required.dedup();
     let missing: Vec<String> = required
@@ -210,7 +210,7 @@ fn run_tactic_inner(
         .collect();
     if !missing.is_empty() {
         return Err(ExecutorError::MissingParams {
-            id: tactic.id.clone(),
+            id: action.id.clone(),
             missing,
         });
     }
@@ -220,40 +220,40 @@ fn run_tactic_inner(
     let mut step_counter = 0usize;
     run_steps(
         registry,
-        tactic,
-        &tactic.steps,
+        action,
+        &action.steps,
         cfg,
         &mut outcomes,
         &mut step_counter,
     )?;
 
-    Ok(TacticRun {
-        tactic_id: tactic.id.clone(),
-        title: tactic.title.clone(),
-        safety: tactic.safety,
+    Ok(ActionRun {
+        action_id: action.id.clone(),
+        title: action.title.clone(),
+        safety: action.safety,
         apply: cfg.apply,
         mode,
         params: cfg.params.clone(),
         steps: outcomes,
-        validations: tactic
+        validations: action
             .validations
             .iter()
             .map(|v| v.describe.clone())
             .collect(),
-        rollback: tactic.rollback.clone(),
+        rollback: action.rollback.clone(),
     })
 }
 
-fn collect_required_params(registry: &Registry, tactic: &Tactic, out: &mut Vec<String>) {
-    for step in &tactic.steps {
+fn collect_required_params(registry: &Registry, action: &Action, out: &mut Vec<String>) {
+    for step in &action.steps {
         match step {
             Step::Command { cmd, .. } => {
                 for p in extract_params(cmd) {
                     out.push(p);
                 }
             }
-            Step::Tactic { id, .. } => {
-                if let Ok(inner) = registry.tactic(id) {
+            Step::Action { id, .. } => {
+                if let Ok(inner) = registry.action(id) {
                     collect_required_params(registry, inner, out);
                 }
             }
@@ -320,7 +320,7 @@ fn substitute(cmd: &str, params: &BTreeMap<String, String>) -> String {
 
 fn run_steps(
     registry: &Registry,
-    tactic: &Tactic,
+    action: &Action,
     steps: &[Step],
     cfg: &ExecutionConfig,
     outcomes: &mut Vec<StepOutcome>,
@@ -342,17 +342,17 @@ fn run_steps(
                     exit_code: None,
                 });
             }
-            Step::Tactic { id, why } => {
-                // Composition: inline the referenced tactic's steps so the
+            Step::Action { id, why } => {
+                // Composition: inline the referenced action's steps so the
                 // operator sees one flat plan.
                 let inner = registry
-                    .tactic(id)
-                    .map_err(|_| ExecutorError::InnerTacticNotFound { id: id.clone() })?;
+                    .action(id)
+                    .map_err(|_| ExecutorError::InnerActionNotFound { id: id.clone() })?;
                 *counter += 1;
                 outcomes.push(StepOutcome {
                     index: *counter,
-                    kind: "tactic",
-                    cmd: Some(format!("(tactic {})", inner.id)),
+                    kind: "action",
+                    cmd: Some(format!("(action {})", inner.id)),
                     why: Some(why.clone()),
                     status: if cfg.apply { "expanded" } else { "planned" },
                     envelope: None,
@@ -365,7 +365,7 @@ fn run_steps(
             Step::Command { cmd, why, .. } => {
                 *counter += 1;
                 let resolved = substitute(cmd, &cfg.params);
-                let safety_blocks = tactic.safety.requires_apply() && !cfg.apply;
+                let safety_blocks = action.safety.requires_apply() && !cfg.apply;
                 if safety_blocks {
                     outcomes.push(StepOutcome {
                         index: *counter,
@@ -381,16 +381,16 @@ fn run_steps(
                     continue;
                 }
                 if !cfg.apply {
-                    // Read-only tactic: still report as planned for symmetry,
+                    // Read-only action: still report as planned for symmetry,
                     // but DO run — read-only is safe by definition.
                 }
-                let outcome = execute_command_step(*counter, &resolved, why, cfg, &tactic.id)?;
+                let outcome = execute_command_step(*counter, &resolved, why, cfg, &action.id)?;
                 let failed = outcome.status != "ok";
                 outcomes.push(outcome);
                 if failed {
                     // Fail-stop: re-raise as ExecutorError so the caller sees
                     // a non-Ok at the top level. The partial `outcomes`
-                    // vector is preserved in the caller's TacticRun.
+                    // vector is preserved in the caller's ActionRun.
                     let last = outcomes.last().unwrap();
                     return Err(match last.status {
                         "envelope-not-ok" => ExecutorError::StepEnvelopeNotOk {
@@ -422,7 +422,7 @@ fn execute_command_step(
     resolved: &str,
     why: &str,
     cfg: &ExecutionConfig,
-    tactic_id: &str,
+    action_id: &str,
 ) -> Result<StepOutcome, ExecutorError> {
     let tokens = shell_split(resolved).ok_or_else(|| ExecutorError::Lex {
         cmd: resolved.to_string(),
@@ -486,9 +486,9 @@ fn execute_command_step(
             source,
         })?;
         let ts = chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ");
-        let path = resolved_dir.join(format!("{}-{}-step-{:02}.json", tactic_id, ts, index));
+        let path = resolved_dir.join(format!("{}-{}-step-{:02}.json", action_id, ts, index));
         let payload = json!({
-            "tactic_id": tactic_id,
+            "action_id": action_id,
             "step_index": index,
             "cmd": resolved,
             "why": why,
@@ -532,7 +532,7 @@ fn execute_command_step(
 
 /// Minimal POSIX-style splitter: handles single and double quotes, plus
 /// backslash escapes inside double quotes. Good enough for the constrained
-/// command lines we put in tactics; returns None on unbalanced quotes.
+/// command lines we put in actions; returns None on unbalanced quotes.
 fn shell_split(s: &str) -> Option<Vec<String>> {
     let mut out: Vec<String> = Vec::new();
     let mut cur = String::new();
@@ -618,7 +618,7 @@ mod tests {
     fn missing_params_block_run() {
         let reg = Registry::load_default().expect("registry");
         let cfg = ExecutionConfig::default();
-        let err = run_tactic(&reg, "mongo.backup-restore", &cfg).unwrap_err();
+        let err = run_action(&reg, "mongo.backup-restore", &cfg).unwrap_err();
         assert!(matches!(err, ExecutorError::MissingParams { .. }));
     }
 
@@ -631,12 +631,12 @@ mod tests {
             .insert("profile".to_string(), "missing-profile".to_string());
         // We don't assert on success here (we don't have a real profile) —
         // we just confirm the executor reaches the run path and that the
-        // safety gate doesn't block a read_only tactic. The first step's
+        // safety gate doesn't block a read_only action. The first step's
         // status will be one of ok/failed/envelope-not-ok, never planned.
-        match run_tactic(&reg, "mongo.doctor", &cfg) {
+        match run_action(&reg, "mongo.doctor", &cfg) {
             Ok(run) => {
                 assert_eq!(run.mode, "plan"); // apply=false
-                // Read-only tactics actually execute steps; status must not be "planned".
+                // Read-only actions actually execute steps; status must not be "planned".
                 let first = &run.steps[0];
                 assert_ne!(first.status, "planned");
             }
@@ -649,13 +649,13 @@ mod tests {
     }
 
     #[test]
-    fn mutating_tactic_without_apply_emits_plan() {
+    fn mutating_action_without_apply_emits_plan() {
         let reg = Registry::load_default().expect("registry");
         let mut cfg = ExecutionConfig::default();
         cfg.params.insert("profile".to_string(), "p".to_string());
         cfg.params
             .insert("ts".to_string(), "2026-05-11".to_string());
-        let run = run_tactic(&reg, "mongo.backup-restore", &cfg).expect("plan runs");
+        let run = run_action(&reg, "mongo.backup-restore", &cfg).expect("plan runs");
         assert_eq!(run.mode, "plan");
         assert!(!run.apply);
         for s in &run.steps {

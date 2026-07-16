@@ -9,7 +9,7 @@ tags:
   - governance
   - go-live
   - workspace
-tactics:
+actions:
   - mongo.backup-restore
   - server.auth.saml-diagnose
   - one.workspace-migrate

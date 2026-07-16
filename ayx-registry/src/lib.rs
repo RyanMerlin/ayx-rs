@@ -1,8 +1,8 @@
-//! `ayx-registry` — tactical, workflow, and capability registry for `ayx`.
+//! `ayx-registry` — action, workflow, and capability registry for `ayx`.
 //!
 //! This crate is the "agent substrate" layer of the toolset. The CLI itself
 //! is a command surface; the registry layers on top of it a small,
-//! declarative model of *named playbooks* (tactics) and *multi-step
+//! declarative model of *named playbooks* (actions) and *multi-step
 //! orchestrations* (workflows) so an LLM or operator can ask "what's the
 //! recipe for X?" and get a curated answer instead of having to discover
 //! the surface flag-by-flag.
@@ -15,20 +15,20 @@
 //!   by a stable id (`mongo.backup`, `one.flow.list`, …). Capabilities are
 //!   produced from the existing `COMMAND_SPECS`; this crate consumes them
 //!   indirectly via the catalog when the registry resolver wants to point
-//!   a tactic at a concrete command.
-//! - **Tactic** — a small declarative recipe: a trigger pattern (when does
+//!   an action at a concrete command.
+//! - **Action** — a small declarative recipe: a trigger pattern (when does
 //!   this apply), guardrails (read-only? mutating? `--apply` required?),
 //!   the canonical command sequence, validation steps, and rollback notes.
-//!   Tactics are leaf-level: an agent can run one without further planning.
-//! - **Workflow** — a higher-order recipe that strings tactics together
+//!   Actions are leaf-level: an agent can run one without further planning.
+//! - **Workflow** — a higher-order recipe that strings actions together
 //!   into a multi-step skill (e.g. `governance-go-live` =
 //!   `backup` → `apply-rbac` → `verify-permissions` → `audit-report`).
 //!
-//! Tactics and workflows live as YAML files on disk under a *search path*:
+//! Actions and workflows live as YAML files on disk under a *search path*:
 //!
 //!   1. `$AYX_REGISTRY_DIR` if set (operator override / dev override)
 //!   2. `${AYX_CONFIG_HOME}/registry/`
-//!   3. The crate-bundled `tactics/` and `workflows/` directories (shipped
+//!   3. The crate-bundled `actions/` and `workflows/` directories (shipped
 //!      with the binary as `include_str!` fallbacks).
 //!
 //! Layer 3 is the "stdlib" of canonical recipes; layers 1-2 let operators
@@ -36,9 +36,9 @@
 //!
 //! # Versioning + safety
 //!
-//! Every tactic carries a `safety` field (one of `read_only`, `mutating`,
+//! Every action carries a `safety` field (one of `read_only`, `mutating`,
 //! `destructive`). The CLI refuses to *run* (vs. *describe*) a mutating or
-//! destructive tactic without `--apply`; this is the same gate the One API
+//! destructive action without `--apply`; this is the same gate the One API
 //! transport already enforces, but lifted to the registry layer so the
 //! check happens before any command would fire.
 
@@ -70,8 +70,8 @@ pub enum RegistryError {
         #[source]
         source: serde_yaml::Error,
     },
-    #[error("tactic '{id}' not found")]
-    TacticNotFound { id: String },
+    #[error("action '{id}' not found")]
+    ActionNotFound { id: String },
     #[error("workflow '{id}' not found")]
     WorkflowNotFound { id: String },
     #[error("duplicate id '{id}' loaded from both '{first}' and '{second}'")]
@@ -80,11 +80,11 @@ pub enum RegistryError {
         first: String,
         second: String,
     },
-    #[error("tactic '{id}' is {safety:?}; --apply required to run (use `describe` to inspect)")]
+    #[error("action '{id}' is {safety:?}; --apply required to run (use `describe` to inspect)")]
     ApplyRequired { id: String, safety: Safety },
 }
 
-/// Classifies the blast radius of a tactic / workflow. The registry refuses
+/// Classifies the blast radius of an action / workflow. The registry refuses
 /// to execute anything beyond `ReadOnly` unless the caller passes `apply`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -130,7 +130,7 @@ impl Safety {
     }
 }
 
-/// A trigger pattern — when should this tactic surface as a candidate?
+/// A trigger pattern — when should this action surface as a candidate?
 /// The matching is intentionally simple (substring + tag) so a future LLM
 /// resolver can compose its own embeddings on top without us locking in a
 /// brittle regex DSL today.
@@ -141,13 +141,13 @@ pub struct Trigger {
     #[serde(default)]
     pub task_keywords: Vec<String>,
     /// Tags (e.g. `mongo`, `one`, `governance`, `migration`) for coarse
-    /// filtering. Tactics matching all tags listed in a query rank higher.
+    /// filtering. Actions matching all tags listed in a query rank higher.
     #[serde(default)]
     pub tags: Vec<String>,
 }
 
-/// One concrete step inside a tactic. Either a shell command line that the
-/// operator runs, or a reference to another tactic (composition).
+/// One concrete step inside an action. Either a shell command line that the
+/// operator runs, or a reference to another action (composition).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Step {
@@ -163,14 +163,14 @@ pub enum Step {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         capability: Option<String>,
     },
-    /// Invoke another tactic by id. Lets common building blocks be reused.
-    Tactic { id: String, why: String },
+    /// Invoke another action by id. Lets common building blocks be reused.
+    Action { id: String, why: String },
     /// A note to the operator — nothing to execute, but worth surfacing
     /// (e.g. "verify ticket is open before proceeding").
     Note { text: String },
 }
 
-/// A validation step that proves the tactic achieved its intent.
+/// A validation step that proves the action achieved its intent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Validation {
     /// Human description: "queue is empty", "schedule is paused", etc.
@@ -180,16 +180,25 @@ pub struct Validation {
     pub check_cmd: Option<String>,
 }
 
-/// Wire-format version for tactic YAML files. Bump only on a breaking
-/// change to the schema; readers compare against `CURRENT_TACTIC_SCHEMA`.
-pub const CURRENT_TACTIC_SCHEMA: u32 = 1;
+/// Wire-format version for action YAML files. Bump only on a breaking change
+/// to the schema. `2` marks the 0.14.0 `tactic` → `action` rename, which
+/// changed both the `kind:` step tag and a workflow's `actions:` key.
+///
+/// NOTE: nothing currently *compares* against this — it is descriptive
+/// metadata, not an enforced gate. What actually keeps a pre-0.14.0 file out
+/// is the `.action.yaml` extension match in `load_dir` (a legacy
+/// `*.tactic.yaml` is skipped with a warning), plus serde rejecting a stale
+/// `kind: tactic` step. Enforcement is tracked separately; do not read this
+/// constant as a guarantee.
+pub const CURRENT_ACTION_SCHEMA: u32 = 2;
 
-/// A tactic — one named playbook.
+/// An action — one named playbook.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Tactic {
-    /// Wire-format version. Defaults to 1; bumped if the schema gains a
-    /// breaking change. Readers should accept any version up to
-    /// `CURRENT_TACTIC_SCHEMA`.
+pub struct Action {
+    /// Wire-format version. Omitted in a file means "current"
+    /// (`CURRENT_ACTION_SCHEMA`), not 1 — so this field cannot by itself
+    /// identify an older file. Not currently compared by any reader; see
+    /// `CURRENT_ACTION_SCHEMA`.
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
     pub id: String,
@@ -211,10 +220,10 @@ pub struct Tactic {
 }
 
 fn default_schema_version() -> u32 {
-    CURRENT_TACTIC_SCHEMA
+    CURRENT_ACTION_SCHEMA
 }
 
-/// A workflow — references tactics + adds top-level metadata.
+/// A workflow — references actions + adds top-level metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workflow {
     #[serde(default = "default_schema_version")]
@@ -225,19 +234,19 @@ pub struct Workflow {
     pub safety: Safety,
     #[serde(default)]
     pub tags: Vec<String>,
-    /// Ordered list of tactic ids. The resolver walks this in order; the
+    /// Ordered list of action ids. The resolver walks this in order; the
     /// CLI surfaces it as a numbered plan.
-    pub tactics: Vec<String>,
+    pub actions: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub success_criteria: Option<String>,
     #[serde(default, skip_serializing)]
     pub source_path: String,
 }
 
-/// Loaded registry — both tactics and workflows, indexed by id.
+/// Loaded registry — both actions and workflows, indexed by id.
 #[derive(Debug, Default)]
 pub struct Registry {
-    pub tactics: BTreeMap<String, Tactic>,
+    pub actions: BTreeMap<String, Action>,
     pub workflows: BTreeMap<String, Workflow>,
     /// Paths actually scanned (for diagnostics).
     pub sources: Vec<PathBuf>,
@@ -262,19 +271,19 @@ impl Registry {
     }
 
     /// Auto-promote every workflow's declared safety to the max of any
-    /// referenced tactic's safety. Prevents a workflow declared `mutating`
-    /// from quietly composing a `destructive` tactic and gaining a weaker
+    /// referenced action's safety. Prevents a workflow declared `mutating`
+    /// from quietly composing a `destructive` action and gaining a weaker
     /// gate than it should have. Idempotent.
     pub fn propagate_workflow_safety(&mut self) {
-        let tactic_safety: std::collections::BTreeMap<String, Safety> = self
-            .tactics
+        let action_safety: std::collections::BTreeMap<String, Safety> = self
+            .actions
             .iter()
             .map(|(id, t)| (id.clone(), t.safety))
             .collect();
         for workflow in self.workflows.values_mut() {
             let mut effective = workflow.safety;
-            for tid in &workflow.tactics {
-                if let Some(s) = tactic_safety.get(tid) {
+            for tid in &workflow.actions {
+                if let Some(s) = action_safety.get(tid) {
                     effective = effective.max(*s);
                 }
             }
@@ -283,7 +292,7 @@ impl Registry {
     }
 
     /// Load a directory of YAML files into this registry. Walks recursively;
-    /// `*.tactic.yaml` parse as tactics, `*.workflow.yaml` as workflows.
+    /// `*.action.yaml` parse as actions, `*.workflow.yaml` as workflows.
     pub fn load_dir(&mut self, dir: &Path) -> Result<(), RegistryError> {
         for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
             let p = entry.path();
@@ -291,18 +300,18 @@ impl Registry {
                 continue;
             }
             let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if name.ends_with(".tactic.yaml") || name.ends_with(".tactic.yml") {
+            if name.ends_with(".action.yaml") || name.ends_with(".action.yml") {
                 let body = fs::read_to_string(p).map_err(|source| RegistryError::Io {
                     path: p.display().to_string(),
                     source,
                 })?;
-                let mut tactic: Tactic =
+                let mut action: Action =
                     serde_yaml::from_str(&body).map_err(|source| RegistryError::Parse {
                         path: p.display().to_string(),
                         source,
                     })?;
-                tactic.source_path = p.display().to_string();
-                self.insert_tactic(tactic)?;
+                action.source_path = p.display().to_string();
+                self.insert_action(action)?;
                 self.sources.push(p.to_path_buf());
             } else if name.ends_with(".workflow.yaml") || name.ends_with(".workflow.yml") {
                 let body = fs::read_to_string(p).map_err(|source| RegistryError::Io {
@@ -317,15 +326,30 @@ impl Registry {
                 workflow.source_path = p.display().to_string();
                 self.insert_workflow(workflow)?;
                 self.sources.push(p.to_path_buf());
+            } else if name.ends_with(".tactic.yaml") || name.ends_with(".tactic.yml") {
+                // 0.14.0 renamed the `tactic` noun to `action`, including this
+                // file extension. Staying silent here would let a bundled action
+                // quietly reclaim the id an operator had overridden — and if
+                // their override tightened `safety`, the gate would silently
+                // relax. Say so loudly instead; the file is still not loaded.
+                eprintln!(
+                    "warning: ignoring legacy registry file '{}' — the `tactic` \
+                     concept was renamed to `action` in 0.14.0. Rename it to \
+                     '*.action.yaml' and change any `kind: tactic` step to \
+                     `kind: action` (a workflow's `tactics:` key is now `actions:`). \
+                     Until then this file is NOT loaded and any bundled action \
+                     sharing its id will be used instead.",
+                    p.display()
+                );
             }
         }
         Ok(())
     }
 
-    /// Insert a tactic, preserving the earlier copy on duplicates (operator
+    /// Insert an action, preserving the earlier copy on duplicates (operator
     /// overrides win because they're loaded first).
-    pub(crate) fn insert_tactic(&mut self, t: Tactic) -> Result<(), RegistryError> {
-        if let Some(existing) = self.tactics.get(&t.id) {
+    pub(crate) fn insert_action(&mut self, t: Action) -> Result<(), RegistryError> {
+        if let Some(existing) = self.actions.get(&t.id) {
             // Operator override already present — keep it.
             if existing.source_path != t.source_path {
                 return Ok(());
@@ -336,7 +360,7 @@ impl Registry {
                 second: t.source_path.clone(),
             });
         }
-        self.tactics.insert(t.id.clone(), t);
+        self.actions.insert(t.id.clone(), t);
         Ok(())
     }
 
@@ -355,10 +379,10 @@ impl Registry {
         Ok(())
     }
 
-    pub fn tactic(&self, id: &str) -> Result<&Tactic, RegistryError> {
-        self.tactics
+    pub fn action(&self, id: &str) -> Result<&Action, RegistryError> {
+        self.actions
             .get(id)
-            .ok_or_else(|| RegistryError::TacticNotFound { id: id.to_string() })
+            .ok_or_else(|| RegistryError::ActionNotFound { id: id.to_string() })
     }
 
     pub fn workflow(&self, id: &str) -> Result<&Workflow, RegistryError> {
@@ -367,15 +391,15 @@ impl Registry {
             .ok_or_else(|| RegistryError::WorkflowNotFound { id: id.to_string() })
     }
 
-    /// Resolve a free-text task description to ranked candidate tactics.
+    /// Resolve a free-text task description to ranked candidate actions.
     ///
     /// Ranking is dumb on purpose: count of keyword + tag matches. A future
     /// LLM resolver can swap this for an embedding match without changing
     /// the public surface.
     ///
-    /// Performance: each tactic's keywords/tags/title are lowercased *once*
+    /// Performance: each action's keywords/tags/title are lowercased *once*
     /// per `resolve` call (kept on the stack as `Vec<String>`s) rather than
-    /// per-comparison. For a 10-tactic library × 5 keywords each that's
+    /// per-comparison. For a 10-action library × 5 keywords each that's
     /// 50 → 0 redundant allocations per query.
     pub fn resolve(&self, task: &str) -> Vec<ResolveHit> {
         let needle = task.to_ascii_lowercase();
@@ -384,13 +408,13 @@ impl Registry {
             .filter(|s| !s.is_empty())
             .collect();
         let mut hits: Vec<ResolveHit> = self
-            .tactics
+            .actions
             .values()
             .map(|t| {
                 let mut score = 0u32;
-                // Lowercase each keyword/tag/title once per tactic. The old
+                // Lowercase each keyword/tag/title once per action. The old
                 // code allocated a fresh String per comparison — fine for 10
-                // tactics, painful at the 100-tactic registry size that's a
+                // actions, painful at the 100-action registry size that's a
                 // plausible target.
                 for kw in &t.trigger.task_keywords {
                     let kw_lower = kw.to_ascii_lowercase();
@@ -416,7 +440,7 @@ impl Registry {
                     }
                 }
                 ResolveHit {
-                    tactic_id: t.id.clone(),
+                    action_id: t.id.clone(),
                     title: t.title.clone(),
                     safety: t.safety,
                     score,
@@ -424,14 +448,14 @@ impl Registry {
             })
             .filter(|h| h.score > 0)
             .collect();
-        hits.sort_by(|a, b| b.score.cmp(&a.score).then(a.tactic_id.cmp(&b.tactic_id)));
+        hits.sort_by(|a, b| b.score.cmp(&a.score).then(a.action_id.cmp(&b.action_id)));
         hits
     }
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ResolveHit {
-    pub tactic_id: String,
+    pub action_id: String,
     pub title: String,
     pub safety: Safety,
     pub score: u32,
@@ -453,11 +477,69 @@ mod tests {
     use super::*;
 
     #[test]
-    fn loads_stdlib_with_known_tactics() {
+    fn loads_stdlib_with_known_actions() {
         let reg = Registry::load_default().expect("registry loads");
-        // The stdlib bundle is expected to ship at least these tactics.
-        assert!(reg.tactic("mongo.backup-restore").is_ok());
-        assert!(reg.tactic("one.workspace-migrate").is_ok());
+        // The stdlib bundle is expected to ship at least these actions.
+        assert!(reg.action("mongo.backup-restore").is_ok());
+        assert!(reg.action("one.workspace-migrate").is_ok());
+    }
+
+    /// A pre-0.14.0 `*.tactic.yaml` must NOT be loaded: the 0.14.0 rename
+    /// changed the extension, the `kind:` step tag, and the workflow key, so
+    /// the file's contents are no longer valid. Loading it would be wrong;
+    /// loading it *silently* would be worse — an operator override that
+    /// tightened `safety` would be dropped and the bundled action would
+    /// reclaim the id with a weaker gate. `load_dir` skips it and warns.
+    #[test]
+    fn legacy_tactic_yaml_is_not_loaded() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("legacy-override.tactic.yaml"),
+            "id: legacy.override\n\
+             title: Legacy override\n\
+             summary: Should not load\n\
+             safety: destructive\n\
+             steps:\n\
+             \x20 - kind: note\n\
+             \x20   text: nope\n",
+        )
+        .expect("write legacy file");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path())
+            .expect("load_dir skips, never errors");
+
+        assert!(
+            reg.action("legacy.override").is_err(),
+            "legacy *.tactic.yaml must not be loaded"
+        );
+        assert!(
+            reg.sources.is_empty(),
+            "a skipped legacy file must not be recorded as a source"
+        );
+    }
+
+    /// The new extension must still load, so the test above is proving the
+    /// extension gate rather than a broken loader.
+    #[test]
+    fn action_yaml_extension_still_loads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("fresh.action.yaml"),
+            "id: fresh.one\n\
+             title: Fresh action\n\
+             summary: Should load\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: note\n\
+             \x20   text: yep\n",
+        )
+        .expect("write action file");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path()).expect("loads");
+
+        assert!(reg.action("fresh.one").is_ok(), "*.action.yaml must load");
     }
 
     #[test]
@@ -468,7 +550,7 @@ mod tests {
     }
 
     #[test]
-    fn workflow_safety_is_max_of_referenced_tactics() {
+    fn workflow_safety_is_max_of_referenced_actions() {
         let reg = Registry::load_default().expect("registry loads");
         // ops.backup-restore references mongo.backup-restore (mutating) and
         // mongo.doctor (read_only). Effective safety must be at least
@@ -501,9 +583,9 @@ mod tests {
         assert!(!hits.is_empty(), "expected at least one resolve hit");
         let top = &hits[0];
         assert!(
-            top.tactic_id.contains("mongo") || top.tactic_id.contains("backup"),
+            top.action_id.contains("mongo") || top.action_id.contains("backup"),
             "top hit should be mongo/backup-related, got {}",
-            top.tactic_id
+            top.action_id
         );
     }
 }

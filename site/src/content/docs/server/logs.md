@@ -123,4 +123,4 @@ The envelope is always `{ ok, message, timestamp_utc, data }` on success; failur
 
 - [Alteryx Server overview](/server/)
 - [Diagnose & auth](/server/diagnose/)
-- [Tactics — server.logs.triage](/telemetry/tactics/)
+- [Actions — server.logs.triage](/telemetry/actions/)

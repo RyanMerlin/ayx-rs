@@ -102,9 +102,9 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Telemetry & tactics',
+          label: 'Telemetry & actions',
           collapsed: true,
-          items: ['telemetry', 'telemetry/tactics'],
+          items: ['telemetry', 'telemetry/actions'],
         },
         {
           label: 'Reference',
