@@ -476,13 +476,33 @@ fn output_json_works_when_flag_is_trailing_for_actions_list() {
 
 #[test]
 fn output_json_works_when_flag_is_trailing_for_workflows_list() {
-    assert_json_output_works_before_and_after(&["workflows", "list"], |json| {
+    assert_json_output_works_before_and_after(&["actions", "workflows", "list"], |json| {
         assert_eq!(json["ok"], serde_json::json!(true));
         let workflows = json["data"]["workflows"]
             .as_array()
             .expect("workflows array");
         assert!(!workflows.is_empty());
     });
+}
+
+#[test]
+fn old_top_level_workflows_command_no_longer_resolves() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["workflows", "list"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Which message clap emits depends on its parse path: the hidden global
+    // `environment_tail` positional makes it report an unexpected argument
+    // rather than an unrecognized subcommand. Accept either — the contract
+    // under test is that the old top-level path no longer resolves, not the
+    // wording clap happens to pick.
+    assert!(
+        stderr.contains("unexpected argument 'workflows'")
+            || stderr.contains("unrecognized subcommand 'workflows'")
+    );
 }
 
 #[test]
