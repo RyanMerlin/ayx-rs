@@ -187,55 +187,211 @@ pub fn doctor_envelope(config: &Config) -> Result<Envelope> {
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn mutate_envelope(
-    config: &Config,
-    database: Option<&str>,
-    collection: Option<&str>,
-    filter: Option<&str>,
-    update: Option<&str>,
-    template: Option<&str>,
-    print_query: bool,
-    apply: bool,
-    accept_mutation_risk: bool,
-) -> Result<Envelope> {
-    let spec = resolve_mutation_spec(config, database, collection, filter, update, template)?;
-    let plan = build_query_plan(config, &spec)?;
-    let safety_gate = json!({
-        "apply": apply,
-        "accept_mutation_risk": accept_mutation_risk,
-        "read_only": false,
-    });
+/// Request for `mutate_envelope` (plan Task 3 Step 1 interface) — replaces
+/// the prior long positional argument list. Built by
+/// `ayx-rs/src/cmd/mongo.rs` from `MongoCommand::Mutate`'s Clap fields.
+///
+/// Free-form `--database`/`--collection`/`--filter`/`--update` are
+/// deliberately absent: the only supported live-preview/apply path is a
+/// named, `Executable` template resolved via `resolve_mutation_template`, so
+/// nothing expressible here can reach mongosh as an unreviewed, uncapped
+/// write.
+#[derive(Clone, Debug, Default)]
+pub struct MongoMutateRequest {
+    pub template: Option<String>,
+    pub params: BTreeMap<String, String>,
+    pub print: bool,
+    pub apply: bool,
+    pub accept_mutation_risk: bool,
+    /// Path to a current, successful `mongo backup` audit artifact.
+    pub backup_audit_artifact: Option<PathBuf>,
+    /// Path to the audit artifact this command wrote on a prior (non-apply)
+    /// preview run.
+    pub approval_artifact: Option<PathBuf>,
+    /// The `sha256:` approval digest printed by the preview run.
+    pub approve: Option<String>,
+    pub audit_dir: PathBuf,
+}
 
-    if print_query || !apply {
+/// Validate the "complete apply tuple" (plan Task 3 Steps 1-2): every safety
+/// gate `--apply` requires, checked together so a caller sees every
+/// missing/malformed piece in one error rather than fixing them one at a
+/// time. Does not check `request.apply` itself — callers only invoke this
+/// once `request.apply` is already known `true`.
+pub fn validate_mutation_apply_gates(request: &MongoMutateRequest) -> Result<()> {
+    let mut problems: Vec<String> = Vec::new();
+    if request.template.is_none() {
+        problems.push("--template is required".to_string());
+    }
+    if !request.accept_mutation_risk {
+        problems.push("--accept-mutation-risk is required".to_string());
+    }
+    if request.backup_audit_artifact.is_none() {
+        problems.push("--backup-audit-artifact is required".to_string());
+    }
+    if request.approval_artifact.is_none() {
+        problems.push("--approval-artifact is required".to_string());
+    }
+    match request.approve.as_deref() {
+        None => problems.push("--approve is required".to_string()),
+        Some(d) if d.trim().is_empty() => problems.push("--approve is required".to_string()),
+        Some(d) if !d.starts_with("sha256:") => problems.push(format!(
+            "--approve must be the 'sha256:' approval digest printed by the preview run, got '{d}'"
+        )),
+        _ => {}
+    }
+    if !problems.is_empty() {
+        anyhow::bail!(
+            "mongo mutate --apply is missing required safety gate(s): {}",
+            problems.join("; ")
+        );
+    }
+    Ok(())
+}
+
+/// `ayx mongo mutate` dispatcher (plan Task 3 Step 2): three explicit,
+/// non-overlapping modes rather than the old collapsed `print_query ||
+/// !apply` branch that always ended in a static plan (or, for `--apply`, a
+/// terminal "not yet enabled" error).
+///
+///   - `request.print`: static, non-audited rendering of the resolved
+///     template's mongosh invocation. No database call, no audit artifact.
+///   - `!request.apply`: a live, read-only diff preview (`preview_mutation`)
+///     against the current data, persisted as an audit artifact whose path
+///     becomes the `--approval-artifact` value for a later `--apply` run.
+///   - `request.apply`: every safety gate must be present
+///     (`validate_mutation_apply_gates`) and the template must currently
+///     resolve before anything else happens. Loading and cross-validating
+///     the referenced backup/approval artifacts against that resolved
+///     mutation, persisting the prepared execution artifact, and calling
+///     `apply_mutation` with the loaded `CandidateSnapshot` are plan Task
+///     4's job (`load_and_validate_backup_audit` /
+///     `load_and_validate_preview_approval`) — not yet implemented. See the
+///     comment on that branch below for the exact handoff contract, and
+///     `ayx-rs/src/cmd/mongo.rs` for where the TTY confirmation prompt is
+///     already wired in ahead of this call.
+pub fn mutate_envelope(config: &Config, request: &MongoMutateRequest) -> Result<Envelope> {
+    let template_name = request.template.as_deref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "mongo mutate requires --template; free-form filter/update is no longer supported \
+             — only a named, reviewed template from the remediation registry can run"
+        )
+    })?;
+
+    if request.print {
+        let mutation = resolve_mutation_template(template_name, &request.params)?;
+        let invocation = prepare_mongosh_invocation(config, build_preview_eval_js(&mutation)?)?;
+        let redacted = render_redacted_mongosh(&invocation);
         return Ok(Envelope::ok_with_data(
-            "mongo mutation plan generated",
+            "mongo mutation plan generated (static preview render, not executed)",
             json!({
                 "profile": config.profile_name,
-                "connection": resolve_connection_detail(config)?,
-                "mutation": {
-                    "database": plan.database,
-                    "collection": plan.collection,
-                    "filter": plan.filter,
-                    "update": plan.update,
-                    "template": plan.template_name,
-                },
-                "mongosh": build_mongosh_mutation_eval(config, &spec)?,
-                "copy_paste": build_mongosh_mutation_eval(config, &spec)?,
-                "safety_gate": safety_gate,
+                "template": mutation.template_id,
+                "template_revision": mutation.template_revision,
+                "database": mutation.database,
+                "collection": mutation.collection,
+                "mongosh": redacted,
+                "copy_paste": redacted,
                 "notes": [
-                    "This command is preview-first and requires explicit confirmation for execution",
-                    "Use named mutation templates for repeated bulk updates such as email-domain changes",
+                    "This is a static rendering only; no query was executed and no audit artifact was written.",
+                    "Run mongo mutate without --print for a live read-only diff preview that persists an approval artifact.",
                 ],
             }),
         ));
     }
 
-    if !accept_mutation_risk {
-        anyhow::bail!("mongo mutate requires --accept-mutation-risk when --apply is set");
+    if !request.apply {
+        let mutation = resolve_mutation_template(template_name, &request.params)?;
+        let preview = preview_mutation(config, &mutation)?;
+        let invocation = prepare_mongosh_invocation(config, build_preview_eval_js(&mutation)?)?;
+        let redacted = render_redacted_mongosh(&invocation);
+        let approval_digest = match &preview {
+            MutationPreview::Ok {
+                approval_digest, ..
+            } => Some(approval_digest.clone()),
+            MutationPreview::CapExceeded { .. } => None,
+        };
+        let audit_payload = json!({
+            "command": "mongo mutate",
+            "mode": "preview",
+            "timestamp_utc": Utc::now(),
+            "profile": config.profile_name,
+            "dry_run": true,
+            "applied": false,
+            "template": mutation.template_id,
+            "template_revision": mutation.template_revision,
+            "parameters": mutation.parameters,
+            "preview": preview,
+            "mongosh": redacted,
+        });
+        let audit_path =
+            write_audit_artifact(&request.audit_dir, "mongo-mutate-preview", &audit_payload)?;
+        return Ok(Envelope::ok_with_data(
+            "mongo mutation preview generated",
+            json!({
+                "profile": config.profile_name,
+                "connection": resolve_connection_detail(config)?,
+                "template": mutation.template_id,
+                "template_revision": mutation.template_revision,
+                "database": mutation.database,
+                "collection": mutation.collection,
+                "dry_run": true,
+                "applied": false,
+                "preview": preview,
+                "approval_artifact": audit_path,
+                "approval_digest": approval_digest,
+                "mongosh": redacted,
+                "copy_paste": redacted,
+                "notes": [
+                    "Review the candidate diff in `preview` before approving.",
+                    "Re-run with --apply, --accept-mutation-risk, --backup-audit-artifact, \
+                     --approval-artifact (this artifact's path), and --approve (this approval_digest) to execute.",
+                ],
+            }),
+        ));
     }
 
-    anyhow::bail!("mongo mutate execution is not yet enabled; preview only");
+    // ── request.apply ───────────────────────────────────────────────────
+    // Step 1: reject an incomplete apply tuple before anything else — no
+    // database call, no confirmation prompt, no partial audit artifact.
+    validate_mutation_apply_gates(request)?;
+
+    // Step 2: current template binding. Resolving is pure (embedded YAML +
+    // JSON substitution, no I/O) and independently re-derives the same
+    // template_id / template_revision / template_source_digest /
+    // parameter_digest that fed the approved preview's approval_digest —
+    // this alone rejects a stale template revision, a different --param
+    // set, or a demoted/removed template, even before Task 4's
+    // stored-artifact comparison exists.
+    let mutation = resolve_mutation_template(template_name, &request.params)?;
+
+    // Step 3 (plan Task 4, not yet implemented — see module doc above):
+    // `load_and_validate_backup_audit` and `load_and_validate_preview_approval`
+    // must read `request.backup_audit_artifact` and
+    // `request.approval_artifact` from disk, confirm the backup is recent
+    // enough (within the template's `max_backup_age_minutes`) and marked
+    // successful, confirm the approval artifact's own recorded
+    // `approval_digest` equals `request.approve` and has not passed its
+    // *original* `expires_at_utc` (not a freshly recomputed one), and
+    // confirm both artifacts were written for this exact resolved mutation
+    // (`template_source_digest` + `parameter_digest`). Only once all of
+    // that succeeds should the prepared execution artifact be persisted and
+    // `apply_mutation` called with the loaded `CandidateSnapshot`. The TTY
+    // confirmation prompt for this path already runs in
+    // `ayx-rs/src/cmd/mongo.rs` before this function is even called, using
+    // `cmd::confirm::require_tty_confirmation` — Task 4 does not need to add
+    // it again, only to slot the real matched-document count into that
+    // prompt's message once it has a loaded snapshot to read it from.
+    anyhow::bail!(
+        "mongo mutate --apply for template '{}' (rev {}) passed every CLI-level safety gate \
+         (--accept-mutation-risk, --backup-audit-artifact, --approval-artifact, --approve) and \
+         the template resolved successfully, but backup/approval artifact loading and the \
+         transactional apply are not yet implemented — this lands in a follow-up task \
+         (load_and_validate_backup_audit / load_and_validate_preview_approval). No write was \
+         attempted and no mongosh process was started.",
+        mutation.template_id,
+        mutation.template_revision,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -680,62 +836,6 @@ pub fn mongo_query_spec_from_name(name: &str) -> Result<MongoQuerySpec> {
         .find(|query| query.name == name)
         .ok_or_else(|| anyhow::anyhow!("unknown mongo query template '{}'", name))?;
     mongo_query_spec_from_template(&template)
-}
-
-fn resolve_mutation_spec(
-    config: &Config,
-    database: Option<&str>,
-    collection: Option<&str>,
-    filter: Option<&str>,
-    update: Option<&str>,
-    template: Option<&str>,
-) -> Result<MongoQuerySpec> {
-    let mut spec = resolve_query_spec(
-        config, database, collection, filter, None, None, None, template,
-    )?;
-    if let Some(value) = update {
-        spec.update = Some(
-            serde_json::from_str(value)
-                .with_context(|| format!("invalid JSON passed to --update: {value}"))?,
-        );
-    }
-    Ok(spec)
-}
-
-fn build_mongosh_mutation_eval(config: &Config, spec: &MongoQuerySpec) -> Result<String> {
-    let database = &spec.database;
-    let collection = &spec.collection;
-    let filter = serde_json::to_string(&spec.filter)?;
-    let update = serde_json::to_string(spec.update.as_ref().unwrap_or(&json!({})))?;
-    let mut js = String::new();
-    js.push_str("const dbName = ");
-    js.push_str(&serde_json::to_string(database)?);
-    js.push_str("; const collName = ");
-    js.push_str(&serde_json::to_string(collection)?);
-    js.push_str("; const filter = ");
-    js.push_str(&filter);
-    js.push_str("; const update = ");
-    js.push_str(&update);
-    js.push_str("; const result = db.getSiblingDB(dbName).getCollection(collName).updateMany(filter, update); print(JSON.stringify(result));");
-    let mut args: Vec<String> = vec!["--quiet".to_string(), "--eval".to_string(), js];
-    attach_connection_args(config, &mut args)?;
-    let cmd = if cfg!(target_os = "windows") {
-        "mongosh.exe"
-    } else {
-        "mongosh"
-    };
-    let quoted = args
-        .into_iter()
-        .map(|a| {
-            if a.contains(' ') {
-                format!("\"{a}\"")
-            } else {
-                a
-            }
-        })
-        .collect::<Vec<String>>()
-        .join(" ");
-    Ok(format!("{cmd} {quoted}"))
 }
 
 fn mongo_query_spec_from_template(template: &MongoSupportQueryTemplate) -> Result<MongoQuerySpec> {
@@ -2037,10 +2137,9 @@ pub struct MongoshInvocation {
 
 /// A `MongoshInvocation` plus its (optional) live password-file guard. The
 /// guard must stay alive for exactly as long as the process reading it —
-/// this struct's ownership is that lifetime. Unlike
-/// `build_mongosh_mutation_eval` (which drops the guard immediately after
-/// building its display string), every constructor here binds it for the
-/// caller.
+/// this struct's ownership is that lifetime. Unlike `build_mongosh_eval`
+/// (which drops the guard immediately after building its display string),
+/// every constructor here binds it for the caller.
 pub struct PreparedMongoshInvocation {
     invocation: MongoshInvocation,
     _password_file: Option<MongoPasswordFile>,
@@ -3888,5 +3987,164 @@ mod tests {
         let err = apply_mutation_with_runner(&runner, &config, &resolved, &approved)
             .expect_err("mongosh never starting is unambiguous, not FailedOrUnknown");
         assert!(err.to_string().contains("not found on PATH"));
+    }
+
+    // ── mutate_envelope / validate_mutation_apply_gates wiring (plan Task 3) ──
+    //
+    // These never reach a real mongosh process: the only shipped template
+    // (`user_email_domain_migration`) is `preview_only`, so
+    // `resolve_mutation_template` always rejects it before print/preview/
+    // apply ever get near `preview_mutation`/`apply_mutation`. That rejection
+    // is itself the proof the dispatcher wired through correctly.
+
+    fn complete_apply_request(
+        template: &str,
+        params: BTreeMap<String, String>,
+    ) -> MongoMutateRequest {
+        MongoMutateRequest {
+            template: Some(template.to_string()),
+            params,
+            print: false,
+            apply: true,
+            accept_mutation_risk: true,
+            backup_audit_artifact: Some(PathBuf::from("/tmp/fixture-backup.json")),
+            approval_artifact: Some(PathBuf::from("/tmp/fixture-approval.json")),
+            approve: Some("sha256:deadbeef".to_string()),
+            audit_dir: PathBuf::from("audits"),
+        }
+    }
+
+    #[test]
+    fn apply_gates_report_every_missing_piece_together() {
+        let request = MongoMutateRequest::default();
+        let err = validate_mutation_apply_gates(&request)
+            .expect_err("an entirely empty request is missing every gate");
+        let msg = err.to_string();
+        assert!(msg.contains("--template is required"), "{msg}");
+        assert!(msg.contains("--accept-mutation-risk is required"), "{msg}");
+        assert!(msg.contains("--backup-audit-artifact is required"), "{msg}");
+        assert!(msg.contains("--approval-artifact is required"), "{msg}");
+        assert!(msg.contains("--approve is required"), "{msg}");
+    }
+
+    #[test]
+    fn apply_gates_accept_mutation_risk_alone_still_reports_the_rest() {
+        let request = MongoMutateRequest {
+            template: Some("user_email_domain_migration".to_string()),
+            accept_mutation_risk: true,
+            ..Default::default()
+        };
+        let err = validate_mutation_apply_gates(&request)
+            .expect_err("backup/approval artifacts and --approve are still missing");
+        let msg = err.to_string();
+        assert!(!msg.contains("--template is required"), "{msg}");
+        assert!(!msg.contains("--accept-mutation-risk is required"), "{msg}");
+        assert!(msg.contains("--backup-audit-artifact is required"), "{msg}");
+        assert!(msg.contains("--approval-artifact is required"), "{msg}");
+        assert!(msg.contains("--approve is required"), "{msg}");
+    }
+
+    #[test]
+    fn apply_gates_reject_malformed_approve_digest() {
+        let mut request = complete_apply_request("user_email_domain_migration", BTreeMap::new());
+        request.approve = Some("not-a-digest".to_string());
+        let err = validate_mutation_apply_gates(&request).expect_err("approve is malformed");
+        assert!(
+            err.to_string()
+                .contains("must be the 'sha256:' approval digest")
+        );
+    }
+
+    #[test]
+    fn apply_gates_pass_with_the_complete_tuple() {
+        let request = complete_apply_request("user_email_domain_migration", BTreeMap::new());
+        validate_mutation_apply_gates(&request).expect("every gate is present and well-formed");
+    }
+
+    #[test]
+    fn mutate_envelope_requires_template_in_every_mode() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let request = MongoMutateRequest::default();
+        let err = mutate_envelope(&config, &request).expect_err("no template was given");
+        assert!(err.to_string().contains("requires --template"));
+    }
+
+    #[test]
+    fn mutate_envelope_print_rejects_preview_only_template_without_touching_mongosh() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let request = MongoMutateRequest {
+            template: Some("user_email_domain_migration".to_string()),
+            params: BTreeMap::from([("new_email".to_string(), "a@b.com".to_string())]),
+            print: true,
+            ..Default::default()
+        };
+        let err = mutate_envelope(&config, &request)
+            .expect_err("the only shipped template is preview_only");
+        assert!(
+            err.to_string()
+                .contains("cannot be resolved for live preview/apply")
+        );
+    }
+
+    #[test]
+    fn mutate_envelope_default_preview_rejects_preview_only_template_without_touching_mongosh() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let request = MongoMutateRequest {
+            template: Some("user_email_domain_migration".to_string()),
+            params: BTreeMap::from([("new_email".to_string(), "a@b.com".to_string())]),
+            ..Default::default()
+        };
+        let err = mutate_envelope(&config, &request)
+            .expect_err("the only shipped template is preview_only");
+        assert!(
+            err.to_string()
+                .contains("cannot be resolved for live preview/apply")
+        );
+    }
+
+    #[test]
+    fn mutate_envelope_apply_rejects_incomplete_gates_before_resolving_template() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        // An unknown template name would also fail resolution, but gate
+        // validation must win first — this proves the ordering rather than
+        // just the end state.
+        let request = MongoMutateRequest {
+            template: Some("does_not_exist_in_the_registry".to_string()),
+            apply: true,
+            ..Default::default()
+        };
+        let err = mutate_envelope(&config, &request).expect_err("gates are incomplete");
+        assert!(
+            err.to_string().contains("missing required safety gate(s)"),
+            "expected the gate-validation error, not a template-resolution error: {err}"
+        );
+    }
+
+    #[test]
+    fn mutate_envelope_apply_with_complete_gates_reaches_template_resolution_boundary() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let request = complete_apply_request(
+            "user_email_domain_migration",
+            BTreeMap::from([("new_email".to_string(), "a@b.com".to_string())]),
+        );
+        let err = mutate_envelope(&config, &request)
+            .expect_err("the only shipped template is preview_only");
+        let msg = err.to_string();
+        // Reached mutate_envelope's template-resolution step (past every
+        // CLI-level gate) without ever hitting the Task 4 stub or mongosh.
+        assert!(
+            msg.contains("cannot be resolved for live preview/apply"),
+            "{msg}"
+        );
+        assert!(!msg.contains("missing required safety gate"), "{msg}");
+        assert!(!msg.contains("not yet implemented"), "{msg}");
+    }
+
+    #[test]
+    fn mutate_envelope_apply_with_unknown_template_reports_unknown_template() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let request = complete_apply_request("does_not_exist_in_the_registry", BTreeMap::new());
+        let err = mutate_envelope(&config, &request).expect_err("template does not exist");
+        assert!(err.to_string().contains("unknown mongo mutation template"));
     }
 }
