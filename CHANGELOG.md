@@ -4,6 +4,7 @@
 
 ### Changed
 
+- **BREAKING** — `ayx workflows` moved to `ayx actions workflows`. No back-compat alias; update scripts and CI that reference the old path. Subcommands (`list`, `explain`, `run`) are unchanged.
 - **BREAKING** — `ayx workflow` moved to `ayx designer workflow`. No back-compat alias; update scripts and CI that reference the old path.
 - **BREAKING** — `ayx tactics` is now `ayx actions`, and the `tactic` concept is renamed to `action` throughout. This is a full rename of the noun, not just the CLI word, so it breaks three contracts at once:
   - **Agent-facing JSON.** Envelope keys change: `tactics` → `actions`, `tactic_id` → `action_id`, `tactic_count` → `action_count`, `tactics_resolved` / `tactics_missing` → `actions_resolved` / `actions_missing`. Anything parsing `ayx actions ... --output json` must be updated.

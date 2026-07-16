@@ -259,7 +259,7 @@ The repository includes a `docs/fixtures/RuntimeSettings.xml` fixture for offlin
 - `catalog` — machine-readable command registry
 - `audit` — audit artifact management, retention, and cleanup
 - `actions` — action registry with safety, validation, and rollback notes
-- `workflows` — workflow registry for higher-order skill chains
+- `actions workflows` — workflow registry for higher-order skill chains
 - `license` — licensing portal branch and API surface
 - `whoami` — show the active profile, account email, workspace, and environment
 - `doctor` — configuration, auth, network, and product health diagnostics

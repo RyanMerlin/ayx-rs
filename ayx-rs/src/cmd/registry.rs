@@ -1,4 +1,4 @@
-//! Dispatch for `ayx actions` and `ayx workflows`.
+//! Dispatch for `ayx actions` and nested workflow registry commands.
 //!
 //! Moved out of `main.rs` because the registry surface is a self-contained
 //! feature with no `load_profile` closure dependency — easy to lift into
@@ -193,6 +193,7 @@ pub fn execute_actions(apply: bool, command: ActionsCommand) -> Result<Envelope>
                 serde_json::to_value(&report)?,
             ))
         }
+        ActionsCommand::Workflows { command } => execute_workflows(apply, command),
     }
 }
 

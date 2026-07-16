@@ -121,7 +121,7 @@ The CLI is product-first. The stable top-level commands and families are:
 - `secret`
 - `audit`
 - `actions`
-- `workflows`
+- `actions workflows`
 - `telemetry`
 - `whoami`
 - `designer workflow`

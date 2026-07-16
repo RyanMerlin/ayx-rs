@@ -7,7 +7,7 @@ For clean docs, scripts, and agent runs, prefer the canonical global-flag form:
 ayx --output json discover
 ayx --output json catalog list --format full
 ayx --output json actions list
-ayx --output json workflows list
+ayx --output json actions workflows list
 ```
 
 Why this form is preferred:

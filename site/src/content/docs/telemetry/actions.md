@@ -1,6 +1,6 @@
 ---
 title: Actions & workflows
-description: Use ayx actions and ayx workflows to run named playbooks and higher-order automation against your Alteryx environment.
+description: Use ayx actions and ayx actions workflows to run named playbooks and higher-order automation against your Alteryx environment.
 sidebar:
   order: 1
 ---
@@ -20,13 +20,13 @@ Actions are named, safety-classified playbooks. Each action documents its steps,
 | `ayx actions validate` | Cross-check all actions against the catalog |
 | `ayx actions export <id>` | Print an action's YAML for forking into your config |
 
-### ayx workflows
+### ayx actions workflows
 
 | Command | What it does |
 |---------|-------------|
-| `ayx workflows list` | List all workflows with title, safety, and action count |
-| `ayx workflows explain <id>` | Show a workflow's ordered actions with summaries |
-| `ayx workflows run <id>` | Execute a workflow chain (dry-run by default; `--apply` to commit) |
+| `ayx actions workflows list` | List all workflows with title, safety, and action count |
+| `ayx actions workflows explain <id>` | Show a workflow's ordered actions with summaries |
+| `ayx actions workflows run <id>` | Execute a workflow chain (dry-run by default; `--apply` to commit) |
 
 ## Bundled actions
 
@@ -109,7 +109,7 @@ ayx actions run server.upgrade.preflight --apply --yes
 ### Inspect a workflow
 
 ```sh
-ayx workflows explain ops.backup-restore
+ayx actions workflows explain ops.backup-restore
 ```
 
 Shows the ordered actions with summaries.
@@ -120,10 +120,10 @@ Workflows execute their actions in order. The same `--apply` semantics apply.
 
 ```sh
 # Dry run
-ayx workflows run ops.backup-restore
+ayx actions workflows run ops.backup-restore
 
 # Commit
-ayx workflows run ops.backup-restore --apply --yes
+ayx actions workflows run ops.backup-restore --apply --yes
 ```
 
 ## Forking and customising
@@ -154,7 +154,7 @@ All commands accept `--output json` as a global flag:
 
 ```sh
 ayx --output json actions list
-ayx --output json workflows list
+ayx --output json actions workflows list
 ```
 
 ## Related

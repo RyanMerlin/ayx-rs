@@ -365,11 +365,6 @@ enum Command {
         #[command(subcommand)]
         command: ActionsCommand,
     },
-    #[command(about = "Workflow registry — higher-order skills composing actions")]
-    Workflows {
-        #[command(subcommand)]
-        command: WorkflowsCommand,
-    },
     #[command(
         about = "Licensing portal branch and API surface",
         arg_required_else_help = true
@@ -504,6 +499,12 @@ pub(crate) enum ActionsCommand {
     /// Emits warnings for unknown command paths, capability ids, and
     /// dangling workflow → action references. Read-only.
     Validate,
+    /// Workflow registry — higher-order skills composing actions.
+    #[command(about = "Workflow registry — higher-order skills composing actions")]
+    Workflows {
+        #[command(subcommand)]
+        command: WorkflowsCommand,
+    },
     /// Print an action's full YAML so an operator can fork it into their
     /// config home (`${AYX_CONFIG_HOME}/registry/`) to override the bundled
     /// stdlib version.
@@ -5947,7 +5948,6 @@ fn execute(cli: Cli) -> Result<Envelope> {
             }
         },
         Command::Actions { command } => cmd::registry::execute_actions(cli.apply, command)?,
-        Command::Workflows { command } => cmd::registry::execute_workflows(cli.apply, command)?,
         Command::Telemetry { command } => cmd::telemetry::execute(environment.as_deref(), command)?,
     };
     Ok(envelope)
