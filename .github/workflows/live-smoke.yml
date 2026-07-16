@@ -5,7 +5,7 @@ name: Live Smoke (Alteryx One)
 # access-token secret the job skips cleanly (green). Once secrets exist, the
 # nightly run authenticates and the token-liveness gate
 # (live_smoke_requires_a_live_token) goes RED when the PAT has expired — that
-# red run is the signal to rotate it via `ayx one platform auth login`.
+# red run is the signal to rotate it via `ayx one login`.
 
 on:
   schedule:
