@@ -67,25 +67,37 @@ fn retry_transient<T, E>(
 }
 
 /// A transport failure where we're confident the request never reached the
-/// server — the failure occurred while establishing the connection (DNS,
-/// TCP connect, TLS handshake), not while waiting on a response. Safe to
-/// retry even for calls with a side effect (an OTP email send, a PAT mint)
-/// because there is no risk the server already processed the request.
+/// server — an immediate, synchronous connect-phase failure (DNS resolution
+/// failure, TCP connection refused, TLS handshake rejected). Safe to retry
+/// even for calls with a side effect (an OTP email send, a PAT mint) because
+/// there is no risk the server already processed the request.
 ///
 /// Deliberately checks connection-phase only (`reqwest::Error::is_connect`),
-/// not `is_timeout` in isolation: a connect attempt that itself times out
-/// (e.g. TCP SYN never ACKed) still reports `is_connect() == true` — the
-/// request body was never sent — so it belongs in this safe-to-retry set
-/// too. A timeout *after* the connection was established (waiting on the
-/// response) does not set `is_connect()` and is excluded here on purpose.
+/// NOT `is_timeout`: for the client this crate builds (a general `.timeout()`
+/// with no separate `.connect_timeout()` — see `email_otp_login`), a
+/// connect-phase timeout does not set `is_connect()`. reqwest's overall
+/// `.timeout()` fires ahead of hyper_util's connect-wrapped error path, so a
+/// connect attempt that itself times out (e.g. TCP SYN never ACKed) reports
+/// as a bare `is_timeout() == true` / `is_connect() == false` failure under
+/// this client's configuration, not as `is_connect()`. That case is
+/// deliberately excluded from this predicate — it is NOT known to be
+/// pre-send, since a request could plausibly have been in flight when the
+/// overall timeout fired. Only genuinely synchronous, immediate connect
+/// failures are covered here. If this client ever adds `.connect_timeout()`,
+/// this predicate's coverage should be re-verified.
 #[allow(dead_code)] // wired up at call sites in Task 2+ of the auth-hardening plan
 fn is_pre_send_failure(err: &reqwest::Error) -> bool {
     err.is_connect()
 }
 
-/// Any transport-level failure — connect or timeout — treated as retryable
-/// for calls with no duplication risk (repeating the request has no side
-/// effect beyond the first successful attempt).
+/// Any transport-level failure — connect or timeout, pre-send or
+/// post-send — treated as retryable for calls with no duplication risk
+/// (repeating the request has no side effect beyond the first successful
+/// attempt). Deliberately broader than `is_pre_send_failure`: it also
+/// covers a post-send timeout (waiting on a response after the connection
+/// was already established), which is fine here because the caller has
+/// already been classified as duplication-safe to retry regardless of
+/// whether the prior attempt's request reached the server.
 #[allow(dead_code)] // wired up at call sites in Task 2+ of the auth-hardening plan
 fn is_transient_transport_error(err: &reqwest::Error) -> bool {
     err.is_connect() || err.is_timeout()
@@ -633,6 +645,47 @@ mod tests {
     #[test]
     fn is_transient_transport_error_true_for_connection_refused() {
         assert!(super::is_transient_transport_error(&connect_refused_error()));
+    }
+
+    fn post_send_timeout_error() -> reqwest::Error {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        std::thread::spawn(move || {
+            // Accept the connection but never write a response — the client's
+            // own request timeout fires while waiting, not during connect.
+            // Bind (not `let _ =`) so the accepted TcpStream stays open for
+            // the sleep duration instead of being dropped immediately, which
+            // would close the connection and produce a spurious
+            // connection-reset error instead of the intended timeout.
+            let _held_conn = listener.accept();
+            std::thread::sleep(std::time::Duration::from_secs(5));
+        });
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .expect("client build");
+        client
+            .get(format!("http://{addr}/"))
+            .send()
+            .expect_err("a server that never responds must time out")
+    }
+
+    #[test]
+    fn is_pre_send_failure_false_for_post_send_timeout() {
+        let err = post_send_timeout_error();
+        assert!(err.is_timeout(), "expected is_timeout() true, got: {err:?}");
+        assert!(
+            !err.is_connect(),
+            "expected is_connect() false, got: {err:?}"
+        );
+        assert!(!super::is_pre_send_failure(&err));
+    }
+
+    #[test]
+    fn is_transient_transport_error_true_for_post_send_timeout() {
+        assert!(super::is_transient_transport_error(
+            &post_send_timeout_error()
+        ));
     }
 
     // ── host_allowed ──────────────────────────────────────────────────────────
