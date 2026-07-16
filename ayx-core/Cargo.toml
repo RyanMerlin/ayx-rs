@@ -20,6 +20,11 @@ serde_yaml.workspace = true
 thiserror.workspace = true
 tempfile.workspace = true
 keyring-core.workspace = true
+# OS-entropy source for the audit lifecycle helper's operation-id suffix
+# (create_sensitive_audit_artifact). Already a vetted, direct dependency of
+# ayx-one-api (PKCE/OAuth state generation) -- reused here rather than
+# pulling in a new crate (e.g. `uuid`) for the same primitive need.
+getrandom = "0.4"
 
 # keyring 4.x split the platform credential stores into separate crates that
 # are registered with keyring-core at runtime. Pick one store per OS:
