@@ -26,6 +26,11 @@ const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
 /// apiAccessTokens mint) use a narrower retry predicate instead of a
 /// separate constant — see `is_pre_send_failure`.
 const TRANSIENT_RETRY_ATTEMPTS: u32 = 3;
+/// Local re-prompt attempts against a single passcodeReferenceId before
+/// falling back to sending a fresh passcode.
+const OTP_ATTEMPTS_PER_REFERENCE: u32 = 3;
+/// Total passcode emails sent per login() call before giving up entirely.
+const MAX_OTP_SENDS: u32 = 2;
 
 /// Retries `attempt_once` up to `max_attempts` times. `should_retry_err`
 /// decides whether a returned error is worth retrying; `should_retry_ok`
@@ -214,6 +219,76 @@ fn submit_workspace_password(
     Ok(())
 }
 
+/// What to do after a `validate_passcode` rejection, given how many local
+/// attempts have been made against the current reference (`attempt`, 1-
+/// indexed, already includes the failing one) and how many passcodes have
+/// been sent so far (`sends`, 1-indexed).
+#[derive(Debug, PartialEq, Eq)]
+enum OtpAction {
+    /// Attempts remain against the current reference — ask for the code again.
+    Reprompt,
+    /// The local attempt budget for this reference is exhausted, but
+    /// there's sends budget left — send a fresh passcode and reset.
+    Resend,
+    /// Both budgets are exhausted — bail.
+    GiveUp,
+}
+
+fn next_otp_action(attempt: u32, sends: u32) -> OtpAction {
+    if attempt < OTP_ATTEMPTS_PER_REFERENCE {
+        OtpAction::Reprompt
+    } else if sends < MAX_OTP_SENDS {
+        OtpAction::Resend
+    } else {
+        OtpAction::GiveUp
+    }
+}
+
+/// Sends a passcode and validates it, re-prompting on a wrong/expired code
+/// (up to `OTP_ATTEMPTS_PER_REFERENCE` times against the same reference)
+/// and automatically sending a fresh passcode if that budget is exhausted
+/// (up to `MAX_OTP_SENDS` sends total). See the module-level design note
+/// on why this doesn't need to parse the API's exact rejection reason.
+fn otp_login_with_reprompt<F>(client: &Client, base: &str, email: &str, get_otp: &F) -> Result<()>
+where
+    F: Fn() -> Result<String>,
+{
+    let mut sends = 0u32;
+    loop {
+        sends += 1;
+        let reference_id = send_passcode(client, base, email)?;
+        if sends > 1 {
+            eprintln!("Sent a new passcode to {email}.");
+        }
+        let mut attempt = 0u32;
+        loop {
+            attempt += 1;
+            let otp = get_otp()?;
+            match validate_passcode(client, base, email, &reference_id, &otp) {
+                Ok(()) => return Ok(()),
+                Err(err) => match next_otp_action(attempt, sends) {
+                    OtpAction::Reprompt => {
+                        eprintln!(
+                            "Incorrect or expired passcode ({attempt}/{OTP_ATTEMPTS_PER_REFERENCE}) — try again."
+                        );
+                    }
+                    OtpAction::Resend => {
+                        eprintln!(
+                            "Still not accepted after {OTP_ATTEMPTS_PER_REFERENCE} tries — sending a new passcode..."
+                        );
+                        break;
+                    }
+                    OtpAction::GiveUp => {
+                        return Err(err.context(format!(
+                            "passcode rejected {OTP_ATTEMPTS_PER_REFERENCE} times across {sends} passcode(s) sent"
+                        )));
+                    }
+                },
+            }
+        }
+    }
+}
+
 /// Authenticate via email OTP and return a 30-day PAT.
 ///
 /// Performs the dependency-free pure-HTTP flow (no browser, no Python):
@@ -277,12 +352,9 @@ where
         let _ = client.get(warm_url).send();
     }
 
-    // 1. Send the passcode.
-    let reference_id = send_passcode(&client, base, email)?;
-
-    // 2. Prompt for the OTP and validate it.
-    let otp = get_otp()?;
-    validate_passcode(&client, base, email, &reference_id, &otp)?;
+    // 1-2. Send the passcode and validate it, retrying wrong entries and
+    //      automatically requesting a fresh passcode if the reference dies.
+    otp_login_with_reprompt(&client, base, email, get_otp)?;
 
     // 3. Enter the workspace; follow redirects to the password page and capture
     //    the OIDC interaction id.
@@ -614,10 +686,25 @@ fn cookie_value_from_jar(jar: &Jar, url: &url::Url, name: &str) -> Option<String
 #[cfg(test)]
 mod tests {
     use super::retry_transient;
-    use super::{
-        extract_interaction_id, host_allowed, is_valid_interaction_id, resolve_workspace_password,
-    };
+    use super::{OtpAction, resolve_workspace_password};
+    use super::{extract_interaction_id, host_allowed, is_valid_interaction_id, next_otp_action};
     use serial_test::serial;
+
+    #[test]
+    fn next_otp_action_reprompts_when_attempts_remain() {
+        assert_eq!(next_otp_action(1, 1), OtpAction::Reprompt);
+        assert_eq!(next_otp_action(2, 1), OtpAction::Reprompt);
+    }
+
+    #[test]
+    fn next_otp_action_resends_when_attempts_and_sends_exhausted_but_sends_remain() {
+        assert_eq!(next_otp_action(3, 1), OtpAction::Resend);
+    }
+
+    #[test]
+    fn next_otp_action_gives_up_when_attempts_and_sends_both_exhausted() {
+        assert_eq!(next_otp_action(3, 2), OtpAction::GiveUp);
+    }
 
     #[test]
     fn retry_transient_returns_ok_on_first_success() {
