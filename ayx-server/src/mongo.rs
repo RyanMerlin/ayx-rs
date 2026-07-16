@@ -763,30 +763,40 @@ pub struct MutationExecutionAudit {
     pub undo_artifact: Option<PathBuf>,
 }
 
-/// Attempt the final atomic status update for a mutation execution audit
-/// artifact (Task 4 Step 1). If the write itself fails, escalates to a
-/// high-severity error naming the operation id and the in-memory outcome
-/// that could not be durably recorded — callers must propagate this, never
-/// swallow it, since the on-disk artifact is left reading `"prepared"`
-/// forever otherwise even though the mutation attempt already concluded.
+/// Attempt the final atomic status update for a lifecycle audit artifact —
+/// shared by both `mongo mutate --apply` execution audits and `mongo undo
+/// --apply` execution audits (Task 4 Step 1/4). If the write itself fails,
+/// escalates to a high-severity error naming the operation id and the
+/// in-memory outcome that could not be durably recorded — callers must
+/// propagate this, never swallow it, since the on-disk artifact is left
+/// reading `"prepared"` forever otherwise even though the operation already
+/// concluded.
+fn finalize_lifecycle_audit(
+    handle: &ayx_core::audit::AuditArtifactHandle,
+    payload: &Value,
+    outcome_description: &str,
+) -> Result<()> {
+    if let Err(update_err) = update_sensitive_audit_artifact(&handle.path, payload) {
+        anyhow::bail!(
+            "CRITICAL: operation '{op}' reached the point of calling mongosh and was classified \
+             in-memory as {outcome_description}, but the final audit artifact update at \
+             '{path}' FAILED ({update_err}) — the on-disk artifact still reads status \
+             \"prepared\". The operation may have succeeded; do NOT retry. Inspect the target \
+             database directly and hand-correct or annotate the artifact once resolved.",
+            op = handle.operation_id,
+            path = handle.path.display(),
+        );
+    }
+    Ok(())
+}
+
+/// `finalize_lifecycle_audit` specialized for a `MutationExecutionAudit`.
 fn finalize_execution_audit(
     handle: &ayx_core::audit::AuditArtifactHandle,
     audit: &MutationExecutionAudit,
 ) -> Result<()> {
     let payload = serde_json::to_value(audit)?;
-    if let Err(update_err) = update_sensitive_audit_artifact(&handle.path, &payload) {
-        anyhow::bail!(
-            "CRITICAL: mongo mutate --apply operation '{op}' reached the point of calling \
-             mongosh and was classified in-memory as {outcome:?}, but the final audit artifact \
-             update at '{path}' FAILED ({update_err}) — the on-disk artifact still reads status \
-             \"prepared\". The mutation may have succeeded; do NOT retry. Inspect the target \
-             database directly and hand-correct or annotate the artifact once resolved.",
-            op = handle.operation_id,
-            outcome = audit.outcome,
-            path = handle.path.display(),
-        );
-    }
-    Ok(())
+    finalize_lifecycle_audit(handle, &payload, &format!("{:?}", audit.outcome))
 }
 
 /// Execute phase for `mongo mutate --apply` (Task 4's required restructure)
@@ -916,6 +926,1090 @@ fn execute_mutation_apply_with_runner(
             data,
         )),
         MutationExecutionOutcome::Prepared => {
+            unreachable!("outcome is always overwritten to a terminal state above")
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Guarded undo (Task 4 Step 4): preview-first, `guarded_set_inverse`-only
+// reversal of a prior `mongo mutate --apply`. Mirrors the mutate
+// preview/prepare/execute shape throughout: a read-only preview that
+// re-verifies every candidate is still fresh and persists its own approval
+// artifact, then an `--apply` path gated by the same
+// accept-mutation-risk/approval-artifact/approve/confirmation tuple.
+// ═══════════════════════════════════════════════════════════════════════
+
+/// One field's guarded inverse for a single candidate document, derived
+/// directly (and only) from the original mutation's own recorded
+/// `field_diffs` — `post_value` is what the mutation actually `$set` (what
+/// undo must find still in place before touching anything), and
+/// `old_present`/`old_value` is what undo restores: `$set` back to
+/// `old_value` if the field was present before the mutation, or `$unset` it
+/// if it was previously absent.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct UndoFieldInverse {
+    pub path: String,
+    pub old_present: bool,
+    pub old_value: Value,
+    pub post_value: Value,
+}
+
+/// One candidate document's guarded inverse: its `_id` plus every affected
+/// field's `UndoFieldInverse`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct UndoCandidate {
+    pub id: Value,
+    pub fields: Vec<UndoFieldInverse>,
+}
+
+/// Derive the full guarded-inverse candidate set from a loaded mutation
+/// audit's own `candidates` snapshot. Pure and deterministic — depends only
+/// on the mutation artifact's recorded `field_diffs`, never on live
+/// database state, so it is always safe to recompute and always produces
+/// the exact same value for the same artifact.
+fn derive_undo_candidates(snapshot: &CandidateSnapshot) -> Vec<UndoCandidate> {
+    snapshot
+        .field_diffs
+        .iter()
+        .map(|diff| UndoCandidate {
+            id: diff.id.clone(),
+            fields: diff
+                .fields
+                .iter()
+                .map(|f| UndoFieldInverse {
+                    path: f.path.clone(),
+                    old_present: f.old_present,
+                    old_value: f.old_value.clone(),
+                    post_value: f.new_value.clone(),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// The sorted, deduplicated union of every field path across all
+/// candidates — used for the Mongo projection in both the undo preview
+/// query and the undo apply transaction. In practice every candidate from
+/// one mutation shares the same `$set` field set (a mutation template has
+/// exactly one `$set` document), but this does not assume that.
+fn undo_field_paths(candidates: &[UndoCandidate]) -> Vec<String> {
+    let mut set = BTreeSet::new();
+    for candidate in candidates {
+        for field in &candidate.fields {
+            set.insert(field.path.clone());
+        }
+    }
+    set.into_iter().collect()
+}
+
+/// Loaded, validated `mongo mutate --apply` execution audit plus the
+/// content hash `mongo undo` binds its own approval digest to.
+#[derive(Debug)]
+pub struct LoadedMutationAudit {
+    pub audit: MutationExecutionAudit,
+    pub source_artifact_hash: String,
+}
+
+/// Load and validate a `--mutation-audit-artifact` path (Task 4 Step 4).
+/// Parses JSON as a `MutationExecutionAudit` — never trusts the filename —
+/// and refuses: an unsupported `schema_version`; a `profile` mismatch; an
+/// unsupported (non-`guarded_set_inverse`) `rollback` strategy; a mutation
+/// that has already been undone (`undo_artifact` already recorded); any
+/// non-`applied` outcome (`prepared` forever, `aborted`, `failed`, or
+/// `failed_or_unknown` — undo must never automatically run after any of
+/// these, most importantly `failed_or_unknown`, where the mutation's own
+/// commit status is itself unresolved); an `applied` outcome with zero
+/// successful changes; and an artifact with no recorded field diffs to
+/// invert. Every problem is collected and reported together.
+pub fn load_applied_mutation_audit(path: &Path, profile_name: &str) -> Result<LoadedMutationAudit> {
+    let raw = fs::read_to_string(path).with_context(|| {
+        format!(
+            "failed to read mutation audit artifact '{}'",
+            path.display()
+        )
+    })?;
+    let audit: MutationExecutionAudit = serde_json::from_str(&raw).with_context(|| {
+        format!(
+            "mutation audit artifact '{}' is not valid JSON in the expected mongo mutate \
+             execution shape",
+            path.display()
+        )
+    })?;
+
+    let mut problems: Vec<String> = Vec::new();
+    if audit.schema_version != 1 {
+        problems.push(format!(
+            "unsupported schema_version {}",
+            audit.schema_version
+        ));
+    }
+    if audit.profile != profile_name {
+        problems.push(format!(
+            "'profile' is '{}', expected '{profile_name}'",
+            audit.profile
+        ));
+    }
+    if audit.rollback != "guarded_set_inverse" {
+        problems.push(format!(
+            "unsupported rollback strategy '{}'; only guarded_set_inverse is undoable",
+            audit.rollback
+        ));
+    }
+    if audit.undo_artifact.is_some() {
+        problems.push(
+            "this mutation has already been undone (undo_artifact is already recorded)".to_string(),
+        );
+    }
+    match &audit.outcome {
+        MutationExecutionOutcome::Applied { modified_count, .. } => {
+            if *modified_count == 0 {
+                problems.push("mutation made zero successful changes; nothing to undo".to_string());
+            }
+        }
+        MutationExecutionOutcome::Prepared => problems
+            .push("mutation is still 'prepared'; it never reached a terminal outcome".to_string()),
+        MutationExecutionOutcome::Aborted { .. } => problems
+            .push("mutation was aborted; no write was ever committed, nothing to undo".to_string()),
+        MutationExecutionOutcome::Failed { .. } => {
+            problems.push("mutation failed before mongosh started; nothing to undo".to_string())
+        }
+        MutationExecutionOutcome::FailedOrUnknown { .. } => problems.push(
+            "mutation outcome is unknown; undo must never run automatically after a \
+             failed_or_unknown mutation — inspect the target database directly first"
+                .to_string(),
+        ),
+    }
+    if audit.candidates.field_diffs.is_empty() {
+        problems.push("mutation audit has no recorded field diffs to invert".to_string());
+    }
+
+    if !problems.is_empty() {
+        anyhow::bail!(
+            "mutation audit artifact '{}' is not undoable: {}",
+            path.display(),
+            problems.join("; ")
+        );
+    }
+
+    let raw_value: Value = serde_json::from_str(&raw)?;
+    let source_artifact_hash = digest_with_prefix(&raw_value);
+
+    Ok(LoadedMutationAudit {
+        audit,
+        source_artifact_hash,
+    })
+}
+
+const UNDO_PREVIEW_QUERY_JS: &str = r#"const docs = db.getSiblingDB(dbName).getCollection(collName).find({ _id: { $in: ids } }, projection).toArray();
+const result = { schema_version: 1, kind: "mongo_undo_preview_result", status: "ok", docs: docs };
+print(JSON.stringify(result));
+"#;
+
+/// Build the read-only staleness-check program (Task 4 Step 4): queries
+/// every candidate `_id` and projects `_id` plus every affected field path.
+/// All comparison against the recorded post-mutation values happens in
+/// Rust afterward (`verify_undo_candidates_fresh`) — this program's only
+/// job is the live DB read.
+fn build_undo_preview_eval_js(
+    database: &str,
+    collection: &str,
+    field_paths: &[String],
+    ids: &[Value],
+) -> Result<String> {
+    let projection = build_projection(field_paths);
+    let mut js = String::new();
+    write_const(&mut js, "dbName", &database)?;
+    write_const(&mut js, "collName", &collection)?;
+    write_const(&mut js, "projection", &projection)?;
+    write_const(&mut js, "ids", &ids)?;
+    js.push_str(UNDO_PREVIEW_QUERY_JS);
+    Ok(js)
+}
+
+#[derive(Debug, Deserialize)]
+struct UndoPreviewWireResult {
+    docs: Vec<Value>,
+}
+
+/// Compare every candidate's recorded `post_value` against the live
+/// document just queried. Fails closed on the *whole* batch the moment any
+/// single candidate is stale (a missing document or a field that no longer
+/// holds its recorded post-mutation value) — mirroring `apply_mutation`'s
+/// own all-or-nothing preflight philosophy.
+fn verify_undo_candidates_fresh(candidates: &[UndoCandidate], docs: &[Value]) -> Result<()> {
+    let mut by_id: BTreeMap<String, &Value> = BTreeMap::new();
+    for doc in docs {
+        let id = doc.get("_id").cloned().unwrap_or(Value::Null);
+        by_id.insert(serde_json::to_string(&id)?, doc);
+    }
+    for candidate in candidates {
+        let key = serde_json::to_string(&candidate.id)?;
+        let doc = by_id.get(&key).ok_or_else(|| {
+            anyhow::anyhow!(
+                "stale candidate: document with _id {} no longer exists — refusing to undo \
+                 (any stale candidate refuses the whole batch)",
+                candidate.id
+            )
+        })?;
+        for field in &candidate.fields {
+            if get_json_path(doc, &field.path) != Some(&field.post_value) {
+                anyhow::bail!(
+                    "stale candidate: document with _id {} field '{}' no longer holds its \
+                     recorded post-mutation value — refusing to undo (any stale candidate \
+                     refuses the whole batch)",
+                    candidate.id,
+                    field.path
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn undo_preview_with_runner(
+    runner: &dyn MongoshRunner,
+    config: &Config,
+    database: &str,
+    collection: &str,
+    field_paths: &[String],
+    candidates: &[UndoCandidate],
+) -> Result<()> {
+    let ids: Vec<Value> = candidates.iter().map(|c| c.id.clone()).collect();
+    let js = build_undo_preview_eval_js(database, collection, field_paths, &ids)?;
+    let invocation = prepare_mongosh_invocation(config, js)?;
+    let output = runner.run(&invocation)?;
+    if !output.success {
+        anyhow::bail!(
+            "mongosh undo preview exited with status {:?}: {}",
+            output.status_code,
+            sanitize_shell_diagnostic(&output.stderr)
+        );
+    }
+    let wire: UndoPreviewWireResult =
+        parse_mongosh_sentinel(&output.stdout, "mongo_undo_preview_result")?;
+    verify_undo_candidates_fresh(candidates, &wire.docs)
+}
+
+/// Run the read-only staleness check for a guarded undo's candidate set
+/// against a live Mongo target. `Ok(())` means every candidate still holds
+/// its recorded post-mutation value; `Err` means at least one is stale (or
+/// the check itself could not run) and the whole undo must be refused.
+pub fn undo_preview(
+    config: &Config,
+    database: &str,
+    collection: &str,
+    field_paths: &[String],
+    candidates: &[UndoCandidate],
+) -> Result<()> {
+    undo_preview_with_runner(
+        &CommandMongoshRunner,
+        config,
+        database,
+        collection,
+        field_paths,
+        candidates,
+    )
+}
+
+/// A deterministic digest binding a guarded undo's approval to the exact
+/// source mutation artifact and candidate set an operator reviewed. Mirrors
+/// `canonical_mutation_digest`'s role for `mongo mutate --apply`.
+pub fn canonical_undo_digest(
+    source_artifact_hash: &str,
+    database: &str,
+    collection: &str,
+    candidates: &[UndoCandidate],
+) -> String {
+    let payload = json!({
+        "undo_of_source_hash": source_artifact_hash,
+        "database": database,
+        "collection": collection,
+        "candidates": candidates,
+    });
+    digest_with_prefix(&payload)
+}
+
+/// Persisted shape of a `mongo undo` preview run (Task 4 Step 4). Unlike
+/// `MutationPreviewAudit`, there is exactly one success shape — every
+/// refusal reason (unsupported schema/rollback, wrong profile, zero
+/// successful changes, already-undone, or a stale candidate) is a hard
+/// `Err` from `load_applied_mutation_audit`/`undo_preview`, not a
+/// structured alternate outcome, so `status` is always `"previewed"`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UndoPreviewAudit {
+    pub schema_version: u32,
+    pub command: String,
+    pub timestamp_utc: DateTime<Utc>,
+    pub profile: String,
+    pub undo_of: PathBuf,
+    pub source_artifact_hash: String,
+    pub template_id: String,
+    pub template_revision: u32,
+    pub database: String,
+    pub collection: String,
+    pub status: String,
+    pub candidates: Vec<UndoCandidate>,
+    pub approval_digest: String,
+    pub created_at_utc: DateTime<Utc>,
+    pub expires_at_utc: DateTime<Utc>,
+    pub mongosh: String,
+}
+
+/// Validate a `mongo undo --apply` `--approval-artifact` path (Task 4 Step
+/// 4), mirroring `load_and_validate_preview_approval`'s rules: parses JSON
+/// as a `UndoPreviewAudit`, requires `schema_version == 1`, `status ==
+/// "previewed"`, an unexpired *originally recorded* `expires_at_utc`, a
+/// matching `source_artifact_hash`/`database`/`collection`, the recorded
+/// `approval_digest` re-derived from the *freshly re-verified* candidate
+/// set via `canonical_undo_digest` (tamper detection — this is why the
+/// write path never trusts anything read from this artifact's own
+/// `candidates` field, only its `approval_digest`), and finally that
+/// `requested_approve` equals that internally-verified digest. Returns the
+/// validated approval digest.
+pub fn load_and_validate_undo_approval(
+    path: &Path,
+    loaded: &LoadedMutationAudit,
+    fresh_candidates: &[UndoCandidate],
+    requested_approve: &str,
+) -> Result<String> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read undo approval artifact '{}'", path.display()))?;
+    let audit: UndoPreviewAudit = serde_json::from_str(&raw).with_context(|| {
+        format!(
+            "undo approval artifact '{}' is not valid JSON in the expected mongo undo preview \
+             shape",
+            path.display()
+        )
+    })?;
+
+    let mut problems: Vec<String> = Vec::new();
+    if audit.schema_version != 1 {
+        problems.push(format!(
+            "unsupported schema_version {}",
+            audit.schema_version
+        ));
+    }
+    if audit.status != "previewed" {
+        problems.push(format!("unexpected status '{}'", audit.status));
+    }
+    if audit.expires_at_utc <= Utc::now() {
+        problems.push(format!("approval expired at {}", audit.expires_at_utc));
+    }
+    if audit.source_artifact_hash != loaded.source_artifact_hash {
+        problems.push(
+            "source_artifact_hash mismatch — this approval is for a different mutation audit \
+             artifact"
+                .to_string(),
+        );
+    }
+    if audit.database != loaded.audit.database || audit.collection != loaded.audit.collection {
+        problems.push(format!(
+            "target mismatch: approval is for {}.{}, mutation audit targets {}.{}",
+            audit.database, audit.collection, loaded.audit.database, loaded.audit.collection
+        ));
+    }
+
+    let recomputed = canonical_undo_digest(
+        &loaded.source_artifact_hash,
+        &loaded.audit.database,
+        &loaded.audit.collection,
+        fresh_candidates,
+    );
+    if recomputed != audit.approval_digest {
+        problems.push(
+            "approval artifact is internally inconsistent: its recorded approval_digest does \
+             not match the freshly re-verified candidate set — treat this artifact as tampered"
+                .to_string(),
+        );
+    }
+    if requested_approve != audit.approval_digest {
+        problems
+            .push("--approve does not match the approval artifact's recorded digest".to_string());
+    }
+
+    if !problems.is_empty() {
+        anyhow::bail!(
+            "undo approval artifact '{}' failed validation: {}",
+            path.display(),
+            problems.join("; ")
+        );
+    }
+
+    Ok(audit.approval_digest)
+}
+
+/// Request for `undo_envelope` — mirrors `MongoMutateRequest`'s shape.
+#[derive(Clone, Debug, Default)]
+pub struct MongoUndoRequest {
+    pub mutation_audit_artifact: PathBuf,
+    pub print: bool,
+    pub apply: bool,
+    pub accept_mutation_risk: bool,
+    pub approval_artifact: Option<PathBuf>,
+    pub approve: Option<String>,
+    pub audit_dir: PathBuf,
+}
+
+/// Validate the complete `mongo undo --apply` safety-gate tuple together,
+/// mirroring `validate_mutation_apply_gates`.
+pub fn validate_undo_apply_gates(request: &MongoUndoRequest) -> Result<()> {
+    let mut problems: Vec<String> = Vec::new();
+    if !request.accept_mutation_risk {
+        problems.push("--accept-mutation-risk is required".to_string());
+    }
+    if request.approval_artifact.is_none() {
+        problems.push("--approval-artifact is required".to_string());
+    }
+    match request.approve.as_deref() {
+        None => problems.push("--approve is required".to_string()),
+        Some(d) if d.trim().is_empty() => problems.push("--approve is required".to_string()),
+        Some(d) if !d.starts_with("sha256:") => problems.push(format!(
+            "--approve must be the 'sha256:' approval digest printed by the undo preview run, \
+             got '{d}'"
+        )),
+        _ => {}
+    }
+    if !problems.is_empty() {
+        anyhow::bail!(
+            "mongo undo --apply is missing required safety gate(s): {}",
+            problems.join("; ")
+        );
+    }
+    Ok(())
+}
+
+/// `mongo undo` dispatcher — mirrors `mutate_envelope`'s three-mode shape
+/// (print / read-only preview / apply).
+pub fn undo_envelope(config: &Config, request: &MongoUndoRequest) -> Result<Envelope> {
+    if request.print {
+        let loaded =
+            load_applied_mutation_audit(&request.mutation_audit_artifact, &config.profile_name)?;
+        let candidates = derive_undo_candidates(&loaded.audit.candidates);
+        let field_paths = undo_field_paths(&candidates);
+        let js = build_undo_apply_eval_js(
+            &loaded.audit.database,
+            &loaded.audit.collection,
+            &field_paths,
+            &candidates,
+        )?;
+        let invocation = prepare_mongosh_invocation(config, js)?;
+        let redacted = render_redacted_mongosh(&invocation);
+        return Ok(Envelope::ok_with_data(
+            "mongo undo plan generated (static preview render, not executed)",
+            json!({
+                "profile": config.profile_name,
+                "undo_of": request.mutation_audit_artifact,
+                "template": loaded.audit.template_id,
+                "database": loaded.audit.database,
+                "collection": loaded.audit.collection,
+                "candidate_count": candidates.len(),
+                "mongosh": redacted,
+                "copy_paste": redacted,
+                "notes": [
+                    "This is a static rendering only; no query was executed and no audit artifact was written.",
+                    "Run mongo undo without --print for a live read-only staleness check that persists an approval artifact.",
+                ],
+            }),
+        ));
+    }
+
+    if !request.apply {
+        let loaded =
+            load_applied_mutation_audit(&request.mutation_audit_artifact, &config.profile_name)?;
+        let candidates = derive_undo_candidates(&loaded.audit.candidates);
+        let field_paths = undo_field_paths(&candidates);
+        undo_preview(
+            config,
+            &loaded.audit.database,
+            &loaded.audit.collection,
+            &field_paths,
+            &candidates,
+        )?;
+
+        let js = build_undo_apply_eval_js(
+            &loaded.audit.database,
+            &loaded.audit.collection,
+            &field_paths,
+            &candidates,
+        )?;
+        let invocation = prepare_mongosh_invocation(config, js)?;
+        let redacted = render_redacted_mongosh(&invocation);
+
+        let approval_digest = canonical_undo_digest(
+            &loaded.source_artifact_hash,
+            &loaded.audit.database,
+            &loaded.audit.collection,
+            &candidates,
+        );
+        let now = Utc::now();
+        let preview_audit = UndoPreviewAudit {
+            schema_version: 1,
+            command: "mongo undo".to_string(),
+            timestamp_utc: now,
+            profile: config.profile_name.clone(),
+            undo_of: request.mutation_audit_artifact.clone(),
+            source_artifact_hash: loaded.source_artifact_hash.clone(),
+            template_id: loaded.audit.template_id.clone(),
+            template_revision: loaded.audit.template_revision,
+            database: loaded.audit.database.clone(),
+            collection: loaded.audit.collection.clone(),
+            status: "previewed".to_string(),
+            candidates: candidates.clone(),
+            approval_digest: approval_digest.clone(),
+            created_at_utc: now,
+            expires_at_utc: now
+                + chrono::Duration::minutes(i64::from(MONGO_MUTATION_PREVIEW_MAX_EXPIRY_MINUTES)),
+            mongosh: redacted.clone(),
+        };
+        let audit_path = write_audit_artifact(
+            &request.audit_dir,
+            "mongo-undo-preview",
+            &serde_json::to_value(&preview_audit)?,
+        )?;
+        return Ok(Envelope::ok_with_data(
+            "mongo undo preview generated",
+            json!({
+                "profile": config.profile_name,
+                "undo_of": request.mutation_audit_artifact,
+                "template": loaded.audit.template_id,
+                "database": loaded.audit.database,
+                "collection": loaded.audit.collection,
+                "candidates": candidates,
+                "approval_artifact": audit_path,
+                "approval_digest": approval_digest,
+                "mongosh": redacted,
+                "copy_paste": redacted,
+                "notes": [
+                    "Every candidate document still holds its recorded post-mutation value (no staleness detected).",
+                    "Re-run with --apply, --accept-mutation-risk, --approval-artifact (this artifact's path), and --approve (this approval_digest) to execute.",
+                ],
+            }),
+        ));
+    }
+
+    let prepared = prepare_undo_apply(config, request)?;
+    execute_undo_apply(config, prepared, request)
+}
+
+/// Everything the TTY confirmation prompt and `execute_undo_apply` need,
+/// already validated read-only — mirrors `PreparedMutationApply`.
+#[derive(Debug)]
+pub struct PreparedUndoApply {
+    pub mutation_audit_artifact: PathBuf,
+    pub loaded: LoadedMutationAudit,
+    pub candidates: Vec<UndoCandidate>,
+    pub field_paths: Vec<String>,
+    pub approval_digest: String,
+    pub approval_artifact: PathBuf,
+}
+
+/// Read-only prepare phase for `mongo undo --apply`: CLI gate validation,
+/// loading + validating the source mutation artifact, deriving the guarded
+/// inverse, a live staleness re-check, and approval-artifact validation. No
+/// audit write, no confirmation prompt, and no Mongo write anywhere in this
+/// function.
+pub fn prepare_undo_apply(
+    config: &Config,
+    request: &MongoUndoRequest,
+) -> Result<PreparedUndoApply> {
+    prepare_undo_apply_with_runner(&CommandMongoshRunner, config, request)
+}
+
+/// Same contract as `prepare_undo_apply`, but takes the `mongosh` runner
+/// used for the live staleness re-check as a parameter — the same
+/// fake-runner test seam `undo_preview_with_runner` already uses, so the
+/// full prepare pipeline (unlike `mongo mutate`'s prepare phase, this one
+/// does touch mongosh, read-only, for the staleness check) is testable
+/// without a live `mongosh`.
+fn prepare_undo_apply_with_runner(
+    runner: &dyn MongoshRunner,
+    config: &Config,
+    request: &MongoUndoRequest,
+) -> Result<PreparedUndoApply> {
+    validate_undo_apply_gates(request)?;
+    let loaded =
+        load_applied_mutation_audit(&request.mutation_audit_artifact, &config.profile_name)?;
+    let candidates = derive_undo_candidates(&loaded.audit.candidates);
+    let field_paths = undo_field_paths(&candidates);
+
+    // Never trust a stale approval alone: re-verify freshness here too (the
+    // apply transaction below re-verifies yet again, inside the
+    // transaction, before writing).
+    undo_preview_with_runner(
+        runner,
+        config,
+        &loaded.audit.database,
+        &loaded.audit.collection,
+        &field_paths,
+        &candidates,
+    )?;
+
+    let approval_path = request
+        .approval_artifact
+        .as_deref()
+        .expect("validate_undo_apply_gates already required --approval-artifact");
+    let requested_approve = request
+        .approve
+        .as_deref()
+        .expect("validate_undo_apply_gates already required --approve");
+    let approval_digest =
+        load_and_validate_undo_approval(approval_path, &loaded, &candidates, requested_approve)?;
+
+    Ok(PreparedUndoApply {
+        mutation_audit_artifact: request.mutation_audit_artifact.clone(),
+        loaded,
+        candidates,
+        field_paths,
+        approval_digest,
+        approval_artifact: approval_path.to_path_buf(),
+    })
+}
+
+/// Why a guarded undo apply attempt made no commit — mirrors
+/// `MutationAbortReason`.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UndoAbortReason {
+    TransactionUnsupported,
+    StaleCandidate,
+    CountMismatch,
+    PostVerificationMismatch,
+}
+
+/// The outcome of one undo apply attempt — mirrors `MutationExecutionResult`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum UndoExecutionResult {
+    Applied {
+        matched_count: u64,
+        modified_count: u64,
+    },
+    Aborted {
+        reason: UndoAbortReason,
+        detail: String,
+    },
+    FailedOrUnknown {
+        detail: String,
+    },
+}
+
+const UNDO_APPLY_TRANSACTION_JS: &str = r#"function ayxAbort(reason, detail) {
+  var err = new Error("ayx_undo_abort:" + reason);
+  err.ayxSentinel = { schema_version: 1, kind: "mongo_undo_apply_result", status: "aborted", reason: reason, detail: detail };
+  throw err;
+}
+
+const candidatesById = {};
+candidates.forEach(function (c) { candidatesById[JSON.stringify(c.id)] = c; });
+
+let finalSentinel = null;
+const hello = (typeof db.hello === "function") ? db.hello() : db.runCommand({ hello: 1 });
+const supportsTransactions = !!(hello.setName || hello.msg === "isdbgrid");
+
+if (!supportsTransactions) {
+  finalSentinel = { schema_version: 1, kind: "mongo_undo_apply_result", status: "aborted", reason: "transaction_unsupported", detail: "deployment is not a replica set or mongos; transactions require a replica set or sharded cluster" };
+} else {
+  const session = db.getMongo().startSession();
+  try {
+    session.withTransaction(function () {
+      const sessionColl = session.getDatabase(dbName).getCollection(collName);
+      const preDocs = sessionColl.find({ _id: { $in: ids } }, projection).toArray();
+      const preById = {};
+      preDocs.forEach(function (d) { preById[JSON.stringify(d._id)] = d; });
+
+      const stale = candidates.some(function (c) {
+        const doc = preById[JSON.stringify(c.id)];
+        if (doc === undefined) { return true; }
+        return c.fields.some(function (f) {
+          return JSON.stringify(ayxGetPath(doc, f.path)) !== JSON.stringify(f.post_value);
+        });
+      });
+      if (stale) {
+        ayxAbort("stale_candidate", "one or more candidate documents no longer match their recorded post-mutation values");
+      }
+
+      const ops = candidates.map(function (c) {
+        const filter = { _id: c.id };
+        c.fields.forEach(function (f) { filter[f.path] = f.post_value; });
+        const setDoc = {};
+        const unsetDoc = {};
+        c.fields.forEach(function (f) {
+          if (f.old_present) { setDoc[f.path] = f.old_value; } else { unsetDoc[f.path] = ""; }
+        });
+        const update = {};
+        if (Object.keys(setDoc).length > 0) { update.$set = setDoc; }
+        if (Object.keys(unsetDoc).length > 0) { update.$unset = unsetDoc; }
+        return { updateOne: { filter: filter, update: update } };
+      });
+
+      const bulkResult = sessionColl.bulkWrite(ops, { ordered: true });
+      if (bulkResult.matchedCount !== ops.length) {
+        ayxAbort("count_mismatch", "bulkWrite matched " + bulkResult.matchedCount + ", expected " + ops.length);
+      }
+
+      const postDocs = sessionColl.find({ _id: { $in: ids } }, projection).toArray();
+      const postOk = postDocs.length === ids.length && postDocs.every(function (doc) {
+        const c = candidatesById[JSON.stringify(doc._id)];
+        if (c === undefined) { return false; }
+        return c.fields.every(function (f) {
+          const val = ayxGetPath(doc, f.path);
+          if (f.old_present) {
+            return JSON.stringify(val) === JSON.stringify(f.old_value);
+          }
+          return val === undefined;
+        });
+      });
+      if (!postOk) {
+        ayxAbort("post_verification_mismatch", "post-undo field values did not match the recorded prior values");
+      }
+
+      finalSentinel = { schema_version: 1, kind: "mongo_undo_apply_result", status: "applied", matched_count: ids.length, modified_count: bulkResult.modifiedCount };
+    });
+  } catch (e) {
+    if (e && e.ayxSentinel) {
+      finalSentinel = e.ayxSentinel;
+    } else {
+      const msg = (e && e.message) ? String(e.message) : String(e);
+      finalSentinel = { schema_version: 1, kind: "mongo_undo_apply_result", status: "failed_or_unknown", detail: msg };
+    }
+  } finally {
+    session.endSession();
+  }
+}
+print(JSON.stringify(finalSentinel));
+"#;
+
+/// Build the single no-retry guarded-inverse transaction program (Task 4
+/// Step 4). Re-queries every candidate `_id` inside the transaction and
+/// aborts the whole batch on any staleness (never trusting the read-only
+/// preview's check alone), then applies an ordered `bulkWrite` whose
+/// per-document filter includes both `_id` and every recorded post-value
+/// (so a race that changes a field between the preflight read and the
+/// write still can't silently touch the wrong state), restoring old values
+/// with `$set` or removing previously-absent paths with `$unset`, then
+/// re-queries and verifies every prior value before letting the
+/// transaction commit.
+fn build_undo_apply_eval_js(
+    database: &str,
+    collection: &str,
+    field_paths: &[String],
+    candidates: &[UndoCandidate],
+) -> Result<String> {
+    let projection = build_projection(field_paths);
+    let ids: Vec<Value> = candidates.iter().map(|c| c.id.clone()).collect();
+
+    let mut js = String::new();
+    js.push_str(AYX_GET_PATH_JS);
+    write_const(&mut js, "dbName", &database)?;
+    write_const(&mut js, "collName", &collection)?;
+    write_const(&mut js, "projection", &projection)?;
+    write_const(&mut js, "ids", &ids)?;
+    write_const(&mut js, "candidates", &candidates)?;
+    js.push_str(UNDO_APPLY_TRANSACTION_JS);
+    Ok(js)
+}
+
+/// Apply defensive sanitization to any diagnostic text in a parsed
+/// `UndoExecutionResult` — mirrors `sanitize_execution_result`.
+fn sanitize_undo_execution_result(result: UndoExecutionResult) -> UndoExecutionResult {
+    match result {
+        UndoExecutionResult::Aborted { reason, detail } => UndoExecutionResult::Aborted {
+            reason,
+            detail: sanitize_shell_diagnostic(&detail),
+        },
+        UndoExecutionResult::FailedOrUnknown { detail } => UndoExecutionResult::FailedOrUnknown {
+            detail: sanitize_shell_diagnostic(&detail),
+        },
+        applied @ UndoExecutionResult::Applied { .. } => applied,
+    }
+}
+
+fn apply_undo_with_runner(
+    runner: &dyn MongoshRunner,
+    config: &Config,
+    database: &str,
+    collection: &str,
+    field_paths: &[String],
+    candidates: &[UndoCandidate],
+) -> Result<UndoExecutionResult> {
+    let js = build_undo_apply_eval_js(database, collection, field_paths, candidates)?;
+    let invocation = prepare_mongosh_invocation(config, js)?;
+    // A spawn failure here means mongosh never started — nothing ambiguous
+    // happened, so this propagates as a plain error rather than
+    // `FailedOrUnknown`.
+    let output = runner.run(&invocation)?;
+    if !output.success {
+        return Ok(UndoExecutionResult::FailedOrUnknown {
+            detail: sanitize_shell_diagnostic(&format!(
+                "mongosh undo apply exited with status {:?}: {}",
+                output.status_code, output.stderr
+            )),
+        });
+    }
+    let result = match parse_mongosh_sentinel::<UndoExecutionResult>(
+        &output.stdout,
+        "mongo_undo_apply_result",
+    ) {
+        Ok(result) => result,
+        Err(_) => UndoExecutionResult::FailedOrUnknown {
+            detail: "mongosh undo apply program did not emit a valid result sentinel; commit \
+                     status is unknown"
+                .to_string(),
+        },
+    };
+    Ok(sanitize_undo_execution_result(result))
+}
+
+/// Run the single no-retry guarded-inverse transaction for a prepared undo
+/// against a live Mongo target. Never retried by this function or its
+/// caller.
+pub fn apply_undo(
+    config: &Config,
+    database: &str,
+    collection: &str,
+    field_paths: &[String],
+    candidates: &[UndoCandidate],
+) -> Result<UndoExecutionResult> {
+    apply_undo_with_runner(
+        &CommandMongoshRunner,
+        config,
+        database,
+        collection,
+        field_paths,
+        candidates,
+    )
+}
+
+/// Persisted lifecycle status of a `mongo undo --apply` execution audit —
+/// mirrors `MutationExecutionOutcome`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum UndoExecutionOutcome {
+    Prepared,
+    Applied {
+        matched_count: u64,
+        modified_count: u64,
+    },
+    Aborted {
+        reason: UndoAbortReason,
+        detail: String,
+    },
+    Failed {
+        detail: String,
+    },
+    FailedOrUnknown {
+        detail: String,
+    },
+}
+
+impl From<UndoExecutionResult> for UndoExecutionOutcome {
+    fn from(result: UndoExecutionResult) -> Self {
+        match result {
+            UndoExecutionResult::Applied {
+                matched_count,
+                modified_count,
+            } => UndoExecutionOutcome::Applied {
+                matched_count,
+                modified_count,
+            },
+            UndoExecutionResult::Aborted { reason, detail } => {
+                UndoExecutionOutcome::Aborted { reason, detail }
+            }
+            UndoExecutionResult::FailedOrUnknown { detail } => {
+                UndoExecutionOutcome::FailedOrUnknown { detail }
+            }
+        }
+    }
+}
+
+/// Persisted execution audit for one `mongo undo --apply` attempt —
+/// mirrors `MutationExecutionAudit`. `undo_of` plus `source_artifact_hash`
+/// bind this artifact to the exact original mutation artifact it reverses;
+/// a successful `Applied` outcome also backlinks this artifact's own path
+/// into that original mutation artifact's `undo_artifact` field
+/// (`backlink_undo_into_mutation_artifact`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UndoExecutionAudit {
+    pub schema_version: u32,
+    pub command: String,
+    pub timestamp_utc: DateTime<Utc>,
+    pub profile: String,
+    pub undo_of: PathBuf,
+    pub source_artifact_hash: String,
+    pub template_id: String,
+    pub template_revision: u32,
+    pub database: String,
+    pub collection: String,
+    pub approval_digest: String,
+    pub approval_artifact: PathBuf,
+    pub candidates: Vec<UndoCandidate>,
+    #[serde(flatten)]
+    pub outcome: UndoExecutionOutcome,
+}
+
+/// Best-effort backlink: record this undo artifact's path in the original
+/// mutation artifact's `undo_artifact` field once the undo has applied
+/// successfully. Failure here does not unwind the undo itself (which
+/// already durably succeeded and has its own complete audit trail) — the
+/// caller surfaces it as a non-fatal warning in the response instead of
+/// silently swallowing it.
+fn backlink_undo_into_mutation_artifact(
+    mutation_path: &Path,
+    undo_artifact_path: &Path,
+) -> Result<()> {
+    let raw = fs::read_to_string(mutation_path).with_context(|| {
+        format!(
+            "failed to read mutation audit artifact '{}' for undo backlink",
+            mutation_path.display()
+        )
+    })?;
+    let mut audit: MutationExecutionAudit = serde_json::from_str(&raw).with_context(|| {
+        format!(
+            "mutation audit artifact '{}' is not valid JSON for undo backlink",
+            mutation_path.display()
+        )
+    })?;
+    audit.undo_artifact = Some(undo_artifact_path.to_path_buf());
+    update_sensitive_audit_artifact(mutation_path, &serde_json::to_value(&audit)?).map_err(|e| {
+        anyhow::anyhow!(
+            "failed to backlink undo artifact into original mutation artifact '{}': {e}",
+            mutation_path.display()
+        )
+    })
+}
+
+/// Execute phase for `mongo undo --apply` — mirrors `execute_mutation_apply`.
+pub fn execute_undo_apply(
+    config: &Config,
+    prepared: PreparedUndoApply,
+    request: &MongoUndoRequest,
+) -> Result<Envelope> {
+    execute_undo_apply_with_runner(&CommandMongoshRunner, config, prepared, request)
+}
+
+/// Same contract as `execute_undo_apply`, but takes the `mongosh` runner as
+/// a parameter — mirrors `execute_mutation_apply_with_runner`.
+fn execute_undo_apply_with_runner(
+    runner: &dyn MongoshRunner,
+    config: &Config,
+    prepared: PreparedUndoApply,
+    request: &MongoUndoRequest,
+) -> Result<Envelope> {
+    let PreparedUndoApply {
+        mutation_audit_artifact,
+        loaded,
+        candidates,
+        field_paths,
+        approval_digest,
+        approval_artifact,
+    } = prepared;
+
+    let mut audit = UndoExecutionAudit {
+        schema_version: 1,
+        command: "mongo undo".to_string(),
+        timestamp_utc: Utc::now(),
+        profile: config.profile_name.clone(),
+        undo_of: mutation_audit_artifact.clone(),
+        source_artifact_hash: loaded.source_artifact_hash.clone(),
+        template_id: loaded.audit.template_id.clone(),
+        template_revision: loaded.audit.template_revision,
+        database: loaded.audit.database.clone(),
+        collection: loaded.audit.collection.clone(),
+        approval_digest,
+        approval_artifact,
+        candidates: candidates.clone(),
+        outcome: UndoExecutionOutcome::Prepared,
+    };
+
+    let handle = create_sensitive_audit_artifact(
+        &request.audit_dir,
+        "mongo-undo-execute",
+        &serde_json::to_value(&audit)?,
+    )
+    .context(
+        "failed to persist the prepared undo execution audit artifact; returning before any \
+         Mongo write was attempted",
+    )?;
+
+    let apply_result = apply_undo_with_runner(
+        runner,
+        config,
+        &loaded.audit.database,
+        &loaded.audit.collection,
+        &field_paths,
+        &candidates,
+    );
+    let (outcome, propagate_err) = match apply_result {
+        Ok(result) => (UndoExecutionOutcome::from(result), None),
+        Err(err) => {
+            let detail = err.to_string();
+            (UndoExecutionOutcome::Failed { detail }, Some(err))
+        }
+    };
+
+    audit.outcome = outcome.clone();
+    audit.timestamp_utc = Utc::now();
+    let payload = serde_json::to_value(&audit)?;
+    finalize_lifecycle_audit(&handle, &payload, &format!("{outcome:?}"))?;
+
+    // Best-effort backlink into the original mutation artifact — never
+    // fatal to a successful undo, but never silently dropped either.
+    let backlink_warning = if matches!(outcome, UndoExecutionOutcome::Applied { .. }) {
+        backlink_undo_into_mutation_artifact(&mutation_audit_artifact, &handle.path)
+            .err()
+            .map(|e| e.to_string())
+    } else {
+        None
+    };
+
+    let mut data = json!({
+        "profile": config.profile_name,
+        "undo_of": mutation_audit_artifact,
+        "template": loaded.audit.template_id,
+        "database": loaded.audit.database,
+        "collection": loaded.audit.collection,
+        "applied": matches!(outcome, UndoExecutionOutcome::Applied { .. }),
+        "result": &outcome,
+        "audit_artifact": handle.path,
+    });
+    if let Some(warning) = &backlink_warning {
+        data["backlink_warning"] = json!(warning);
+    }
+
+    match outcome {
+        UndoExecutionOutcome::Applied {
+            matched_count,
+            modified_count,
+        } => Ok(Envelope::ok_with_data(
+            format!(
+                "mongo undo applied: {modified_count} of {matched_count} matched document(s) \
+                 restored"
+            ),
+            data,
+        )),
+        UndoExecutionOutcome::Aborted { reason, .. } => Ok(Envelope::ok_with_data(
+            format!("mongo undo aborted before any write committed (reason: {reason:?})"),
+            data,
+        )),
+        UndoExecutionOutcome::FailedOrUnknown { .. } => Ok(Envelope::err_coded(
+            ErrorCode::Internal,
+            "mongo undo outcome is UNKNOWN after mongosh started — inspect the target database \
+             and this audit artifact directly before taking any further action"
+                .to_string(),
+            data,
+        )),
+        UndoExecutionOutcome::Failed { .. } => Ok(Envelope::err_coded(
+            ErrorCode::Internal,
+            format!(
+                "mongo undo --apply did not run: {}",
+                propagate_err
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "unknown error".to_string())
+            ),
+            data,
+        )),
+        UndoExecutionOutcome::Prepared => {
             unreachable!("outcome is always overwritten to a terminal state above")
         }
     }
@@ -5518,5 +6612,1027 @@ mod tests {
         assert!(msg.contains("CRITICAL"), "{msg}");
         assert!(msg.contains(&handle.operation_id), "{msg}");
         assert!(msg.contains("may have succeeded"), "{msg}");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Task 4 Step 4: guarded undo
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ── Pure: derive_undo_candidates / undo_field_paths ─────────────────────
+
+    #[test]
+    fn derive_undo_candidates_maps_field_diffs_to_guarded_inverse() {
+        let snapshot = CandidateSnapshot {
+            matched_count: 1,
+            candidate_ids: vec![json!("doc1")],
+            raw_docs: vec![],
+            field_diffs: vec![CandidateDiff {
+                id: json!("doc1"),
+                fields: vec![
+                    FieldDiff {
+                        path: "value".to_string(),
+                        old_present: true,
+                        old_value: json!("old"),
+                        new_value: json!("42"),
+                    },
+                    FieldDiff {
+                        path: "extra".to_string(),
+                        old_present: false,
+                        old_value: Value::Null,
+                        new_value: json!("x"),
+                    },
+                ],
+            }],
+        };
+        let candidates = derive_undo_candidates(&snapshot);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].id, json!("doc1"));
+        assert_eq!(
+            candidates[0].fields[0],
+            UndoFieldInverse {
+                path: "value".to_string(),
+                old_present: true,
+                old_value: json!("old"),
+                post_value: json!("42"),
+            }
+        );
+        assert_eq!(
+            candidates[0].fields[1],
+            UndoFieldInverse {
+                path: "extra".to_string(),
+                old_present: false,
+                old_value: Value::Null,
+                post_value: json!("x"),
+            }
+        );
+    }
+
+    #[test]
+    fn undo_field_paths_is_sorted_and_deduplicated() {
+        let candidates = vec![
+            UndoCandidate {
+                id: json!("a"),
+                fields: vec![
+                    UndoFieldInverse {
+                        path: "z".to_string(),
+                        old_present: true,
+                        old_value: json!(1),
+                        post_value: json!(2),
+                    },
+                    UndoFieldInverse {
+                        path: "a".to_string(),
+                        old_present: true,
+                        old_value: json!(1),
+                        post_value: json!(2),
+                    },
+                ],
+            },
+            UndoCandidate {
+                id: json!("b"),
+                fields: vec![UndoFieldInverse {
+                    path: "a".to_string(),
+                    old_present: true,
+                    old_value: json!(1),
+                    post_value: json!(2),
+                }],
+            },
+        ];
+        assert_eq!(
+            undo_field_paths(&candidates),
+            vec!["a".to_string(), "z".to_string()]
+        );
+    }
+
+    // ── load_applied_mutation_audit ─────────────────────────────────────────
+
+    /// A valid, undoable `MutationExecutionAudit` fixture: one candidate
+    /// (`_id: "doc1"`), field `value` restored from `"old"` (the mutation
+    /// set it to `"42"`).
+    fn undoable_mutation_audit(profile: &str) -> MutationExecutionAudit {
+        let resolved = resolved_fixture("42");
+        MutationExecutionAudit {
+            schema_version: 1,
+            command: "mongo mutate".to_string(),
+            timestamp_utc: Utc::now(),
+            profile: profile.to_string(),
+            template_id: resolved.template_id.clone(),
+            template_revision: resolved.template_revision,
+            template_source_digest: resolved.template_source_digest.clone(),
+            parameter_digest: resolved.parameter_digest.clone(),
+            database: resolved.database.clone(),
+            collection: resolved.collection.clone(),
+            max_affected: resolved.max_affected,
+            rollback: resolved.rollback.clone(),
+            approval_digest: "sha256:deadbeef".to_string(),
+            approval_artifact: PathBuf::from("/tmp/fixture-approval.json"),
+            backup_audit_artifact: PathBuf::from("/tmp/fixture-backup.json"),
+            backup_timestamp_utc: Utc::now(),
+            connection: json!({}),
+            candidates: CandidateSnapshot {
+                matched_count: 1,
+                candidate_ids: vec![json!("doc1")],
+                raw_docs: vec![json!({"_id": "doc1", "value": "42"})],
+                field_diffs: vec![CandidateDiff {
+                    id: json!("doc1"),
+                    fields: vec![FieldDiff {
+                        path: "value".to_string(),
+                        old_present: true,
+                        old_value: json!("old"),
+                        new_value: json!("42"),
+                    }],
+                }],
+            },
+            outcome: MutationExecutionOutcome::Applied {
+                matched_count: 1,
+                modified_count: 1,
+            },
+            undo_artifact: None,
+        }
+    }
+
+    #[test]
+    fn load_applied_mutation_audit_accepts_a_valid_undoable_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_json(
+            dir.path(),
+            "mutation.json",
+            &serde_json::to_value(undoable_mutation_audit("test")).unwrap(),
+        );
+        let loaded = load_applied_mutation_audit(&path, "test")
+            .expect("valid undoable artifact should load");
+        assert_eq!(loaded.audit.candidates.field_diffs.len(), 1);
+        assert!(loaded.source_artifact_hash.starts_with("sha256:"));
+    }
+
+    #[test]
+    fn load_applied_mutation_audit_rejects_wrong_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_json(
+            dir.path(),
+            "mutation.json",
+            &serde_json::to_value(undoable_mutation_audit("other")).unwrap(),
+        );
+        let err = load_applied_mutation_audit(&path, "test")
+            .expect_err("profile mismatch must be rejected");
+        assert!(err.to_string().contains("'profile' is 'other'"));
+    }
+
+    #[test]
+    fn load_applied_mutation_audit_rejects_unsupported_rollback() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut audit = undoable_mutation_audit("test");
+        audit.rollback = "manual_only".to_string();
+        let path = write_json(
+            dir.path(),
+            "mutation.json",
+            &serde_json::to_value(audit).unwrap(),
+        );
+        let err = load_applied_mutation_audit(&path, "test")
+            .expect_err("unsupported rollback strategy must be rejected");
+        assert!(err.to_string().contains("unsupported rollback strategy"));
+    }
+
+    #[test]
+    fn load_applied_mutation_audit_rejects_already_undone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut audit = undoable_mutation_audit("test");
+        audit.undo_artifact = Some(PathBuf::from("/tmp/already-undone.json"));
+        let path = write_json(
+            dir.path(),
+            "mutation.json",
+            &serde_json::to_value(audit).unwrap(),
+        );
+        let err = load_applied_mutation_audit(&path, "test")
+            .expect_err("an already-undone mutation must be rejected");
+        assert!(err.to_string().contains("already been undone"));
+    }
+
+    #[test]
+    fn load_applied_mutation_audit_rejects_zero_successful_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut audit = undoable_mutation_audit("test");
+        audit.outcome = MutationExecutionOutcome::Applied {
+            matched_count: 1,
+            modified_count: 0,
+        };
+        let path = write_json(
+            dir.path(),
+            "mutation.json",
+            &serde_json::to_value(audit).unwrap(),
+        );
+        let err = load_applied_mutation_audit(&path, "test")
+            .expect_err("zero successful changes must be rejected");
+        assert!(err.to_string().contains("zero successful changes"));
+    }
+
+    #[test]
+    fn load_applied_mutation_audit_rejects_every_non_applied_outcome() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let mut prepared = undoable_mutation_audit("test");
+        prepared.outcome = MutationExecutionOutcome::Prepared;
+        let path = write_json(
+            dir.path(),
+            "prepared.json",
+            &serde_json::to_value(prepared).unwrap(),
+        );
+        let err = load_applied_mutation_audit(&path, "test")
+            .expect_err("prepared-forever must be rejected");
+        assert!(err.to_string().contains("still 'prepared'"));
+
+        let mut aborted = undoable_mutation_audit("test");
+        aborted.outcome = MutationExecutionOutcome::Aborted {
+            reason: MutationAbortReason::PreflightMismatch,
+            detail: "x".to_string(),
+        };
+        let path = write_json(
+            dir.path(),
+            "aborted.json",
+            &serde_json::to_value(aborted).unwrap(),
+        );
+        let err = load_applied_mutation_audit(&path, "test").expect_err("aborted must be rejected");
+        assert!(err.to_string().contains("was aborted"));
+
+        let mut failed = undoable_mutation_audit("test");
+        failed.outcome = MutationExecutionOutcome::Failed {
+            detail: "spawn failure".to_string(),
+        };
+        let path = write_json(
+            dir.path(),
+            "failed.json",
+            &serde_json::to_value(failed).unwrap(),
+        );
+        let err = load_applied_mutation_audit(&path, "test").expect_err("failed must be rejected");
+        assert!(err.to_string().contains("failed before mongosh started"));
+
+        // The critical one: undo must never automatically run after a
+        // failed_or_unknown mutation, where the mutation's own commit
+        // status is itself unresolved.
+        let mut unknown = undoable_mutation_audit("test");
+        unknown.outcome = MutationExecutionOutcome::FailedOrUnknown {
+            detail: "ambiguous".to_string(),
+        };
+        let path = write_json(
+            dir.path(),
+            "unknown.json",
+            &serde_json::to_value(unknown).unwrap(),
+        );
+        let err = load_applied_mutation_audit(&path, "test")
+            .expect_err("undo must never run automatically after a failed_or_unknown mutation");
+        assert!(
+            err.to_string()
+                .contains("must never run automatically after a failed_or_unknown mutation")
+        );
+    }
+
+    #[test]
+    fn load_applied_mutation_audit_rejects_unsupported_schema_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut value = serde_json::to_value(undoable_mutation_audit("test")).unwrap();
+        value["schema_version"] = json!(2);
+        let path = write_json(dir.path(), "mutation.json", &value);
+        let err = load_applied_mutation_audit(&path, "test")
+            .expect_err("unsupported schema_version must be rejected");
+        assert!(err.to_string().contains("unsupported schema_version"));
+    }
+
+    #[test]
+    fn load_applied_mutation_audit_rejects_malformed_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mutation.json");
+        fs::write(&path, "not json at all").unwrap();
+        let err = load_applied_mutation_audit(&path, "test")
+            .expect_err("malformed JSON must be rejected");
+        assert!(err.to_string().contains("not valid JSON"));
+    }
+
+    #[test]
+    fn load_applied_mutation_audit_rejects_missing_file() {
+        let err = load_applied_mutation_audit(Path::new("/nonexistent/mutation.json"), "test")
+            .expect_err("a missing file must be rejected");
+        assert!(
+            err.to_string()
+                .contains("failed to read mutation audit artifact")
+        );
+    }
+
+    // ── Fake-runner: undo_preview_with_runner / verify_undo_candidates_fresh ─
+
+    fn ok_undo_preview_stdout(docs: &[Value]) -> String {
+        json!({
+            "schema_version": 1,
+            "kind": "mongo_undo_preview_result",
+            "status": "ok",
+            "docs": docs,
+        })
+        .to_string()
+    }
+
+    fn undo_fixture_candidates() -> Vec<UndoCandidate> {
+        vec![UndoCandidate {
+            id: json!("doc1"),
+            fields: vec![UndoFieldInverse {
+                path: "value".to_string(),
+                old_present: true,
+                old_value: json!("old"),
+                post_value: json!("42"),
+            }],
+        }]
+    }
+
+    #[test]
+    fn undo_preview_with_runner_accepts_fresh_candidates() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let candidates = undo_fixture_candidates();
+        let docs = vec![json!({"_id": "doc1", "value": "42"})];
+        let runner = FakeMongoshRunner::returning_stdout(&ok_undo_preview_stdout(&docs));
+        undo_preview_with_runner(
+            &runner,
+            &config,
+            "TestDb",
+            "widgets",
+            &["value".to_string()],
+            &candidates,
+        )
+        .expect("fresh candidates should pass the staleness check");
+    }
+
+    #[test]
+    fn undo_preview_with_runner_refuses_a_missing_document() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let candidates = undo_fixture_candidates();
+        let runner = FakeMongoshRunner::returning_stdout(&ok_undo_preview_stdout(&[]));
+        let err = undo_preview_with_runner(
+            &runner,
+            &config,
+            "TestDb",
+            "widgets",
+            &["value".to_string()],
+            &candidates,
+        )
+        .expect_err("a missing document is a stale candidate");
+        assert!(err.to_string().contains("no longer exists"));
+    }
+
+    #[test]
+    fn undo_preview_with_runner_refuses_a_changed_field() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let candidates = undo_fixture_candidates();
+        let docs = vec![json!({"_id": "doc1", "value": "changed-by-someone-else"})];
+        let runner = FakeMongoshRunner::returning_stdout(&ok_undo_preview_stdout(&docs));
+        let err = undo_preview_with_runner(
+            &runner,
+            &config,
+            "TestDb",
+            "widgets",
+            &["value".to_string()],
+            &candidates,
+        )
+        .expect_err("a changed field is a stale candidate");
+        assert!(
+            err.to_string()
+                .contains("no longer holds its recorded post-mutation value")
+        );
+    }
+
+    #[test]
+    fn undo_preview_with_runner_propagates_process_failure() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let candidates = undo_fixture_candidates();
+        let runner = FakeMongoshRunner::failing_exit(1, "connection refused");
+        let err = undo_preview_with_runner(
+            &runner,
+            &config,
+            "TestDb",
+            "widgets",
+            &["value".to_string()],
+            &candidates,
+        )
+        .expect_err("a failed preview process is a plain error");
+        assert!(err.to_string().contains("mongosh undo preview exited"));
+    }
+
+    // ── Fake-runner: apply_undo_with_runner ─────────────────────────────────
+
+    fn applied_undo_apply_stdout(matched: u64, modified: u64) -> String {
+        json!({
+            "schema_version": 1,
+            "kind": "mongo_undo_apply_result",
+            "status": "applied",
+            "matched_count": matched,
+            "modified_count": modified,
+        })
+        .to_string()
+    }
+
+    fn aborted_undo_apply_stdout(reason: &str, detail: &str) -> String {
+        json!({
+            "schema_version": 1,
+            "kind": "mongo_undo_apply_result",
+            "status": "aborted",
+            "reason": reason,
+            "detail": detail,
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn apply_undo_with_runner_applied_success() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let candidates = undo_fixture_candidates();
+        let runner = FakeMongoshRunner::returning_stdout(&applied_undo_apply_stdout(1, 1));
+        let result = apply_undo_with_runner(
+            &runner,
+            &config,
+            "TestDb",
+            "widgets",
+            &["value".to_string()],
+            &candidates,
+        )
+        .expect("well-formed applied sentinel should parse");
+        assert_eq!(
+            result,
+            UndoExecutionResult::Applied {
+                matched_count: 1,
+                modified_count: 1
+            }
+        );
+    }
+
+    #[test]
+    fn apply_undo_with_runner_aborted_stale_candidate() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let candidates = undo_fixture_candidates();
+        let runner = FakeMongoshRunner::returning_stdout(&aborted_undo_apply_stdout(
+            "stale_candidate",
+            "one or more candidate documents no longer match their recorded post-mutation values",
+        ));
+        let result = apply_undo_with_runner(
+            &runner,
+            &config,
+            "TestDb",
+            "widgets",
+            &["value".to_string()],
+            &candidates,
+        )
+        .expect("aborted is a structured, non-error result");
+        assert!(matches!(
+            result,
+            UndoExecutionResult::Aborted {
+                reason: UndoAbortReason::StaleCandidate,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn apply_undo_with_runner_aborted_transaction_unsupported() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let candidates = undo_fixture_candidates();
+        let runner = FakeMongoshRunner::returning_stdout(&aborted_undo_apply_stdout(
+            "transaction_unsupported",
+            "deployment is not a replica set or mongos",
+        ));
+        let result = apply_undo_with_runner(
+            &runner,
+            &config,
+            "TestDb",
+            "widgets",
+            &["value".to_string()],
+            &candidates,
+        )
+        .expect("should parse");
+        assert!(matches!(
+            result,
+            UndoExecutionResult::Aborted {
+                reason: UndoAbortReason::TransactionUnsupported,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn apply_undo_with_runner_failed_or_unknown_on_nonzero_exit() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let candidates = undo_fixture_candidates();
+        let runner = FakeMongoshRunner::failing_exit(1, "connection reset by peer");
+        let result = apply_undo_with_runner(
+            &runner,
+            &config,
+            "TestDb",
+            "widgets",
+            &["value".to_string()],
+            &candidates,
+        )
+        .expect("a process failure after start is ambiguous, not a hard error");
+        assert!(matches!(
+            result,
+            UndoExecutionResult::FailedOrUnknown { .. }
+        ));
+    }
+
+    #[test]
+    fn apply_undo_with_runner_failed_or_unknown_on_malformed_sentinel() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let candidates = undo_fixture_candidates();
+        let runner = FakeMongoshRunner::returning_stdout("{not valid json");
+        let result = apply_undo_with_runner(
+            &runner,
+            &config,
+            "TestDb",
+            "widgets",
+            &["value".to_string()],
+            &candidates,
+        )
+        .expect("a malformed sentinel after mongosh started is ambiguous, not a hard error");
+        assert!(matches!(
+            result,
+            UndoExecutionResult::FailedOrUnknown { .. }
+        ));
+    }
+
+    #[test]
+    fn apply_undo_with_runner_propagates_spawn_failure_as_plain_error() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let candidates = undo_fixture_candidates();
+        let runner = FakeMongoshRunner::spawn_failure("required tool 'mongosh' not found on PATH");
+        let err = apply_undo_with_runner(
+            &runner,
+            &config,
+            "TestDb",
+            "widgets",
+            &["value".to_string()],
+            &candidates,
+        )
+        .expect_err("mongosh never starting is unambiguous, not FailedOrUnknown");
+        assert!(err.to_string().contains("not found on PATH"));
+    }
+
+    #[test]
+    fn build_undo_apply_eval_js_uses_ordered_bulk_write_and_no_raw_uri() {
+        let candidates = undo_fixture_candidates();
+        let js = build_undo_apply_eval_js("TestDb", "widgets", &["value".to_string()], &candidates)
+            .expect("should build undo apply js");
+        assert!(js.contains("bulkWrite"));
+        assert!(js.contains("ordered: true"));
+        assert!(js.contains("withTransaction"));
+        assert!(!js.contains("mongodb://"));
+        assert!(!js.contains("mongodb+srv://"));
+    }
+
+    // ── load_and_validate_undo_approval ─────────────────────────────────────
+
+    fn loaded_mutation_fixture() -> (LoadedMutationAudit, Vec<UndoCandidate>) {
+        let audit = undoable_mutation_audit("test");
+        let raw = serde_json::to_string(&audit).unwrap();
+        let source_artifact_hash =
+            digest_with_prefix(&serde_json::from_str::<Value>(&raw).unwrap());
+        let candidates = derive_undo_candidates(&audit.candidates);
+        (
+            LoadedMutationAudit {
+                audit,
+                source_artifact_hash,
+            },
+            candidates,
+        )
+    }
+
+    fn write_undo_preview_audit(
+        dir: &Path,
+        loaded: &LoadedMutationAudit,
+        candidates: &[UndoCandidate],
+        expires_in: chrono::Duration,
+    ) -> (PathBuf, String) {
+        let digest = canonical_undo_digest(
+            &loaded.source_artifact_hash,
+            &loaded.audit.database,
+            &loaded.audit.collection,
+            candidates,
+        );
+        let now = Utc::now();
+        let audit = UndoPreviewAudit {
+            schema_version: 1,
+            command: "mongo undo".to_string(),
+            timestamp_utc: now,
+            profile: "test".to_string(),
+            undo_of: PathBuf::from("/tmp/mutation.json"),
+            source_artifact_hash: loaded.source_artifact_hash.clone(),
+            template_id: loaded.audit.template_id.clone(),
+            template_revision: loaded.audit.template_revision,
+            database: loaded.audit.database.clone(),
+            collection: loaded.audit.collection.clone(),
+            status: "previewed".to_string(),
+            candidates: candidates.to_vec(),
+            approval_digest: digest.clone(),
+            created_at_utc: now,
+            expires_at_utc: now + expires_in,
+            mongosh: "mongosh --quiet --eval ***".to_string(),
+        };
+        let path = write_json(
+            dir,
+            "undo-approval.json",
+            &serde_json::to_value(&audit).unwrap(),
+        );
+        (path, digest)
+    }
+
+    #[test]
+    fn load_and_validate_undo_approval_accepts_a_valid_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let (loaded, candidates) = loaded_mutation_fixture();
+        let (path, digest) =
+            write_undo_preview_audit(dir.path(), &loaded, &candidates, chrono::Duration::hours(1));
+        let approved = load_and_validate_undo_approval(&path, &loaded, &candidates, &digest)
+            .expect("a valid, unexpired, matching approval must load");
+        assert_eq!(approved, digest);
+    }
+
+    #[test]
+    fn load_and_validate_undo_approval_rejects_wrong_approve_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        let (loaded, candidates) = loaded_mutation_fixture();
+        let (path, _digest) =
+            write_undo_preview_audit(dir.path(), &loaded, &candidates, chrono::Duration::hours(1));
+        let err = load_and_validate_undo_approval(&path, &loaded, &candidates, "sha256:wrongvalue")
+            .expect_err("a wrong --approve digest must be rejected");
+        assert!(
+            err.to_string()
+                .contains("--approve does not match the approval artifact's recorded digest")
+        );
+    }
+
+    #[test]
+    fn load_and_validate_undo_approval_rejects_expired() {
+        let dir = tempfile::tempdir().unwrap();
+        let (loaded, candidates) = loaded_mutation_fixture();
+        let (path, digest) = write_undo_preview_audit(
+            dir.path(),
+            &loaded,
+            &candidates,
+            chrono::Duration::hours(-1),
+        );
+        let err = load_and_validate_undo_approval(&path, &loaded, &candidates, &digest)
+            .expect_err("an approval past its recorded expires_at_utc must be rejected");
+        assert!(err.to_string().contains("expired"));
+    }
+
+    #[test]
+    fn load_and_validate_undo_approval_rejects_source_hash_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let (loaded, candidates) = loaded_mutation_fixture();
+        let (path, digest) =
+            write_undo_preview_audit(dir.path(), &loaded, &candidates, chrono::Duration::hours(1));
+        // A different loaded mutation artifact (distinct timestamp_utc ->
+        // distinct source_artifact_hash) than the one this approval was
+        // written for.
+        let (other_loaded, _other_candidates) = loaded_mutation_fixture();
+        assert_ne!(
+            loaded.source_artifact_hash,
+            other_loaded.source_artifact_hash
+        );
+        let err = load_and_validate_undo_approval(&path, &other_loaded, &candidates, &digest)
+            .expect_err("a source_artifact_hash mismatch must be rejected");
+        assert!(err.to_string().contains("source_artifact_hash mismatch"));
+    }
+
+    #[test]
+    fn load_and_validate_undo_approval_rejects_tampered_candidates() {
+        let dir = tempfile::tempdir().unwrap();
+        let (loaded, candidates) = loaded_mutation_fixture();
+        let (path, digest) =
+            write_undo_preview_audit(dir.path(), &loaded, &candidates, chrono::Duration::hours(1));
+        let mut tampered = candidates.clone();
+        tampered[0].fields[0].old_value = json!("tampered-value");
+        let err = load_and_validate_undo_approval(&path, &loaded, &tampered, &digest)
+            .expect_err("a mismatched fresh candidate set must be rejected as tampering");
+        assert!(err.to_string().contains("treat this artifact as tampered"));
+    }
+
+    #[test]
+    fn load_and_validate_undo_approval_rejects_unsupported_schema_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let (loaded, candidates) = loaded_mutation_fixture();
+        let (path, digest) =
+            write_undo_preview_audit(dir.path(), &loaded, &candidates, chrono::Duration::hours(1));
+        let mut value: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        value["schema_version"] = json!(2);
+        fs::write(&path, serde_json::to_string_pretty(&value).unwrap()).unwrap();
+        let err = load_and_validate_undo_approval(&path, &loaded, &candidates, &digest)
+            .expect_err("an unsupported schema_version must be rejected");
+        assert!(err.to_string().contains("unsupported schema_version"));
+    }
+
+    #[test]
+    fn load_and_validate_undo_approval_rejects_missing_file() {
+        let (loaded, candidates) = loaded_mutation_fixture();
+        let err = load_and_validate_undo_approval(
+            Path::new("/nonexistent/undo-approval.json"),
+            &loaded,
+            &candidates,
+            "sha256:anything",
+        )
+        .expect_err("a missing approval artifact must be rejected");
+        assert!(
+            err.to_string()
+                .contains("failed to read undo approval artifact")
+        );
+    }
+
+    // ── prepare_undo_apply / execute_undo_apply (full pipeline) ─────────────
+
+    fn fresh_undo_preview_runner() -> FakeMongoshRunner {
+        FakeMongoshRunner::returning_stdout(&ok_undo_preview_stdout(&[
+            json!({"_id": "doc1", "value": "42"}),
+        ]))
+    }
+
+    /// Full valid fixture: an undoable mutation audit artifact on disk plus
+    /// an approved undo-preview artifact tying together into a complete
+    /// `MongoUndoRequest`. Returns the tempdir (kept alive for the artifact
+    /// paths), the managed test config, the assembled request, and the
+    /// mutation artifact's own path (for backlink assertions).
+    fn valid_undo_apply_fixture() -> (tempfile::TempDir, Config, MongoUndoRequest, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let mutation_audit = undoable_mutation_audit("test");
+        let mutation_path = write_json(
+            dir.path(),
+            "mutation.json",
+            &serde_json::to_value(&mutation_audit).unwrap(),
+        );
+
+        let raw = fs::read_to_string(&mutation_path).unwrap();
+        let source_artifact_hash =
+            digest_with_prefix(&serde_json::from_str::<Value>(&raw).unwrap());
+        let candidates = derive_undo_candidates(&mutation_audit.candidates);
+        let digest = canonical_undo_digest(
+            &source_artifact_hash,
+            &mutation_audit.database,
+            &mutation_audit.collection,
+            &candidates,
+        );
+        let now = Utc::now();
+        let preview_audit = UndoPreviewAudit {
+            schema_version: 1,
+            command: "mongo undo".to_string(),
+            timestamp_utc: now,
+            profile: "test".to_string(),
+            undo_of: mutation_path.clone(),
+            source_artifact_hash,
+            template_id: mutation_audit.template_id.clone(),
+            template_revision: mutation_audit.template_revision,
+            database: mutation_audit.database.clone(),
+            collection: mutation_audit.collection.clone(),
+            status: "previewed".to_string(),
+            candidates: candidates.clone(),
+            approval_digest: digest.clone(),
+            created_at_utc: now,
+            expires_at_utc: now + chrono::Duration::hours(1),
+            mongosh: "mongosh --quiet --eval ***".to_string(),
+        };
+        let approval_path = write_json(
+            dir.path(),
+            "undo-approval.json",
+            &serde_json::to_value(&preview_audit).unwrap(),
+        );
+
+        let audit_dir = dir.path().join("audits");
+        let request = MongoUndoRequest {
+            mutation_audit_artifact: mutation_path.clone(),
+            print: false,
+            apply: true,
+            accept_mutation_risk: true,
+            approval_artifact: Some(approval_path),
+            approve: Some(digest),
+            audit_dir,
+        };
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        (dir, config, request, mutation_path)
+    }
+
+    #[test]
+    fn prepare_undo_apply_with_runner_succeeds_end_to_end() {
+        let (_dir, config, request, _mutation_path) = valid_undo_apply_fixture();
+        let runner = fresh_undo_preview_runner();
+        let prepared = prepare_undo_apply_with_runner(&runner, &config, &request)
+            .expect("prepare should succeed with valid fixtures and fresh candidates");
+        assert_eq!(prepared.candidates.len(), 1);
+        assert_eq!(prepared.approval_digest, request.approve.clone().unwrap());
+    }
+
+    #[test]
+    fn prepare_undo_apply_with_runner_fails_closed_on_stale_candidate() {
+        let (_dir, config, request, _mutation_path) = valid_undo_apply_fixture();
+        // Empty docs = the candidate document is missing = stale.
+        let runner = FakeMongoshRunner::returning_stdout(&ok_undo_preview_stdout(&[]));
+        let err = prepare_undo_apply_with_runner(&runner, &config, &request)
+            .expect_err("a stale candidate must fail the prepare phase closed");
+        assert!(err.to_string().contains("no longer exists"));
+    }
+
+    #[test]
+    fn prepare_undo_apply_with_runner_never_auto_runs_after_failed_or_unknown_mutation() {
+        let (dir, config, mut request, mutation_path) = valid_undo_apply_fixture();
+        let mut mutation_audit: MutationExecutionAudit =
+            serde_json::from_str(&fs::read_to_string(&mutation_path).unwrap()).unwrap();
+        mutation_audit.outcome = MutationExecutionOutcome::FailedOrUnknown {
+            detail: "ambiguous".to_string(),
+        };
+        let new_mutation_path = write_json(
+            dir.path(),
+            "mutation.json",
+            &serde_json::to_value(&mutation_audit).unwrap(),
+        );
+        request.mutation_audit_artifact = new_mutation_path;
+
+        let runner = fresh_undo_preview_runner();
+        let err = prepare_undo_apply_with_runner(&runner, &config, &request)
+            .expect_err("undo must never run automatically after a failed_or_unknown mutation");
+        assert!(
+            err.to_string()
+                .contains("must never run automatically after a failed_or_unknown mutation")
+        );
+        assert_eq!(
+            runner.call_count(),
+            0,
+            "the live staleness check must never even run once the source mutation itself is refused"
+        );
+    }
+
+    #[test]
+    fn execute_undo_apply_with_runner_applied_backlinks_into_the_original_mutation_artifact() {
+        let (dir, config, request, mutation_path) = valid_undo_apply_fixture();
+        let prepare_runner = fresh_undo_preview_runner();
+        let prepared = prepare_undo_apply_with_runner(&prepare_runner, &config, &request)
+            .expect("prepare should succeed");
+
+        let apply_runner = FakeMongoshRunner::returning_stdout(&applied_undo_apply_stdout(1, 1));
+        let envelope = execute_undo_apply_with_runner(&apply_runner, &config, prepared, &request)
+            .expect("a well-formed applied sentinel should produce a successful envelope");
+
+        assert!(envelope.ok);
+        assert_eq!(envelope.data["applied"], true);
+        assert_eq!(envelope.data["result"]["status"], "applied");
+        assert!(
+            envelope.data.get("backlink_warning").is_none(),
+            "backlink should succeed silently: {:?}",
+            envelope.data
+        );
+        assert_eq!(
+            apply_runner.call_count(),
+            1,
+            "undo apply must never be retried"
+        );
+
+        let on_disk_mutation: Value =
+            serde_json::from_str(&fs::read_to_string(&mutation_path).unwrap()).unwrap();
+        let undo_audit_path = envelope.data["audit_artifact"].as_str().unwrap();
+        assert_eq!(
+            on_disk_mutation["undo_artifact"], undo_audit_path,
+            "the original mutation artifact must be backlinked to the undo artifact"
+        );
+
+        let audits_dir = dir.path().join("audits");
+        let json_entries: Vec<_> = fs::read_dir(&audits_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
+            .collect();
+        assert_eq!(
+            json_entries.len(),
+            1,
+            "the prepared write and the terminal update must land on the SAME undo artifact file"
+        );
+    }
+
+    #[test]
+    fn execute_undo_apply_with_runner_aborted_does_not_backlink() {
+        let (_dir, config, request, mutation_path) = valid_undo_apply_fixture();
+        let prepare_runner = fresh_undo_preview_runner();
+        let prepared = prepare_undo_apply_with_runner(&prepare_runner, &config, &request)
+            .expect("prepare should succeed");
+
+        let apply_runner = FakeMongoshRunner::returning_stdout(&aborted_undo_apply_stdout(
+            "stale_candidate",
+            "one or more candidate documents no longer match",
+        ));
+        let envelope = execute_undo_apply_with_runner(&apply_runner, &config, prepared, &request)
+            .expect("aborted is a structured, non-error outcome");
+        assert!(envelope.ok);
+        assert_eq!(envelope.data["result"]["status"], "aborted");
+
+        let on_disk_mutation: Value =
+            serde_json::from_str(&fs::read_to_string(&mutation_path).unwrap()).unwrap();
+        assert!(
+            on_disk_mutation
+                .get("undo_artifact")
+                .is_none_or(Value::is_null),
+            "an aborted undo must not backlink into the original mutation artifact"
+        );
+    }
+
+    #[test]
+    fn execute_undo_apply_with_runner_failed_or_unknown_is_an_error_envelope() {
+        let (_dir, config, request, _mutation_path) = valid_undo_apply_fixture();
+        let prepare_runner = fresh_undo_preview_runner();
+        let prepared = prepare_undo_apply_with_runner(&prepare_runner, &config, &request)
+            .expect("prepare should succeed");
+
+        let apply_runner = FakeMongoshRunner::failing_exit(1, "connection reset by peer");
+        let envelope = execute_undo_apply_with_runner(&apply_runner, &config, prepared, &request)
+            .expect("a well-formed envelope must still be returned, never a Rust Err");
+        assert!(
+            !envelope.ok,
+            "an unknown commit status must surface as ok=false, never silently succeed"
+        );
+        assert_eq!(envelope.data["result"]["status"], "failed_or_unknown");
+    }
+
+    #[test]
+    fn execute_undo_apply_with_runner_spawn_failure_is_failed_not_failed_or_unknown() {
+        let (_dir, config, request, _mutation_path) = valid_undo_apply_fixture();
+        let prepare_runner = fresh_undo_preview_runner();
+        let prepared = prepare_undo_apply_with_runner(&prepare_runner, &config, &request)
+            .expect("prepare should succeed");
+
+        let apply_runner =
+            FakeMongoshRunner::spawn_failure("required tool 'mongosh' not found on PATH");
+        let envelope = execute_undo_apply_with_runner(&apply_runner, &config, prepared, &request)
+            .expect("a spawn failure is unambiguous and must still produce a well-formed envelope");
+        assert!(!envelope.ok);
+        assert_eq!(
+            envelope.data["result"]["status"], "failed",
+            "a spawn failure (mongosh never started) is unambiguous -- distinct from failed_or_unknown"
+        );
+    }
+
+    // ── validate_undo_apply_gates / undo_envelope wiring ────────────────────
+
+    #[test]
+    fn validate_undo_apply_gates_reports_every_missing_piece_together() {
+        let request = MongoUndoRequest::default();
+        let err = validate_undo_apply_gates(&request)
+            .expect_err("an entirely empty request is missing every gate");
+        let msg = err.to_string();
+        assert!(msg.contains("--accept-mutation-risk is required"), "{msg}");
+        assert!(msg.contains("--approval-artifact is required"), "{msg}");
+        assert!(msg.contains("--approve is required"), "{msg}");
+    }
+
+    #[test]
+    fn validate_undo_apply_gates_rejects_malformed_approve_digest() {
+        let request = MongoUndoRequest {
+            accept_mutation_risk: true,
+            approval_artifact: Some(PathBuf::from("/tmp/undo-approval.json")),
+            approve: Some("not-a-digest".to_string()),
+            ..Default::default()
+        };
+        let err = validate_undo_apply_gates(&request)
+            .expect_err("a malformed approve digest is rejected");
+        assert!(
+            err.to_string()
+                .contains("must be the 'sha256:' approval digest")
+        );
+    }
+
+    #[test]
+    fn undo_envelope_apply_rejects_incomplete_gates_before_loading_the_mutation_artifact() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let request = MongoUndoRequest {
+            mutation_audit_artifact: PathBuf::from("/nonexistent/mutation.json"),
+            apply: true,
+            ..Default::default()
+        };
+        let err = undo_envelope(&config, &request).expect_err("gates are incomplete");
+        assert!(
+            err.to_string().contains("missing required safety gate(s)"),
+            "expected the gate-validation error, not a file-read error: {err}"
+        );
+    }
+
+    #[test]
+    fn undo_envelope_print_and_preview_reject_a_nonexistent_mutation_artifact() {
+        let config = test_managed_config(managed_with_url("mongodb://localhost:27017/test"));
+        let base = MongoUndoRequest {
+            mutation_audit_artifact: PathBuf::from("/nonexistent/mutation.json"),
+            ..Default::default()
+        };
+
+        let print_request = MongoUndoRequest {
+            print: true,
+            ..base.clone()
+        };
+        let err = undo_envelope(&config, &print_request)
+            .expect_err("a nonexistent mutation artifact must be rejected in --print mode too");
+        assert!(
+            err.to_string()
+                .contains("failed to read mutation audit artifact")
+        );
+
+        let err = undo_envelope(&config, &base)
+            .expect_err("a nonexistent mutation artifact must be rejected in preview mode");
+        assert!(
+            err.to_string()
+                .contains("failed to read mutation audit artifact")
+        );
     }
 }

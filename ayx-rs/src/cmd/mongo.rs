@@ -26,14 +26,22 @@
 //! anything a loaded artifact actually proved. `mutate_envelope` itself
 //! still runs the whole apply flow end-to-end (prepare then execute, no
 //! confirmation) for print/preview modes and any other direct caller.
+//!
+//! `mongo undo --apply` follows the exact same prepare/confirm/execute
+//! split — `prepare_undo_apply` (loading + validating the source mutation
+//! artifact, deriving the guarded inverse, a live staleness re-check, and
+//! approval-artifact validation) runs before `require_tty_confirmation`,
+//! which then names the real restore target and candidate count, before
+//! `execute_undo_apply` runs.
 
 use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_server::mongo::{
-    MongoMutateRequest, PreparedMutationApply, backup_envelope,
-    doctor_envelope as mongo_doctor_envelope, execute_mutation_apply, inventory_envelope,
-    mutate_envelope, parse_mutation_params, prepare_mutation_apply,
-    query_envelope as mongo_query_envelope, restore_envelope, status_envelope,
+    MongoMutateRequest, MongoUndoRequest, PreparedMutationApply, PreparedUndoApply,
+    backup_envelope, doctor_envelope as mongo_doctor_envelope, execute_mutation_apply,
+    execute_undo_apply, inventory_envelope, mutate_envelope, parse_mutation_params,
+    prepare_mutation_apply, prepare_undo_apply, query_envelope as mongo_query_envelope,
+    restore_envelope, status_envelope, undo_envelope,
 };
 
 use crate::MongoCommand;
@@ -138,11 +146,42 @@ pub fn execute(environment: Option<&str>, yes: bool, command: MongoCommand) -> R
                 mutate_envelope(&profile_cfg, &request)
             }
         }
-        MongoCommand::Undo { .. } => {
-            anyhow::bail!(
-                "mongo undo is not yet implemented; the guarded-rollback executor and the \
-                 mutation execution audit artifact it reads from land in a follow-up task"
-            );
+        MongoCommand::Undo {
+            profile,
+            mutation_audit_artifact,
+            print,
+            apply,
+            accept_mutation_risk,
+            approval_artifact,
+            approve,
+            audit_dir,
+        } => {
+            let profile_cfg = runtime.load_profile(profile.as_deref())?;
+            let request = MongoUndoRequest {
+                mutation_audit_artifact,
+                print,
+                apply,
+                accept_mutation_risk,
+                approval_artifact,
+                approve,
+                audit_dir,
+            };
+
+            if request.apply {
+                // Read-only first: CLI gates, source mutation artifact
+                // loading + validation, the guarded inverse, a live
+                // staleness re-check, and approval-artifact validation.
+                // Nothing has been written and mongosh has not been used to
+                // write anything by the time this returns.
+                let prepared = prepare_undo_apply(&profile_cfg, &request)?;
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &mongo_undo_apply_warning(&profile_cfg.profile_name, &prepared),
+                )?;
+                execute_undo_apply(&profile_cfg, prepared, &request)
+            } else {
+                undo_envelope(&profile_cfg, &request)
+            }
         }
     }
 }
@@ -171,6 +210,30 @@ fn mongo_mutation_apply_warning(profile_name: &str, prepared: &PreparedMutationA
         digest = prepared.approval_digest,
         backup = prepared.backup_audit_artifact.display(),
         backup_age = prepared.backup_timestamp_utc,
+        approval = prepared.approval_artifact.display(),
+    )
+}
+
+/// Build the TTY confirmation prompt for `mongo undo --apply`. Mirrors
+/// `mongo_mutation_apply_warning`: built from the *prepared* undo (the
+/// loaded, freshness-verified source mutation and its guarded-inverse
+/// candidate set), so it names the real restore target and the real
+/// candidate count, not just raw request paths.
+fn mongo_undo_apply_warning(profile_name: &str, prepared: &PreparedUndoApply) -> String {
+    format!(
+        "About to APPLY mongo undo of mutation template '{template}' (rev {revision}) on \
+         profile '{profile_name}': restoring {candidate_count} document(s) in \
+         '{database}.{collection}'. Approving digest: {digest}. Undoing mutation artifact: \
+         {undo_of}. Approval artifact: {approval}. This runs a single no-retry transactional \
+         Mongo write and cannot itself be undone. Review the approved restore diff before \
+         proceeding.",
+        template = prepared.loaded.audit.template_id,
+        revision = prepared.loaded.audit.template_revision,
+        candidate_count = prepared.candidates.len(),
+        database = prepared.loaded.audit.database,
+        collection = prepared.loaded.audit.collection,
+        digest = prepared.approval_digest,
+        undo_of = prepared.mutation_audit_artifact.display(),
         approval = prepared.approval_artifact.display(),
     )
 }
@@ -240,5 +303,94 @@ mod tests {
         assert!(message.contains("rev 3"), "{message}");
         assert!(message.contains("myprofile"), "{message}");
         assert!(message.contains("sha256:cccc"), "{message}");
+    }
+
+    /// A hand-built `PreparedUndoApply` — everything `mongo_undo_apply_warning`
+    /// needs, without going through `prepare_undo_apply` (which requires a
+    /// live mongosh staleness check).
+    fn fixture_prepared_undo() -> PreparedUndoApply {
+        use ayx_server::mongo::{
+            CandidateDiff, FieldDiff, LoadedMutationAudit, MutationExecutionAudit,
+            MutationExecutionOutcome, UndoCandidate, UndoFieldInverse,
+        };
+
+        let candidates = ayx_server::mongo::CandidateSnapshot {
+            matched_count: 1,
+            candidate_ids: vec![serde_json::json!("doc1")],
+            raw_docs: vec![],
+            field_diffs: vec![CandidateDiff {
+                id: serde_json::json!("doc1"),
+                fields: vec![FieldDiff {
+                    path: "value".to_string(),
+                    old_present: true,
+                    old_value: serde_json::json!("old"),
+                    new_value: serde_json::json!("42"),
+                }],
+            }],
+        };
+        let audit = MutationExecutionAudit {
+            schema_version: 1,
+            command: "mongo mutate".to_string(),
+            timestamp_utc: Utc::now(),
+            profile: "myprofile".to_string(),
+            template_id: "test_template".to_string(),
+            template_revision: 3,
+            template_source_digest: "sha256:aaaa".to_string(),
+            parameter_digest: "sha256:bbbb".to_string(),
+            database: "TestDb".to_string(),
+            collection: "widgets".to_string(),
+            max_affected: 10,
+            rollback: "guarded_set_inverse".to_string(),
+            approval_digest: "sha256:cccc".to_string(),
+            approval_artifact: PathBuf::from("/tmp/mutate-approval.json"),
+            backup_audit_artifact: PathBuf::from("/tmp/backup.json"),
+            backup_timestamp_utc: Utc::now(),
+            connection: serde_json::json!({}),
+            candidates,
+            outcome: MutationExecutionOutcome::Applied {
+                matched_count: 1,
+                modified_count: 1,
+            },
+            undo_artifact: None,
+        };
+
+        PreparedUndoApply {
+            mutation_audit_artifact: PathBuf::from("/tmp/mutation-audit.json"),
+            loaded: LoadedMutationAudit {
+                audit,
+                source_artifact_hash: "sha256:eeee".to_string(),
+            },
+            candidates: vec![UndoCandidate {
+                id: serde_json::json!("doc1"),
+                fields: vec![UndoFieldInverse {
+                    path: "value".to_string(),
+                    old_present: true,
+                    old_value: serde_json::json!("old"),
+                    post_value: serde_json::json!("42"),
+                }],
+            }],
+            field_paths: vec!["value".to_string()],
+            approval_digest: "sha256:ffff".to_string(),
+            approval_artifact: PathBuf::from("/tmp/undo-approval.json"),
+        }
+    }
+
+    #[test]
+    fn mongo_undo_apply_warning_names_the_real_target_and_candidate_count() {
+        let prepared = fixture_prepared_undo();
+        let message = mongo_undo_apply_warning("myprofile", &prepared);
+        assert!(
+            message.contains("TestDb.widgets"),
+            "must name the real target database.collection: {message}"
+        );
+        assert!(
+            message.contains("restoring 1 document"),
+            "must name the real candidate count: {message}"
+        );
+        assert!(message.contains("test_template"), "{message}");
+        assert!(message.contains("rev 3"), "{message}");
+        assert!(message.contains("myprofile"), "{message}");
+        assert!(message.contains("sha256:ffff"), "{message}");
+        assert!(message.contains("/tmp/mutation-audit.json"), "{message}");
     }
 }

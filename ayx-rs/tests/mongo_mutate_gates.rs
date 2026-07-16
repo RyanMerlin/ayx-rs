@@ -29,11 +29,23 @@
 //! `ayx-rs/src/cmd/mongo.rs`'s own `#[cfg(test)]` module instead, using a
 //! hand-built `PreparedMutationApply` — see
 //! `mongo_mutation_apply_warning_names_the_real_target_and_matched_count`.
+//!
+//! **`mongo undo`** is different: it reads its entire target from the
+//! `--mutation-audit-artifact` file, not from the compiled-in template
+//! registry, so a hand-built, valid `MutationExecutionAudit` fixture (see
+//! `write_undoable_mutation_fixture`) lets these tests reach all the way to
+//! the live `mongosh` staleness-check boundary — further than the mutate
+//! tests can reach, since no `executable` mutation template ships.
 
 use std::fs;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use ayx_core::profile::{AyxState, Config, MongoDatabases, MongoManaged, MongoMode, MongoProfile};
+use ayx_server::mongo::{
+    CandidateDiff, CandidateSnapshot, FieldDiff, MutationExecutionAudit, MutationExecutionOutcome,
+};
+use chrono::Utc;
 use tempfile::TempDir;
 
 const PROFILE_NAME: &str = "mongotest";
@@ -408,19 +420,105 @@ fn apply_with_yes_reaches_the_same_prepare_boundary() {
     assert_never_touched_mongosh(&err);
 }
 
-// ── mongo undo: Clap variant exists but execution is intentionally stubbed ──
+// ── mongo undo (plan Task 4 Step 4) ─────────────────────────────────────────
+
+/// A valid, undoable `MutationExecutionAudit` fixture: one candidate
+/// (`_id: "doc1"`), field `value` restored from `"old"` (the mutation set
+/// it to `"42"`). Written to `<home>/mutation-audit.json`. Unlike
+/// `mongo mutate` (whose only shipped template is `preview_only`), `mongo
+/// undo` reads its entire target from this file, so this fixture lets these
+/// tests reach the live `mongosh` staleness-check boundary.
+fn write_undoable_mutation_fixture(home: &Path) -> std::path::PathBuf {
+    let audit = MutationExecutionAudit {
+        schema_version: 1,
+        command: "mongo mutate".to_string(),
+        timestamp_utc: Utc::now(),
+        profile: PROFILE_NAME.to_string(),
+        template_id: "fixture_template".to_string(),
+        template_revision: 1,
+        template_source_digest: "sha256:aaaa".to_string(),
+        parameter_digest: "sha256:bbbb".to_string(),
+        database: "TestDb".to_string(),
+        collection: "widgets".to_string(),
+        max_affected: 10,
+        rollback: "guarded_set_inverse".to_string(),
+        approval_digest: "sha256:cccc".to_string(),
+        approval_artifact: std::path::PathBuf::from("/tmp/fixture-mutate-approval.json"),
+        backup_audit_artifact: std::path::PathBuf::from("/tmp/fixture-backup.json"),
+        backup_timestamp_utc: Utc::now(),
+        connection: serde_json::json!({}),
+        candidates: CandidateSnapshot {
+            matched_count: 1,
+            candidate_ids: vec![serde_json::json!("doc1")],
+            raw_docs: vec![serde_json::json!({"_id": "doc1", "value": "42"})],
+            field_diffs: vec![CandidateDiff {
+                id: serde_json::json!("doc1"),
+                fields: vec![FieldDiff {
+                    path: "value".to_string(),
+                    old_present: true,
+                    old_value: serde_json::json!("old"),
+                    new_value: serde_json::json!("42"),
+                }],
+            }],
+        },
+        outcome: MutationExecutionOutcome::Applied {
+            matched_count: 1,
+            modified_count: 1,
+        },
+        undo_artifact: None,
+    };
+    let path = home.join("mutation-audit.json");
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&audit).expect("serialize undo fixture"),
+    )
+    .expect("write undo fixture");
+    path
+}
 
 #[test]
-fn undo_variant_parses_and_reports_not_yet_implemented() {
+fn undo_with_a_nonexistent_mutation_artifact_is_rejected() {
     let fixture = MongoFixture::new();
     let output = fixture.run(&[
         "mongo",
         "undo",
         "--mutation-audit-artifact",
-        "/tmp/mutation-audit.json",
+        "/tmp/does-not-exist-mutation-audit.json",
     ]);
     assert!(!output.status.success());
-    assert!(stderr(&output).contains("not yet implemented"));
+    assert!(
+        stderr(&output).contains("failed to read mutation audit artifact"),
+        "expected undo_envelope's preview branch to reach load_applied_mutation_audit, got: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn undo_default_preview_reaches_the_live_staleness_check_boundary() {
+    // No executable mutation template is needed for undo (unlike mongo
+    // mutate) -- a hand-built, valid, undoable fixture reaches all the way
+    // to undo_preview's live mongosh call. This test environment has no
+    // mongosh installed, so it fails there -- past artifact loading,
+    // past deriving the guarded inverse, right at the live boundary.
+    let fixture = MongoFixture::new();
+    let mutation_path = write_undoable_mutation_fixture(fixture.home.path());
+    let output = fixture.run(&[
+        "mongo",
+        "undo",
+        "--mutation-audit-artifact",
+        mutation_path.to_str().unwrap(),
+    ]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(
+        !err.contains("is not undoable"),
+        "the fixture is a valid, undoable artifact: {err}"
+    );
+    assert!(
+        err.contains("required tool 'mongosh' not found on PATH")
+            || err.contains("failed to execute 'mongosh"),
+        "expected to reach the live staleness-check boundary, got: {err}"
+    );
 }
 
 #[test]
@@ -436,4 +534,86 @@ fn undo_print_conflicts_with_apply() {
     ]);
     assert!(!output.status.success());
     assert!(stderr(&output).contains("cannot be used with"));
+}
+
+#[test]
+fn undo_print_conflicts_with_approval_artifact_and_approve() {
+    let fixture = MongoFixture::new();
+    for flag_and_value in [
+        vec!["--approval-artifact", "/tmp/undo-approval.json"],
+        vec!["--approve", "sha256:deadbeef"],
+    ] {
+        let mut args = vec![
+            "mongo",
+            "undo",
+            "--mutation-audit-artifact",
+            "/tmp/mutation-audit.json",
+            "--print",
+        ];
+        args.extend(flag_and_value);
+        let output = fixture.run(&args);
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains("cannot be used with"));
+    }
+}
+
+#[test]
+fn undo_apply_with_nothing_else_reports_every_missing_gate_together() {
+    let fixture = MongoFixture::new();
+    let output = fixture.run(&[
+        "mongo",
+        "undo",
+        "--mutation-audit-artifact",
+        "/tmp/mutation-audit.json",
+        "--apply",
+    ]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(err.contains("--accept-mutation-risk is required"), "{err}");
+    assert!(err.contains("--approval-artifact is required"), "{err}");
+    assert!(err.contains("--approve is required"), "{err}");
+    assert_never_touched_mongosh(&err);
+}
+
+#[test]
+fn undo_apply_reaches_prepare_before_confirmation() {
+    // Mirrors apply_without_yes_reaches_prepare_before_confirmation for
+    // mongo mutate: prepare_undo_apply (which, for undo, includes a live
+    // staleness check) runs in full BEFORE confirmation. With a valid,
+    // undoable fixture and a complete gate tuple, prepare reaches the live
+    // mongosh boundary (unavailable in this test environment) -- proving
+    // it runs unconditionally ahead of the confirmation gate.
+    let fixture = MongoFixture::new();
+    let mutation_path = write_undoable_mutation_fixture(fixture.home.path());
+    let output = fixture.run(&[
+        "mongo",
+        "undo",
+        "--mutation-audit-artifact",
+        mutation_path.to_str().unwrap(),
+        "--apply",
+        "--accept-mutation-risk",
+        "--approval-artifact",
+        "/tmp/fixture-undo-approval.json",
+        "--approve",
+        "sha256:deadbeef",
+    ]);
+    assert!(!output.status.success());
+    let err = stderr(&output);
+    assert!(
+        !err.contains("destructive operation requires confirmation"),
+        "confirmation must never be reached when prepare itself already failed: {err}"
+    );
+    assert!(
+        !err.contains("missing required safety gate"),
+        "the apply tuple was complete: {err}"
+    );
+    assert!(
+        !err.contains("is not undoable"),
+        "the fixture is a valid, undoable artifact: {err}"
+    );
+    assert!(
+        err.contains("required tool 'mongosh' not found on PATH")
+            || err.contains("failed to execute 'mongosh"),
+        "expected to reach the live staleness-check boundary, got: {err}"
+    );
 }

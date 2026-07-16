@@ -807,14 +807,27 @@ pub(crate) enum MongoCommand {
         /// run being reversed.
         #[arg(long, value_name = "PATH")]
         mutation_audit_artifact: PathBuf,
-        #[arg(long, conflicts_with_all = ["apply", "approve"])]
+        /// Render the resolved undo mongosh invocation without querying the
+        /// database or writing an audit artifact. Mutually exclusive with
+        /// the apply flags below.
+        #[arg(
+            long,
+            conflicts_with_all = ["apply", "approval_artifact", "approve"]
+        )]
         print: bool,
+        /// Execute the undo live. Requires --accept-mutation-risk,
+        /// --approval-artifact, and --approve together.
         #[arg(long)]
         apply: bool,
         #[arg(long)]
         accept_mutation_risk: bool,
-        /// The `sha256:` approval digest for the undo, mirroring `mongo
-        /// mutate --approve`.
+        /// Path to the audit artifact this command wrote on a prior
+        /// (non-apply) undo preview run — proves a human reviewed the exact
+        /// restore diff before approving it.
+        #[arg(long, value_name = "PATH")]
+        approval_artifact: Option<PathBuf>,
+        /// The `sha256:` approval digest printed by the undo preview run,
+        /// mirroring `mongo mutate --approve`.
         #[arg(long, value_name = "DIGEST")]
         approve: Option<String>,
         #[arg(long, default_value = "audits")]
