@@ -31,6 +31,9 @@ const TRANSIENT_RETRY_ATTEMPTS: u32 = 3;
 const OTP_ATTEMPTS_PER_REFERENCE: u32 = 3;
 /// Total passcode emails sent per login() call before giving up entirely.
 const MAX_OTP_SENDS: u32 = 2;
+/// Workspace-password re-prompt attempts before bailing (interactive path
+/// only — see workspace_login_with_reprompt).
+const WORKSPACE_PASSWORD_ATTEMPTS: u32 = 3;
 
 /// Retries `attempt_once` up to `max_attempts` times. `should_retry_err`
 /// decides whether a returned error is worth retrying; `should_retry_ok`
@@ -377,9 +380,8 @@ where
          the auth flow may have changed",
     )?;
 
-    // 4. Submit the workspace password.
-    let ws_password = resolve_workspace_password()?;
-    submit_workspace_password(&client, base, email, &ws_password)?;
+    // 4. Submit the workspace password, re-prompting on rejection.
+    workspace_login_with_reprompt(&client, base, email)?;
 
     // 5. Resume the OIDC interaction; the BFF exchanges the code server-side and
     //    sets the local-auth-workspace cookie.
@@ -494,14 +496,15 @@ fn resolve_workspace_name(
     bail!("workspace {workspace_gid} not found in /v4/auth/accounts (not a member?)")
 }
 
-/// Read the workspace password from `AYX_ONE_WS_PASSWORD`, prompting on the
-/// terminal (masked, no echo) if it is not set.
-fn resolve_workspace_password() -> Result<String> {
-    if let Ok(pw) = std::env::var("AYX_ONE_WS_PASSWORD")
-        && !pw.is_empty()
-    {
-        return Ok(pw);
-    }
+/// The workspace password from `AYX_ONE_WS_PASSWORD`, if set and non-empty.
+fn workspace_password_from_env() -> Option<String> {
+    std::env::var("AYX_ONE_WS_PASSWORD")
+        .ok()
+        .filter(|pw| !pw.is_empty())
+}
+
+/// Prompt on the terminal for the workspace password (masked, no echo).
+fn prompt_workspace_password() -> Result<String> {
     eprint!("Workspace password: ");
     std::io::stderr().flush().ok();
     let pw = rpassword::read_password().context(
@@ -513,6 +516,51 @@ fn resolve_workspace_password() -> Result<String> {
         bail!("workspace password is required (set AYX_ONE_WS_PASSWORD or enter it when prompted)");
     }
     Ok(pw)
+}
+
+/// Whether to try the workspace password again after a rejection.
+/// A password sourced from `AYX_ONE_WS_PASSWORD` never gets retried — a
+/// fixed environment value will fail identically every time, so retrying
+/// it would just burn attempts (and requests against the live auth
+/// endpoint) for nothing. Only an interactively-typed password, which
+/// could have been mistyped, gets the retry budget.
+fn should_retry_workspace_password(attempt: u32, from_env: bool) -> bool {
+    !from_env && attempt < WORKSPACE_PASSWORD_ATTEMPTS
+}
+
+/// Submits the workspace password, re-prompting on rejection when the
+/// password came from interactive input (see should_retry_workspace_password).
+fn workspace_login_with_reprompt(client: &Client, base: &str, email: &str) -> Result<()> {
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        let password_source = workspace_password_from_env();
+        let from_env = password_source.is_some();
+        let password = match password_source {
+            Some(pw) => pw,
+            None => prompt_workspace_password()?,
+        };
+        match submit_workspace_password(client, base, email, &password) {
+            Ok(()) => return Ok(()),
+            Err(err) if from_env => {
+                return Err(err.context(
+                    "AYX_ONE_WS_PASSWORD was rejected — not retrying, since a fixed \
+                     environment value won't change between attempts; check the secret",
+                ));
+            }
+            Err(err) if !should_retry_workspace_password(attempt, from_env) => {
+                return Err(err.context(format!(
+                    "workspace password rejected {WORKSPACE_PASSWORD_ATTEMPTS} times — \
+                     run `ayx one platform auth login` again"
+                )));
+            }
+            Err(_) => {
+                eprintln!(
+                    "Workspace password rejected ({attempt}/{WORKSPACE_PASSWORD_ATTEMPTS}) — try again."
+                );
+            }
+        }
+    }
 }
 
 /// Returns `true` if `host` is allowed given the auth base host.
@@ -685,9 +733,11 @@ fn cookie_value_from_jar(jar: &Jar, url: &url::Url, name: &str) -> Option<String
 
 #[cfg(test)]
 mod tests {
+    use super::OtpAction;
     use super::retry_transient;
-    use super::{OtpAction, resolve_workspace_password};
+    use super::should_retry_workspace_password;
     use super::{extract_interaction_id, host_allowed, is_valid_interaction_id, next_otp_action};
+    use super::{prompt_workspace_password, workspace_password_from_env};
     use serial_test::serial;
 
     #[test]
@@ -979,17 +1029,34 @@ mod tests {
         assert_eq!(extract_interaction_id(&[]), None);
     }
 
-    // ── resolve_workspace_password ───────────────────────────────────────────
+    // ── workspace_password_from_env / prompt_workspace_password ─────────────
+
+    #[test]
+    fn should_retry_workspace_password_false_when_from_env() {
+        assert!(!should_retry_workspace_password(1, true));
+        assert!(!should_retry_workspace_password(3, true));
+    }
+
+    #[test]
+    fn should_retry_workspace_password_true_while_attempts_remain_interactively() {
+        assert!(should_retry_workspace_password(1, false));
+        assert!(should_retry_workspace_password(2, false));
+    }
+
+    #[test]
+    fn should_retry_workspace_password_false_when_interactive_attempts_exhausted() {
+        assert!(!should_retry_workspace_password(3, false));
+    }
 
     #[test]
     #[serial]
-    fn resolve_workspace_password_env_var_short_circuit() {
+    fn workspace_password_from_env_short_circuit() {
         // nextest process-isolates each test; #[serial] additionally guards
         // against a non-nextest (threaded) runner racing on the shared env var.
         unsafe { std::env::set_var("AYX_ONE_WS_PASSWORD", "test-secret-pw") };
-        let result = resolve_workspace_password();
+        let result = workspace_password_from_env();
         unsafe { std::env::remove_var("AYX_ONE_WS_PASSWORD") };
-        assert_eq!(result.unwrap(), "test-secret-pw");
+        assert_eq!(result, Some("test-secret-pw".to_string()));
     }
 
     /// Returns `true` if this process has a real controlling terminal
@@ -1034,15 +1101,17 @@ mod tests {
 
     #[test]
     #[serial]
-    fn resolve_workspace_password_no_tty_fails_cleanly() {
-        // With AYX_ONE_WS_PASSWORD unset, this falls through to the masked
-        // terminal read. In a headless environment (no controlling terminal
-        // — true for CI on all three OSes this crate's test matrix covers)
-        // rpassword returns an `Err` almost instantly, which is what this
-        // test asserts. But if this test runs from a real interactive
-        // terminal (a developer's local `cargo nextest run`), rpassword
-        // successfully opens the terminal and blocks waiting for actual
-        // keystrokes, with no timeout of its own.
+    fn prompt_workspace_password_no_tty_fails_cleanly() {
+        // This directly exercises the masked terminal read — in production,
+        // `prompt_workspace_password` is only reached once
+        // `workspace_password_from_env` has already come back empty. In a
+        // headless environment (no controlling terminal — true for CI on all
+        // three OSes this crate's test matrix covers) rpassword returns an
+        // `Err` almost instantly, which is what this test asserts. But if
+        // this test runs from a real interactive terminal (a developer's
+        // local `cargo nextest run`), rpassword successfully opens the
+        // terminal and blocks waiting for actual keystrokes, with no timeout
+        // of its own.
         //
         // Two other approaches were tried and rejected during review:
         //   1. An unconditional, Unix-only `/dev/tty` probe-and-skip — wrong
@@ -1068,7 +1137,7 @@ mod tests {
         // terminal to corrupt.
         if has_controlling_terminal_for_test() {
             eprintln!(
-                "note: resolve_workspace_password_no_tty_fails_cleanly skipped — \
+                "note: prompt_workspace_password_no_tty_fails_cleanly skipped — \
                  a real controlling terminal is attached to this test process, \
                  so the no-TTY path can't be exercised here without risking a \
                  blocked read that leaves local echo disabled"
@@ -1076,8 +1145,7 @@ mod tests {
             return;
         }
 
-        unsafe { std::env::remove_var("AYX_ONE_WS_PASSWORD") };
-        let err = resolve_workspace_password()
+        let err = prompt_workspace_password()
             .expect_err("expected an error with no TTY and no env var set");
         let msg = err.to_string();
         assert!(
