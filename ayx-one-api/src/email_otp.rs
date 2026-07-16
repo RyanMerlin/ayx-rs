@@ -25,7 +25,6 @@ const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
 /// Calls where a retry COULD duplicate a side effect (sendPasscode,
 /// apiAccessTokens mint) use a narrower retry predicate instead of a
 /// separate constant — see `is_pre_send_failure`.
-#[allow(dead_code)] // wired up at call sites in Task 2+ of the auth-hardening plan
 const TRANSIENT_RETRY_ATTEMPTS: u32 = 3;
 
 /// Retries `attempt_once` up to `max_attempts` times. `should_retry_err`
@@ -40,7 +39,6 @@ const TRANSIENT_RETRY_ATTEMPTS: u32 = 3;
 /// constructing real `reqwest` types (which have no public test
 /// constructors) — callers plug in `reqwest::blocking::Response` /
 /// `reqwest::Error` at the call site.
-#[allow(dead_code)] // wired up at call sites in Task 2+ of the auth-hardening plan
 fn retry_transient<T, E>(
     max_attempts: u32,
     should_retry_err: impl Fn(&E) -> bool,
@@ -85,7 +83,6 @@ fn retry_transient<T, E>(
 /// overall timeout fired. Only genuinely synchronous, immediate connect
 /// failures are covered here. If this client ever adds `.connect_timeout()`,
 /// this predicate's coverage should be re-verified.
-#[allow(dead_code)] // wired up at call sites in Task 2+ of the auth-hardening plan
 fn is_pre_send_failure(err: &reqwest::Error) -> bool {
     err.is_connect()
 }
@@ -122,6 +119,34 @@ pub struct OtpAuthResult {
     pub workspace_gid: String,
     /// ISO 8601 expiry from `tokenInfo.expiredAt`, if present.
     pub token_expires_at: Option<String>,
+}
+
+/// `POST /v4/auth/sendPasscode`. Retries only on a pre-send failure — see
+/// `is_pre_send_failure` — because a retry after the request reached the
+/// server risks sending a second passcode email for the same login attempt.
+fn send_passcode(client: &Client, base: &str, email: &str) -> Result<String> {
+    let response = retry_transient(
+        TRANSIENT_RETRY_ATTEMPTS,
+        is_pre_send_failure,
+        |_: &Response| false,
+        || {
+            client
+                .post(format!("{base}/v4/auth/sendPasscode"))
+                .json(&serde_json::json!({ "email": email }))
+                .send()
+        },
+    )
+    .context("sendPasscode request failed")?
+    .error_for_status()
+    .context("sendPasscode returned an error status")?;
+    let send: Value = response
+        .json()
+        .context("sendPasscode response was not JSON")?;
+    let reference_id = send["passcodeReferenceId"]
+        .as_str()
+        .context("sendPasscode response missing passcodeReferenceId")?
+        .to_string();
+    Ok(reference_id)
 }
 
 /// Authenticate via email OTP and return a 30-day PAT.
@@ -188,19 +213,7 @@ where
     }
 
     // 1. Send the passcode.
-    let send: Value = client
-        .post(format!("{base}/v4/auth/sendPasscode"))
-        .json(&serde_json::json!({ "email": email }))
-        .send()
-        .context("sendPasscode request failed")?
-        .error_for_status()
-        .context("sendPasscode returned an error status")?
-        .json()
-        .context("sendPasscode response was not JSON")?;
-    let reference_id = send["passcodeReferenceId"]
-        .as_str()
-        .context("sendPasscode response missing passcodeReferenceId")?
-        .to_string();
+    let reference_id = send_passcode(&client, base, email)?;
 
     // 2. Prompt for the OTP and validate it.
     let otp = get_otp()?;
@@ -269,23 +282,33 @@ where
         .context("local-auth-workspace cookie was not set — authentication did not complete")?;
     let bearer = decode_local_auth_workspace(&law)?;
 
-    // 7. Mint a 30-day PAT.
+    // 7. Mint a 30-day PAT. Retries only on a pre-send failure — a retry
+    //    after the request reached the server risks minting a second,
+    //    orphaned PAT the caller never sees (see is_pre_send_failure).
     let csrf = cookie_value_from_jar(&jar, &base_for_cookies, "x-csrf-token").unwrap_or_default();
-    let pat: Value = client
-        .post(format!("{base}/v4/apiAccessTokens"))
-        .header("x-csrf-token", csrf)
-        .header("x-alteryx-workspace-gid", workspace_gid)
-        .bearer_auth(&bearer)
-        .json(&serde_json::json!({
-            "name": "ayx-rs-cli",
-            "lifetimeSeconds": 2_592_000,
-        }))
-        .send()
-        .context("apiAccessTokens request failed")?
-        .error_for_status()
-        .context("apiAccessTokens returned an error status")?
-        .json()
-        .context("apiAccessTokens response was not JSON")?;
+    let pat_payload = serde_json::json!({
+        "name": "ayx-rs-cli",
+        "lifetimeSeconds": 2_592_000,
+    });
+    let pat: Value = retry_transient(
+        TRANSIENT_RETRY_ATTEMPTS,
+        is_pre_send_failure,
+        |_: &Response| false,
+        || {
+            client
+                .post(format!("{base}/v4/apiAccessTokens"))
+                .header("x-csrf-token", csrf.as_str())
+                .header("x-alteryx-workspace-gid", workspace_gid)
+                .bearer_auth(&bearer)
+                .json(&pat_payload)
+                .send()
+        },
+    )
+    .context("apiAccessTokens request failed")?
+    .error_for_status()
+    .context("apiAccessTokens returned an error status")?
+    .json()
+    .context("apiAccessTokens response was not JSON")?;
 
     let access_token = pat["tokenValue"]
         .as_str()
