@@ -2269,9 +2269,10 @@ fn build_candidate_snapshot(
     })
 }
 
-/// Shared JS helper the apply program uses for post-update field
-/// verification — the only place JS still needs to walk a dotted path,
-/// since that comparison must happen live inside the transaction.
+/// Shared JS helper the apply program uses for both the pre-write preflight
+/// comparison and post-update field verification — the only places JS still
+/// needs to walk a dotted path, since both comparisons must happen live
+/// inside the transaction.
 const AYX_GET_PATH_JS: &str = r#"function ayxGetPath(obj, path) {
   var parts = path.split('.');
   var cur = obj;
@@ -2342,7 +2343,15 @@ if (!supportsTransactions) {
       if (preDocs.length !== approvedMatchedCount) {
         ayxAbort("count_mismatch", "expected " + approvedMatchedCount + " candidates, found " + preDocs.length);
       }
-      if (JSON.stringify(preDocs) !== JSON.stringify(approvedDocs)) {
+      const preflightOk = preDocs.every(function (doc, i) {
+        const approvedDoc = approvedDocs[i];
+        if (approvedDoc === undefined) { return false; }
+        if (JSON.stringify(doc._id) !== JSON.stringify(approvedDoc._id)) { return false; }
+        return setFields.every(function (path) {
+          return JSON.stringify(ayxGetPath(doc, path)) === JSON.stringify(ayxGetPath(approvedDoc, path));
+        });
+      });
+      if (!preflightOk) {
         ayxAbort("preflight_mismatch", "candidate identities or prior field values changed since the approved preview");
       }
 
@@ -2381,11 +2390,15 @@ print(JSON.stringify(finalSentinel));
 
 /// Build the single no-retry transactional apply program (plan Task 2 Step
 /// 3). Re-queries the target with the same deterministic ordering and
-/// projection as the approved preview, compares raw documents byte-for-byte
-/// against `approved.raw_docs`, applies the bounded `$set` scoped to
-/// exactly the re-verified `_id`s, then re-queries and verifies every
-/// post-value before letting the transaction commit. Never falls back to a
-/// non-transactional write.
+/// projection as the approved preview, compares each candidate's `_id` plus
+/// every `$set`-affected field path individually against `approved.raw_docs`
+/// (field-by-field via `ayxGetPath`, not a whole-document `JSON.stringify`
+/// equality — `serde_json` has no `preserve_order`, so `approvedDocs` is
+/// always alphabetical while the live driver returns storage order, which
+/// would false-abort on nothing more than key order), applies the bounded
+/// `$set` scoped to exactly the re-verified `_id`s, then re-queries and
+/// verifies every post-value before letting the transaction commit. Never
+/// falls back to a non-transactional write.
 fn build_apply_eval_js(
     mutation: &ResolvedMutation,
     approved: &CandidateSnapshot,
@@ -3399,6 +3412,54 @@ mod tests {
         assert!(js.contains("withTransaction"));
         assert!(!js.contains("mongodb://"));
         assert!(!js.contains("mongodb+srv://"));
+    }
+
+    #[test]
+    fn build_apply_eval_js_preflight_compares_fields_not_whole_document() {
+        // Regression test for the key-order false-abort finding: `preDocs`
+        // comes straight from the live mongosh driver (storage/insertion
+        // order) while `approvedDocs` was round-tripped through
+        // `serde_json::Value` (a `BTreeMap` — always alphabetical, since
+        // this workspace does not enable `preserve_order`). A whole-document
+        // `JSON.stringify(preDocs) !== JSON.stringify(approvedDocs)`
+        // comparison false-aborts on nothing more than key order for any
+        // multi-field candidate. The preflight must instead walk `_id` plus
+        // each `$set`-affected field path individually via `ayxGetPath`,
+        // exactly like the existing post-update verification does.
+        let resolved = resolved_fixture("42");
+        let approved = approved_snapshot_fixture();
+        let js = build_apply_eval_js(&resolved, &approved).expect("should build apply js");
+
+        // The old whole-document comparison must be gone.
+        assert!(
+            !js.contains("JSON.stringify(preDocs) !== JSON.stringify(approvedDocs)"),
+            "preflight must not compare preDocs and approvedDocs as whole documents"
+        );
+
+        // The new comparison walks documents pairwise and compares `_id`
+        // plus each setFields path via the shared ayxGetPath helper.
+        assert!(
+            js.contains("const preflightOk = preDocs.every(function (doc, i) {"),
+            "preflight must iterate preDocs pairwise against approvedDocs by index"
+        );
+        assert!(
+            js.contains("const approvedDoc = approvedDocs[i];"),
+            "preflight must index into approvedDocs by position, not compare full arrays"
+        );
+        assert!(
+            js.contains("JSON.stringify(doc._id) !== JSON.stringify(approvedDoc._id)"),
+            "preflight must still compare candidate identity via _id"
+        );
+        assert!(
+            js.contains(
+                "return JSON.stringify(ayxGetPath(doc, path)) === JSON.stringify(ayxGetPath(approvedDoc, path));"
+            ),
+            "preflight must compare each $set-affected field path via ayxGetPath, matching the post-update verification pattern"
+        );
+        assert!(
+            js.contains("ayxAbort(\"preflight_mismatch\""),
+            "a field-level mismatch must still abort with preflight_mismatch"
+        );
     }
 
     #[test]
