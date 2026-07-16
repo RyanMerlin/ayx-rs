@@ -11,13 +11,96 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use ayx_core::observability::redact_text;
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 use reqwest::cookie::{CookieStore as _, Jar};
 use reqwest::redirect::Policy;
 use serde_json::Value;
 
 const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
     (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+
+/// Attempts for HTTP calls where repeating the same request has no
+/// duplication risk (either it's read-only, or a retried POST like
+/// validatePasscode/session has no side effect beyond the first success).
+/// Calls where a retry COULD duplicate a side effect (sendPasscode,
+/// apiAccessTokens mint) use a narrower retry predicate instead of a
+/// separate constant — see `is_pre_send_failure`.
+#[allow(dead_code)] // wired up at call sites in Task 2+ of the auth-hardening plan
+const TRANSIENT_RETRY_ATTEMPTS: u32 = 3;
+
+/// Retries `attempt_once` up to `max_attempts` times. `should_retry_err`
+/// decides whether a returned error is worth retrying; `should_retry_ok`
+/// does the same for a value that came back successfully but still
+/// warrants another try (e.g. an HTTP 429/5xx that round-tripped fine at
+/// the transport level). Sleeps between attempts using the crate's
+/// existing jittered backoff (`crate::retry_delay`), the same pacing
+/// already used by the rest of this crate's One API request loop.
+///
+/// Generic over `T`/`E` so the retry mechanics can be unit tested without
+/// constructing real `reqwest` types (which have no public test
+/// constructors) — callers plug in `reqwest::blocking::Response` /
+/// `reqwest::Error` at the call site.
+#[allow(dead_code)] // wired up at call sites in Task 2+ of the auth-hardening plan
+fn retry_transient<T, E>(
+    max_attempts: u32,
+    should_retry_err: impl Fn(&E) -> bool,
+    should_retry_ok: impl Fn(&T) -> bool,
+    mut attempt_once: impl FnMut() -> Result<T, E>,
+) -> Result<T, E> {
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        match attempt_once() {
+            Ok(value) => {
+                if attempt >= max_attempts || !should_retry_ok(&value) {
+                    return Ok(value);
+                }
+            }
+            Err(err) => {
+                if attempt >= max_attempts || !should_retry_err(&err) {
+                    return Err(err);
+                }
+            }
+        }
+        std::thread::sleep(crate::retry_delay(attempt, None));
+    }
+}
+
+/// A transport failure where we're confident the request never reached the
+/// server — the failure occurred while establishing the connection (DNS,
+/// TCP connect, TLS handshake), not while waiting on a response. Safe to
+/// retry even for calls with a side effect (an OTP email send, a PAT mint)
+/// because there is no risk the server already processed the request.
+///
+/// Deliberately checks connection-phase only (`reqwest::Error::is_connect`),
+/// not `is_timeout` in isolation: a connect attempt that itself times out
+/// (e.g. TCP SYN never ACKed) still reports `is_connect() == true` — the
+/// request body was never sent — so it belongs in this safe-to-retry set
+/// too. A timeout *after* the connection was established (waiting on the
+/// response) does not set `is_connect()` and is excluded here on purpose.
+#[allow(dead_code)] // wired up at call sites in Task 2+ of the auth-hardening plan
+fn is_pre_send_failure(err: &reqwest::Error) -> bool {
+    err.is_connect()
+}
+
+/// Any transport-level failure — connect or timeout — treated as retryable
+/// for calls with no duplication risk (repeating the request has no side
+/// effect beyond the first successful attempt).
+#[allow(dead_code)] // wired up at call sites in Task 2+ of the auth-hardening plan
+fn is_transient_transport_error(err: &reqwest::Error) -> bool {
+    err.is_connect() || err.is_timeout()
+}
+
+/// Whether a *successfully received* response (any status) is worth
+/// retrying. Reuses this crate's existing status-based retry policy
+/// (`crate::should_retry_status`, already covered by
+/// `retry_policy_retries_gets_but_not_mutations` in `lib.rs`) with
+/// `mutating = false` — every call site that uses this predicate has
+/// already been classified as duplication-safe to retry.
+#[allow(dead_code)] // wired up at call sites in Task 2+ of the auth-hardening plan
+fn retryable_status_response(response: &Response) -> bool {
+    crate::should_retry_status(response.status(), false)
+}
 
 /// Result of a successful email OTP login.
 pub struct OtpAuthResult {
@@ -442,10 +525,115 @@ fn cookie_value_from_jar(jar: &Jar, url: &url::Url, name: &str) -> Option<String
 
 #[cfg(test)]
 mod tests {
+    use super::retry_transient;
     use super::{
         extract_interaction_id, host_allowed, is_valid_interaction_id, resolve_workspace_password,
     };
     use serial_test::serial;
+
+    #[test]
+    fn retry_transient_returns_ok_on_first_success() {
+        let mut calls = 0u32;
+        let result: Result<u32, &'static str> = retry_transient(
+            3,
+            |_: &&'static str| true,
+            |_: &u32| false,
+            || {
+                calls += 1;
+                Ok(7)
+            },
+        );
+        assert_eq!(result, Ok(7));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn retry_transient_retries_on_retryable_err_then_succeeds() {
+        let mut calls = 0u32;
+        let result: Result<u32, &'static str> = retry_transient(
+            3,
+            |_: &&'static str| true,
+            |_: &u32| false,
+            || {
+                calls += 1;
+                if calls < 3 { Err("transient") } else { Ok(42) }
+            },
+        );
+        assert_eq!(result, Ok(42));
+        assert_eq!(calls, 3);
+    }
+
+    #[test]
+    fn retry_transient_stops_at_max_attempts_on_persistent_err() {
+        let mut calls = 0u32;
+        let result: Result<u32, &'static str> = retry_transient(
+            3,
+            |_: &&'static str| true,
+            |_: &u32| false,
+            || {
+                calls += 1;
+                Err("still broken")
+            },
+        );
+        assert_eq!(result, Err("still broken"));
+        assert_eq!(calls, 3);
+    }
+
+    #[test]
+    fn retry_transient_does_not_retry_non_retryable_err() {
+        let mut calls = 0u32;
+        let result: Result<u32, &'static str> = retry_transient(
+            3,
+            |_: &&'static str| false,
+            |_: &u32| false,
+            || {
+                calls += 1;
+                Err("terminal")
+            },
+        );
+        assert_eq!(result, Err("terminal"));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn retry_transient_retries_retryable_ok_value_then_stops() {
+        let mut calls = 0u32;
+        let result: Result<u32, &'static str> = retry_transient(
+            3,
+            |_: &&'static str| true,
+            |v: &u32| *v == 429,
+            || {
+                calls += 1;
+                if calls < 2 { Ok(429) } else { Ok(200) }
+            },
+        );
+        assert_eq!(result, Ok(200));
+        assert_eq!(calls, 2);
+    }
+
+    fn connect_refused_error() -> reqwest::Error {
+        // Port 1 on loopback is always unbound — connecting to it fails
+        // immediately with ECONNREFUSED, deterministically and without any
+        // real network access (loopback-only, no DNS involved).
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .expect("client build");
+        client
+            .get("http://127.0.0.1:1/")
+            .send()
+            .expect_err("connecting to a closed loopback port must fail")
+    }
+
+    #[test]
+    fn is_pre_send_failure_true_for_connection_refused() {
+        assert!(super::is_pre_send_failure(&connect_refused_error()));
+    }
+
+    #[test]
+    fn is_transient_transport_error_true_for_connection_refused() {
+        assert!(super::is_transient_transport_error(&connect_refused_error()));
+    }
 
     // ── host_allowed ──────────────────────────────────────────────────────────
 
