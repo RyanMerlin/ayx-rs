@@ -836,27 +836,45 @@ mod tests {
         assert_eq!(calls, 2);
     }
 
+    /// A `reqwest::dns::Resolve` that always fails resolution, synchronously
+    /// and without touching the network.
+    struct AlwaysFailResolver;
+
+    impl reqwest::dns::Resolve for AlwaysFailResolver {
+        fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+            Box::pin(async {
+                Err("synthetic DNS failure — deliberately unresolvable for this test".into())
+            })
+        }
+    }
+
     fn connect_refused_error() -> reqwest::Error {
-        // Bind then immediately drop a listener to free a port the OS will
-        // actively RST future connections to. A port that was never bound at
-        // all (e.g. a fixed low port like 127.0.0.1:1) is not reliable across
-        // platforms — Windows Defender Firewall's default behavior for
-        // unsolicited connections to a never-bound port is often a silent drop
-        // rather than an active reject, so the client's own timeout fires
-        // first instead of getting an immediate connection-refused error.
-        let addr = {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-            listener.local_addr().expect("local_addr")
-            // listener dropped here, freeing the port for the RST behavior above
-        };
+        // Two prior versions of this helper synthesized a real TCP
+        // connection-refused error: first a fixed low port (127.0.0.1:1),
+        // then bind-then-drop an ephemeral port to free it. Both were tried
+        // against live CI and both failed identically on windows-latest --
+        // every failure landed at ~2.0s, exactly the client's configured
+        // timeout, meaning the SYN to the closed loopback port was silently
+        // dropped rather than RST'd, so the client's own timeout fired
+        // first instead of an immediate connection-refused error. This is
+        // an environment/network-stack difference, not something either
+        // port strategy could fix.
+        //
+        // A resolver that always fails sidesteps TCP entirely: it errors
+        // synchronously, in-process, with no OS network-stack or firewall
+        // involved, so behavior is identical on every platform.
+        // `Error::is_connect()` classifies both DNS and TCP connect
+        // failures as "connect" errors (both happen before the request is
+        // sent), so this still exercises exactly the boundary these tests
+        // care about.
         let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(2))
+            .dns_resolver(std::sync::Arc::new(AlwaysFailResolver))
             .build()
             .expect("client build");
         client
-            .get(format!("http://{addr}/"))
+            .get("http://example.invalid/")
             .send()
-            .expect_err("connecting to a freed loopback port must fail")
+            .expect_err("a resolver that always fails must produce a connect error")
     }
 
     #[test]
