@@ -179,7 +179,7 @@ Start with:
 
 ```powershell
 ayx discover
-ayx catalog list
+ayx --output json catalog list --format full --scope all
 ayx catalog describe mongo/backup
 ayx catalog describe designer.workflow.context
 ayx one doctor discover
@@ -206,10 +206,11 @@ ayx mongo doctor
 ```
 
 Agent-oriented catalog notes:
-- `ayx discover [path] [--deep]` is the progressive live entry point for the actual `clap` command tree.
-- `ayx catalog list --tag designer --format full` surfaces capability ids, schemas, safety, and provider type alongside the existing command catalog.
-- `ayx catalog describe <command-or-capability>` resolves either a legacy command path/name or a capability id such as `designer.tool.add`.
-- `catalog` remains the registry view for commands and capabilities; it is not the primary discovery entry point anymore.
+- `ayx discover [path] [--deep]` is the progressive, rich tree/flag discovery API — the source of truth for flags, positional arguments, aliases, and nested command structure.
+- `ayx --output json catalog list --format full --scope all` is the complete, flattened, machine-readable index of every visible command plus every registered capability. `--scope all` is the default; pass it explicitly in scripts and docs so a future compatibility change to the default can't silently shrink what comes back.
+- `ayx --output json catalog list --format full --scope curated` is the compatibility view for clients that need only the previously curated subset — commands with a full `output`/`safety`/`mutating`/`prerequisites`/`notes` classification, no `unclassified` rows.
+- `ayx catalog describe <command-or-capability>` continues to accept either a legacy command name/path or a capability id such as `designer.tool.add`.
+- `catalog` remains the derived registry/compatibility view for commands and capabilities — command identity and summaries come live from clap, not a hand-maintained list; it is not the primary discovery entry point.
 - Capability ids, validation metadata, and executor wiring already exist inside the registry layer so we can progressively expose deeper discovery without changing the ids.
 
 ## Development

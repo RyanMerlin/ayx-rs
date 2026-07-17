@@ -26,7 +26,7 @@ const session = [
 const capabilities = [
   {
     name: 'Generated command surface',
-    body: 'The command reference is generated from the CLI’s machine-readable catalog and checked for staleness in CI — the docs follow the binary, not the other way around. For the full live command tree, run `ayx discover --deep`.',
+    body: 'The command reference is generated from the full, live command tree (`ayx catalog list --scope all`) and checked for staleness in CI — the docs follow the binary, not the other way around. For rich flag and tree discovery, run `ayx discover --deep`.',
   },
   {
     name: 'Explicit safety model',

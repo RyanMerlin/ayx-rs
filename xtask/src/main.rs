@@ -77,7 +77,7 @@ fn run_catalog_list(repo_root: &Path) -> Result<Value> {
         .current_dir(repo_root)
         .args([
             "run", "-q", "-p", "ayx-rs", "--", "--output", "json", "catalog", "list", "--format",
-            "full",
+            "full", "--scope", "all",
         ])
         .output()
         .with_context(|| "failed to run catalog generation command")?;
@@ -136,11 +136,13 @@ fn render_command_surface(catalog: &Value) -> Result<String> {
     lines.push("# AYX Command Surface".to_string());
     lines.push(String::new());
     lines.push(format!(
-        "_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on {}._",
+        "_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on {}._",
         generated_utc
     ));
     lines.push(String::new());
-    lines.push("This is the curated **catalog** view — the agent-facing capability surface, not the complete command tree. For every command and flag, use `ayx --help`, `ayx <group> --help`, or `ayx discover --deep`.".to_string());
+    lines.push("This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.".to_string());
+    lines.push(String::new());
+    lines.push("For flags, positional arguments, aliases, payload schemas, and nested tree traversal, use `ayx --help`, `ayx <group> --help`, or `ayx discover --deep`.".to_string());
     lines.push(String::new());
     lines.push("This file is generated. Refresh it with:".to_string());
     lines.push(String::new());
@@ -216,12 +218,12 @@ fn render_command_surface(catalog: &Value) -> Result<String> {
     lines.push(String::new());
     lines.push("This spec intentionally does not duplicate:".to_string());
     lines.push(String::new());
-    lines.push("- every leaf command".to_string());
+    lines.push("- every flag, positional argument, or alias".to_string());
     lines.push("- every payload schema".to_string());
     lines.push("- every API endpoint path".to_string());
     lines.push("- every implementation detail of module layout".to_string());
     lines.push(String::new());
-    lines.push("Those details belong in command help, the catalog surface, targeted handoff docs, or generated references.".to_string());
+    lines.push("Those details belong in command help, `ayx discover --deep`, targeted handoff docs, or generated references.".to_string());
     lines.push(String::new());
 
     Ok(lines.join("\n"))

@@ -19,8 +19,9 @@ Source of this audit: a live-tree run on `main` (`ayx discover one --deep`,
 - `one dataset` is a real `/v4` primitive, not a stub under `one ui data`.
 - The `one ui` subtree is feature-gated behind the `ui` cargo feature and
   stays default-off.
-- Every command named in the old gap list now carries a description via the
-  in-binary `COMMAND_SPECS` registry.
+- Every command named in the old gap list now carries a description sourced
+  live from its clap `#[command(about = ...)]`, not a hand-maintained
+  registry.
 
 ## Next Steps
 
@@ -35,7 +36,11 @@ Source of this audit: a live-tree run on `main` (`ayx discover one --deep`,
 
 ## Exit Criteria
 
-- No live command lacks a description.
+- Live clap `about` text supplies every visible command's summary — no
+  command lacks a description, and none is duplicated by hand in a separate
+  registry.
+- Generated docs (`docs/command-surface.md`) are derived from the full live
+  index (`ayx catalog list --scope all`), not a hand-curated subset.
 - Datasets are a first-class `/v4` primitive, not a stub under `ui`.
 - The experimental `ui` surface is either implemented or feature-gated out of
   default builds.
