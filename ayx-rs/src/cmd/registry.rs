@@ -3,8 +3,8 @@
 //! Moved out of `main.rs` because the registry surface is a self-contained
 //! feature with no `load_profile` closure dependency — easy to lift into
 //! its own module. The `LiveCatalog` adapter that lets the registry's
-//! validator query `COMMAND_SPECS` and the capability registry without
-//! taking a direct dependency on either lives here.
+//! validator query the live command surface and the capability registry
+//! without taking a direct dependency on either lives here.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -16,14 +16,23 @@ use serde_json::Value;
 use serde_json::json;
 
 use crate::capability;
-use crate::{ActionsCommand, COMMAND_SPECS, WorkflowsCommand};
+use crate::cmd::command_surface;
+use crate::{ActionsCommand, WorkflowsCommand};
 
-/// Catalog adapter — let the registry's validator query the CLI's
-/// `COMMAND_SPECS` and capability registry without depending on either.
+/// Catalog adapter — let the registry's validator query the live command
+/// surface and capability registry without depending on either.
+///
+/// NOTE: this queries every visible command (not just `catalog`'s curated
+/// scope) so an action referencing a real but not-yet-annotated command is
+/// never falsely reported as unknown. Task 3 of the discovery/catalog
+/// consolidation plan is expected to revisit this adapter further (e.g.
+/// caching the path set instead of re-walking the clap tree per call).
 struct LiveCatalog;
 impl ayx_registry::validate::CatalogLookup for LiveCatalog {
     fn has_command_path(&self, path: &str) -> bool {
-        COMMAND_SPECS.iter().any(|spec| spec.name == path)
+        command_surface::visible_commands()
+            .iter()
+            .any(|cmd| cmd.name == path)
     }
     fn has_capability(&self, id: &str) -> bool {
         capability::has_capability(id)
@@ -432,19 +441,21 @@ mod tests {
     use super::*;
     use ayx_registry::validate::CatalogLookup;
 
-    // Plan Task 3 Step 3: `mongo mutate` and `mongo undo` previously had no
-    // COMMAND_SPECS entry, so any future remediation action referencing
-    // either would be falsely reported as unknown by `ayx actions validate`.
-    // These paths must resolve now that the entries exist.
+    // `mongo mutate` and `mongo undo` are real, visible clap commands; any
+    // remediation action referencing either must not be falsely reported as
+    // unknown by `ayx actions validate`. Now backed by the live command
+    // surface directly, so this is really just a regression guard against
+    // `mongo mutate`/`mongo undo` losing their `#[command(about = ...)]` and
+    // dropping out of the visible tree.
     #[test]
     fn live_catalog_knows_mongo_mutate_and_undo() {
         assert!(
             LiveCatalog.has_command_path("mongo mutate"),
-            "COMMAND_SPECS is missing a 'mongo mutate' entry"
+            "'mongo mutate' is missing from the live command tree"
         );
         assert!(
             LiveCatalog.has_command_path("mongo undo"),
-            "COMMAND_SPECS is missing a 'mongo undo' entry"
+            "'mongo undo' is missing from the live command tree"
         );
     }
 }

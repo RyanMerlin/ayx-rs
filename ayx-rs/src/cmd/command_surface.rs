@@ -8,15 +8,12 @@
 //! `Cli::command()` — never from help text, a spawned binary, or a second
 //! generated file.
 //!
-//! `visible_commands()` / `visible_command_paths()` / `LiveCommand` are the
-//! read-side API this module exists to provide; today they are exercised
-//! only by the tests below. `discover` consumes `root_command()` and
-//! `visible_subcommands()`. The command registry (`cmd::catalog`) is the
-//! next consumer of the summary-bearing records — wiring it up is
-//! intentionally out of scope for this change (see the plan this module was
-//! introduced under), so `-D warnings` would otherwise flag the rest of this
-//! file as dead code until that follow-up lands.
-#![allow(dead_code)]
+//! `visible_commands()` / `LiveCommand` are the read-side API this module
+//! exists to provide; `discover` consumes `root_command()` and
+//! `visible_subcommands()`, `cmd::catalog` and `cmd::registry` consume
+//! `visible_commands()`/`root_command()`. `visible_command_paths()` remains
+//! test-only (cross-checked against `discover --deep` and `catalog list
+//! --scope all`), hence the narrow allow below.
 
 use std::collections::BTreeSet;
 
@@ -86,6 +83,11 @@ pub(crate) fn visible_commands() -> Vec<LiveCommand> {
 /// `visible_commands()`, projected to just the canonical `path` set. Useful
 /// for membership checks (e.g. "does the live tree still expose X") without
 /// carrying summaries around.
+///
+/// Test-only today (`discover --deep` and `catalog list --scope all` are
+/// both cross-checked against it) — no non-test caller needs the bare path
+/// set instead of the full `LiveCommand` records, hence the narrow allow.
+#[allow(dead_code)]
 pub(crate) fn visible_command_paths() -> BTreeSet<String> {
     visible_commands().into_iter().map(|c| c.path).collect()
 }
