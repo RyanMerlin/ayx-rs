@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.14.0 — 2026-07-17
+
 ### Added
 
 - **Every bundled action and workflow now carries a machine-readable, validated I/O contract.** `input_schema` and `output_schema` (a JSON-Schema-subset grammar covering `object`/`string`/`array`/`boolean`/`integer`/`number`/`null` types, `required`, `additionalProperties`, `enum`, `const`, `minLength`, `minItems`) can be declared on any `*.action.yaml`/`*.workflow.yaml` entry and are checked at load time — grammar errors, cross-action property disagreements, and missing composed-child placeholders are all rejected before the registry finalizes, not discovered at run time. At run time, a declared input contract is enforced against the caller's `--param` map *before any step or subprocess runs* (unknown parameter, missing required parameter, and enum/const mismatches all fail as a single reported violation set), and a declared output contract is checked against the finished `ActionRun`/`WorkflowRun` record on every run, plan or `--apply`. A workflow validates its own contract once, then filters the caller's params down to each composed action's own declared property set before calling it, so a strict child action never sees (or rejects on) a sibling's key. `ayx actions describe` and `ayx actions workflows explain` expose the effective schema plus `input_schema_source` (`declared` vs. `inferred`) so an agent can fetch a validated contract before constructing parameters. This is additive and v2-compatible — no `schema_version` bump. All 12 bundled actions/workflows (10 actions, 2 workflows) now declare real, load-bearing contracts; a legacy custom action or workflow with no declared schema still runs exactly as before, via a permissive contract inferred from its `<placeholder>` usage.
