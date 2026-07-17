@@ -32,14 +32,8 @@
 //! [`SchemaRole::Output`] permits the full supported-type table and the
 //! ordinary JSON Schema permissive `additionalProperties` default.
 //!
-//! This module is intentionally freestanding for now: nothing in the crate
-//! calls its `pub(crate)` surface yet — Task 2 wires `validate_schema` into
-//! the registry loader and Task 3 wires `validate_instance` into the
-//! executor. Until then, only the unit tests below exercise it, so the
-//! module-level `allow` prevents a spurious `dead_code` finding on a plain
-//! (non-test) build under `-D warnings`.
-
-#![allow(dead_code)]
+//! `validate_schema` is wired into the registry loader (`Registry::finalize`)
+//! and `validate_instance` into the executor's input/output contract checks.
 
 use std::collections::BTreeSet;
 

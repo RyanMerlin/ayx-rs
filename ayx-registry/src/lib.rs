@@ -202,10 +202,9 @@ pub enum Step {
 /// Pull `<word>` placeholders out of a command template.
 ///
 /// The single placeholder extractor for the whole crate — the executor's
-/// runtime substitution (`executor::collect_required_params`) and the
-/// registry's load-time effective-contract builder
-/// (`Registry::effective_action_input_schema`) both call this, so "what
-/// counts as a required parameter" can never drift between the two.
+/// pre-run contract lookup and the registry's load-time effective-contract
+/// builder (`Registry::effective_action_input_schema`) both call this, so
+/// "what counts as a required parameter" can never drift between the two.
 pub(crate) fn extract_params(cmd: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut chars = cmd.chars().peekable();
@@ -650,8 +649,8 @@ impl Registry {
                 Step::Action { id: child_id, .. } => {
                     // A dangling composition reference is `validate.rs`'s
                     // concern (`ayx actions validate`), not a hard failure
-                    // here — mirrors
-                    // executor::collect_required_params's `if let Ok(...)`.
+                    // here — mirrors the executor's own dangling-reference
+                    // handling when it expands a composed action step.
                     if self.actions.contains_key(child_id) {
                         let (child_schema, child_placeholders) =
                             self.effective_action_contract(child_id, stack)?;
@@ -1276,9 +1275,9 @@ mod tests {
     /// must equal — not merely cover — the registry's own independently
     /// calculated transitive placeholder set: exactly what
     /// `effective_action_contract` (the same recursive `<name>`-token walk
-    /// `executor::collect_required_params`/`effective_action_input_schema`
-    /// rely on) discovers for an action, or the exact union of that
-    /// calculation across a workflow's referenced actions. A future edit to
+    /// `effective_action_input_schema` relies on) discovers for an action,
+    /// or the exact union of that calculation across a workflow's
+    /// referenced actions. A future edit to
     /// a `cmd:` template, or to which actions a workflow composes, changes
     /// what this test independently computes; if the published contract
     /// isn't updated to match, this fails instead of silently drifting.

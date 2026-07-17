@@ -868,8 +868,8 @@ mod tests {
     /// below, built the same way `lib.rs`'s own tests build fixtures:
     /// write real `*.action.yaml`/`*.workflow.yaml` files into a tempdir
     /// and `load_dir` them — no `Registry::load_default()`, so none of
-    /// this is coupled to the bundled stdlib (which, as of this task, has
-    /// no declared schemas at all — see Task 5).
+    /// this is coupled to the bundled stdlib's own (now fully-declared)
+    /// contracts.
     fn fixture_registry() -> Registry {
         let dir = tempfile::tempdir().expect("tempdir");
         let files: &[(&str, &str)] = &[
