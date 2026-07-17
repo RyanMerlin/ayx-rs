@@ -50,6 +50,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use walkdir::WalkDir;
 
+mod io_schema;
 mod stdlib;
 
 pub mod executor;
