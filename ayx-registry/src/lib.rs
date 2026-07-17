@@ -1259,11 +1259,147 @@ mod tests {
 
     /// Step 2: the same grammar check applies to the bundled stdlib path
     /// (`stdlib::install_into`), not just `load_dir` — proven indirectly by
-    /// `load_default` (which calls both) still succeeding, since none of
-    /// the bundled v2 files declare a schema yet (Task 5).
+    /// `load_default` (which calls both) still succeeding. As of Task 5,
+    /// every bundled action/workflow declares its own `input_schema` +
+    /// `output_schema`, so this also proves those declarations are
+    /// grammar-valid and every composition/union invariant checked at
+    /// `finalize()` holds across the whole bundled set.
     #[test]
     fn bundled_stdlib_has_no_schema_grammar_violations() {
         Registry::load_default().expect("bundled stdlib passes grammar + finalization");
+    }
+
+    /// Task 5, Step 4: every bundled action and workflow (identified by its
+    /// `"bundled:"` `source_path` prefix — see `stdlib::install_into`, not a
+    /// hand-picked sample) must declare BOTH `input_schema` and
+    /// `output_schema`, and each declared *input* contract's `required` set
+    /// must equal — not merely cover — the registry's own independently
+    /// calculated transitive placeholder set: exactly what
+    /// `effective_action_contract` (the same recursive `<name>`-token walk
+    /// `executor::collect_required_params`/`effective_action_input_schema`
+    /// rely on) discovers for an action, or the exact union of that
+    /// calculation across a workflow's referenced actions. A future edit to
+    /// a `cmd:` template, or to which actions a workflow composes, changes
+    /// what this test independently computes; if the published contract
+    /// isn't updated to match, this fails instead of silently drifting.
+    #[test]
+    fn every_bundled_action_and_workflow_declares_a_truthful_contract() {
+        let reg = Registry::load_default().expect("bundled registry finalizes cleanly");
+
+        let bundled_action_ids: Vec<String> = reg
+            .actions
+            .values()
+            .filter(|a| a.source_path.starts_with("bundled:"))
+            .map(|a| a.id.clone())
+            .collect();
+        assert!(
+            !bundled_action_ids.is_empty(),
+            "expected at least one bundled action to be loaded"
+        );
+
+        for id in &bundled_action_ids {
+            let action = reg.action(id).expect("bundled action resolves");
+            assert!(
+                action.input_schema.is_some(),
+                "bundled action '{id}' ({}) has no declared input_schema",
+                action.source_path
+            );
+            assert!(
+                action.output_schema.is_some(),
+                "bundled action '{id}' ({}) has no declared output_schema",
+                action.source_path
+            );
+
+            let (effective, transitive) = reg
+                .effective_action_contract(id, &mut Vec::new())
+                .unwrap_or_else(|e| panic!("effective contract for action '{id}': {e}"));
+            assert_eq!(
+                effective.origin,
+                SchemaOrigin::Explicit,
+                "bundled action '{id}' declares an input_schema but its effective origin resolved to Inferred"
+            );
+
+            let declared_required: BTreeSet<String> = effective
+                .schema
+                .get("required")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default();
+            assert_eq!(
+                declared_required, transitive,
+                "action '{id}' declared input_schema required set does not equal its \
+                 calculated transitive placeholder set"
+            );
+        }
+
+        let bundled_workflow_ids: Vec<String> = reg
+            .workflows
+            .values()
+            .filter(|w| w.source_path.starts_with("bundled:"))
+            .map(|w| w.id.clone())
+            .collect();
+        assert!(
+            !bundled_workflow_ids.is_empty(),
+            "expected at least one bundled workflow to be loaded"
+        );
+
+        for id in &bundled_workflow_ids {
+            let workflow = reg.workflow(id).expect("bundled workflow resolves");
+            assert!(
+                workflow.input_schema.is_some(),
+                "bundled workflow '{id}' ({}) has no declared input_schema",
+                workflow.source_path
+            );
+            assert!(
+                workflow.output_schema.is_some(),
+                "bundled workflow '{id}' ({}) has no declared output_schema",
+                workflow.source_path
+            );
+
+            let effective = reg
+                .effective_workflow_input_schema(id)
+                .unwrap_or_else(|e| panic!("effective schema for workflow '{id}': {e}"));
+            assert_eq!(
+                effective.origin,
+                SchemaOrigin::Explicit,
+                "bundled workflow '{id}' declares an input_schema but its effective origin resolved to Inferred"
+            );
+
+            let declared_required: BTreeSet<String> = effective
+                .schema
+                .get("required")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let mut union: BTreeSet<String> = BTreeSet::new();
+            for action_id in &workflow.actions {
+                let (_, placeholders) = reg
+                    .effective_action_contract(action_id, &mut Vec::new())
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "effective contract for action '{action_id}' referenced by \
+                             workflow '{id}': {e}"
+                        )
+                    });
+                union.extend(placeholders);
+            }
+            assert_eq!(
+                declared_required, union,
+                "workflow '{id}' declared input_schema required set does not equal the \
+                 union of its referenced actions' calculated transitive placeholder sets"
+            );
+        }
     }
 
     #[test]

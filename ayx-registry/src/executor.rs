@@ -789,12 +789,27 @@ mod tests {
         assert!(shell_split("missing 'quote").is_none());
     }
 
+    /// `mongo.backup-restore` carries an `Explicit` declared `input_schema`
+    /// as of Task 5 (bundled stdlib annotation), so a call with no params at
+    /// all now surfaces as `InputContractViolation` (the strict, explicit-
+    /// origin path in `validate_input_contract`), not the legacy
+    /// `MissingParams` shape reserved for `Inferred`-origin (undeclared)
+    /// actions — see `legacy_missing_params_still_uses_missing_params_error`
+    /// below for that still-covered case.
     #[test]
     fn missing_params_block_run() {
         let reg = Registry::load_default().expect("registry");
         let cfg = ExecutionConfig::default();
         let err = run_action(&reg, "mongo.backup-restore", &cfg).unwrap_err();
-        assert!(matches!(err, ExecutorError::MissingParams { .. }));
+        match err {
+            ExecutorError::InputContractViolation { id, violations } => {
+                assert_eq!(id, "mongo.backup-restore");
+                let paths: Vec<&str> = violations.iter().map(|v| v.path.as_str()).collect();
+                assert!(paths.contains(&"/profile"), "paths: {paths:?}");
+                assert!(paths.contains(&"/ts"), "paths: {paths:?}");
+            }
+            other => panic!("expected InputContractViolation, got {other:?}"),
+        }
     }
 
     #[test]
