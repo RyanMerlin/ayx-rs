@@ -199,6 +199,33 @@ pub enum Step {
     Note { text: String },
 }
 
+/// Pull `<word>` placeholders out of a command template.
+///
+/// The single placeholder extractor for the whole crate — the executor's
+/// runtime substitution (`executor::collect_required_params`) and the
+/// registry's load-time effective-contract builder
+/// (`Registry::effective_action_input_schema`) both call this, so "what
+/// counts as a required parameter" can never drift between the two.
+pub(crate) fn extract_params(cmd: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut chars = cmd.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '<' {
+            let mut name = String::new();
+            for c in chars.by_ref() {
+                if c == '>' {
+                    if !name.is_empty() {
+                        out.push(name);
+                    }
+                    break;
+                }
+                name.push(c);
+            }
+        }
+    }
+    out
+}
+
 /// A validation step that proves the action achieved its intent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Validation {

@@ -34,7 +34,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use crate::{Action, Registry, Safety, Step};
+use crate::{Action, Registry, Safety, Step, extract_params};
 
 #[derive(Debug, Error)]
 pub enum ExecutorError {
@@ -260,27 +260,6 @@ fn collect_required_params(registry: &Registry, action: &Action, out: &mut Vec<S
             Step::Note { .. } => {}
         }
     }
-}
-
-/// Pull `<word>` placeholders out of a command template.
-fn extract_params(cmd: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut chars = cmd.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '<' {
-            let mut name = String::new();
-            for c in chars.by_ref() {
-                if c == '>' {
-                    if !name.is_empty() {
-                        out.push(name);
-                    }
-                    break;
-                }
-                name.push(c);
-            }
-        }
-    }
-    out
 }
 
 fn substitute(cmd: &str, params: &BTreeMap<String, String>) -> String {
