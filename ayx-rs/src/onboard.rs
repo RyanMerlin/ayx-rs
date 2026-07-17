@@ -1519,8 +1519,68 @@ mod tests {
     };
     use ayx_core::secrets::install_test_keyring_store;
     use std::collections::HashMap;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
 
     const SAMPLE_GID: &str = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+
+    static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            // Tests serialize env access with TEST_ENV_LOCK.
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, old }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let old = std::env::var(key).ok();
+            // Tests serialize env access with TEST_ENV_LOCK.
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(old) = &self.old {
+                // Tests serialize env access with TEST_ENV_LOCK.
+                unsafe {
+                    std::env::set_var(self.key, old);
+                }
+            } else {
+                // Tests serialize env access with TEST_ENV_LOCK.
+                unsafe {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+    }
+
+    struct IsolatedConfigHome {
+        _lock: MutexGuard<'static, ()>,
+        _guard: EnvGuard,
+        temp: tempfile::TempDir,
+    }
+
+    impl IsolatedConfigHome {
+        fn path(&self) -> &std::path::Path {
+            self.temp.path()
+        }
+    }
+
+    fn test_env_lock() -> MutexGuard<'static, ()> {
+        TEST_ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     #[test]
     fn parses_auth_portal_workspace_url() {
@@ -1772,8 +1832,7 @@ mod tests {
         )
         .unwrap();
 
-        // nextest process-isolates each test, so mutating an env var here is safe.
-        unsafe { std::env::set_var("AYX_TEST_ROUNDTRIP_TOKEN", "secret-from-env") };
+        let _env = EnvGuard::set("AYX_TEST_ROUNDTRIP_TOKEN", "secret-from-env");
 
         let config = Config::load_from_path_with_environment(&path, None).unwrap();
         // Sanity: the ref resolved to the env value in memory.
@@ -1786,8 +1845,6 @@ mod tests {
         write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
 
         let on_disk = std::fs::read_to_string(&path).unwrap();
-        unsafe { std::env::remove_var("AYX_TEST_ROUNDTRIP_TOKEN") };
-
         assert!(
             on_disk.contains("access_token_ref: env:AYX_TEST_ROUNDTRIP_TOKEN"),
             "env:-backed ref must be preserved as-is on round-trip, got:\n{on_disk}"
@@ -1820,7 +1877,7 @@ mod tests {
         )
         .unwrap();
 
-        unsafe { std::env::set_var("AYX_TEST_LOGIN_TOKEN", "old-env-value") };
+        let _env = EnvGuard::set("AYX_TEST_LOGIN_TOKEN", "old-env-value");
 
         let mut config = Config::load_from_path_with_environment(&path, None).unwrap();
         // Simulate `auth login` minting a new token onto the profile.
@@ -1829,8 +1886,6 @@ mod tests {
         write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
 
         let on_disk = std::fs::read_to_string(&path).unwrap();
-        unsafe { std::env::remove_var("AYX_TEST_LOGIN_TOKEN") };
-
         assert!(
             !on_disk.contains("env:AYX_TEST_LOGIN_TOKEN"),
             "a freshly minted token must overwrite the env: ref so it persists:\n{on_disk}"
@@ -1858,11 +1913,10 @@ alteryx_one:
         )
         .unwrap();
 
-        unsafe { std::env::set_var("AYX_TEST_WS_TOKEN", "ws-secret-from-env") };
+        let _env = EnvGuard::set("AYX_TEST_WS_TOKEN", "ws-secret-from-env");
         let config = Config::load_from_path_with_environment(&path, None).unwrap();
         write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
         let on_disk = std::fs::read_to_string(&path).unwrap();
-        unsafe { std::env::remove_var("AYX_TEST_WS_TOKEN") };
 
         assert!(
             on_disk.contains("access_token_ref: env:AYX_TEST_WS_TOKEN"),
@@ -1961,11 +2015,10 @@ alteryx_one:
         )
         .unwrap();
 
-        unsafe { std::env::set_var("AYX_TEST_ROTATE_TOKEN", "old-value") };
+        let _env = EnvGuard::set("AYX_TEST_ROTATE_TOKEN", "old-value");
         let mut config = Config::load_from_path_with_environment(&path, None).unwrap();
         config.alteryx_one.as_mut().unwrap().access_token = Some("rotated-token".to_string());
         write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
-        unsafe { std::env::remove_var("AYX_TEST_ROTATE_TOKEN") };
 
         let reloaded = Config::load_from_path_with_environment(&path, None).unwrap();
         assert_eq!(
@@ -1982,14 +2035,18 @@ alteryx_one:
 
     /// Tempdir that also points `AYX_CONFIG_HOME` at itself, so the strict config
     /// loader's active-profile overlay finds no host state to contaminate the
-    /// fixture. nextest process-isolates each test, so the env mutation is safe.
-    fn isolated_config_home() -> tempfile::TempDir {
+    /// fixture. Access is serialized with `TEST_ENV_LOCK` because `AYX_CONFIG_HOME`
+    /// is process-global.
+    fn isolated_config_home() -> IsolatedConfigHome {
+        let lock = test_env_lock();
         install_test_keyring_store();
         let temp = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("AYX_CONFIG_HOME", temp.path());
+        let guard = EnvGuard::set("AYX_CONFIG_HOME", temp.path().to_str().unwrap());
+        IsolatedConfigHome {
+            _lock: lock,
+            _guard: guard,
+            temp,
         }
-        temp
     }
 
     #[test]
@@ -2101,7 +2158,7 @@ server_api:
 "#,
         )
         .unwrap();
-        unsafe { std::env::set_var("AYX_TEST_SA_SECRET", "sa-from-env") };
+        let _env = EnvGuard::set("AYX_TEST_SA_SECRET", "sa-from-env");
         let config = Config::load_from_path_with_environment(&path, None).unwrap();
         assert_eq!(
             config.server_api.as_ref().map(|s| s.client_secret.as_str()),
@@ -2110,7 +2167,6 @@ server_api:
         );
         write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
         let on_disk = std::fs::read_to_string(&path).unwrap();
-        unsafe { std::env::remove_var("AYX_TEST_SA_SECRET") };
         assert!(
             on_disk.contains("client_secret_ref: env:AYX_TEST_SA_SECRET"),
             "server.api env: ref must be preserved:\n{on_disk}"
@@ -2259,23 +2315,16 @@ server_api:
         // gated with #[cfg(test)] because cfg(test) inside a library crate is
         // inactive when that crate is compiled as a dependency — the env-var
         // guard is sufficient for production safety (undocumented, no CLI
-        // surface, inert when unset). nextest process-isolates each test, so
-        // the env mutation is safe.
-        unsafe {
-            std::env::set_var("AYX_FORCE_INLINE_SECRETS", "1");
-        }
+        // surface, inert when unset). Env access is serialized here because
+        // AYX_FORCE_INLINE_SECRETS and AYX_CONFIG_HOME are process-global.
+        let _lock = test_env_lock();
+        let _force_inline = EnvGuard::set("AYX_FORCE_INLINE_SECRETS", "1");
         let _home = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("AYX_CONFIG_HOME", _home.path());
-        }
+        let _config_home = EnvGuard::set("AYX_CONFIG_HOME", _home.path().to_str().unwrap());
         let ws = workspace_with_one_env_secret("shh");
         let tmp = tempfile::tempdir().unwrap();
         let ws_path = tmp.path().join("ws.yaml");
         let out = write_workspace_config(&ws_path, &ws).unwrap();
-        // Restore before any assertions so a panic doesn't leak the var.
-        unsafe {
-            std::env::remove_var("AYX_FORCE_INLINE_SECRETS");
-        }
         // With the keyring forced unavailable, write_workspace_config must fall
         // back to inline storage AND surface that fact in SecretizeOutput.
         let on_disk = std::fs::read_to_string(&ws_path).unwrap();
@@ -2347,17 +2396,12 @@ server_api:
     /// Config where one side uses an env var that is NOT set → unresolvable →
     /// cannot prove conflict → `detect_secret_conflict` must return `Ok`.
     fn config_with_one_unresolvable_ref() -> Config {
-        // Use a name that is extremely unlikely to be set in any real environment.
-        let env_var = "AYX_CONFLICT_TEST_MISSING_VAR_49283747";
-        // Ensure it is not set (safe because nextest process-isolates each test).
-        unsafe { std::env::remove_var(env_var) };
-
         let mut cfg = conflict_base("unresolvable-test");
         cfg.server_api = Some(ServerApiProfile {
             base_url: "https://example.com".to_string(),
             client_id: "cid".to_string(),
             client_secret: String::new(),
-            client_secret_ref: Some(format!("env:{env_var}")),
+            client_secret_ref: Some("env:AYX_CONFLICT_TEST_MISSING_VAR_49283747".to_string()),
         });
         cfg.api = Some(ApiProfile {
             base_url: "https://example.com".to_string(),
@@ -2437,7 +2481,8 @@ server_api:
 
     #[test]
     fn unresolvable_ref_does_not_error() {
-        let _home = isolated_config_home();
+        let _lock = test_env_lock();
+        let _missing_env = EnvGuard::unset("AYX_CONFLICT_TEST_MISSING_VAR_49283747");
         // one side env:MISSING → unresolvable → cannot prove conflict → Ok
         let cfg = config_with_one_unresolvable_ref();
         assert!(
