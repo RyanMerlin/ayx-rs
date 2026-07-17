@@ -522,4 +522,29 @@ mod tests {
             "an invented command path must not resolve"
         );
     }
+
+    // Final-review regression guard (post-Task-3 finding): `permissive_catalog_passes`
+    // in `ayx-registry`'s own test suite exercises `validate()` against the real
+    // bundled registry, but with a `PermissiveCatalog` stub that answers `true` to
+    // every lookup — so it can never catch a bundled action's `cmd:` drifting away
+    // from a real, current clap command path. This test closes that gap by running
+    // the *real* `LiveCatalog` (the live clap tree) against the *real* bundled
+    // registry end-to-end, the same combination `ayx actions validate` uses at
+    // runtime. It caught `server-logs-triage.action.yaml` calling the non-existent
+    // top-level `ayx server-logs discover`/`context` instead of the real nested
+    // `ayx server server-logs discover`/`context` — a drift the old curated
+    // `COMMAND_SPECS` catalog masked with a stale top-level entry.
+    #[test]
+    fn live_catalog_end_to_end_validate_report_is_clean() {
+        let reg = ayx_registry::Registry::load_default().expect("bundled registry must load");
+        let catalog = LiveCatalog::new();
+        let report = ayx_registry::validate::validate(&reg, &catalog);
+        assert!(
+            report.ok(),
+            "bundled actions/workflows must validate cleanly against the live \
+             command tree; findings: {:?}; dangling workflow actions: {:?}",
+            report.findings,
+            report.workflow_dangling_actions
+        );
+    }
 }

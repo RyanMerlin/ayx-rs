@@ -30,7 +30,7 @@ const capabilities = [
   },
   {
     name: 'Explicit safety model',
-    body: 'Every command is annotated read-only or mutating. Read-only needs no flags; mutating remote calls are gated behind --apply.',
+    body: 'Commands are annotated read-only or mutating where curated; anything not yet classified is honestly marked unclassified, never guessed. Read-only needs no flags; mutating remote calls are gated behind --apply.',
   },
   {
     name: 'Dry-run by default',
