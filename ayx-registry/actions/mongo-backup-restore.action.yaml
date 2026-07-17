@@ -36,3 +36,58 @@ rollback: |
   Backups are non-destructive on creation. To recover from a *bad* restore,
   re-run `ayx mongo restore` against the previous good snapshot in the
   backups/ tree.
+input_schema:
+  type: object
+  description: "Parameters for capturing or restoring a Mongo backup snapshot of the AlteryxGallery and AlteryxService databases."
+  additionalProperties: false
+  required: [profile, ts]
+  properties:
+    profile:
+      type: string
+      description: "Named ayx CLI profile (as configured via ayx profiles) identifying which Alteryx Server environment to target."
+      minLength: 1
+    ts:
+      type: string
+      description: "Timestamp label used to name the backup/restore artifact directory (for example backups/<ts>)."
+      minLength: 1
+output_schema:
+  type: object
+  description: "The ActionRun record this action's run or plan produces."
+  required: [action_id, title, safety, apply, mode, params, steps, validations, rollback]
+  properties:
+    action_id:
+      type: string
+      description: "Stable identifier for this action; always equals mongo.backup-restore."
+      const: mongo.backup-restore
+    title:
+      type: string
+      description: "Human-readable title for this action."
+    safety:
+      type: string
+      description: "Safety classification for this action's run: read_only, mutating, or destructive."
+      enum: [read_only, mutating, destructive]
+    apply:
+      type: boolean
+      description: "Whether this run was invoked with --apply (true) or produced a dry-run plan only (false)."
+    mode:
+      type: string
+      description: "Run mode: \"plan\" when --apply was not set, \"execute\" when it was."
+      enum: [plan, execute]
+    params:
+      type: object
+      description: "The parameter map actually used to run or plan this action (string values only)."
+    steps:
+      type: array
+      description: "Ordered per-step outcome (command, composed action, or note) for this run."
+      items:
+        type: object
+        description: "One planned or executed step outcome for this run."
+    validations:
+      type: array
+      description: "Human-readable validation descriptions declared for this action; not automatically executed."
+      items:
+        type: string
+        description: "One validation's description text."
+    rollback:
+      type: string
+      description: "Rollback guidance for a bad restore: re-run ayx mongo restore against the previous good snapshot under backups/."

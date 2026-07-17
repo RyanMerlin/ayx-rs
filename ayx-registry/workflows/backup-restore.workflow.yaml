@@ -14,3 +14,46 @@ actions:
 success_criteria: |
   - Backup exists and is non-empty.
   - Mongo doctor reports identical posture before and after the change.
+input_schema:
+  type: object
+  description: "Parameters for the pre-change backup + post-change verification guardrail: the profile to operate on and the backup timestamp label, covering both the backup/restore and doctor actions it composes."
+  additionalProperties: false
+  required: [profile, ts]
+  properties:
+    profile:
+      type: string
+      description: "Named ayx CLI profile (as configured via ayx profiles) identifying which Alteryx Server environment to target."
+      minLength: 1
+    ts:
+      type: string
+      description: "Timestamp label used to name the backup/restore artifact directory (for example backups/<ts>)."
+      minLength: 1
+output_schema:
+  type: object
+  description: "The WorkflowRun record this workflow's run or plan produces."
+  required: [workflow_id, title, safety, apply, mode, actions]
+  properties:
+    workflow_id:
+      type: string
+      description: "Stable identifier for this workflow; always equals ops.backup-restore."
+      const: ops.backup-restore
+    title:
+      type: string
+      description: "Human-readable title for this workflow."
+    safety:
+      type: string
+      description: "Effective safety classification for this run, promoted to the maximum of any referenced action's safety: read_only, mutating, or destructive."
+      enum: [read_only, mutating, destructive]
+    apply:
+      type: boolean
+      description: "Whether this run was invoked with --apply (true) or produced a dry-run plan only (false)."
+    mode:
+      type: string
+      description: "Run mode: \"plan\" when --apply was not set, \"execute\" when it was."
+      enum: [plan, execute]
+    actions:
+      type: array
+      description: "Ordered per-action run/plan record, one for each action referenced by this workflow's actions list (see each action's own output_schema for its shape)."
+      items:
+        type: object
+        description: "One referenced action's ActionRun record for this workflow run."
