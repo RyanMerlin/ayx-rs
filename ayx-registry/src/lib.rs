@@ -84,6 +84,33 @@ pub enum RegistryError {
     },
     #[error("action '{id}' is {safety:?}; --apply required to run (use `describe` to inspect)")]
     ApplyRequired { id: String, safety: Safety },
+    /// Covers two related failure classes for an `input_schema`/
+    /// `output_schema` declaration:
+    ///
+    /// - **Grammar** (`Step 2`): the declared schema document itself isn't
+    ///   well-formed under the `io_schema` subset — caught at parse/insert
+    ///   time, before the malformed schema can reach an executor.
+    /// - **Contract** (`Steps 3-4`): the schema document is grammatically
+    ///   valid, but violates a composition invariant — a required
+    ///   placeholder is missing from `required`, a composed/referenced
+    ///   action disagrees on a shared property's definition, or an action
+    ///   composition cycle exists. Caught at `Registry::finalize`, once
+    ///   every override directory and the bundled stdlib have loaded.
+    ///
+    /// `path` is the owning file's `source_path` (or bundled resource
+    /// label); `owner_kind` is `"action"` or `"workflow"`; `location` is a
+    /// JSON-pointer-like pointer into the offending schema field (grammar
+    /// errors) or a synthetic pointer such as `/steps` (a composition
+    /// cycle) — always relative to the owning action/workflow, never the
+    /// bare schema document.
+    #[error("{owner_kind} '{owner_id}' ({path}) — {location}: {message}")]
+    SchemaContract {
+        path: String,
+        owner_kind: &'static str,
+        owner_id: String,
+        location: String,
+        message: String,
+    },
 }
 
 /// Classifies the blast radius of an action / workflow. The registry refuses
@@ -379,6 +406,30 @@ impl Registry {
     /// Insert an action, preserving the earlier copy on duplicates (operator
     /// overrides win because they're loaded first).
     pub(crate) fn insert_action(&mut self, t: Action) -> Result<(), RegistryError> {
+        // Grammar-check any declared schema *before* the duplicate-id logic
+        // below can decide to silently keep an earlier copy and drop this
+        // one — a malformed declaration must fail loudly at its own file,
+        // not vanish because another file happened to load first.
+        if let Some(schema) = &t.input_schema {
+            check_schema_grammar(
+                "input_schema",
+                schema,
+                io_schema::SchemaRole::Input,
+                "action",
+                &t.id,
+                &t.source_path,
+            )?;
+        }
+        if let Some(schema) = &t.output_schema {
+            check_schema_grammar(
+                "output_schema",
+                schema,
+                io_schema::SchemaRole::Output,
+                "action",
+                &t.id,
+                &t.source_path,
+            )?;
+        }
         if let Some(existing) = self.actions.get(&t.id) {
             // Operator override already present — keep it.
             if existing.source_path != t.source_path {
@@ -395,6 +446,26 @@ impl Registry {
     }
 
     pub(crate) fn insert_workflow(&mut self, w: Workflow) -> Result<(), RegistryError> {
+        if let Some(schema) = &w.input_schema {
+            check_schema_grammar(
+                "input_schema",
+                schema,
+                io_schema::SchemaRole::Input,
+                "workflow",
+                &w.id,
+                &w.source_path,
+            )?;
+        }
+        if let Some(schema) = &w.output_schema {
+            check_schema_grammar(
+                "output_schema",
+                schema,
+                io_schema::SchemaRole::Output,
+                "workflow",
+                &w.id,
+                &w.source_path,
+            )?;
+        }
         if let Some(existing) = self.workflows.get(&w.id) {
             if existing.source_path != w.source_path {
                 return Ok(());
@@ -491,6 +562,46 @@ pub struct ResolveHit {
     pub score: u32,
 }
 
+/// Grammar-validate one declared schema field (`input_schema` or
+/// `output_schema`) against the `io_schema` subset for `role`, translating
+/// the first violation (violations are pre-sorted by pointer path) into a
+/// [`RegistryError::SchemaContract`] carrying full provenance. Shared by
+/// `insert_action`/`insert_workflow` so filesystem-loaded and bundled
+/// (`stdlib::install_into`) YAML get the exact same check.
+fn check_schema_grammar(
+    field_name: &'static str,
+    schema: &Value,
+    role: io_schema::SchemaRole,
+    owner_kind: &'static str,
+    owner_id: &str,
+    source_path: &str,
+) -> Result<(), RegistryError> {
+    if let Err(mut violations) = io_schema::validate_schema(schema, role) {
+        // Pre-sorted by io_schema::validate_schema; take the first so the
+        // caller gets one actionable, deterministic error rather than a
+        // truncated dump of every violation.
+        let v = violations.remove(0);
+        return Err(RegistryError::SchemaContract {
+            path: source_path.to_string(),
+            owner_kind,
+            owner_id: owner_id.to_string(),
+            location: format!("/{field_name}{}", v.path),
+            message: v.reason,
+        });
+    }
+    Ok(())
+}
+
+/// Canonical JSON serialization, used to compare two schema property
+/// definitions "byte-for-byte after canonical JSON object ordering".
+/// `serde_json::Map` is BTreeMap-backed in this workspace (the
+/// `preserve_order` feature is not enabled), so `to_string` already
+/// produces deterministic, sorted-key output at every nesting level —
+/// no separate canonicalization pass is needed.
+fn canonical_json(value: &Value) -> String {
+    serde_json::to_string(value).unwrap_or_default()
+}
+
 fn default_search_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Ok(dir) = std::env::var("AYX_REGISTRY_DIR") {
@@ -570,6 +681,152 @@ mod tests {
         reg.load_dir(dir.path()).expect("loads");
 
         assert!(reg.action("fresh.one").is_ok(), "*.action.yaml must load");
+    }
+
+    /// Step 2: a well-formed declared `input_schema`/`output_schema` loads
+    /// and round-trips onto the parsed `Action` unchanged.
+    #[test]
+    fn declared_action_schema_loads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("declared.action.yaml"),
+            "id: schema.declared\n\
+             title: Declared schema action\n\
+             summary: Has an explicit contract\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: command\n\
+             \x20   cmd: \"ayx mongo doctor --profile <profile>\"\n\
+             \x20   why: check\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 description: Parameters.\n\
+             \x20 additionalProperties: false\n\
+             \x20 required: [profile]\n\
+             \x20 properties:\n\
+             \x20   profile:\n\
+             \x20     type: string\n\
+             \x20     description: Named profile.\n\
+             output_schema:\n\
+             \x20 type: object\n\
+             \x20 description: Result.\n\
+             \x20 required: [action_id]\n\
+             \x20 properties:\n\
+             \x20   action_id:\n\
+             \x20     type: string\n\
+             \x20     description: Stable action id.\n\
+             \x20     const: schema.declared\n",
+        )
+        .expect("write action file");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path()).expect("declared schema loads");
+
+        let action = reg.action("schema.declared").expect("action present");
+        let input = action.input_schema.as_ref().expect("input_schema present");
+        assert_eq!(input["required"], json!(["profile"]));
+        let output = action
+            .output_schema
+            .as_ref()
+            .expect("output_schema present");
+        assert_eq!(
+            output["properties"]["action_id"]["const"],
+            json!("schema.declared")
+        );
+    }
+
+    /// Step 2: a malformed `input_schema` fails at load time (not later, as
+    /// an opaque executor error), and the error names the owning file,
+    /// action id, and a JSON-pointer-like location.
+    #[test]
+    fn malformed_input_schema_reports_provenance() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("bad.action.yaml");
+        std::fs::write(
+            &path,
+            "id: schema.bad-input\n\
+             title: Bad input schema\n\
+             summary: input_schema uses an unsupported keyword\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: note\n\
+             \x20   text: nope\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 additionalProperties: false\n\
+             \x20 properties: {}\n\
+             \x20 pattern: \"^x$\"\n",
+        )
+        .expect("write action file");
+
+        let mut reg = Registry::default();
+        let err = reg.load_dir(dir.path()).unwrap_err();
+        match err {
+            RegistryError::SchemaContract {
+                path: err_path,
+                owner_kind,
+                owner_id,
+                location,
+                ..
+            } => {
+                assert_eq!(err_path, path.display().to_string());
+                assert_eq!(owner_kind, "action");
+                assert_eq!(owner_id, "schema.bad-input");
+                assert!(
+                    location.starts_with("/input_schema/"),
+                    "location should be scoped under /input_schema, got {location}"
+                );
+            }
+            other => panic!("expected SchemaContract, got {other:?}"),
+        }
+    }
+
+    /// Step 2: same check, `output_schema` field, and workflow owner kind.
+    #[test]
+    fn malformed_output_schema_on_workflow_reports_provenance() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("bad.workflow.yaml");
+        std::fs::write(
+            &path,
+            "id: schema.bad-output-workflow\n\
+             title: Bad output schema workflow\n\
+             summary: output_schema root is not type object\n\
+             safety: read_only\n\
+             actions: []\n\
+             output_schema:\n\
+             \x20 type: string\n",
+        )
+        .expect("write workflow file");
+
+        let mut reg = Registry::default();
+        let err = reg.load_dir(dir.path()).unwrap_err();
+        match err {
+            RegistryError::SchemaContract {
+                path: err_path,
+                owner_kind,
+                owner_id,
+                location,
+                ..
+            } => {
+                assert_eq!(err_path, path.display().to_string());
+                assert_eq!(owner_kind, "workflow");
+                assert_eq!(owner_id, "schema.bad-output-workflow");
+                assert!(
+                    location.starts_with("/output_schema/"),
+                    "location should be scoped under /output_schema, got {location}"
+                );
+            }
+            other => panic!("expected SchemaContract, got {other:?}"),
+        }
+    }
+
+    /// Step 2: the same grammar check applies to the bundled stdlib path
+    /// (`stdlib::install_into`), not just `load_dir` — proven indirectly by
+    /// `load_default` (which calls both) still succeeding, since none of
+    /// the bundled v2 files declare a schema yet (Task 5).
+    #[test]
+    fn bundled_stdlib_has_no_schema_grammar_violations() {
+        Registry::load_default().expect("bundled stdlib passes grammar + finalization");
     }
 
     #[test]
