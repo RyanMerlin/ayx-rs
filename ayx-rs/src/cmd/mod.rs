@@ -13,6 +13,7 @@
 use anyhow::Result;
 
 pub mod catalog;
+pub(crate) mod command_surface;
 pub mod confirm;
 pub mod discover;
 pub mod mongo;

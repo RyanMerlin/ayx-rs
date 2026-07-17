@@ -1815,7 +1815,7 @@ pub(crate) enum OneApiCommand {
         #[arg(long)]
         profile: Option<String>,
     },
-    /// Diff the live One OpenAPI spec against the wired-command inventory.
+    /// Diff the live One OpenAPI spec against wired commands (covered / missing / stale).
     Coverage {
         #[arg(long)]
         profile: Option<String>,
