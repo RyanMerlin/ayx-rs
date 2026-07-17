@@ -426,3 +426,25 @@ fn collect_action_params(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ayx_registry::validate::CatalogLookup;
+
+    // Plan Task 3 Step 3: `mongo mutate` and `mongo undo` previously had no
+    // COMMAND_SPECS entry, so any future remediation action referencing
+    // either would be falsely reported as unknown by `ayx actions validate`.
+    // These paths must resolve now that the entries exist.
+    #[test]
+    fn live_catalog_knows_mongo_mutate_and_undo() {
+        assert!(
+            LiveCatalog.has_command_path("mongo mutate"),
+            "COMMAND_SPECS is missing a 'mongo mutate' entry"
+        );
+        assert!(
+            LiveCatalog.has_command_path("mongo undo"),
+            "COMMAND_SPECS is missing a 'mongo undo' entry"
+        );
+    }
+}

@@ -747,31 +747,91 @@ pub(crate) enum MongoCommand {
         #[arg(long)]
         template: Option<String>,
     },
-    #[command(about = "Apply a guarded Mongo update to a Server collection")]
+    #[command(
+        about = "Apply a guarded, template-based Mongo mutation with mandatory preview approval."
+    )]
     Mutate {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long)]
-        database: Option<String>,
-        #[arg(long)]
-        collection: Option<String>,
-        #[arg(long)]
-        filter: Option<String>,
-        #[arg(long)]
-        update: Option<String>,
+        /// Named executable mutation template from the remediation registry
+        /// (`knowledge/mongo/mutations.yaml`). Free-form filter/update is not
+        /// supported for live preview/apply — only a reviewed, capped
+        /// template can execute a write.
         #[arg(long)]
         template: Option<String>,
-        #[arg(long)]
+        /// Bind a template parameter, e.g. `--param new_email=a@b.com`. May
+        /// be repeated. Unknown or duplicate keys are rejected.
+        #[arg(long, value_name = "KEY=VALUE")]
+        param: Vec<String>,
+        /// Render the resolved mongosh invocation without querying the
+        /// database or writing an audit artifact. Mutually exclusive with
+        /// the apply flags below.
+        #[arg(
+            long,
+            conflicts_with_all = ["apply", "backup_audit_artifact", "approval_artifact", "approve"]
+        )]
         print: bool,
+        /// Execute the mutation live. Requires --accept-mutation-risk,
+        /// --backup-audit-artifact, --approval-artifact, and --approve
+        /// together — missing pieces are reported all at once.
         #[arg(long)]
         apply: bool,
         #[arg(long)]
         accept_mutation_risk: bool,
+        /// Path to a current, successful `mongo backup` audit artifact
+        /// proving a backup exists before this mutation runs.
+        #[arg(long, value_name = "PATH")]
+        backup_audit_artifact: Option<PathBuf>,
+        /// Path to the audit artifact this command wrote on a prior
+        /// (non-apply) preview run — proves a human reviewed the exact
+        /// candidate diff before approving it.
+        #[arg(long, value_name = "PATH")]
+        approval_artifact: Option<PathBuf>,
+        /// The `sha256:` approval digest printed by the preview run, copied
+        /// verbatim to prove the operator reviewed that specific diff.
+        #[arg(long, value_name = "DIGEST")]
+        approve: Option<String>,
+        #[arg(long, default_value = "audits")]
+        audit_dir: PathBuf,
     },
     #[command(about = "Run the default support query suite across critical Mongo collections.")]
     Doctor {
         #[arg(long)]
         profile: Option<String>,
+    },
+    #[command(about = "Reverse a prior guarded Mongo mutation from its execution audit artifact.")]
+    Undo {
+        #[arg(long)]
+        profile: Option<String>,
+        /// The execution audit artifact written by the `mongo mutate --apply`
+        /// run being reversed.
+        #[arg(long, value_name = "PATH")]
+        mutation_audit_artifact: PathBuf,
+        /// Render the resolved undo mongosh invocation without querying the
+        /// database or writing an audit artifact. Mutually exclusive with
+        /// the apply flags below.
+        #[arg(
+            long,
+            conflicts_with_all = ["apply", "approval_artifact", "approve"]
+        )]
+        print: bool,
+        /// Execute the undo live. Requires --accept-mutation-risk,
+        /// --approval-artifact, and --approve together.
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        accept_mutation_risk: bool,
+        /// Path to the audit artifact this command wrote on a prior
+        /// (non-apply) undo preview run — proves a human reviewed the exact
+        /// restore diff before approving it.
+        #[arg(long, value_name = "PATH")]
+        approval_artifact: Option<PathBuf>,
+        /// The `sha256:` approval digest printed by the undo preview run,
+        /// mirroring `mongo mutate --approve`.
+        #[arg(long, value_name = "DIGEST")]
+        approve: Option<String>,
+        #[arg(long, default_value = "audits")]
+        audit_dir: PathBuf,
     },
 }
 
@@ -2959,6 +3019,43 @@ pub(crate) const COMMAND_SPECS: &[CommandSpec] = &[
         notes: &[
             "Requires --apply for a live restore.",
             "Writes audit artifacts.",
+        ],
+    },
+    CommandSpec {
+        name: "mongo mutate",
+        path: "mongo/mutate",
+        summary: "Apply a guarded, template-based Mongo mutation with mandatory preview approval.",
+        output: "mutation preview envelope by default, or the terminal applied/aborted/failed_or_unknown execution result envelope with --apply",
+        safety: "destructive",
+        mutating: true,
+        prerequisites: &[
+            "central runtime profile",
+            "mongosh available on PATH",
+            "a current successful mongo backup audit artifact",
+            "an approved, non-expired mongo mutate preview artifact",
+        ],
+        notes: &[
+            "Requires --template; free-form filter/update is not supported.",
+            "Requires --apply plus --accept-mutation-risk, --backup-audit-artifact, --approval-artifact, and --approve together for live execution.",
+            "Writes an audit artifact for every preview attempt.",
+        ],
+    },
+    CommandSpec {
+        name: "mongo undo",
+        path: "mongo/undo",
+        summary: "Reverse a prior guarded Mongo mutation from its execution audit artifact.",
+        output: "undo execution result envelope",
+        safety: "destructive",
+        mutating: true,
+        prerequisites: &[
+            "central runtime profile",
+            "mongosh available on PATH",
+            "the source mutation's execution audit artifact",
+        ],
+        notes: &[
+            "Preview-first: run without --apply to derive the guarded inverse from the source mutation's own recorded prior values, re-verify every candidate is still fresh, and write an approval artifact.",
+            "Requires --apply plus --accept-mutation-risk, --approval-artifact, and --approve together for live execution — the same gate tuple as mongo mutate, minus a backup artifact.",
+            "Refuses to run against a mutation that was not applied, was already undone, or used an unsupported rollback strategy, and aborts the whole batch if any candidate document is stale (missing, or no longer holding its recorded post-mutation value).",
         ],
     },
     CommandSpec {
@@ -5605,7 +5702,9 @@ fn execute(cli: Cli) -> Result<Envelope> {
         load_profile_with_env(profile, environment.as_deref())
     };
     let envelope = match cli.command {
-        Command::Mongo { command } => cmd::mongo::execute(environment.as_deref(), command)?,
+        Command::Mongo { command } => {
+            cmd::mongo::execute(environment.as_deref(), cli.yes, command)?
+        }
         Command::Server { command } => cmd::server::execute(environment.as_deref(), command)?,
         Command::Sqlserver { command } => cmd::sqlserver::execute(environment.as_deref(), command)?,
         Command::Designer { command } => match command {

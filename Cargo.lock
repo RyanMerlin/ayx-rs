@@ -339,6 +339,7 @@ version = "0.13.2"
 dependencies = [
  "apple-native-keyring-store",
  "chrono",
+ "getrandom 0.4.3",
  "keyring-core",
  "serde",
  "serde_json",

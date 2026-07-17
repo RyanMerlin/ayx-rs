@@ -11,7 +11,6 @@ queries:
       - AS_Queue
       - job state corruption
       - orphaned queue rows
-    read_only: true
 
   - name: results_health
     database: AlteryxService
@@ -25,7 +24,6 @@ queries:
       - AS_Results
       - missing result rows
       - workflow completion issues
-    read_only: true
 
   - name: gallery_users
     database: AlteryxGallery
@@ -39,7 +37,6 @@ queries:
       - users
       - bulk email domain migration
       - orphaned users
-    read_only: true
 
   - name: appinfos
     database: AlteryxGallery
@@ -53,23 +50,10 @@ queries:
       - appinfos
       - app ownership
       - gallery item corruption
-    read_only: true
 
-  - name: user_email_domain_migration
-    database: AlteryxGallery
-    collection: users
-    filter:
-      email:
-        $regex: "@companyA\\.com$"
-    update:
-      $set:
-        email: "${new_email}"
-    purpose: Bulk update Gallery user email domains during company migration
-    kba_refs:
-      - users
-      - bulk email domain migration
-      - user remediation
-    read_only: false
+  # user_email_domain_migration moved to mutations.yaml (typed remediation
+  # registry) — it is a write, not a read-only diagnostic. See
+  # ayx-server/knowledge/mongo/mutations.yaml.
 
   # ─── Telemetry templates (Phase 2: ayx telemetry --source server) ──────
   # All read-only. Filters intentionally permissive so client-side
@@ -90,7 +74,6 @@ queries:
     kba_refs:
       - AS_Queue
       - queue depth
-    read_only: true
 
   - name: queue_recent
     database: AlteryxService
@@ -103,7 +86,6 @@ queries:
     kba_refs:
       - AS_Queue
       - wait time
-    read_only: true
 
   - name: results_recent
     database: AlteryxService
@@ -116,7 +98,6 @@ queries:
     kba_refs:
       - AS_Results
       - run history
-    read_only: true
 
   - name: results_errored
     database: AlteryxService
@@ -134,7 +115,6 @@ queries:
     kba_refs:
       - AS_Results
       - job failures
-    read_only: true
 
   - name: schedule_run_history_raw
     database: AlteryxGallery
@@ -156,4 +136,3 @@ queries:
     kba_refs:
       - Schedules
       - schedule health
-    read_only: true

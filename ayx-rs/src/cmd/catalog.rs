@@ -287,6 +287,30 @@ mod tests {
     }
 
     #[test]
+    fn catalog_describe_mongo_undo_notes_do_not_claim_unimplemented() {
+        // Regression guard (final whole-branch review, mongo-mutation-execution
+        // branch): `mongo undo --apply` shipped real, transaction-gated,
+        // audited execution. The catalog is shipped, machine-readable public
+        // metadata — a stale "not yet implemented" note must never silently
+        // rot back in once the feature is real.
+        let env = catalog_describe_envelope("mongo undo").expect("catalog describe should work");
+        let notes = env.data["notes"].as_array().expect("notes array");
+        let joined: String = notes
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            !joined.to_lowercase().contains("not yet implemented"),
+            "mongo undo catalog notes regressed to claiming unimplemented: {joined}"
+        );
+        assert!(
+            !joined.to_lowercase().contains("follow-up task"),
+            "mongo undo catalog notes regressed to claiming unimplemented: {joined}"
+        );
+    }
+
+    #[test]
     fn catalog_list_filters_capabilities_by_tag() {
         let env =
             catalog_list_envelope(Some("cloud"), "compact").expect("catalog list should work");
