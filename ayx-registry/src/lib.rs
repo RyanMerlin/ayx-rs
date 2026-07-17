@@ -42,11 +42,12 @@
 //! transport already enforces, but lifted to the registry layer so the
 //! check happens before any command would fire.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value, json};
 use thiserror::Error;
 use walkdir::WalkDir;
 
@@ -214,6 +215,20 @@ pub struct Action {
     /// Optional rollback note: "restore from <audit_file>", etc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rollback: Option<String>,
+    /// Optional JSON-Schema-shaped contract (see `io_schema` for the
+    /// supported subset) describing the parameter object this action's
+    /// `<placeholder>` steps accept. Absent means "no explicit contract" —
+    /// the loader still derives an *inferred* permissive contract from the
+    /// action's placeholders (see `Registry::effective_action_input_schema`),
+    /// it just isn't author-declared or strictly validated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<Value>,
+    /// Optional JSON-Schema-shaped contract describing the `ActionRun`
+    /// record this action produces in a successful run's `Envelope.data`.
+    /// Absent means "not declared / not output-validated" — never an
+    /// invented guarantee about the run record's shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<Value>,
     /// Provenance: which file the loader read this from. Set by the loader,
     /// never by the YAML author.
     #[serde(default, skip_serializing)]
@@ -240,6 +255,20 @@ pub struct Workflow {
     pub actions: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub success_criteria: Option<String>,
+    /// Optional JSON-Schema-shaped contract describing the parameter object
+    /// this workflow accepts. When declared it must be exactly the union of
+    /// its referenced actions' effective input contracts (see
+    /// `Registry::effective_workflow_input_schema`); when absent an
+    /// inferred permissive union is used instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<Value>,
+    /// Optional JSON-Schema-shaped contract describing the `WorkflowRun`
+    /// record this workflow produces in a successful run's `Envelope.data`.
+    /// There is no output binding/dataflow model between actions, so this
+    /// is never derived from child action outputs — only from what's
+    /// explicitly declared here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<Value>,
     #[serde(default, skip_serializing)]
     pub source_path: String,
 }
