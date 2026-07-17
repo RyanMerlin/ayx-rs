@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-16 00:10:53 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full` _on 2026-07-17 01:37:58 UTC._
 
 This is the curated **catalog** view — the agent-facing capability surface, not the complete command tree. For every command and flag, use `ayx --help`, `ayx <group> --help`, or `ayx discover --deep`.
 
@@ -12,7 +12,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 206
+- Commands: 208
 - Capabilities: 6
 
 ## Commands
@@ -67,9 +67,11 @@ cargo run -q -p xtask -- refresh-command-surface
 | mongo backup | `mongo/backup` | mutating | yes | Back up the Gallery and Service Mongo databases. |
 | mongo doctor | `mongo/doctor` | read-only | no | Run the default support query suite across critical Mongo collections. |
 | mongo inventory | `mongo/inventory` | read-only | no | Generate an inventory plan for the Mongo-backed databases. |
+| mongo mutate | `mongo/mutate` | destructive | yes | Apply a guarded, template-based Mongo mutation with mandatory preview approval. |
 | mongo query | `mongo/query` | read-only | no | Run a read-only Mongo query against a Server collection. |
 | mongo restore | `mongo/restore` | mutating | yes | Restore Mongo data from a backup input path. |
 | mongo status | `mongo/status` | read-only | no | Resolve the configured Mongo connection and database names. |
+| mongo undo | `mongo/undo` | destructive | yes | Reverse a prior guarded Mongo mutation from its execution audit artifact. |
 
 ### `one`
 
