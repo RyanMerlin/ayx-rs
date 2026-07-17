@@ -36,3 +36,62 @@ rollback: |
   (`ayx --apply one flows delete --flow-id <new_id>`) and re-export from
   source after fixing the underlying issue. The export zip is your immutable
   source of truth — keep it until you're confident in the promotion.
+input_schema:
+  type: object
+  description: "Parameters for promoting a single Alteryx One flow from a source environment to a target environment."
+  additionalProperties: false
+  required: [source, target, flow_id]
+  properties:
+    source:
+      type: string
+      description: "Environment name, as configured in ayx's environments file, to promote or migrate assets FROM."
+      minLength: 1
+    target:
+      type: string
+      description: "Environment name, as configured in ayx's environments file, to promote or migrate assets TO."
+      minLength: 1
+    flow_id:
+      type: string
+      description: "Alteryx One flow id being promoted between environments."
+      minLength: 1
+output_schema:
+  type: object
+  description: "The ActionRun record this action's run or plan produces."
+  required: [action_id, title, safety, apply, mode, params, steps, validations, rollback]
+  properties:
+    action_id:
+      type: string
+      description: "Stable identifier for this action; always equals one.flow.promote."
+      const: one.flow.promote
+    title:
+      type: string
+      description: "Human-readable title for this action."
+    safety:
+      type: string
+      description: "Safety classification for this action's run: read_only, mutating, or destructive."
+      enum: [read_only, mutating, destructive]
+    apply:
+      type: boolean
+      description: "Whether this run was invoked with --apply (true) or produced a dry-run plan only (false)."
+    mode:
+      type: string
+      description: "Run mode: \"plan\" when --apply was not set, \"execute\" when it was."
+      enum: [plan, execute]
+    params:
+      type: object
+      description: "The parameter map actually used to run or plan this action (string values only)."
+    steps:
+      type: array
+      description: "Ordered per-step outcome (command, composed action, or note) for this run."
+      items:
+        type: object
+        description: "One planned or executed step outcome for this run."
+    validations:
+      type: array
+      description: "Human-readable validation descriptions declared for this action; not automatically executed."
+      items:
+        type: string
+        description: "One validation's description text."
+    rollback:
+      type: string
+      description: "Rollback guidance for a broken promotion: delete the target-side flow and re-export from source after fixing the underlying issue."
