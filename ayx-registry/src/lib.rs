@@ -327,6 +327,29 @@ pub struct Workflow {
     pub source_path: String,
 }
 
+/// Origin of an [`EffectiveSchema`]: was it author-declared, or synthesized
+/// by the loader from placeholder inference? Surfaced to the CLI (Task 4)
+/// so a caller can distinguish "the author defined this contract" from
+/// "nothing was declared, so the loader guessed one from `<name>` tokens".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SchemaOrigin {
+    /// The action/workflow declared this `input_schema` itself.
+    Explicit,
+    /// No `input_schema` was declared; this is a loader-synthesized
+    /// permissive string-object fallback (see
+    /// `io_schema::inferred_string_object`).
+    Inferred,
+}
+
+/// The resolved input contract for one action or workflow: either its own
+/// declared `input_schema` or a loader-synthesized permissive fallback,
+/// tagged with which one it is.
+#[derive(Debug, Clone)]
+pub(crate) struct EffectiveSchema {
+    pub schema: Value,
+    pub origin: SchemaOrigin,
+}
+
 /// Loaded registry — both actions and workflows, indexed by id.
 #[derive(Debug, Default)]
 pub struct Registry {
@@ -350,7 +373,10 @@ impl Registry {
         // Stdlib fallback always loads — operator overrides above will win on
         // duplicate ids by virtue of being inserted first.
         stdlib::install_into(&mut reg)?;
-        reg.propagate_workflow_safety();
+        // Only now, with every override directory *and* the bundled
+        // stdlib inserted, can composed/referenced ids reliably resolve
+        // across sources — see `finalize`'s doc comment.
+        reg.finalize()?;
         Ok(reg)
     }
 
@@ -505,6 +531,337 @@ impl Registry {
         }
         self.workflows.insert(w.id.clone(), w);
         Ok(())
+    }
+
+    /// Post-load finalization: validates every action's and workflow's
+    /// effective input contract — composition-cycle detection, transitive
+    /// placeholder coverage, and cross-action property agreement, see
+    /// `RegistryError::SchemaContract` — then promotes workflow safety via
+    /// `propagate_workflow_safety`.
+    ///
+    /// Must run only after every override directory *and* the bundled
+    /// stdlib have been inserted: a composed action or a workflow's
+    /// referenced action may live in a different source than the
+    /// action/workflow that references it, so references only reliably
+    /// resolve once loading is complete. `Registry::load_dir` deliberately
+    /// does NOT call this — it stays parsing/insertion-only so focused
+    /// tests and incremental callers can build a registry without paying
+    /// for (or needing) finalized contracts. A caller assembling a
+    /// `Registry` outside `load_default` must call `finalize` itself
+    /// before resolving or running anything.
+    pub fn finalize(&mut self) -> Result<(), RegistryError> {
+        let action_ids: Vec<String> = self.actions.keys().cloned().collect();
+        for id in &action_ids {
+            self.effective_action_input_schema(id)?;
+        }
+        let workflow_ids: Vec<String> = self.workflows.keys().cloned().collect();
+        for id in &workflow_ids {
+            self.effective_workflow_input_schema(id)?;
+        }
+        self.propagate_workflow_safety();
+        Ok(())
+    }
+
+    /// The effective input contract for one action: its own declared
+    /// `input_schema` if present, otherwise an inferred permissive
+    /// string-object schema built from its transitive placeholder set
+    /// (`<name>` tokens on its own `Step::Command` entries, plus every
+    /// composed `Step::Action` child's, recursively).
+    ///
+    /// A declared schema is also checked here (not just grammar-checked at
+    /// insert time): every transitive placeholder must be a required
+    /// property, action-composition cycles are rejected with the full
+    /// cycle path, and — for every composed child that *itself* explicitly
+    /// declares a property this action also declares — the two
+    /// definitions must be byte-identical after canonical JSON ordering,
+    /// so a parent can never promise a different meaning than the child it
+    /// composes. An inferred child's auto-generated property carries no
+    /// such promise, so it is never compared against.
+    pub(crate) fn effective_action_input_schema(
+        &self,
+        id: &str,
+    ) -> Result<EffectiveSchema, RegistryError> {
+        let mut stack = Vec::new();
+        self.effective_action_contract(id, &mut stack)
+            .map(|(schema, _placeholders)| schema)
+    }
+
+    /// Implementation detail behind `effective_action_input_schema`: also
+    /// returns this action's transitive placeholder set, so a caller
+    /// composing it further (a parent action, or a workflow unioning its
+    /// referenced actions) doesn't have to re-derive it by re-reading the
+    /// returned `Value`. `stack` is the in-progress action-id recursion
+    /// path, used for cycle detection.
+    fn effective_action_contract(
+        &self,
+        id: &str,
+        stack: &mut Vec<String>,
+    ) -> Result<(EffectiveSchema, BTreeSet<String>), RegistryError> {
+        let action = self.action(id)?;
+
+        if let Some(pos) = stack.iter().position(|s| s == id) {
+            let mut cycle: Vec<String> = stack[pos..].to_vec();
+            cycle.push(id.to_string());
+            return Err(RegistryError::SchemaContract {
+                path: action.source_path.clone(),
+                owner_kind: "action",
+                owner_id: id.to_string(),
+                location: "/steps".to_string(),
+                message: format!("action composition cycle: {}", cycle.join(" -> ")),
+            });
+        }
+        stack.push(id.to_string());
+
+        let mut placeholders: BTreeSet<String> = BTreeSet::new();
+        // (child action id, shared property name, child's own definition)
+        // — collected only for children whose effective schema is
+        // Explicit; an Inferred child's generated text is not a promise a
+        // parent could contradict.
+        let mut child_defs: Vec<(String, String, Value)> = Vec::new();
+
+        for step in &action.steps {
+            match step {
+                Step::Command { cmd, .. } => {
+                    for p in extract_params(cmd) {
+                        placeholders.insert(p);
+                    }
+                }
+                Step::Action { id: child_id, .. } => {
+                    // A dangling composition reference is `validate.rs`'s
+                    // concern (`ayx actions validate`), not a hard failure
+                    // here — mirrors
+                    // executor::collect_required_params's `if let Ok(...)`.
+                    if self.actions.contains_key(child_id) {
+                        let (child_schema, child_placeholders) =
+                            self.effective_action_contract(child_id, stack)?;
+                        placeholders.extend(child_placeholders.iter().cloned());
+                        if child_schema.origin == SchemaOrigin::Explicit
+                            && let Some(props) = child_schema
+                                .schema
+                                .get("properties")
+                                .and_then(Value::as_object)
+                        {
+                            for name in &child_placeholders {
+                                if let Some(def) = props.get(name) {
+                                    child_defs.push((child_id.clone(), name.clone(), def.clone()));
+                                }
+                            }
+                        }
+                    }
+                }
+                Step::Note { .. } => {}
+            }
+        }
+
+        stack.pop();
+
+        let effective = match &action.input_schema {
+            Some(declared) => {
+                let declared_props = declared.get("properties").and_then(Value::as_object);
+                let declared_required: BTreeSet<String> = declared
+                    .get("required")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(Value::as_str)
+                            .map(String::from)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                for name in &placeholders {
+                    let has_property = declared_props.is_some_and(|p| p.contains_key(name));
+                    if !has_property || !declared_required.contains(name) {
+                        return Err(RegistryError::SchemaContract {
+                            path: action.source_path.clone(),
+                            owner_kind: "action",
+                            owner_id: id.to_string(),
+                            location: "/input_schema/required".to_string(),
+                            message: format!(
+                                "placeholder '<{name}>' is used by this action (directly, or via composition) but is not a required property of its declared input_schema"
+                            ),
+                        });
+                    }
+                }
+
+                for (child_id, name, child_def) in &child_defs {
+                    let parent_def = declared_props.and_then(|p| p.get(name));
+                    let agrees =
+                        parent_def.is_some_and(|d| canonical_json(d) == canonical_json(child_def));
+                    if !agrees {
+                        return Err(RegistryError::SchemaContract {
+                            path: action.source_path.clone(),
+                            owner_kind: "action",
+                            owner_id: id.to_string(),
+                            location: format!("/input_schema/properties/{name}"),
+                            message: format!(
+                                "property '{name}' disagrees with composed action '{child_id}': a parent cannot promise a different definition than the child it composes (parent declares {}, child declares {})",
+                                parent_def
+                                    .map(canonical_json)
+                                    .unwrap_or_else(|| "<missing>".to_string()),
+                                canonical_json(child_def)
+                            ),
+                        });
+                    }
+                }
+
+                EffectiveSchema {
+                    schema: declared.clone(),
+                    origin: SchemaOrigin::Explicit,
+                }
+            }
+            None => EffectiveSchema {
+                schema: io_schema::inferred_string_object(placeholders.clone()),
+                origin: SchemaOrigin::Inferred,
+            },
+        };
+
+        Ok((effective, placeholders))
+    }
+
+    /// The effective input contract for one workflow: the union of its
+    /// ordered `actions`' effective input contracts (see
+    /// `effective_action_input_schema`). Two referenced actions giving the
+    /// same parameter name incompatible definitions is always rejected,
+    /// regardless of whether the workflow itself declares a schema — it's
+    /// a property of the actions being composed together, not of the
+    /// workflow's own declaration.
+    ///
+    /// An undeclared workflow gets an inferred permissive union so
+    /// existing workflows keep executing. A declared workflow must expose
+    /// exactly that union as its required properties, each definition
+    /// identical (byte-for-byte, canonical JSON) to the action contract
+    /// that actually consumes it — never a merged, weakened, or invented
+    /// definition. Per the plan, there is no output-schema derivation from
+    /// child action outputs; only `Workflow.output_schema`'s own grammar
+    /// (checked at insert time) applies to workflow output.
+    pub(crate) fn effective_workflow_input_schema(
+        &self,
+        id: &str,
+    ) -> Result<EffectiveSchema, RegistryError> {
+        let workflow = self.workflow(id)?;
+
+        // name -> (owning action id, property definition). Built
+        // action-by-action (in `Workflow.actions` order) so a second
+        // action giving the same key an incompatible definition can name
+        // both actions in the error.
+        let mut union_props: BTreeMap<String, (String, Value)> = BTreeMap::new();
+        let mut union_required: BTreeSet<String> = BTreeSet::new();
+
+        for action_id in &workflow.actions {
+            // A dangling workflow -> action reference is `validate.rs`'s
+            // concern, not a hard failure here.
+            if !self.actions.contains_key(action_id) {
+                continue;
+            }
+            let action_schema = self.effective_action_input_schema(action_id)?;
+            let required: BTreeSet<String> = action_schema
+                .schema
+                .get("required")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let props = action_schema
+                .schema
+                .get("properties")
+                .and_then(Value::as_object);
+
+            for name in &required {
+                union_required.insert(name.clone());
+                let Some(def) = props.and_then(|p| p.get(name)) else {
+                    continue;
+                };
+                match union_props.get(name) {
+                    Some((other_action, other_def)) => {
+                        if canonical_json(other_def) != canonical_json(def) {
+                            return Err(RegistryError::SchemaContract {
+                                path: workflow.source_path.clone(),
+                                owner_kind: "workflow",
+                                owner_id: id.to_string(),
+                                location: "/actions".to_string(),
+                                message: format!(
+                                    "actions '{other_action}' and '{action_id}' declare incompatible definitions for the shared parameter '{name}'"
+                                ),
+                            });
+                        }
+                    }
+                    None => {
+                        union_props.insert(name.clone(), (action_id.clone(), def.clone()));
+                    }
+                }
+            }
+        }
+
+        let inferred = {
+            let mut properties = Map::new();
+            for (name, (_, def)) in &union_props {
+                properties.insert(name.clone(), def.clone());
+            }
+            json!({
+                "type": "object",
+                "description": "Inferred workflow input contract: union of the required input parameters across referenced actions.",
+                "properties": Value::Object(properties),
+                "required": union_required.iter().cloned().collect::<Vec<_>>(),
+                "additionalProperties": true,
+            })
+        };
+
+        match &workflow.input_schema {
+            Some(declared) => {
+                let declared_required: BTreeSet<String> = declared
+                    .get("required")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(Value::as_str)
+                            .map(String::from)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if declared_required != union_required {
+                    return Err(RegistryError::SchemaContract {
+                        path: workflow.source_path.clone(),
+                        owner_kind: "workflow",
+                        owner_id: id.to_string(),
+                        location: "/input_schema/required".to_string(),
+                        message: format!(
+                            "declared required set {declared_required:?} does not match the union of referenced actions' required parameters {union_required:?}"
+                        ),
+                    });
+                }
+                let declared_props = declared.get("properties").and_then(Value::as_object);
+                for name in &union_required {
+                    let (owning_action, union_def) = &union_props[name];
+                    let declared_def = declared_props.and_then(|p| p.get(name));
+                    let agrees = declared_def
+                        .is_some_and(|d| canonical_json(d) == canonical_json(union_def));
+                    if !agrees {
+                        return Err(RegistryError::SchemaContract {
+                            path: workflow.source_path.clone(),
+                            owner_kind: "workflow",
+                            owner_id: id.to_string(),
+                            location: format!("/input_schema/properties/{name}"),
+                            message: format!(
+                                "property '{name}' does not match the definition consumed from action '{owning_action}'"
+                            ),
+                        });
+                    }
+                }
+                Ok(EffectiveSchema {
+                    schema: declared.clone(),
+                    origin: SchemaOrigin::Explicit,
+                })
+            }
+            None => Ok(EffectiveSchema {
+                schema: inferred,
+                origin: SchemaOrigin::Inferred,
+            }),
+        }
     }
 
     pub fn action(&self, id: &str) -> Result<&Action, RegistryError> {
@@ -861,6 +1218,448 @@ mod tests {
         assert!(!Safety::ReadOnly.requires_apply());
         assert!(Safety::Mutating.requires_apply());
         assert!(Safety::Destructive.requires_apply());
+    }
+
+    // -- Step 3/4/6: effective contracts + composition/finalization -----
+
+    /// Step 6: a current `*.action.yaml` with no declared schema gets an
+    /// effective *inferred* contract: a permissive string-object whose
+    /// required properties are exactly its recursively discovered
+    /// placeholders.
+    #[test]
+    fn undeclared_action_gets_inferred_effective_schema() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("plain.action.yaml"),
+            "id: schema.plain\n\
+             title: Plain action\n\
+             summary: No declared schema\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: command\n\
+             \x20   cmd: \"ayx mongo doctor --profile <profile>\"\n\
+             \x20   why: check\n",
+        )
+        .expect("write action file");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path()).expect("loads");
+        let effective = reg
+            .effective_action_input_schema("schema.plain")
+            .expect("inferred contract builds");
+
+        assert_eq!(effective.origin, SchemaOrigin::Inferred);
+        assert_eq!(effective.schema["required"], json!(["profile"]));
+        assert_eq!(effective.schema["additionalProperties"], json!(true));
+        assert_eq!(
+            effective.schema["properties"]["profile"]["type"],
+            json!("string")
+        );
+    }
+
+    /// Step 6: an action-composition cycle (`A -> B -> A`) is rejected at
+    /// finalization with the complete cycle path in the error, not a stack
+    /// overflow.
+    #[test]
+    fn action_composition_cycle_is_rejected_with_full_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("a.action.yaml"),
+            "id: cycle.a\n\
+             title: A\n\
+             summary: composes B\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: action\n\
+             \x20   id: cycle.b\n\
+             \x20   why: compose\n",
+        )
+        .expect("write a");
+        std::fs::write(
+            dir.path().join("b.action.yaml"),
+            "id: cycle.b\n\
+             title: B\n\
+             summary: composes A\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: action\n\
+             \x20   id: cycle.a\n\
+             \x20   why: compose\n",
+        )
+        .expect("write b");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path())
+            .expect("loads (finalize is separate)");
+        let err = reg.finalize().unwrap_err();
+        match err {
+            RegistryError::SchemaContract {
+                owner_kind,
+                location,
+                message,
+                ..
+            } => {
+                assert_eq!(owner_kind, "action");
+                assert_eq!(location, "/steps");
+                assert!(message.contains("cycle"), "{message}");
+                assert!(message.contains("cycle.a"), "{message}");
+                assert!(message.contains("cycle.b"), "{message}");
+            }
+            other => panic!("expected SchemaContract cycle error, got {other:?}"),
+        }
+    }
+
+    /// Step 6: a declared `input_schema` that omits a placeholder the
+    /// action's own command steps actually use is rejected.
+    #[test]
+    fn declared_action_missing_direct_placeholder_is_rejected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("missing-direct.action.yaml"),
+            "id: schema.missing-direct\n\
+             title: Missing direct placeholder\n\
+             summary: input_schema omits the profile placeholder\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: command\n\
+             \x20   cmd: \"ayx mongo doctor --profile <profile>\"\n\
+             \x20   why: check\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 description: Parameters.\n\
+             \x20 additionalProperties: false\n\
+             \x20 required: []\n\
+             \x20 properties: {}\n",
+        )
+        .expect("write action file");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path()).expect("loads");
+        let err = reg.finalize().unwrap_err();
+        match err {
+            RegistryError::SchemaContract {
+                owner_kind,
+                owner_id,
+                message,
+                ..
+            } => {
+                assert_eq!(owner_kind, "action");
+                assert_eq!(owner_id, "schema.missing-direct");
+                assert!(message.contains("profile"), "{message}");
+            }
+            other => panic!("expected SchemaContract, got {other:?}"),
+        }
+    }
+
+    /// Step 6: a declared `input_schema` must cover placeholders pulled in
+    /// transitively through a composed `Step::Action` child too, not just
+    /// its own direct command steps.
+    #[test]
+    fn declared_action_missing_composed_child_placeholder_is_rejected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("child.action.yaml"),
+            "id: schema.child-has-x\n\
+             title: Child\n\
+             summary: uses x, no declared schema\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: command\n\
+             \x20   cmd: \"ayx mongo doctor --profile <x>\"\n\
+             \x20   why: check\n",
+        )
+        .expect("write child");
+        std::fs::write(
+            dir.path().join("parent.action.yaml"),
+            "id: schema.parent-missing-child-placeholder\n\
+             title: Parent\n\
+             summary: composes child but forgets x in its own schema\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: action\n\
+             \x20   id: schema.child-has-x\n\
+             \x20   why: compose\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 description: Parameters.\n\
+             \x20 additionalProperties: false\n\
+             \x20 required: []\n\
+             \x20 properties: {}\n",
+        )
+        .expect("write parent");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path()).expect("loads");
+        let err = reg.finalize().unwrap_err();
+        match err {
+            RegistryError::SchemaContract {
+                owner_kind,
+                owner_id,
+                message,
+                ..
+            } => {
+                assert_eq!(owner_kind, "action");
+                assert_eq!(owner_id, "schema.parent-missing-child-placeholder");
+                assert!(message.contains('x'), "{message}");
+            }
+            other => panic!("expected SchemaContract, got {other:?}"),
+        }
+    }
+
+    /// Step 6: two explicitly-declared actions in a composition chain that
+    /// give the same shared property a *different* definition is rejected
+    /// — a parent cannot promise a weaker/different meaning for a child's
+    /// input. The error names the parent, the child, and the property.
+    #[test]
+    fn declared_action_conflicting_property_with_composed_child_is_rejected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("child.action.yaml"),
+            "id: schema.child-explicit-x\n\
+             title: Child explicit\n\
+             summary: declares its own meaning of x\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: command\n\
+             \x20   cmd: \"ayx mongo doctor --profile <x>\"\n\
+             \x20   why: check\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 description: Child parameters.\n\
+             \x20 additionalProperties: false\n\
+             \x20 required: [x]\n\
+             \x20 properties:\n\
+             \x20   x:\n\
+             \x20     type: string\n\
+             \x20     description: Child's own meaning of x.\n",
+        )
+        .expect("write child");
+        std::fs::write(
+            dir.path().join("parent.action.yaml"),
+            "id: schema.parent-conflicts-with-child\n\
+             title: Parent conflicts\n\
+             summary: declares a DIFFERENT meaning for x than the child\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: action\n\
+             \x20   id: schema.child-explicit-x\n\
+             \x20   why: compose\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 description: Parent parameters.\n\
+             \x20 additionalProperties: false\n\
+             \x20 required: [x]\n\
+             \x20 properties:\n\
+             \x20   x:\n\
+             \x20     type: string\n\
+             \x20     description: Parent's DIFFERENT meaning of x.\n",
+        )
+        .expect("write parent");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path()).expect("loads");
+        let err = reg.finalize().unwrap_err();
+        match err {
+            RegistryError::SchemaContract {
+                owner_kind,
+                owner_id,
+                message,
+                ..
+            } => {
+                assert_eq!(owner_kind, "action");
+                assert_eq!(owner_id, "schema.parent-conflicts-with-child");
+                assert!(message.contains("schema.child-explicit-x"), "{message}");
+                assert!(message.contains('x'), "{message}");
+            }
+            other => panic!("expected SchemaContract, got {other:?}"),
+        }
+    }
+
+    /// Positive counterpart: identical property definitions across a
+    /// composition chain agree and finalize cleanly.
+    #[test]
+    fn declared_action_matching_property_with_composed_child_passes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("child.action.yaml"),
+            "id: schema.child-agrees\n\
+             title: Child agrees\n\
+             summary: shared meaning\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: command\n\
+             \x20   cmd: \"ayx mongo doctor --profile <x>\"\n\
+             \x20   why: check\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 description: Shared parameters.\n\
+             \x20 additionalProperties: false\n\
+             \x20 required: [x]\n\
+             \x20 properties:\n\
+             \x20   x:\n\
+             \x20     type: string\n\
+             \x20     description: Shared meaning of x.\n",
+        )
+        .expect("write child");
+        std::fs::write(
+            dir.path().join("parent.action.yaml"),
+            "id: schema.parent-agrees\n\
+             title: Parent agrees\n\
+             summary: same meaning as child\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: action\n\
+             \x20   id: schema.child-agrees\n\
+             \x20   why: compose\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 description: Parent parameters.\n\
+             \x20 additionalProperties: false\n\
+             \x20 required: [x]\n\
+             \x20 properties:\n\
+             \x20   x:\n\
+             \x20     type: string\n\
+             \x20     description: Shared meaning of x.\n",
+        )
+        .expect("write parent");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path()).expect("loads");
+        reg.finalize().expect("matching property definitions agree");
+        let effective = reg
+            .effective_action_input_schema("schema.parent-agrees")
+            .expect("effective schema still resolvable");
+        assert_eq!(effective.origin, SchemaOrigin::Explicit);
+    }
+
+    /// Step 6: a workflow that declares an `input_schema` omitting or
+    /// changing a required action property is rejected.
+    #[test]
+    fn declared_workflow_missing_required_action_property_is_rejected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("leaf.action.yaml"),
+            "id: schema.wf-leaf\n\
+             title: Leaf\n\
+             summary: uses profile\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: command\n\
+             \x20   cmd: \"ayx mongo doctor --profile <profile>\"\n\
+             \x20   why: check\n",
+        )
+        .expect("write leaf");
+        std::fs::write(
+            dir.path().join("wf.workflow.yaml"),
+            "id: schema.wf-missing-required\n\
+             title: WF missing required\n\
+             summary: declares an empty schema despite requiring profile\n\
+             safety: read_only\n\
+             actions: [schema.wf-leaf]\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 description: Parameters.\n\
+             \x20 additionalProperties: false\n\
+             \x20 required: []\n\
+             \x20 properties: {}\n",
+        )
+        .expect("write workflow");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path()).expect("loads");
+        let err = reg.finalize().unwrap_err();
+        match err {
+            RegistryError::SchemaContract {
+                owner_kind,
+                owner_id,
+                message,
+                ..
+            } => {
+                assert_eq!(owner_kind, "workflow");
+                assert_eq!(owner_id, "schema.wf-missing-required");
+                assert!(message.contains("profile"), "{message}");
+            }
+            other => panic!("expected SchemaContract, got {other:?}"),
+        }
+    }
+
+    /// Step 6: two actions referenced by the same workflow that give a
+    /// shared parameter name incompatible definitions is rejected — this
+    /// is checked independently of whether the workflow itself declares a
+    /// schema, since it's a property of the actions being composed.
+    #[test]
+    fn workflow_actions_with_conflicting_shared_property_is_rejected() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("first.action.yaml"),
+            "id: schema.wf-first\n\
+             title: First\n\
+             summary: declares ts one way\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: command\n\
+             \x20   cmd: \"ayx mongo backup --ts <ts>\"\n\
+             \x20   why: backup\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 description: First parameters.\n\
+             \x20 additionalProperties: false\n\
+             \x20 required: [ts]\n\
+             \x20 properties:\n\
+             \x20   ts:\n\
+             \x20     type: string\n\
+             \x20     description: First's meaning of ts.\n",
+        )
+        .expect("write first");
+        std::fs::write(
+            dir.path().join("second.action.yaml"),
+            "id: schema.wf-second\n\
+             title: Second\n\
+             summary: declares ts differently\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: command\n\
+             \x20   cmd: \"ayx mongo restore --ts <ts>\"\n\
+             \x20   why: restore\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 description: Second parameters.\n\
+             \x20 additionalProperties: false\n\
+             \x20 required: [ts]\n\
+             \x20 properties:\n\
+             \x20   ts:\n\
+             \x20     type: string\n\
+             \x20     description: Second's DIFFERENT meaning of ts.\n",
+        )
+        .expect("write second");
+        std::fs::write(
+            dir.path().join("wf.workflow.yaml"),
+            "id: schema.wf-conflict\n\
+             title: WF conflict\n\
+             summary: no declared schema; conflict is still caught\n\
+             safety: read_only\n\
+             actions: [schema.wf-first, schema.wf-second]\n",
+        )
+        .expect("write workflow");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path()).expect("loads");
+        let err = reg.finalize().unwrap_err();
+        match err {
+            RegistryError::SchemaContract {
+                owner_kind,
+                owner_id,
+                message,
+                ..
+            } => {
+                assert_eq!(owner_kind, "workflow");
+                assert_eq!(owner_id, "schema.wf-conflict");
+                assert!(message.contains("schema.wf-first"), "{message}");
+                assert!(message.contains("schema.wf-second"), "{message}");
+                assert!(message.contains("ts"), "{message}");
+            }
+            other => panic!("expected SchemaContract, got {other:?}"),
+        }
     }
 
     #[test]
