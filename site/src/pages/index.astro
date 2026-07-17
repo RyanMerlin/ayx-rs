@@ -11,7 +11,7 @@ const install = 'curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/
 const session = [
   { cmd: 'ayx onboard', out: ['profile "default" created at ~/.config/ayx'], kind: 'ok' },
   {
-    cmd: 'ayx --output json one workspace current',
+    cmd: 'ayx one workspace current --output json',
     out: ['{ "workspace": "acme-prod", "role": "admin" }'],
     kind: 'json',
   },

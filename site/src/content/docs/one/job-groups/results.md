@@ -33,7 +33,7 @@ ayx one job-groups profile-results <id>
 ayx one job-groups profile <id> --profile <profile-id>
 
 # Machine-readable
-ayx --output json one job-groups profile <id>
+ayx one job-groups profile <id> --output json
 ```
 
 `profile` returns a summary view. `profile-results` returns a more detailed breakdown. Use `profile-results` when you need field-level statistics or are building data quality checks.
@@ -45,7 +45,7 @@ Some job groups produce PDF outputs when configured to do so.
 ```bash
 ayx one job-groups pdf-results <id>
 
-ayx --output json one job-groups pdf-results <id>
+ayx one job-groups pdf-results <id> --output json
 ```
 
 The response includes the PDF data or a reference to where it can be retrieved.
@@ -62,7 +62,7 @@ ayx one job-groups publications <id>
 ayx one job-groups publications <id> --profile <profile-id>
 
 # Machine-readable
-ayx --output json one job-groups publications <id>
+ayx one job-groups publications <id> --output json
 ```
 
 To publish new results to a target, use `ayx one job-groups publish` — see [Job groups](/one/job-groups/).
@@ -72,24 +72,24 @@ To publish new results to a target, use `ayx one job-groups publish` — see [Jo
 Check profile results for data quality after every run:
 
 ```bash
-PROFILE=$(ayx --output json one job-groups profile-results <id>)
+PROFILE=$(ayx one job-groups profile-results <id> --output json)
 echo "$PROFILE" | jq '.data'
 ```
 
 Audit all publication targets for a job group:
 
 ```bash
-ayx --output json one job-groups publications <id> \
+ayx one job-groups publications <id> --output json \
   | jq -r '.data[] | [.target, .publishedAt, .status] | @tsv'
 ```
 
 List job groups that have produced PDF results:
 
 ```bash
-ayx --output json one job-groups list --all \
+ayx one job-groups list --all --output json \
   | jq -r '.data[].id' \
   | while read id; do
-      COUNT=$(ayx --output json one job-groups pdf-results "$id" \
+      COUNT=$(ayx one job-groups pdf-results "$id" --output json \
                | jq '.data | length')
       [[ "$COUNT" -gt 0 ]] && echo "$id: $COUNT PDF result(s)"
     done

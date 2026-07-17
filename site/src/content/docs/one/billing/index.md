@@ -54,8 +54,8 @@ See [Diagnostics](/one/diagnostics/) for the full doctor command set.
 Pass `--output json` for structured output. `--output` is a global flag, so it can appear before or after the subcommand:
 
 ```bash
-ayx --output json one billing current-account
-ayx --output json one billing usage-export
+ayx one billing current-account --output json
+ayx one billing usage-export --output json
 ```
 
 The envelope is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`.

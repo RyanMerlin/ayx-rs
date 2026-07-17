@@ -38,7 +38,7 @@ ayx one job-groups list --profile <profile-id>
 ayx one job-groups list --limit 50
 
 # Machine-readable
-ayx --output json one job-groups list --all
+ayx one job-groups list --all --output json
 ```
 
 When the API returns a null `name` for a job group, `list` synthesizes a display name: `flow-{flowId}` if a `flowId` is present, otherwise `job-{id}`. The synthesized name appears in both text and JSON output.
@@ -113,9 +113,9 @@ Cancel is a best-effort operation. Jobs that have already completed are not affe
 Find all job groups and show their status in one pass:
 
 ```bash
-ayx --output json one job-groups list --all \
+ayx one job-groups list --all --output json \
   | jq -r '.data[].id' \
-  | xargs -I{} ayx --output json one job-groups status {} \
+  | xargs -I{} ayx one job-groups status {} --output json \
   | jq -r '[.data.id, .data.status] | @tsv'
 ```
 
@@ -126,7 +126,7 @@ ayx one job-groups run --body '{"jobGroupId":"<id>"}' --apply
 
 # Poll status
 while true; do
-  STATUS=$(ayx --output json one job-groups status <id> | jq -r '.data.status')
+  STATUS=$(ayx one job-groups status <id> --output json | jq -r '.data.status')
   echo "$STATUS"
   [[ "$STATUS" == "Completed" || "$STATUS" == "Failed" ]] && break
   sleep 10

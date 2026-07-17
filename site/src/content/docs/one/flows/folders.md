@@ -99,24 +99,24 @@ Deleting a folder that still contains flows will be rejected by the server. Move
 ### List all folders as JSON
 
 ```bash
-ayx --output json one flows folders list \
+ayx one flows folders list --output json \
   | jq '.data[]'
 ```
 
 ### Find a folder by name
 
 ```bash
-ayx --output json one flows folders list \
+ayx one flows folders list --output json \
   | jq -r '.data[] | select(.name == "Production") | .id'
 ```
 
 ### List flows in a folder by name
 
 ```bash
-folder_id=$(ayx --output json one flows folders list \
+folder_id=$(ayx one flows folders list --output json \
   | jq -r '.data[] | select(.name == "Production") | .id')
 
-ayx --output json one flows folders flows list "$folder_id" \
+ayx one flows folders flows list "$folder_id" --output json \
   | jq '.data[]'
 ```
 

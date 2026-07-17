@@ -97,7 +97,7 @@ ayx one output-objects wrangle-to-python <id> --body '{"options": {}}'
 ## JSON output
 
 ```bash
-ayx --output json one output-objects list
+ayx one output-objects list --output json
 ```
 
 The envelope is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`.

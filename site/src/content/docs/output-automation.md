@@ -12,7 +12,7 @@ ayx is built to be driven by scripts and agents, not just typed at a prompt. Two
 Add `--output json` for machine-readable output. It's a global flag, so it can appear before or after the subcommand:
 
 ```bash
-ayx --output json one flows list
+ayx one flows list --output json
 ```
 
 Every JSON response uses the same envelope:
@@ -34,7 +34,7 @@ Mutating commands print what they *would* do and exit `0` unless you pass `--app
 
 ```bash
 # Preview — no changes; capture the planned request
-ayx --output json one flows delete <id>
+ayx one flows delete <id> --output json
 
 # Commit, non-interactively
 ayx one flows delete <id> --apply --yes

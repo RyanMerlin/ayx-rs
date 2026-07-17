@@ -65,7 +65,7 @@ ayx one flows permissions \
 BODY='{"permissions": [...]}'
 
 while IFS= read -r id; do
-  ayx --output json one flows permissions \
+  ayx one flows permissions --output json \
     "$id" \
     --body "$BODY" \
     --apply --yes \

@@ -44,7 +44,7 @@ ayx one person current
 ayx one person detail <id>
 
 # Machine-readable
-ayx --output json one person list --all
+ayx one person list --all --output json
 ```
 
 `--profile <name>` switches the target environment on commands that support it. Use `--max-pages <n>` to cap auto-pagination.
@@ -132,14 +132,14 @@ This sends the reset email to the user. No `--yes` is required — it is not con
 
 ```bash
 # Export all users as JSON for auditing
-ayx --output json one person list --all | jq '.data'
+ayx one person list --all --output json | jq '.data'
 
 # Get a user's ID by email
-ayx --output json one person list --all \
+ayx one person list --all --output json \
   | jq -r '.data[] | select(.email == "<email>") | .id'
 
 # Bulk delete: pipe IDs into xargs (dry-run first)
-ayx --output json one person list --all \
+ayx one person list --all --output json \
   | jq -r '.data[] | select(.someField == "value") | .id' \
   | xargs -I{} ayx one person delete {}
 

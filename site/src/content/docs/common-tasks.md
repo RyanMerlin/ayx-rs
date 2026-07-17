@@ -26,7 +26,7 @@ Active profile, account email, workspace, and environment, in one shot.
 ## List flows
 
 ```bash
-ayx --output json one flows list --all
+ayx one flows list --all --output json
 ```
 
 `--all` pages through every result. Leave it off for just the first page.
@@ -34,7 +34,7 @@ ayx --output json one flows list --all
 ## Inspect a flow before you touch it
 
 ```bash
-ayx --output json one flows detail <id>
+ayx one flows detail <id> --output json
 ```
 
 Read-only — returns the flow's metadata, parameters, and permissions.
@@ -66,7 +66,7 @@ With `--apply`, ayx records an audit artifact under `${AYX_CONFIG_HOME}/audits/`
 ## Run one command against a different environment
 
 ```bash
-ayx --output json one flows list --profile staging
+ayx one flows list --profile staging --output json
 ```
 
 `--profile` switches profile for a single run. To change your default for good, use `ayx profile use <name>`.
@@ -74,7 +74,7 @@ ayx --output json one flows list --profile staging
 ## Get a telemetry overview
 
 ```bash
-ayx --output json telemetry summary --since 7d --top 10
+ayx telemetry summary --since 7d --top 10 --output json
 ```
 
 Running jobs, recent history, top workflows, and errors — in one envelope.

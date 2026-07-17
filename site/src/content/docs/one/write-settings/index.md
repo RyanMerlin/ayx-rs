@@ -77,7 +77,7 @@ ayx one write-settings delete <id> --apply --yes
 ## JSON output
 
 ```bash
-ayx --output json one write-settings list
+ayx one write-settings list --output json
 ```
 
 The envelope is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`.

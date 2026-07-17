@@ -49,7 +49,7 @@ ayx one workspace list --all
 ayx one workspace list --limit 50
 
 # Machine-readable
-ayx --output json one workspace list --all
+ayx one workspace list --all --output json
 ```
 
 `--all` follows all pagination tokens automatically. Use `--max-pages <n>` to cap how many pages it fetches.
@@ -192,7 +192,7 @@ If you haven't authenticated for that workspace yet, the command errors and dire
 
 ```bash
 # Audit: list all workspaces as JSON and extract IDs
-ayx --output json one workspace list --all \
+ayx one workspace list --all --output json \
   | jq -r '.data[].id'
 
 # Bulk suspend users in the active workspace (CI/script)
@@ -200,7 +200,7 @@ ayx one workspace suspend-users \
   --apply --yes
 
 # Export current workspace config for review
-ayx --output json one workspace current-configuration \
+ayx one workspace current-configuration --output json \
   | jq '.data'
 ```
 

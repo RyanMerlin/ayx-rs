@@ -50,7 +50,7 @@ In this version, `ayx one plans import --help` shows only the standard flags (`-
 
 ```bash
 # 1. Export from dev
-ayx --output json --profile dev one plans export <plan-id> --apply \
+ayx --profile dev one plans export <plan-id> --apply --output json \
   > plan-export.json
 
 # 2. Import to prod

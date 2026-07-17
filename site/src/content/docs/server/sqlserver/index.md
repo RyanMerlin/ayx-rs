@@ -120,7 +120,7 @@ Both commands also accept `--dry-run` explicitly if you prefer to make the inten
 All commands accept `--output json` as a global flag:
 
 ```sh
-ayx --output json sqlserver status --profile prod
+ayx sqlserver status --profile prod --output json
 ```
 
 ## Related

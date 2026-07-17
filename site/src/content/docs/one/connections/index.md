@@ -36,7 +36,7 @@ ayx one connections list --profile <profile-id>
 ayx one connections list --limit 25
 
 # Machine-readable output
-ayx --output json one connections list --all
+ayx one connections list --all --output json
 ```
 
 The `--all` flag follows pagination automatically and returns every record. For large environments pair it with `--output json` and pipe into `jq`.
@@ -114,16 +114,16 @@ ayx one connections delete <id> --apply --yes
 Parse the connection ID from a list to use in downstream commands:
 
 ```bash
-ayx --output json one connections list --all \
+ayx one connections list --all --output json \
   | jq -r '.data[] | select(.name == "My DB") | .id'
 ```
 
 Audit connection health across all connections:
 
 ```bash
-ayx --output json one connections list --all \
+ayx one connections list --all --output json \
   | jq -r '.data[].id' \
-  | xargs -I{} ayx --output json one connections status {}
+  | xargs -I{} ayx one connections status {} --output json
 ```
 
 ## Related

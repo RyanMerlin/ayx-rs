@@ -144,28 +144,28 @@ ayx one plans delete <plan-id> --apply --yes
 ### List all plans as JSON
 
 ```bash
-ayx --output json one plans list --all \
+ayx one plans list --all --output json \
   | jq '.data[]'
 ```
 
 ### Find a plan by name
 
 ```bash
-ayx --output json one plans list --all \
+ayx one plans list --all --output json \
   | jq -r '.data[] | select(.name == "Daily ETL") | .id'
 ```
 
 ### Run a plan and check success
 
 ```bash
-result=$(ayx --output json one plans run <plan-id> --apply)
+result=$(ayx one plans run <plan-id> --apply --output json)
 echo "$result" | jq -e '.ok'
 ```
 
 ### Run plans in a specific environment
 
 ```bash
-ayx --output json --environment prod one plans list --all
+ayx --environment prod one plans list --all --output json
 ```
 
 ## Related

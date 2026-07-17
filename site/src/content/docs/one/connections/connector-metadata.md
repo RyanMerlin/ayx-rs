@@ -50,7 +50,7 @@ Overrides let you change connector metadata at the environment level without tou
 ```bash
 ayx one connections connector-metadata overrides list <connector>
 
-ayx --output json one connections connector-metadata overrides list <connector>
+ayx one connections connector-metadata overrides list <connector> --output json
 ```
 
 ### Create overrides
@@ -116,15 +116,15 @@ Pipe the output to a file and pass it to `connections create --body <file>`. Use
 Dump all metadata for a connector to a file for auditing:
 
 ```bash
-ayx --output json one connections connector-metadata detail <connector> \
+ayx one connections connector-metadata detail <connector> --output json \
   | jq '.data' > connector-<connector>-metadata.json
 ```
 
 Compare defaults against active overrides to detect drift:
 
 ```bash
-ayx --output json one connections connector-metadata defaults <connector> | jq '.data' > defaults.json
-ayx --output json one connections connector-metadata overrides list <connector> | jq '.data' > overrides.json
+ayx one connections connector-metadata defaults <connector> --output json | jq '.data' > defaults.json
+ayx one connections connector-metadata overrides list <connector> --output json | jq '.data' > overrides.json
 diff defaults.json overrides.json
 ```
 

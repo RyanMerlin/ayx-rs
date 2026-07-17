@@ -28,7 +28,7 @@ ayx one connections permissions list <id>
 ayx one connections permissions list <id> --profile <profile-id>
 
 # Machine-readable output
-ayx --output json one connections permissions list <id>
+ayx one connections permissions list <id> --output json
 ```
 
 ## Inspecting a permission
@@ -78,7 +78,7 @@ ayx one connections permissions delete \
 Audit all subjects with access to a connection:
 
 ```bash
-ayx --output json one connections permissions list <id> \
+ayx one connections permissions list <id> --output json \
   | jq -r '.data[] | [.subjectId, .role] | @tsv'
 ```
 
@@ -86,11 +86,11 @@ Remove all permissions for a decommissioned user across multiple connections:
 
 ```bash
 # First collect connection IDs
-ayx --output json one connections list --all | jq -r '.data[].id' > conn-ids.txt
+ayx one connections list --all --output json | jq -r '.data[].id' > conn-ids.txt
 
 # Then revoke per connection where the subject appears
 while read conn_id; do
-  ayx --output json one connections permissions list "$conn_id" \
+  ayx one connections permissions list "$conn_id" --output json \
     | jq -r '.data[] | select(.subjectId == "<subject-id>") | .subjectId' \
     | grep -q . && \
     ayx one connections permissions delete \

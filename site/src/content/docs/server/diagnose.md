@@ -73,7 +73,7 @@ ayx server diagnose tls --profile prod
 Snapshot the current auth configuration:
 
 ```sh
-ayx --output json server auth status --profile prod
+ayx server auth status --profile prod --output json
 ```
 
 Diagnose a broken auth setup (SAML, Windows auth, API key):
@@ -156,7 +156,7 @@ Output goes to `system_info.json` by default. Override with `--output-file <path
 All commands accept `--output json` as a global flag:
 
 ```sh
-ayx --output json server auth status --profile prod
+ayx server auth status --profile prod --output json
 ```
 
 The envelope is always `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`.

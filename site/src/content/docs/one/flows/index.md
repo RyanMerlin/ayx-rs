@@ -156,35 +156,35 @@ ayx one flows delete <flow-id> --apply --yes
 ### List all flows as JSON
 
 ```bash
-ayx --output json one flows list --all \
+ayx one flows list --all --output json \
   | jq '.data[]'
 ```
 
 ### Extract just IDs and names
 
 ```bash
-ayx --output json one flows list --all \
+ayx one flows list --all --output json \
   | jq -r '.data[] | [.id, .name] | @tsv'
 ```
 
 ### Run a flow and capture the job reference
 
 ```bash
-result=$(ayx --output json one flows run <flow-id> --apply)
+result=$(ayx one flows run <flow-id> --apply --output json)
 ok=$(echo "$result" | jq -r '.ok')
 ```
 
 ### Validate before promoting
 
 ```bash
-ayx --output json one flows validate <flow-id> \
+ayx one flows validate <flow-id> --output json \
   | jq -e '.ok'
 ```
 
 ### Target a specific environment
 
 ```bash
-ayx --output json --environment prod one flows list
+ayx --environment prod one flows list --output json
 ```
 
 `--environment` is a root flag — place it before the subcommand.

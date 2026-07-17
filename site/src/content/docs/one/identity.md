@@ -89,7 +89,7 @@ Summarizes the current One API surface registry — a quick read on what's reach
 Pass `--output json` to get a structured envelope on stdout. `--output` is a global flag, so it can appear before or after the subcommand:
 
 ```bash
-ayx --output json one whoami
+ayx one whoami --output json
 ```
 
 The envelope shape is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`. Combine with `--verbose` to see progress on stderr without polluting stdout.

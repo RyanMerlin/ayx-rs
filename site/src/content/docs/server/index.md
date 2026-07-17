@@ -74,7 +74,7 @@ ayx server api diagnose --profile prod
 Capture auth configuration before an upgrade or for a change record:
 
 ```sh
-ayx --output json server auth status --profile prod
+ayx server auth status --profile prod --output json
 ```
 
 ## Doctor vs. diagnose

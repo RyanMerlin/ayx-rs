@@ -22,7 +22,7 @@ sidebar:
 ayx one role list-assignments <id>
 
 # Machine-readable
-ayx --output json one role list-assignments <id>
+ayx one role list-assignments <id> --output json
 ```
 
 ## Assigning a role
@@ -57,7 +57,7 @@ ayx one role unassign \
 
 ```bash
 # Audit: dump all assignments for a role
-ayx --output json one role list-assignments <id> \
+ayx one role list-assignments <id> --output json \
   | jq '.data'
 
 # Bulk assign: read subject IDs from a file, assign each
@@ -69,7 +69,7 @@ while IFS= read -r subject_id; do
 done < subject_ids.txt
 
 # Verify a specific user holds a role
-ayx --output json one role list-assignments <id> \
+ayx one role list-assignments <id> --output json \
   | jq -e --arg uid "<person-id>" '.data[] | select(.id == $uid)' \
   && echo "assigned" || echo "not assigned"
 ```

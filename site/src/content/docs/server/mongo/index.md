@@ -206,7 +206,7 @@ ayx actions run mongo.backup-restore
 All commands accept `--output json` as a global flag:
 
 ```sh
-ayx --output json mongo status --profile prod
+ayx mongo status --profile prod --output json
 ```
 
 ## Related

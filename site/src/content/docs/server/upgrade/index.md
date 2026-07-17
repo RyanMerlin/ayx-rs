@@ -133,7 +133,7 @@ ayx server upgrade bundle --input upgrade-plan/ --out upgrade-bundle.zip
 All commands accept `--output json` as a global flag:
 
 ```sh
-ayx --output json server upgrade plan --from 2023.1 --to 2024.2
+ayx server upgrade plan --from 2023.1 --to 2024.2 --output json
 ```
 
 ## Related
