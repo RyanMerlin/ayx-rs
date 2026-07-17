@@ -6,7 +6,7 @@
 //! validator query the live command surface and the capability registry
 //! without taking a direct dependency on either lives here.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
@@ -22,17 +22,31 @@ use crate::{ActionsCommand, WorkflowsCommand};
 /// Catalog adapter — let the registry's validator query the live command
 /// surface and capability registry without depending on either.
 ///
-/// NOTE: this queries every visible command (not just `catalog`'s curated
-/// scope) so an action referencing a real but not-yet-annotated command is
-/// never falsely reported as unknown. Task 3 of the discovery/catalog
-/// consolidation plan is expected to revisit this adapter further (e.g.
-/// caching the path set instead of re-walking the clap tree per call).
-struct LiveCatalog;
+/// Backed by the *entire* visible live command tree (not just `catalog`'s
+/// curated scope), so an action referencing a real but not-yet-annotated
+/// command is never falsely reported as unknown. `command_names` is a
+/// snapshot of `command_surface::visible_commands()`'s canonical whitespace
+/// `name` set, captured once by `LiveCatalog::new()` — `has_command_path`
+/// then does a plain set lookup instead of re-walking the clap tree on every
+/// call, which matters because `actions validate` checks many command
+/// references in a single run.
+struct LiveCatalog {
+    command_names: BTreeSet<String>,
+}
+
+impl LiveCatalog {
+    fn new() -> Self {
+        let command_names = command_surface::visible_commands()
+            .into_iter()
+            .map(|cmd| cmd.name)
+            .collect();
+        Self { command_names }
+    }
+}
+
 impl ayx_registry::validate::CatalogLookup for LiveCatalog {
     fn has_command_path(&self, path: &str) -> bool {
-        command_surface::visible_commands()
-            .iter()
-            .any(|cmd| cmd.name == path)
+        self.command_names.contains(path)
     }
     fn has_capability(&self, id: &str) -> bool {
         capability::has_capability(id)
@@ -191,7 +205,8 @@ pub fn execute_actions(apply: bool, command: ActionsCommand) -> Result<Envelope>
         }
         ActionsCommand::Validate => {
             let reg = ayx_registry::Registry::load_default()?;
-            let report = ayx_registry::validate::validate(&reg, &LiveCatalog);
+            let catalog = LiveCatalog::new();
+            let report = ayx_registry::validate::validate(&reg, &catalog);
             Ok(Envelope::ok_with_data(
                 format!(
                     "validate: {} finding(s) across {} action(s), {} workflow(s)",
@@ -443,19 +458,68 @@ mod tests {
 
     // `mongo mutate` and `mongo undo` are real, visible clap commands; any
     // remediation action referencing either must not be falsely reported as
-    // unknown by `ayx actions validate`. Now backed by the live command
-    // surface directly, so this is really just a regression guard against
-    // `mongo mutate`/`mongo undo` losing their `#[command(about = ...)]` and
+    // unknown by `ayx actions validate`. Backed by the live command surface
+    // directly, so this is really just a regression guard against `mongo
+    // mutate`/`mongo undo` losing their `#[command(about = ...)]` and
     // dropping out of the visible tree.
     #[test]
     fn live_catalog_knows_mongo_mutate_and_undo() {
+        let catalog = LiveCatalog::new();
         assert!(
-            LiveCatalog.has_command_path("mongo mutate"),
+            catalog.has_command_path("mongo mutate"),
             "'mongo mutate' is missing from the live command tree"
         );
         assert!(
-            LiveCatalog.has_command_path("mongo undo"),
+            catalog.has_command_path("mongo undo"),
             "'mongo undo' is missing from the live command tree"
+        );
+    }
+
+    // End-to-end adapter coverage (Task 3, Step 3): prove `LiveCatalog`
+    // tracks command *reality* (the live clap tree), not an arbitrary
+    // curated catalog subset.
+
+    // `mongo status` is a real, visible command AND is referenced by a
+    // bundled legacy action (`mongo-backup-restore.action.yaml`, step
+    // `ayx mongo status --profile <profile>`). It also happens to carry a
+    // `CATALOG_METADATA` row (curated), so this exercises the "known legacy
+    // action command still resolves" case end-to-end through `LiveCatalog`.
+    #[test]
+    fn live_catalog_resolves_a_known_legacy_action_command() {
+        let catalog = LiveCatalog::new();
+        assert!(
+            catalog.has_command_path("mongo status"),
+            "'mongo status' — referenced by mongo-backup-restore.action.yaml — \
+             is missing from the live command tree"
+        );
+    }
+
+    // `telemetry summary` is a real, visible command with NO
+    // `CATALOG_METADATA` row — it only ever shows up under
+    // `catalog list --scope all`, never `--scope curated`. Before this task,
+    // an action referencing it would still have validated correctly (the
+    // interim fix already widened lookup to the full visible tree); this
+    // test locks that behavior into the real constructor so a future
+    // regression back to a curated-only lookup fails loudly here.
+    #[test]
+    fn live_catalog_resolves_an_all_scope_only_command() {
+        let catalog = LiveCatalog::new();
+        assert!(
+            catalog.has_command_path("telemetry summary"),
+            "'telemetry summary' has no CATALOG_METADATA row but is a real, \
+             visible command — it must still resolve through LiveCatalog"
+        );
+    }
+
+    // An invented command that has never existed in the clap tree must
+    // remain unknown — the adapter should not become permissive by accident
+    // (e.g. a substring match instead of exact set membership).
+    #[test]
+    fn live_catalog_rejects_an_invented_command() {
+        let catalog = LiveCatalog::new();
+        assert!(
+            !catalog.has_command_path("mongo definitely-not-a-real-subcommand"),
+            "an invented command path must not resolve"
         );
     }
 }

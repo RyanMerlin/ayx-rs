@@ -3,18 +3,20 @@
 //! out-of-band (via `ayx actions validate`) rather than at load time so an
 //! action that drifts ahead of the binary doesn't bork the whole tool.
 //!
-//! The validator is intentionally permissive: it consumes a `Catalog` trait
-//! the CLI implements over `COMMAND_SPECS`, so the registry crate doesn't
-//! need to know about that data structure. Findings are returned as a
+//! The validator is intentionally permissive: it consumes a `CatalogLookup`
+//! trait the CLI implements over its own canonical command surface (the
+//! live `clap` tree) and capability registry, so the registry crate doesn't
+//! need to know about either data structure. Findings are returned as a
 //! structured vec; nothing here aborts.
 
 use serde::Serialize;
 
 use crate::{Registry, Safety, Step};
 
-/// Catalog adapter the CLI implements over its own COMMAND_SPECS. The
-/// registry doesn't take a direct dependency on the dispatcher — callers
-/// pass closures that resolve the question.
+/// Catalog adapter the CLI implements over its own canonical command surface
+/// (the live `clap` tree) and capability registry. The registry doesn't take
+/// a direct dependency on the dispatcher — callers pass an implementation
+/// that resolves the question.
 pub trait CatalogLookup {
     /// Is this `ayx ...`-style command path known? Pass the part after the
     /// `ayx` binary name, e.g. "mongo backup".

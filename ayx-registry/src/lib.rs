@@ -13,7 +13,7 @@
 //!
 //! - **Capability** — a single addressable thing the CLI can do, identified
 //!   by a stable id (`mongo.backup`, `one.flow.list`, …). Capabilities are
-//!   produced from the existing `COMMAND_SPECS`; this crate consumes them
+//!   produced by the CLI's capability registry; this crate consumes them
 //!   indirectly via the catalog when the registry resolver wants to point
 //!   an action at a concrete command.
 //! - **Action** — a small declarative recipe: a trigger pattern (when does

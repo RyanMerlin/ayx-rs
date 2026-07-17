@@ -61,6 +61,11 @@ pub struct CloudCapabilityAdapter {
 }
 
 impl CloudCapabilityAdapter {
+    /// Parse a cloud capability-discovery response body into an
+    /// availability map. Unrelated to `ayx discover` / `cmd::command_surface`
+    /// (the live `clap`-tree command surface) — this `discover` is scoped
+    /// entirely to which *capabilities* a remote cloud environment reports
+    /// as available, keyed by capability id.
     pub fn discover(response: &Value) -> Self {
         let mut supported = HashMap::new();
         for capability in response
