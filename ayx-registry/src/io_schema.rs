@@ -67,7 +67,7 @@ pub(crate) enum SchemaRole {
 /// explanation. Deliberately holds only plain strings — no parser internals
 /// — so a caller can surface it directly in an executor/registry error.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SchemaViolation {
+pub struct SchemaViolation {
     pub path: String,
     pub reason: String,
 }
