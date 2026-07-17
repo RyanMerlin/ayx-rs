@@ -53,7 +53,7 @@ ayx onboard
 
 ```bash
 ayx profile current
-ayx one platform workspace current
+ayx one workspace current
 ayx one flows list
 ayx server api status
 ```
@@ -72,14 +72,14 @@ The shortest path from zero to useful output is usually one of:
 
 - `ayx profile current`
 - `ayx doctor`
-- `ayx one platform workspace current`
+- `ayx one workspace current`
 - `ayx one flows list`
 - `ayx one connections list`
 - `ayx server api status --output json`
 - `ayx mongo inventory --output json`
 - `ayx one job-groups list`
 - `ayx one output-objects list`
-- `ayx one platform person count`
+- `ayx one person count`
 
 The tool returns a consistent envelope model so humans and agents can parse success, failure, and artifact paths in the same way.
 
@@ -183,14 +183,14 @@ ayx catalog list
 ayx catalog describe mongo/backup
 ayx catalog describe designer.workflow.context
 ayx one doctor discover
-ayx one platform workspace current
-ayx one platform person count
+ayx one workspace current
+ayx one person count
 ayx one flows list
 ayx one connections list
 ayx one job-groups list
 ayx one output-objects list
-ayx one platform auth status
-ayx one platform auth diagnose
+ayx one auth status
+ayx one auth diagnose
 ayx one plans list
 ayx one scheduling list
 ayx license api status
