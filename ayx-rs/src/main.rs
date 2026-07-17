@@ -586,6 +586,19 @@ mod tests {
     }
 
     #[test]
+    fn input_contract_violation_classifies_as_validation() {
+        // ayx-registry's ExecutorError::InputContractViolation ("action/workflow
+        // '<id>' input contract violation — '/ts': missing required property
+        // 'ts'") is caller-supplied bad input, same as a missing clap argument —
+        // it must classify as Validation, not Internal, so an agent knows fixing
+        // its params (not retrying blindly) is the right response.
+        let err = anyhow::anyhow!(
+            "action/workflow 'mongo.backup-restore' input contract violation — '/ts': missing required property 'ts'"
+        );
+        assert!(matches!(classify_anyhow_error(&err), ErrorCode::Validation));
+    }
+
+    #[test]
     fn upstream_5xx_wins_over_body_validation_phrase() {
         // A 5xx whose body echoes a validation phrase is an upstream fault, not
         // a client-side validation error — status code beats body keywords.
@@ -5225,6 +5238,13 @@ fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
         || chain.contains("invalid format")
         || chain.contains("cannot be empty")
         || chain.contains("is required")
+        // ayx-registry's `ExecutorError::InputContractViolation` — a declared
+        // action/workflow's own `--param` map failed its input_schema (unknown
+        // key, missing required key, enum/const mismatch, etc.), caught before
+        // any step runs. This is caller-supplied bad input, exactly like the
+        // "is required" clap-argument case above — an agent needs Validation
+        // here (not Internal) to know retrying with the same params won't help.
+        || chain.contains("input contract violation")
     {
         return ErrorCode::Validation;
     }
