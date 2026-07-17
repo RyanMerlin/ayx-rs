@@ -36,3 +36,59 @@ steps:
       on-call) has a hit.
 validations:
   - describe: "Every error_pattern in the grep output has either a doctor hit or a captured ticket reference."
+input_schema:
+  type: object
+  description: "Parameters for triaging an Alteryx Server incident from its logs: which profile, which log file, and which error pattern to search for."
+  additionalProperties: false
+  required: [profile, log_path, error_pattern]
+  properties:
+    profile:
+      type: string
+      description: "Named ayx CLI profile (as configured via ayx profiles) identifying which Alteryx Server environment to target."
+      minLength: 1
+    log_path:
+      type: string
+      description: "Filesystem path to one Alteryx Server log file, as returned by ayx server server-logs discover."
+      minLength: 1
+    error_pattern:
+      type: string
+      description: "Substring or pattern to search for within Server logs, or to map to a known diagnostic playbook."
+      minLength: 1
+output_schema:
+  type: object
+  description: "The ActionRun record this action's run or plan produces."
+  required: [action_id, title, safety, apply, mode, params, steps, validations]
+  properties:
+    action_id:
+      type: string
+      description: "Stable identifier for this action; always equals server.logs.triage."
+      const: server.logs.triage
+    title:
+      type: string
+      description: "Human-readable title for this action."
+    safety:
+      type: string
+      description: "Safety classification for this action's run: read_only, mutating, or destructive."
+      enum: [read_only, mutating, destructive]
+    apply:
+      type: boolean
+      description: "Whether this run was invoked with --apply (true) or produced a dry-run plan only (false)."
+    mode:
+      type: string
+      description: "Run mode: \"plan\" when --apply was not set, \"execute\" when it was."
+      enum: [plan, execute]
+    params:
+      type: object
+      description: "The parameter map actually used to run or plan this action (string values only)."
+    steps:
+      type: array
+      description: "Ordered per-step outcome (command, composed action, or note) for this run."
+      items:
+        type: object
+        description: "One planned or executed step outcome for this run."
+    validations:
+      type: array
+      description: "Human-readable validation descriptions declared for this action; not automatically executed."
+      items:
+        type: string
+        description: "One validation's description text."
