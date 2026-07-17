@@ -328,11 +328,12 @@ pub struct Workflow {
 }
 
 /// Origin of an [`EffectiveSchema`]: was it author-declared, or synthesized
-/// by the loader from placeholder inference? Surfaced to the CLI (Task 4)
-/// so a caller can distinguish "the author defined this contract" from
-/// "nothing was declared, so the loader guessed one from `<name>` tokens".
+/// by the loader from placeholder inference? `pub` (Task 4) so the CLI
+/// (`ayx-rs`) can distinguish "the author defined this contract" from
+/// "nothing was declared, so the loader guessed one from `<name>` tokens"
+/// in `ayx actions describe` / `ayx actions workflows explain` output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SchemaOrigin {
+pub enum SchemaOrigin {
     /// The action/workflow declared this `input_schema` itself.
     Explicit,
     /// No `input_schema` was declared; this is a loader-synthesized
@@ -341,11 +342,27 @@ pub(crate) enum SchemaOrigin {
     Inferred,
 }
 
+impl SchemaOrigin {
+    /// The `input_schema_source` value the CLI surfaces: `"declared"` for
+    /// an author-written schema, `"inferred"` for the loader's
+    /// placeholder-derived fallback. Mirrors `Safety::as_str`'s role as the
+    /// single place an internal variant name maps to its wire string, so
+    /// callers never hand-roll the mapping (and risk drifting from what the
+    /// interface actually documents — `"declared"`, not `"explicit"`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SchemaOrigin::Explicit => "declared",
+            SchemaOrigin::Inferred => "inferred",
+        }
+    }
+}
+
 /// The resolved input contract for one action or workflow: either its own
 /// declared `input_schema` or a loader-synthesized permissive fallback,
-/// tagged with which one it is.
+/// tagged with which one it is. `pub` (Task 4) so `ayx-rs`'s `describe`/
+/// `explain` descriptor builders can consume both fields directly.
 #[derive(Debug, Clone)]
-pub(crate) struct EffectiveSchema {
+pub struct EffectiveSchema {
     pub schema: Value,
     pub origin: SchemaOrigin,
 }
@@ -577,7 +594,11 @@ impl Registry {
     /// so a parent can never promise a different meaning than the child it
     /// composes. An inferred child's auto-generated property carries no
     /// such promise, so it is never compared against.
-    pub(crate) fn effective_action_input_schema(
+    ///
+    /// `pub` (Task 4): this is also the single required-key source `ayx-rs`
+    /// uses for both `actions describe` and `--prompt-missing`, so the two
+    /// callers can never see a different notion of "what's required".
+    pub fn effective_action_input_schema(
         &self,
         id: &str,
     ) -> Result<EffectiveSchema, RegistryError> {
@@ -743,7 +764,11 @@ impl Registry {
     /// definition. Per the plan, there is no output-schema derivation from
     /// child action outputs; only `Workflow.output_schema`'s own grammar
     /// (checked at insert time) applies to workflow output.
-    pub(crate) fn effective_workflow_input_schema(
+    ///
+    /// `pub` (Task 4): the required-key source for `workflows explain` and
+    /// workflow `--prompt-missing`, mirroring
+    /// `effective_action_input_schema`'s cross-crate role.
+    pub fn effective_workflow_input_schema(
         &self,
         id: &str,
     ) -> Result<EffectiveSchema, RegistryError> {
