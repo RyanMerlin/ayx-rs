@@ -684,6 +684,9 @@ impl Registry {
                     }
                 }
 
+                // Parent-vs-child only, not sibling-vs-sibling — two children
+                // disagreeing under an undeclared parent is out of scope per
+                // the plan's Step 3 ("for a declared action"), intentionally.
                 for (child_id, name, child_def) in &child_defs {
                     let parent_def = declared_props.and_then(|p| p.get(name));
                     let agrees =
@@ -722,10 +725,15 @@ impl Registry {
     /// The effective input contract for one workflow: the union of its
     /// ordered `actions`' effective input contracts (see
     /// `effective_action_input_schema`). Two referenced actions giving the
-    /// same parameter name incompatible definitions is always rejected,
-    /// regardless of whether the workflow itself declares a schema — it's
-    /// a property of the actions being composed together, not of the
-    /// workflow's own declaration.
+    /// same parameter name incompatible *Explicit* definitions is always
+    /// rejected, regardless of whether the workflow itself declares a
+    /// schema — it's a property of the actions being composed together,
+    /// not of the workflow's own declaration. An `Inferred` contribution
+    /// (a legacy action with no declared `input_schema`) carries no such
+    /// promise, so it is never compared for conflicts — the union simply
+    /// prefers whichever contribution for a given name is `Explicit`, the
+    /// same asymmetry `effective_action_contract` already applies to
+    /// composed children one level down.
     ///
     /// An undeclared workflow gets an inferred permissive union so
     /// existing workflows keep executing. A declared workflow must expose
@@ -741,11 +749,15 @@ impl Registry {
     ) -> Result<EffectiveSchema, RegistryError> {
         let workflow = self.workflow(id)?;
 
-        // name -> (owning action id, property definition). Built
-        // action-by-action (in `Workflow.actions` order) so a second
-        // action giving the same key an incompatible definition can name
-        // both actions in the error.
-        let mut union_props: BTreeMap<String, (String, Value)> = BTreeMap::new();
+        // name -> (owning action id, property definition, that action's
+        // schema origin). Built action-by-action (in `Workflow.actions`
+        // order) so a second action giving the same key an incompatible
+        // *Explicit* definition can name both actions in the error. An
+        // `Inferred` contribution is never compared for conflicts — see
+        // this function's doc comment — it is only ever kept as a
+        // placeholder until an `Explicit` contribution for the same name
+        // comes along, which then takes over.
+        let mut union_props: BTreeMap<String, (String, Value, SchemaOrigin)> = BTreeMap::new();
         let mut union_required: BTreeSet<String> = BTreeSet::new();
 
         for action_id in &workflow.actions {
@@ -755,6 +767,7 @@ impl Registry {
                 continue;
             }
             let action_schema = self.effective_action_input_schema(action_id)?;
+            let origin = action_schema.origin;
             let required: BTreeSet<String> = action_schema
                 .schema
                 .get("required")
@@ -776,22 +789,37 @@ impl Registry {
                 let Some(def) = props.and_then(|p| p.get(name)) else {
                     continue;
                 };
-                match union_props.get(name) {
-                    Some((other_action, other_def)) => {
-                        if canonical_json(other_def) != canonical_json(def) {
-                            return Err(RegistryError::SchemaContract {
-                                path: workflow.source_path.clone(),
-                                owner_kind: "workflow",
-                                owner_id: id.to_string(),
-                                location: "/actions".to_string(),
-                                message: format!(
-                                    "actions '{other_action}' and '{action_id}' declare incompatible definitions for the shared parameter '{name}'"
-                                ),
-                            });
+                match union_props.get(name).cloned() {
+                    Some((other_action, other_def, other_origin)) => {
+                        if other_origin == SchemaOrigin::Explicit
+                            && origin == SchemaOrigin::Explicit
+                        {
+                            if canonical_json(&other_def) != canonical_json(def) {
+                                return Err(RegistryError::SchemaContract {
+                                    path: workflow.source_path.clone(),
+                                    owner_kind: "workflow",
+                                    owner_id: id.to_string(),
+                                    location: "/actions".to_string(),
+                                    message: format!(
+                                        "actions '{other_action}' and '{action_id}' declare incompatible definitions for the shared parameter '{name}'"
+                                    ),
+                                });
+                            }
+                            // Both Explicit and agree — keep the existing entry.
+                        } else if origin == SchemaOrigin::Explicit {
+                            // The new contribution is Explicit and the
+                            // existing one wasn't (Inferred carries no
+                            // promise to contradict) — the Explicit
+                            // definition takes over.
+                            union_props
+                                .insert(name.clone(), (action_id.clone(), def.clone(), origin));
                         }
+                        // Else: existing is Explicit and new is Inferred, or
+                        // both are Inferred — keep the existing entry,
+                        // nothing to compare.
                     }
                     None => {
-                        union_props.insert(name.clone(), (action_id.clone(), def.clone()));
+                        union_props.insert(name.clone(), (action_id.clone(), def.clone(), origin));
                     }
                 }
             }
@@ -799,7 +827,7 @@ impl Registry {
 
         let inferred = {
             let mut properties = Map::new();
-            for (name, (_, def)) in &union_props {
+            for (name, (_, def, _origin)) in &union_props {
                 properties.insert(name.clone(), def.clone());
             }
             json!({
@@ -836,7 +864,7 @@ impl Registry {
                 }
                 let declared_props = declared.get("properties").and_then(Value::as_object);
                 for name in &union_required {
-                    let (owning_action, union_def) = &union_props[name];
+                    let (owning_action, union_def, _origin) = &union_props[name];
                     let declared_def = declared_props.and_then(|p| p.get(name));
                     let agrees = declared_def
                         .is_some_and(|d| canonical_json(d) == canonical_json(union_def));
@@ -1660,6 +1688,167 @@ mod tests {
             }
             other => panic!("expected SchemaContract, got {other:?}"),
         }
+    }
+
+    /// Reviewer finding (Task 2 review): an undeclared workflow referencing
+    /// one `Inferred` (legacy, no `input_schema`) action and one `Explicit`
+    /// (declared `input_schema`) action that share a placeholder name must
+    /// NOT be rejected — the inferred contribution carries no promise to
+    /// contradict, so only Explicit-vs-Explicit disagreement is a conflict.
+    /// Exercises both action orderings so both the "existing Inferred,
+    /// incoming Explicit" and "existing Explicit, incoming Inferred"
+    /// branches of the union-building loop run. Also asserts the union
+    /// keeps the Explicit action's real definition, not the Inferred
+    /// placeholder text, for the shared property.
+    #[test]
+    fn workflow_mixed_inferred_and_explicit_action_sharing_placeholder_succeeds() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("legacy.action.yaml"),
+            "id: schema.wf-legacy\n\
+             title: Legacy\n\
+             summary: legacy action, no declared contract\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: command\n\
+             \x20   cmd: \"ayx mongo doctor --profile <profile>\"\n\
+             \x20   why: check\n",
+        )
+        .expect("write legacy action");
+        std::fs::write(
+            dir.path().join("explicit.action.yaml"),
+            "id: schema.wf-explicit\n\
+             title: Explicit\n\
+             summary: declares profile explicitly\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: command\n\
+             \x20   cmd: \"ayx mongo backup --profile <profile>\"\n\
+             \x20   why: backup\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 description: Explicit parameters.\n\
+             \x20 additionalProperties: false\n\
+             \x20 required: [profile]\n\
+             \x20 properties:\n\
+             \x20   profile:\n\
+             \x20     type: string\n\
+             \x20     description: The real, author-written meaning of profile.\n",
+        )
+        .expect("write explicit action");
+        std::fs::write(
+            dir.path().join("wf-legacy-first.workflow.yaml"),
+            "id: schema.wf-mixed-legacy-first\n\
+             title: WF mixed, legacy first\n\
+             summary: undeclared workflow; legacy action referenced before explicit\n\
+             safety: read_only\n\
+             actions: [schema.wf-legacy, schema.wf-explicit]\n",
+        )
+        .expect("write workflow (legacy first)");
+        std::fs::write(
+            dir.path().join("wf-explicit-first.workflow.yaml"),
+            "id: schema.wf-mixed-explicit-first\n\
+             title: WF mixed, explicit first\n\
+             summary: undeclared workflow; explicit action referenced before legacy\n\
+             safety: read_only\n\
+             actions: [schema.wf-explicit, schema.wf-legacy]\n",
+        )
+        .expect("write workflow (explicit first)");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path()).expect("loads");
+        reg.finalize().expect(
+            "undeclared workflow mixing an Inferred and an Explicit action over a shared \
+             placeholder must not be treated as a schema conflict",
+        );
+
+        for wf_id in [
+            "schema.wf-mixed-legacy-first",
+            "schema.wf-mixed-explicit-first",
+        ] {
+            let effective = reg
+                .effective_workflow_input_schema(wf_id)
+                .expect("effective schema");
+            assert_eq!(effective.origin, SchemaOrigin::Inferred);
+            let props = effective.schema["properties"]
+                .as_object()
+                .expect("properties object");
+            assert_eq!(
+                props["profile"]["description"],
+                json!("The real, author-written meaning of profile."),
+                "union must keep the Explicit action's real definition, not the \
+                 Inferred placeholder text, for '{wf_id}'"
+            );
+        }
+    }
+
+    /// Companion to the mixed-action test above: when the workflow itself
+    /// DOES declare an `input_schema`, it's checked against the union built
+    /// from its actions. That union must reflect the Explicit action's real
+    /// definition for the shared property (not swallowed or overwritten by
+    /// the Inferred action's placeholder), so a workflow author who declares
+    /// a schema matching the Explicit action's contract still validates.
+    #[test]
+    fn declared_workflow_matching_explicit_action_over_inferred_passes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("legacy.action.yaml"),
+            "id: schema.wf-declared-legacy\n\
+             title: Legacy\n\
+             summary: legacy action, no declared contract\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: command\n\
+             \x20   cmd: \"ayx mongo doctor --profile <profile>\"\n\
+             \x20   why: check\n",
+        )
+        .expect("write legacy action");
+        std::fs::write(
+            dir.path().join("explicit.action.yaml"),
+            "id: schema.wf-declared-explicit\n\
+             title: Explicit\n\
+             summary: declares profile explicitly\n\
+             safety: read_only\n\
+             steps:\n\
+             \x20 - kind: command\n\
+             \x20   cmd: \"ayx mongo backup --profile <profile>\"\n\
+             \x20   why: backup\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 description: Explicit parameters.\n\
+             \x20 additionalProperties: false\n\
+             \x20 required: [profile]\n\
+             \x20 properties:\n\
+             \x20   profile:\n\
+             \x20     type: string\n\
+             \x20     description: The real, author-written meaning of profile.\n",
+        )
+        .expect("write explicit action");
+        std::fs::write(
+            dir.path().join("wf.workflow.yaml"),
+            "id: schema.wf-declared-mixed\n\
+             title: WF declared, mixed actions\n\
+             summary: declared workflow schema matches the Explicit action's contract\n\
+             safety: read_only\n\
+             actions: [schema.wf-declared-legacy, schema.wf-declared-explicit]\n\
+             input_schema:\n\
+             \x20 type: object\n\
+             \x20 description: Declared parameters.\n\
+             \x20 additionalProperties: false\n\
+             \x20 required: [profile]\n\
+             \x20 properties:\n\
+             \x20   profile:\n\
+             \x20     type: string\n\
+             \x20     description: The real, author-written meaning of profile.\n",
+        )
+        .expect("write workflow");
+
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path()).expect("loads");
+        reg.finalize().expect(
+            "declared workflow schema matching the Explicit action's contract must pass, \
+             even though a sibling Inferred action shares the same placeholder name",
+        );
     }
 
     #[test]
