@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-07-17 03:08:28 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-07-17 06:57:30 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -24,15 +24,15 @@ cargo run -q -p xtask -- refresh-command-surface
 | Name | Path | Safety | Mutating | Summary |
 | --- | --- | --- | --- | --- |
 | actions | `actions` | unclassified |  | Action registry — named playbooks with safety, validation, and rollback notes |
-| actions describe | `actions/describe` | unclassified |  | Describe a single action: steps, validations, rollback |
+| actions describe | `actions/describe` | unclassified |  | Describe a single action: steps, validations, rollback, plus its effective `input_schema` (declared or inferred, tagged by `input_schema_source`) and declared `output_schema`, if any — the agent-facing source of truth for what this action requires/returns |
 | actions export | `actions/export` | unclassified |  | Print an action's full YAML so an operator can fork it into their config home (`${AYX_CONFIG_HOME}/registry/`) to override the bundled stdlib version |
-| actions list | `actions/list` | unclassified |  | List every action, with title, safety classification, and tags |
-| actions resolve | `actions/resolve` | unclassified |  | Resolve a free-text task description to a ranked list of candidate actions |
+| actions list | `actions/list` | unclassified |  | List every action, with title, safety classification, and tags. Compact index only — no input/output schema. Call `describe` on a candidate id for its full contract before constructing `--param`s |
+| actions resolve | `actions/resolve` | unclassified |  | Resolve a free-text task description to a ranked list of candidate actions. Ranking/lookup only — no schema. Call `describe` on the chosen id for its full contract before constructing `--param`s |
 | actions run | `actions/run` | unclassified |  | Execute an action. Without `--apply`, mutating/destructive actions emit a structured plan and never invoke a subprocess. Read-only actions always run |
 | actions validate | `actions/validate` | unclassified |  | Cross-check every step in every loaded action against the catalog. Emits warnings for unknown command paths, capability ids, and dangling workflow → action references. Read-only |
 | actions workflows | `actions/workflows` | unclassified |  | Workflow registry — higher-order skills composing actions |
-| actions workflows explain | `actions/workflows/explain` | unclassified |  | Explain a workflow: title, safety, ordered action ids with summaries |
-| actions workflows list | `actions/workflows/list` | unclassified |  | List every workflow with its title, safety, and action count |
+| actions workflows explain | `actions/workflows/explain` | unclassified |  | Explain a workflow: title, safety, ordered action ids with summaries, resolved/missing action detail, plus its effective `input_schema` (declared or inferred, tagged by `input_schema_source`) and declared `output_schema`, if any — the agent-facing source of truth for what this workflow requires/returns |
+| actions workflows list | `actions/workflows/list` | unclassified |  | List every workflow with its title, safety, and action count. Compact index only — no input/output schema. Call `explain` on a candidate id for its full contract before constructing `--param`s |
 | actions workflows run | `actions/workflows/run` | unclassified |  | Execute a workflow as an ordered chain of actions. Honors the same `--apply` semantics as `actions run` |
 
 ### `audit`
