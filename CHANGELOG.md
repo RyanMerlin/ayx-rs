@@ -8,6 +8,7 @@
 
 ### Changed
 
+- **`ayx catalog` is now derived from the live `clap` command tree instead of a hand-maintained `COMMAND_SPECS` registry.** `ayx catalog list` defaults to `--scope all` — every visible command, not just the previously curated subset — with `name`, `path`, and `summary` sourced live from clap so a new command can never be silently missing from the catalog. Existing curated entries keep their full `output`/`safety`/`mutating`/`prerequisites`/`notes` classification unchanged; commands with no `CATALOG_METADATA` row show up honestly as `metadata_status: unclassified` (blank `mutating`, `safety: unclassified`) rather than borrowing another command's classification. `ayx catalog list --scope curated` is preserved as the compatibility view for consumers that need only the former, fully annotated projection. `docs/command-surface.md` is regenerated from the all-scope projection and now documents the complete command index (345 commands, up from the prior curated-only ~208).
 - **BREAKING** — `ayx workflows` moved to `ayx actions workflows`. No back-compat alias; update scripts and CI that reference the old path. Subcommands (`list`, `explain`, `run`) are unchanged.
 - **BREAKING** — `ayx workflow` moved to `ayx designer workflow`. No back-compat alias; update scripts and CI that reference the old path.
 - **BREAKING** — `ayx tactics` is now `ayx actions`, and the `tactic` concept is renamed to `action` throughout. This is a full rename of the noun, not just the CLI word, so it breaks three contracts at once:

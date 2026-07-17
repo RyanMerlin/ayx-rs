@@ -170,7 +170,7 @@ fn catalog_surface_lists_core_one_commands() {
     assert!(names.contains(&"one inventory"));
     assert!(names.contains(&"one doctor auth"));
     assert!(names.contains(&"one doctor discover"));
-    assert!(names.contains(&"one plans status"));
+    assert!(names.contains(&"one plans list"));
     assert!(names.contains(&"one flows list"));
     assert!(names.contains(&"one connections list"));
     assert!(names.contains(&"discover"));

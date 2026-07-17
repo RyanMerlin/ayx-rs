@@ -7,10 +7,10 @@
 
 use anyhow::{Result, anyhow};
 use ayx_core::envelope::Envelope;
-use clap::{ArgAction, CommandFactory};
+use clap::ArgAction;
 use serde::Serialize;
 
-use crate::Cli;
+use super::command_surface;
 
 #[derive(Debug, Serialize)]
 pub struct DiscoverNode {
@@ -70,7 +70,7 @@ pub fn execute(path: Vec<String>, deep: bool) -> Result<Envelope> {
         })
         .collect();
 
-    let root = Cli::command();
+    let root = command_surface::root_command();
     let mut current: &clap::Command = &root;
     for token in &path_tokens {
         current = current
@@ -132,8 +132,7 @@ fn build_node(cmd: &clap::Command, remaining_depth: usize) -> DiscoverNode {
     let subcommands = if remaining_depth == 0 {
         Vec::new()
     } else {
-        cmd.get_subcommands()
-            .filter(|sub| !sub.is_hide_set())
+        command_surface::visible_subcommands(cmd)
             .map(|sub| build_node(sub, remaining_depth.saturating_sub(1)))
             .collect()
     };
@@ -146,5 +145,103 @@ fn build_node(cmd: &clap::Command, remaining_depth: usize) -> DiscoverNode {
         options,
         subcommands,
         hidden: cmd.is_hide_set().then_some(true),
+    }
+}
+
+/// Flatten a full-depth discover tree into its canonical `path` set
+/// (slash-joined, matching `command_surface::LiveCommand::path`). Test-only:
+/// this is the narrow helper `command_surface`'s source-of-truth test uses to
+/// cross-check discover's tree against `visible_commands()`, without making
+/// `DiscoverNode` part of any broader public API.
+#[cfg(test)]
+pub(crate) fn flatten_deep_tree_paths() -> std::collections::BTreeSet<String> {
+    let root = command_surface::root_command();
+    let tree = build_node(&root, usize::MAX);
+
+    fn walk(
+        node: &DiscoverNode,
+        tokens: &mut Vec<String>,
+        out: &mut std::collections::BTreeSet<String>,
+    ) {
+        for sub in &node.subcommands {
+            tokens.push(sub.name.clone());
+            out.insert(tokens.join("/"));
+            walk(sub, tokens, out);
+            tokens.pop();
+        }
+    }
+
+    let mut out = std::collections::BTreeSet::new();
+    let mut tokens = Vec::new();
+    walk(&tree, &mut tokens, &mut out);
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_node_omits_hidden_subcommands_via_shared_predicate() {
+        let synthetic = clap::Command::new("root")
+            .subcommand(clap::Command::new("visible").about("Visible child."))
+            .subcommand(
+                clap::Command::new("secret")
+                    .about("Hidden child.")
+                    .hide(true),
+            );
+
+        let node = build_node(&synthetic, usize::MAX);
+
+        assert_eq!(node.subcommands.len(), 1);
+        assert_eq!(node.subcommands[0].name, "visible");
+    }
+
+    #[test]
+    fn shallow_depth_stops_at_one_level() {
+        let root = command_surface::root_command();
+        let node = build_node(&root, 1);
+        assert!(!node.subcommands.is_empty());
+        for sub in &node.subcommands {
+            assert!(
+                sub.subcommands.is_empty(),
+                "{} should have no grandchildren at depth 1",
+                sub.name
+            );
+        }
+    }
+
+    #[test]
+    fn execute_reports_unknown_path() {
+        let result = execute(vec!["definitely-not-a-real-command".to_string()], false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn execute_default_depth_is_shallow() {
+        let envelope = execute(Vec::new(), false).expect("execute should succeed");
+        let subcommands = envelope.data["tree"]["subcommands"]
+            .as_array()
+            .expect("tree.subcommands should be an array")
+            .clone();
+        assert!(!subcommands.is_empty());
+        for sub in &subcommands {
+            let grandchildren = sub
+                .get("subcommands")
+                .and_then(|s| s.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            assert_eq!(
+                grandchildren, 0,
+                "default depth must not include grandchildren"
+            );
+        }
+    }
+
+    #[test]
+    fn execute_deep_flatten_matches_command_surface_paths() {
+        let discover_paths = flatten_deep_tree_paths();
+        let surface_paths = crate::cmd::command_surface::visible_command_paths();
+        assert_eq!(discover_paths, surface_paths);
     }
 }

@@ -56,6 +56,27 @@ jobs:
         run: echo 'AYX_FORCE_INLINE_SECRETS=1' >> "$GITHUB_ENV"
       - run: cargo nextest run --workspace --locked
 
+  command-surface:
+    name: Command surface source-of-truth
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
+        with:
+          tool: cargo-nextest
+      # These filters gate the invariant that the live `clap` command tree
+      # (via `command_surface`) is the single source of truth `catalog`
+      # metadata derives from. Run in both the default and `ui` feature
+      # configurations so a UI-gated command addition/rename/removal that
+      # isn't reflected in CATALOG_METADATA fails loudly here too, not just
+      # silently in the docs diff.
+      - run: cargo nextest run -p ayx-rs --locked command_surface
+      - run: cargo nextest run -p ayx-rs --locked catalog
+      - run: cargo nextest run -p ayx-rs --features ui --locked command_surface
+      - run: cargo nextest run -p ayx-rs --features ui --locked catalog
+
   docs:
     name: Docs
     runs-on: ubuntu-latest

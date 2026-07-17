@@ -4,19 +4,34 @@ Status: active
 
 ## Current Scope
 
-- `ayx discover` is the primary live-tree entry point.
-- Command, capability, action, and workflow discovery should stay aligned.
-- `catalog` remains a supporting registry index until discovery exposes the
-  same stable concepts directly.
+- `ayx discover` is the primary live-tree entry point and the canonical
+  source for command identity, flags, positional arguments, aliases, and
+  nested traversal.
+- The live `clap` command tree is canonical. `ayx catalog` is a derived
+  compatibility/metadata view over that same tree, not an independent
+  registry: `catalog list --scope all` (the default) mirrors every visible
+  command with clap-sourced `name`/`path`/`summary`; `catalog list --scope
+  curated` narrows that to commands that also carry a hand-maintained
+  `CATALOG_METADATA` row (`output`/`safety`/`mutating`/`prerequisites`/
+  `notes`).
+- **Resolved**: the two-model split is not being collapsed into a single
+  surface. `discover` (live tree, rich per-command detail) and `catalog`
+  (derived, flattened command-and-capability index with optional semantic
+  metadata) are both canonical, for different audiences — `discover` for
+  humans/agents walking or inspecting the tree, `catalog` for agents that
+  want one flat, machine-readable list with safety/mutation classification
+  where it exists.
 
 ## Next Steps
 
-- Add an automated parity check between the live `clap` tree and the static
-  `COMMAND_SPECS` catalog so `discover` and `catalog` cannot drift
-  independently.
-- Resolve the two-model split: `discover` (live tree) vs `catalog`
-  (`COMMAND_SPECS`) are still two canonical surfaces; decide the long-term
-  compatibility story.
+- Enrich `CATALOG_METADATA` for commands that currently show
+  `metadata_status: unclassified` in `catalog list --scope all`,
+  prioritizing mutating/destructive commands so their safety classification
+  is explicit instead of defaulted.
+- Later: decide whether `catalog list --scope curated` needs a formal
+  deprecation window now that `--scope all` covers the full command tree, or
+  whether it stays indefinitely as the stable pre-migration compatibility
+  view for existing consumers.
 
 ## Exit Criteria
 

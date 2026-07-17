@@ -141,13 +141,14 @@ The exact leaf inventory can expand, but the design rules are stable:
 
 ## Catalog Contract
 
-`ayx discover` is the structured discovery surface for humans and agents.
+`ayx discover` is the structured, progressive discovery surface for humans and agents — the source of truth for flags, positional arguments, aliases, and nested tree traversal.
 
 - `ayx discover [path] [--deep]` walks the live CLI tree.
-- `ayx catalog list` enumerates commands and capabilities.
-- `ayx catalog describe <id>` resolves either a command path or capability id.
-- `catalog` remains the registry view for commands and capabilities.
-- If `catalog` is ever deprecated, it should get a clear compatibility window or alias path rather than vanishing before discovery exposes an equivalent stable registry surface.
+- `ayx catalog list --scope all` (the default) enumerates every visible command plus every registered capability as a complete, flattened, machine-readable index. Command identity and summary are sourced live from clap; commands without a curated metadata entry show up honestly as `unclassified` rather than a fabricated classification.
+- `ayx catalog list --scope curated` is the compatibility view: the same command set narrowed to entries that carry a full metadata classification (output/safety/mutating/prerequisites/notes), for clients that need only the previously curated projection.
+- `ayx catalog describe <id>` continues to accept either a legacy command name/path or a capability id.
+- `catalog` remains the derived registry/compatibility view for commands and capabilities, not a hand-maintained one.
+- If `catalog` (or its `curated` scope) is ever deprecated, it should get a clear compatibility window or alias path rather than vanishing before discovery exposes an equivalent stable registry surface.
 - The discovery ladder grows from commands to capabilities to actions and
   workflows without changing the public ids.
 

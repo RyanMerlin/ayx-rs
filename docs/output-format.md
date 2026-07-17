@@ -5,7 +5,7 @@ For clean docs, scripts, and agent runs, prefer the canonical global-flag form:
 
 ```powershell
 ayx --output json discover
-ayx --output json catalog list --format full
+ayx --output json catalog list --format full --scope all
 ayx --output json actions list
 ayx --output json actions workflows list
 ```
