@@ -2153,3 +2153,369 @@ fn parse_json_arg(raw: &str) -> Result<Value> {
     serde_json::from_str(&text).context("failed to parse --json input")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ayx_one_api::format_refresh_token_response;
+
+    // ─── all-scope: derived directly from the live tree ───────────────────
+
+    #[test]
+    fn all_scope_paths_exactly_equal_visible_command_paths() {
+        let records = catalog_command_records(CatalogScope::All).expect("all-scope records");
+        let record_paths: BTreeSet<String> = records.iter().map(|r| r.path.clone()).collect();
+        assert_eq!(
+            record_paths,
+            command_surface::visible_command_paths(),
+            "catalog_command_records(All) must exactly equal the live command surface -- \
+             a new visible command must never be silently absent"
+        );
+    }
+
+    #[test]
+    fn every_all_scope_record_has_canonical_identity_and_honest_classification() {
+        let records = catalog_command_records(CatalogScope::All).expect("all-scope records");
+        assert!(!records.is_empty(), "expected a non-empty command tree");
+        for record in &records {
+            assert_eq!(
+                record.name.replace(' ', "/"),
+                record.path,
+                "name/path identity mismatch for {}",
+                record.path
+            );
+            assert!(
+                !record.summary.trim().is_empty(),
+                "{} has a blank clap summary",
+                record.path
+            );
+            match record.metadata_status {
+                MetadataStatus::Curated => {
+                    assert!(
+                        record.output.is_some(),
+                        "{} curated but output is None",
+                        record.path
+                    );
+                    assert!(
+                        record.safety.is_some(),
+                        "{} curated but safety is None",
+                        record.path
+                    );
+                    assert!(
+                        record.mutating.is_some(),
+                        "{} curated but mutating is None",
+                        record.path
+                    );
+                }
+                MetadataStatus::Unclassified => {
+                    assert!(
+                        record.output.is_none(),
+                        "{} unclassified but output is Some",
+                        record.path
+                    );
+                    assert_eq!(
+                        record.safety,
+                        Some("unclassified"),
+                        "{} unclassified safety must be the literal string, not null",
+                        record.path
+                    );
+                    assert!(
+                        record.mutating.is_none(),
+                        "{} unclassified mutation must be null, never false",
+                        record.path
+                    );
+                    assert!(
+                        record.prerequisites.is_empty(),
+                        "{} expected empty prerequisites",
+                        record.path
+                    );
+                    assert!(
+                        record.notes.is_empty(),
+                        "{} expected empty notes",
+                        record.path
+                    );
+                }
+            }
+        }
+    }
+
+    // ─── curated scope: exactly the metadata-key path set ─────────────────
+
+    #[test]
+    fn curated_scope_matches_metadata_key_set_and_preserves_legacy_values() {
+        let records = catalog_command_records(CatalogScope::Curated).expect("curated records");
+        let record_paths: BTreeSet<&str> = records.iter().map(|r| r.path.as_str()).collect();
+        let metadata_paths: BTreeSet<&str> = CATALOG_METADATA.iter().map(|m| m.path).collect();
+        assert_eq!(
+            record_paths, metadata_paths,
+            "curated scope must be exactly the CATALOG_METADATA key set, no more, no less"
+        );
+        assert_eq!(
+            records.len(),
+            CATALOG_METADATA.len(),
+            "no duplicate/dropped curated records"
+        );
+        assert!(
+            records
+                .iter()
+                .all(|r| r.metadata_status == MetadataStatus::Curated)
+        );
+
+        let by_path: BTreeMap<&str, &CatalogCommandRecord> =
+            records.iter().map(|r| (r.path.as_str(), r)).collect();
+
+        // Read-only representative.
+        let profile_list = by_path["profile/list"];
+        assert_eq!(profile_list.safety, Some("read-only"));
+        assert_eq!(profile_list.mutating, Some(false));
+        assert_eq!(profile_list.output, Some("profile registry envelope"));
+
+        // Mutating Mongo representative.
+        let mongo_backup = by_path["mongo/backup"];
+        assert_eq!(mongo_backup.mutating, Some(true));
+        assert_eq!(mongo_backup.safety, Some("mutating"));
+        assert_eq!(
+            mongo_backup.notes,
+            &[
+                "Requires --apply for a live backup.",
+                "Writes audit artifacts."
+            ]
+        );
+
+        // Mutating One representative.
+        let one_login = by_path["one/login"];
+        assert_eq!(one_login.mutating, Some(true));
+        assert_eq!(one_login.safety, Some("mutating"));
+
+        // `catalog list` itself is curated.
+        assert!(by_path.contains_key("catalog/list"));
+
+        // `ui`-gated rows are curated only when the feature is compiled in --
+        // the clap commands themselves (and thus the metadata rows) don't
+        // exist in the live tree otherwise.
+        if cfg!(feature = "ui") {
+            assert!(by_path.contains_key("one/ui/session/status"));
+            assert!(by_path.contains_key("one/ui/workflow/inventory"));
+            assert!(by_path.contains_key("one/ui/data/list-datasets"));
+        } else {
+            assert!(!by_path.contains_key("one/ui/session/status"));
+            assert!(!by_path.contains_key("one/ui/workflow/inventory"));
+            assert!(!by_path.contains_key("one/ui/data/list-datasets"));
+        }
+    }
+
+    // ─── catalog list envelope ──────────────────────────────────────────
+
+    #[test]
+    fn catalog_list_default_scope_is_all_and_carries_schema_fields() {
+        let env = catalog_list_envelope(None, "compact", CatalogScope::All)
+            .expect("catalog list should succeed");
+        assert_eq!(env.data["command_schema_version"], 2);
+        assert_eq!(env.data["scope"], "all");
+        let commands = env.data["commands"].as_array().expect("commands array");
+        assert_eq!(
+            commands.len() as u64,
+            env.data["command_count"].as_u64().unwrap()
+        );
+        assert_eq!(
+            commands.len(),
+            command_surface::visible_command_paths().len()
+        );
+        let capabilities = env.data["capabilities"]
+            .as_array()
+            .expect("capabilities array");
+        assert!(
+            capabilities
+                .iter()
+                .any(|item| item["id"] == "designer.workflow.context")
+        );
+    }
+
+    #[test]
+    fn catalog_list_curated_scope_matches_metadata_count() {
+        let env = catalog_list_envelope(None, "compact", CatalogScope::Curated)
+            .expect("catalog list curated should succeed");
+        assert_eq!(env.data["scope"], "curated");
+        let commands = env.data["commands"].as_array().expect("commands array");
+        assert_eq!(commands.len(), CATALOG_METADATA.len());
+    }
+
+    // ─── catalog describe ────────────────────────────────────────────────
+
+    #[test]
+    fn catalog_describe_finds_path_or_name() {
+        let env = catalog_describe_envelope("mongo backup").expect("catalog describe should work");
+        assert_eq!(env.data["name"], "mongo backup");
+        assert_eq!(env.data["mutating"], true);
+
+        let env = catalog_describe_envelope("server/api/import-swagger")
+            .expect("catalog describe should work by path");
+        assert_eq!(env.data["name"], "server api import-swagger");
+
+        let env = catalog_describe_envelope("license api diagnose")
+            .expect("catalog describe should work for license");
+        assert_eq!(env.data["path"], "license/api/diagnose");
+
+        let env = catalog_describe_envelope("one auth diagnose").expect("describe one auth");
+        assert_eq!(env.data["path"], "one/auth/diagnose");
+
+        let env = catalog_describe_envelope("designer.workflow.run")
+            .expect("catalog describe should work for capability");
+        assert_eq!(env.data["kind"], "capability");
+        assert_eq!(env.data["provider"], "designer_local");
+    }
+
+    #[test]
+    fn catalog_describe_finds_a_visible_all_scope_command_that_is_not_curated() {
+        // `server/server-logs/tail` is a real, visible clap command with no
+        // CATALOG_METADATA row -- `catalog describe` must still resolve it
+        // (unlike the old COMMAND_SPECS-only lookup, which could not).
+        assert!(
+            !CATALOG_METADATA
+                .iter()
+                .any(|m| m.path == "server/server-logs/tail"),
+            "test assumption broken: server/server-logs/tail unexpectedly has metadata"
+        );
+        let env = catalog_describe_envelope("server/server-logs/tail")
+            .expect("catalog describe should resolve an unclassified live command");
+        assert_eq!(env.data["path"], "server/server-logs/tail");
+        assert_eq!(env.data["metadata_status"], "unclassified");
+        assert_eq!(env.data["output"], Value::Null);
+        assert_eq!(env.data["safety"], "unclassified");
+        assert_eq!(env.data["mutating"], Value::Null);
+    }
+
+    #[test]
+    fn catalog_describe_mongo_undo_notes_do_not_claim_unimplemented() {
+        // Regression guard (final whole-branch review, mongo-mutation-execution
+        // branch): `mongo undo --apply` shipped real, transaction-gated,
+        // audited execution. The catalog is shipped, machine-readable public
+        // metadata — a stale "not yet implemented" note must never silently
+        // rot back in once the feature is real.
+        let env = catalog_describe_envelope("mongo undo").expect("catalog describe should work");
+        let notes = env.data["notes"].as_array().expect("notes array");
+        let joined: String = notes
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            !joined.to_lowercase().contains("not yet implemented"),
+            "mongo undo catalog notes regressed to claiming unimplemented: {joined}"
+        );
+        assert!(
+            !joined.to_lowercase().contains("follow-up task"),
+            "mongo undo catalog notes regressed to claiming unimplemented: {joined}"
+        );
+    }
+
+    #[test]
+    fn catalog_describe_rejects_unknown_identifier() {
+        let err = catalog_describe_envelope("not/a/real/command").unwrap_err();
+        assert!(err.to_string().contains("not/a/real/command"));
+    }
+
+    // ─── validation: duplicate / unknown / hidden metadata keys ────────────
+
+    fn sample_metadata(path: &'static str) -> CatalogMetadata {
+        CatalogMetadata {
+            path,
+            output: "sample output",
+            safety: "read-only",
+            mutating: false,
+            prerequisites: &[],
+            notes: &[],
+        }
+    }
+
+    #[test]
+    fn validate_metadata_rejects_duplicate_path() {
+        let rows = vec![sample_metadata("a/b"), sample_metadata("a/b")];
+        let visible: BTreeSet<String> = ["a/b".to_string()].into_iter().collect();
+        let all = visible.clone();
+        let err = validate_metadata(&rows, &visible, &all).expect_err("duplicate must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("duplicate"), "message was: {msg}");
+        assert!(msg.contains("a/b"), "message was: {msg}");
+    }
+
+    #[test]
+    fn validate_metadata_rejects_unknown_path() {
+        let rows = vec![sample_metadata("no/such/command")];
+        let visible: BTreeSet<String> = BTreeSet::new();
+        let all: BTreeSet<String> = BTreeSet::new();
+        let err = validate_metadata(&rows, &visible, &all).expect_err("unknown must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("unknown"), "message was: {msg}");
+        assert!(msg.contains("no/such/command"), "message was: {msg}");
+    }
+
+    #[test]
+    fn validate_metadata_rejects_hidden_path() {
+        let rows = vec![sample_metadata("hidden/cmd")];
+        let visible: BTreeSet<String> = BTreeSet::new();
+        let all: BTreeSet<String> = ["hidden/cmd".to_string()].into_iter().collect();
+        let err = validate_metadata(&rows, &visible, &all).expect_err("hidden must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("hidden"), "message was: {msg}");
+        assert!(msg.contains("hidden/cmd"), "message was: {msg}");
+    }
+
+    #[test]
+    fn validate_metadata_accepts_clean_overlay() {
+        let rows = vec![sample_metadata("a/b")];
+        let visible: BTreeSet<String> = ["a/b".to_string()].into_iter().collect();
+        let all = visible.clone();
+        let map = validate_metadata(&rows, &visible, &all).expect("clean overlay must validate");
+        assert_eq!(map.len(), 1);
+        assert!(map.contains_key("a/b"));
+    }
+
+    // ─── capability listing/filtering/run (unchanged behavior) ────────────
+
+    #[test]
+    fn catalog_list_filters_capabilities_by_tag() {
+        let env = catalog_list_envelope(Some("cloud"), "compact", CatalogScope::All)
+            .expect("catalog list should work");
+        let capabilities = env.data["capabilities"]
+            .as_array()
+            .expect("capabilities array");
+        assert!(capabilities.iter().all(|item| {
+            item["tags"]
+                .as_array()
+                .expect("tags")
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|tag| tag == "cloud")
+        }));
+    }
+
+    #[test]
+    fn catalog_run_executes_designer_capability() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let input = dir.path().join("sample.yxmd");
+        fs::write(
+            &input,
+            r#"<AlteryxDocument yxmdVer="2025.2"><Nodes><Node ToolID="1"><GuiSettings Plugin="AlteryxBasePluginsGui.TextInput.TextInput"/></Node></Nodes><Connections/></AlteryxDocument>"#,
+        )
+        .expect("write sample");
+
+        let json_input = serde_json::to_string(&json!({
+            "workflow_path": input.display().to_string(),
+        }))
+        .expect("serialize");
+        let env = catalog_run_envelope("designer.workflow.context", &json_input, false)
+            .expect("catalog run should succeed");
+        assert_eq!(env.data["capability"]["id"], "designer.workflow.context");
+        assert_eq!(env.data["result"]["workflow"]["tool_count"], 1);
+    }
+
+    #[test]
+    fn one_refresh_token_response_formats_access_token() {
+        let token = format_refresh_token_response(&serde_json::json!({
+            "token_type": "Bearer",
+            "access_token": "fresh-token"
+        }))
+        .expect("response should format");
+        assert_eq!(token, "Bearer fresh-token");
+    }
+}
