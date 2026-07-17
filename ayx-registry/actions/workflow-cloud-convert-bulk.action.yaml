@@ -37,3 +37,55 @@ steps:
 validations:
   - describe: "Every conversion report's converted_tool_count > 0."
   - describe: "Aggregate unsupported_tools list has a triage owner before scheduling the cutover."
+input_schema:
+  type: object
+  description: "Parameters for bulk-converting Desktop (.yxmd) workflows to Alteryx Cloud format: the directory to scan and the specific workflow to inspect/convert."
+  additionalProperties: false
+  required: [workflow_dir, workflow_path]
+  properties:
+    workflow_dir:
+      type: string
+      description: "Root directory to scan recursively for .yxmd Designer workflow files."
+      minLength: 1
+    workflow_path:
+      type: string
+      description: "Path to one .yxmd Designer workflow file to inspect or convert."
+      minLength: 1
+output_schema:
+  type: object
+  description: "The ActionRun record this action's run or plan produces."
+  required: [action_id, title, safety, apply, mode, params, steps, validations]
+  properties:
+    action_id:
+      type: string
+      description: "Stable identifier for this action; always equals workflow.cloud-convert.bulk."
+      const: workflow.cloud-convert.bulk
+    title:
+      type: string
+      description: "Human-readable title for this action."
+    safety:
+      type: string
+      description: "Safety classification for this action's run: read_only, mutating, or destructive."
+      enum: [read_only, mutating, destructive]
+    apply:
+      type: boolean
+      description: "Whether this run was invoked with --apply (true) or produced a dry-run plan only (false)."
+    mode:
+      type: string
+      description: "Run mode: \"plan\" when --apply was not set, \"execute\" when it was."
+      enum: [plan, execute]
+    params:
+      type: object
+      description: "The parameter map actually used to run or plan this action (string values only)."
+    steps:
+      type: array
+      description: "Ordered per-step outcome (command, composed action, or note) for this run."
+      items:
+        type: object
+        description: "One planned or executed step outcome for this run."
+    validations:
+      type: array
+      description: "Human-readable validation descriptions declared for this action; not automatically executed."
+      items:
+        type: string
+        description: "One validation's description text."

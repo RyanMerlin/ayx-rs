@@ -36,3 +36,50 @@ rollback: |
   Use the snapshot file ./schedules-pre-pause.json to identify which
   schedules were active. Run `one.scheduling.resume` against those ids
   to restore service.
+input_schema:
+  type: object
+  description: "This action's command template currently takes no CLI parameters: the schedule inventory step (ayx one scheduling list --all) has no templated placeholders."
+  additionalProperties: false
+  required: []
+  properties: {}
+output_schema:
+  type: object
+  description: "The ActionRun record this action's run or plan produces."
+  required: [action_id, title, safety, apply, mode, params, steps, validations, rollback]
+  properties:
+    action_id:
+      type: string
+      description: "Stable identifier for this action; always equals one.scheduling.pause-all."
+      const: one.scheduling.pause-all
+    title:
+      type: string
+      description: "Human-readable title for this action."
+    safety:
+      type: string
+      description: "Safety classification for this action's run: read_only, mutating, or destructive."
+      enum: [read_only, mutating, destructive]
+    apply:
+      type: boolean
+      description: "Whether this run was invoked with --apply (true) or produced a dry-run plan only (false)."
+    mode:
+      type: string
+      description: "Run mode: \"plan\" when --apply was not set, \"execute\" when it was."
+      enum: [plan, execute]
+    params:
+      type: object
+      description: "The parameter map actually used to run or plan this action (string values only)."
+    steps:
+      type: array
+      description: "Ordered per-step outcome (command, composed action, or note) for this run."
+      items:
+        type: object
+        description: "One planned or executed step outcome for this run."
+    validations:
+      type: array
+      description: "Human-readable validation descriptions declared for this action; not automatically executed."
+      items:
+        type: string
+        description: "One validation's description text."
+    rollback:
+      type: string
+      description: "Rollback guidance to restore service: use the pre-pause snapshot file to identify affected schedules and run one.scheduling.resume against those ids."

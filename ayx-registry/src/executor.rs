@@ -34,7 +34,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use crate::{Action, Registry, Safety, Step};
+use crate::io_schema::{self, SchemaViolation};
+use crate::{Action, EffectiveSchema, Registry, Safety, SchemaOrigin, Step};
 
 #[derive(Debug, Error)]
 pub enum ExecutorError {
@@ -44,6 +45,45 @@ pub enum ExecutorError {
         "unknown parameter(s) referenced by action '{id}': {missing:?}. Provide via --param key=value."
     )]
     MissingParams { id: String, missing: Vec<String> },
+    /// `Explicit`-origin input contract violation: unknown parameter,
+    /// empty/short string, enum/const mismatch, etc. Surfaced before a
+    /// read-only command, mutating plan, or `--apply` subprocess can start
+    /// — see `validate_input_contract`. `Inferred`-origin contracts keep
+    /// the legacy `MissingParams` shape instead (existing callers depend
+    /// on it).
+    #[error(
+        "action/workflow '{id}' input contract violation — {}",
+        format_violations(.violations)
+    )]
+    InputContractViolation {
+        id: String,
+        violations: Vec<SchemaViolation>,
+    },
+    /// A completed `ActionRun`/`WorkflowRun` failed its owner's declared
+    /// `output_schema`. This is a post-execution contract-integrity
+    /// failure discovered only after the run record was fully built — by
+    /// construction every step in that record already finished (or was
+    /// planned); this must never trigger a retry, an extra step, or the
+    /// action's own rollback text.
+    #[error(
+        "action/workflow '{id}' output contract violation (mismatch discovered after its steps may have executed) — {}",
+        format_violations(.violations)
+    )]
+    OutputContractViolation {
+        id: String,
+        violations: Vec<SchemaViolation>,
+    },
+    /// A declared contract failed a composition-level invariant (cycle,
+    /// property disagreement, required-set mismatch — see
+    /// `RegistryError::SchemaContract`) when the executor asked the
+    /// registry for an action/workflow's effective schema. Every
+    /// `Registry::load_default()` registry already checked these
+    /// invariants for every entry at `finalize()` time, so this fires only
+    /// for a registry assembled without `finalize()` (e.g. a hand-built
+    /// test registry) reaching an inconsistency `finalize()` would have
+    /// caught at load time.
+    #[error(transparent)]
+    Registry(#[from] crate::RegistryError),
     #[error("action '{id}' referenced by composition step does not exist")]
     InnerActionNotFound { id: String },
     #[error("failed to locate current ayx binary: {0}")]
@@ -76,6 +116,20 @@ pub enum ExecutorError {
     },
     #[error("could not split command line '{cmd}' (unmatched quote?)")]
     Lex { cmd: String },
+}
+
+/// Render schema violations as one deterministically ordered, human-readable
+/// string for an error's `Display` text. `SchemaViolation::path` is already
+/// a JSON-pointer-style string (e.g. `/profile`); quoting it here keeps the
+/// failing path unambiguous even when `reason` also contains punctuation.
+/// `io_schema::validate_instance` returns violations pre-sorted by path, so
+/// the joined message is stable across calls.
+fn format_violations(violations: &[SchemaViolation]) -> String {
+    violations
+        .iter()
+        .map(|v| format!("'{}': {}", v.path, v.reason))
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// Result of executing (or planning) one step.
@@ -173,22 +227,43 @@ pub fn run_workflow(
             .map_err(|_| ExecutorError::InnerActionNotFound {
                 id: workflow_id.to_string(),
             })?;
+
+    // Validate the whole param map once against the workflow's own
+    // effective contract before touching any referenced action.
+    let workflow_effective = registry.effective_workflow_input_schema(workflow_id)?;
+    validate_input_contract(workflow_id, &workflow_effective, &cfg.params)?;
+
     let mode = if cfg.apply { "execute" } else { "plan" };
     let mut runs = Vec::with_capacity(workflow.actions.len());
     for tid in &workflow.actions {
         let action = registry
             .action(tid)
             .map_err(|_| ExecutorError::InnerActionNotFound { id: tid.clone() })?;
-        runs.push(run_action_inner(registry, action, cfg)?);
+        // Filter to this action's own declared/effective property set
+        // before calling into it — see `filter_params_for_schema`'s docs.
+        // `run_action_inner` then independently validates the filtered
+        // subset against the action's own effective contract, so a strict
+        // action never sees (and can't be rejected by) a sibling's key.
+        let action_effective = registry.effective_action_input_schema(tid)?;
+        let mut child_cfg = cfg.clone();
+        child_cfg.params = filter_params_for_schema(&action_effective, &cfg.params);
+        runs.push(run_action_inner(registry, action, &child_cfg)?);
     }
-    Ok(WorkflowRun {
+
+    let run = WorkflowRun {
         workflow_id: workflow.id.clone(),
         title: workflow.title.clone(),
         safety: workflow.safety,
         apply: cfg.apply,
         mode,
         actions: runs,
-    })
+    };
+
+    validate_output_contract(workflow_id, workflow.output_schema.as_ref(), || {
+        serde_json::to_value(&run).expect("WorkflowRun is composed of plain serializable fields")
+    })?;
+
+    Ok(run)
 }
 
 fn run_action_inner(
@@ -196,24 +271,12 @@ fn run_action_inner(
     action: &Action,
     cfg: &ExecutionConfig,
 ) -> Result<ActionRun, ExecutorError> {
-    // Up-front parameter validation. We scan every Command step (and inline
-    // any Action composition steps) before running so we fail loud, not
-    // halfway through.
-    let mut required: Vec<String> = Vec::new();
-    collect_required_params(registry, action, &mut required);
-    required.sort();
-    required.dedup();
-    let missing: Vec<String> = required
-        .iter()
-        .filter(|p| !cfg.params.contains_key(*p))
-        .cloned()
-        .collect();
-    if !missing.is_empty() {
-        return Err(ExecutorError::MissingParams {
-            id: action.id.clone(),
-            missing,
-        });
-    }
+    // Up-front parameter validation against the registry's single canonical
+    // effective contract (Task 2) — no more locally re-scanning
+    // `action.steps` for placeholders. Must happen before any read-only
+    // command, mutating plan, or `--apply` subprocess can start.
+    let effective = registry.effective_action_input_schema(&action.id)?;
+    validate_input_contract(&action.id, &effective, &cfg.params)?;
 
     let mode = if cfg.apply { "execute" } else { "plan" };
     let mut outcomes = Vec::new();
@@ -227,7 +290,7 @@ fn run_action_inner(
         &mut step_counter,
     )?;
 
-    Ok(ActionRun {
+    let run = ActionRun {
         action_id: action.id.clone(),
         title: action.title.clone(),
         safety: action.safety,
@@ -241,46 +304,142 @@ fn run_action_inner(
             .map(|v| v.describe.clone())
             .collect(),
         rollback: action.rollback.clone(),
-    })
+    };
+
+    validate_output_contract(&action.id, action.output_schema.as_ref(), || {
+        serde_json::to_value(&run).expect("ActionRun is composed of plain serializable fields")
+    })?;
+
+    Ok(run)
 }
 
-fn collect_required_params(registry: &Registry, action: &Action, out: &mut Vec<String>) {
-    for step in &action.steps {
-        match step {
-            Step::Command { cmd, .. } => {
-                for p in extract_params(cmd) {
-                    out.push(p);
-                }
+/// Validate `params` against `id`'s effective input contract before any
+/// step runs.
+///
+/// - `Inferred` origin preserves the exact legacy `MissingParams` shape
+///   existing callers depend on. The required set now comes from the
+///   registry's own effective schema (already derived from the same
+///   recursive `extract_params` walk the old executor-local scan
+///   duplicated) rather than a second, independently maintained scan.
+/// - `Explicit` origin runs the full `io_schema` instance validator, so
+///   unknown parameters, empty/short strings, and enum/const mismatches
+///   are all caught here as `InputContractViolation`.
+fn validate_input_contract(
+    id: &str,
+    effective: &EffectiveSchema,
+    params: &BTreeMap<String, String>,
+) -> Result<(), ExecutorError> {
+    match effective.origin {
+        SchemaOrigin::Inferred => {
+            let required: Vec<String> = effective
+                .schema
+                .get("required")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let missing: Vec<String> = required
+                .into_iter()
+                .filter(|p| !params.contains_key(p))
+                .collect();
+            if missing.is_empty() {
+                Ok(())
+            } else {
+                Err(ExecutorError::MissingParams {
+                    id: id.to_string(),
+                    missing,
+                })
             }
-            Step::Action { id, .. } => {
-                if let Ok(inner) = registry.action(id) {
-                    collect_required_params(registry, inner, out);
-                }
+        }
+        SchemaOrigin::Explicit => {
+            let instance = params_to_json_object(params);
+            let violations = io_schema::validate_instance(&effective.schema, &instance);
+            if violations.is_empty() {
+                Ok(())
+            } else {
+                Err(ExecutorError::InputContractViolation {
+                    id: id.to_string(),
+                    violations,
+                })
             }
-            Step::Note { .. } => {}
         }
     }
 }
 
-/// Pull `<word>` placeholders out of a command template.
-fn extract_params(cmd: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut chars = cmd.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '<' {
-            let mut name = String::new();
-            for c in chars.by_ref() {
-                if c == '>' {
-                    if !name.is_empty() {
-                        out.push(name);
-                    }
-                    break;
-                }
-                name.push(c);
-            }
+/// Validate a completed `ActionRun`/`WorkflowRun` against its owner's
+/// declared `output_schema`, when one is declared — absent a declared
+/// schema, nothing is checked, since an undeclared action/workflow makes
+/// no promise about the shape of the record it produces. `build_instance`
+/// is only invoked (and only pays for `serde_json::to_value`) when a
+/// schema is actually present to validate against.
+///
+/// Called after the run record is fully built, in both plan and execute
+/// mode. A violation here is a post-execution contract-integrity failure,
+/// not evidence that a mutating step ran incorrectly: every step in the
+/// record it's validating already finished (or was planned) by the time
+/// this runs, so it must never trigger a retry, an additional step, or the
+/// action's own `rollback` text — see `ExecutorError::OutputContractViolation`.
+fn validate_output_contract(
+    id: &str,
+    output_schema: Option<&Value>,
+    build_instance: impl FnOnce() -> Value,
+) -> Result<(), ExecutorError> {
+    let Some(schema) = output_schema else {
+        return Ok(());
+    };
+    let instance = build_instance();
+    let violations = io_schema::validate_instance(schema, &instance);
+    if violations.is_empty() {
+        Ok(())
+    } else {
+        Err(ExecutorError::OutputContractViolation {
+            id: id.to_string(),
+            violations,
+        })
+    }
+}
+
+/// Convert the executor's lexical `--param key=value` map into the JSON
+/// object `io_schema::validate_instance` expects. Every value stays a JSON
+/// string — the CLI's parameter interface is lexical-string-only by design
+/// (see `io_schema`'s module docs) — there is no type coercion here.
+fn params_to_json_object(params: &BTreeMap<String, String>) -> Value {
+    Value::Object(
+        params
+            .iter()
+            .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+            .collect(),
+    )
+}
+
+/// Select the parameter subset applicable to a child action at a
+/// composition boundary (a workflow's referenced action, or an inlined
+/// `Step::Action`). An `Explicit` contract is a closed contract —
+/// `io_schema::SchemaRole::Input` requires `additionalProperties: false`
+/// on every declared input schema — so forwarding a sibling's parameter
+/// would surface as a spurious "unexpected property" violation; only that
+/// child's own declared keys are forwarded. An `Inferred` contract carries
+/// no such promise and keeps today's permissive full map — unchanged
+/// behavior for every action that hasn't declared a schema yet.
+fn filter_params_for_schema(
+    effective: &EffectiveSchema,
+    params: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    match effective.origin {
+        SchemaOrigin::Inferred => params.clone(),
+        SchemaOrigin::Explicit => {
+            let allowed = io_schema::object_property_names(&effective.schema);
+            params
+                .iter()
+                .filter(|(k, _)| allowed.contains(k.as_str()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
         }
     }
-    out
 }
 
 fn substitute(cmd: &str, params: &BTreeMap<String, String>) -> String {
@@ -348,6 +507,21 @@ fn run_steps(
                 let inner = registry
                     .action(id)
                     .map_err(|_| ExecutorError::InnerActionNotFound { id: id.clone() })?;
+
+                // Boundary check, mirroring `run_workflow`'s per-action
+                // handling: filter to `inner`'s own declared/effective
+                // property set, then validate that filtered subset against
+                // `inner`'s own effective contract, before any of its
+                // steps are planned or executed. A strict `inner` only
+                // ever sees its own keys, so a parameter meant for a
+                // sibling composition step never becomes a spurious
+                // "unexpected property" violation here.
+                let inner_effective = registry.effective_action_input_schema(id)?;
+                let inner_params = filter_params_for_schema(&inner_effective, &cfg.params);
+                validate_input_contract(id, &inner_effective, &inner_params)?;
+                let mut inner_cfg = cfg.clone();
+                inner_cfg.params = inner_params;
+
                 *counter += 1;
                 outcomes.push(StepOutcome {
                     index: *counter,
@@ -360,7 +534,7 @@ fn run_steps(
                     stderr: None,
                     exit_code: None,
                 });
-                run_steps(registry, inner, &inner.steps, cfg, outcomes, counter)?;
+                run_steps(registry, inner, &inner.steps, &inner_cfg, outcomes, counter)?;
             }
             Step::Command { cmd, why, .. } => {
                 *counter += 1;
@@ -586,6 +760,7 @@ fn shell_split(s: &str) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::extract_params;
 
     #[test]
     fn extracts_placeholders() {
@@ -614,12 +789,27 @@ mod tests {
         assert!(shell_split("missing 'quote").is_none());
     }
 
+    /// `mongo.backup-restore` carries an `Explicit` declared `input_schema`
+    /// as of Task 5 (bundled stdlib annotation), so a call with no params at
+    /// all now surfaces as `InputContractViolation` (the strict, explicit-
+    /// origin path in `validate_input_contract`), not the legacy
+    /// `MissingParams` shape reserved for `Inferred`-origin (undeclared)
+    /// actions — see `legacy_missing_params_still_uses_missing_params_error`
+    /// below for that still-covered case.
     #[test]
     fn missing_params_block_run() {
         let reg = Registry::load_default().expect("registry");
         let cfg = ExecutionConfig::default();
         let err = run_action(&reg, "mongo.backup-restore", &cfg).unwrap_err();
-        assert!(matches!(err, ExecutorError::MissingParams { .. }));
+        match err {
+            ExecutorError::InputContractViolation { id, violations } => {
+                assert_eq!(id, "mongo.backup-restore");
+                let paths: Vec<&str> = violations.iter().map(|v| v.path.as_str()).collect();
+                assert!(paths.contains(&"/profile"), "paths: {paths:?}");
+                assert!(paths.contains(&"/ts"), "paths: {paths:?}");
+            }
+            other => panic!("expected InputContractViolation, got {other:?}"),
+        }
     }
 
     #[test]
@@ -663,6 +853,484 @@ mod tests {
             if s.kind == "command" {
                 assert_eq!(s.status, "planned", "mutating step ran without --apply");
             }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Step 5: deterministic executor tests for input/output contract
+    // enforcement. Every fixture action is `safety: mutating` and every
+    // test runs with `apply: false`, so no command step ever leaves
+    // "planned" — no real profile or subprocess is ever needed, and
+    // command output can never masquerade as contract behavior.
+    // -----------------------------------------------------------------
+
+    /// One shared in-memory registry for every contract-enforcement test
+    /// below, built the same way `lib.rs`'s own tests build fixtures:
+    /// write real `*.action.yaml`/`*.workflow.yaml` files into a tempdir
+    /// and `load_dir` them — no `Registry::load_default()`, so none of
+    /// this is coupled to the bundled stdlib's own (now fully-declared)
+    /// contracts.
+    fn fixture_registry() -> Registry {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let files: &[(&str, &str)] = &[
+            (
+                "strict.action.yaml",
+                r#"
+id: test.strict
+title: Strict test action
+summary: Declares a closed input contract with a minLength and an enum property.
+safety: mutating
+steps:
+  - kind: command
+    cmd: "ayx test noop --name <name> --env <env>"
+    why: exercise strict input contract
+input_schema:
+  type: object
+  description: Strict parameters.
+  additionalProperties: false
+  required: [name, env]
+  properties:
+    name:
+      type: string
+      description: A name, at least 3 characters.
+      minLength: 3
+    env:
+      type: string
+      description: Target environment.
+      enum: [prod, staging]
+"#,
+            ),
+            (
+                "legacy.action.yaml",
+                r#"
+id: test.legacy
+title: Legacy test action
+summary: No declared input_schema; contract is placeholder-inferred.
+safety: mutating
+steps:
+  - kind: command
+    cmd: "ayx test noop --token <token>"
+    why: exercise legacy inferred contract
+"#,
+            ),
+            (
+                "strict-a.action.yaml",
+                r#"
+id: test.strict-a
+title: Strict A
+summary: Requires only 'alpha', constrained to an enum.
+safety: mutating
+steps:
+  - kind: command
+    cmd: "ayx test noop --alpha <alpha>"
+    why: a-only
+input_schema:
+  type: object
+  description: A's own parameters.
+  additionalProperties: false
+  required: [alpha]
+  properties:
+    alpha:
+      type: string
+      description: Alpha value.
+      enum: [x, y]
+"#,
+            ),
+            (
+                "strict-b.action.yaml",
+                r#"
+id: test.strict-b
+title: Strict B
+summary: Requires only 'beta', constrained to an enum.
+safety: mutating
+steps:
+  - kind: command
+    cmd: "ayx test noop --beta <beta>"
+    why: b-only
+input_schema:
+  type: object
+  description: B's own parameters.
+  additionalProperties: false
+  required: [beta]
+  properties:
+    beta:
+      type: string
+      description: Beta value.
+      enum: [prod, staging]
+"#,
+            ),
+            (
+                "disjoint.workflow.yaml",
+                r#"
+id: test.disjoint-workflow
+title: Disjoint workflow
+summary: Composes A and B, which declare disjoint required parameters.
+safety: mutating
+actions: [test.strict-a, test.strict-b]
+"#,
+            ),
+            (
+                "nested-parent.action.yaml",
+                r#"
+id: test.nested-parent
+title: Nested parent
+summary: Composes strict-a and strict-b via Step::Action (no declared schema of its own).
+safety: mutating
+steps:
+  - kind: action
+    id: test.strict-a
+    why: run a
+  - kind: action
+    id: test.strict-b
+    why: run b
+"#,
+            ),
+            (
+                "output-match.action.yaml",
+                r#"
+id: test.output-match
+title: Output match
+summary: Declares an output_schema that matches its own plan-mode record.
+safety: mutating
+steps:
+  - kind: command
+    cmd: "ayx test noop --name <name>"
+    why: exercise output contract
+input_schema:
+  type: object
+  description: Parameters.
+  additionalProperties: false
+  required: [name]
+  properties:
+    name:
+      type: string
+      description: A name.
+output_schema:
+  type: object
+  description: Result record.
+  required: [action_id, mode]
+  properties:
+    action_id:
+      type: string
+      description: Stable action id.
+      const: test.output-match
+    mode:
+      type: string
+      description: plan or execute.
+      enum: [plan, execute]
+"#,
+            ),
+            (
+                "output-mismatch.action.yaml",
+                r#"
+id: test.output-mismatch
+title: Output mismatch
+summary: Declares an output_schema with a deliberately wrong const.
+safety: mutating
+steps:
+  - kind: command
+    cmd: "ayx test noop --name <name>"
+    why: exercise output contract violation
+input_schema:
+  type: object
+  description: Parameters.
+  additionalProperties: false
+  required: [name]
+  properties:
+    name:
+      type: string
+      description: A name.
+output_schema:
+  type: object
+  description: Result record.
+  required: [action_id, mode]
+  properties:
+    action_id:
+      type: string
+      description: Deliberately wrong const so output validation must fire.
+      const: totally-not-the-real-id
+    mode:
+      type: string
+      description: plan or execute.
+      enum: [plan, execute]
+"#,
+            ),
+            (
+                "output-workflow.workflow.yaml",
+                r#"
+id: test.output-workflow
+title: Output workflow
+summary: Declares a workflow output_schema that matches its own plan-mode record.
+safety: mutating
+actions: [test.output-match]
+output_schema:
+  type: object
+  description: Workflow result record.
+  required: [workflow_id, mode]
+  properties:
+    workflow_id:
+      type: string
+      description: Stable workflow id.
+      const: test.output-workflow
+    mode:
+      type: string
+      description: plan or execute.
+      enum: [plan, execute]
+"#,
+            ),
+            (
+                "output-workflow-mismatch.workflow.yaml",
+                r#"
+id: test.output-workflow-mismatch
+title: Output workflow mismatch
+summary: Declares a workflow output_schema with a deliberately wrong const.
+safety: mutating
+actions: [test.output-match]
+output_schema:
+  type: object
+  description: Workflow result record.
+  required: [workflow_id, mode]
+  properties:
+    workflow_id:
+      type: string
+      description: Deliberately wrong const so output validation must fire.
+      const: totally-not-the-real-workflow-id
+    mode:
+      type: string
+      description: plan or execute.
+      enum: [plan, execute]
+"#,
+            ),
+        ];
+        for (name, body) in files {
+            std::fs::write(dir.path().join(name), body).expect("write fixture");
+        }
+        let mut reg = Registry::default();
+        reg.load_dir(dir.path()).expect("fixture registry loads");
+        reg
+    }
+
+    fn params(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn explicit_missing_required_params_rejected_before_any_step() {
+        let reg = fixture_registry();
+        let cfg = ExecutionConfig::default(); // no params at all
+        // `run_action` returning `Err` before ever producing an `ActionRun`
+        // *is* the proof no step exists yet: `run_action_inner` only
+        // starts building `ActionRun.steps` after input validation
+        // succeeds (see Step 1's placement, before `run_steps` is called).
+        let err = run_action(&reg, "test.strict", &cfg).unwrap_err();
+        match err {
+            ExecutorError::InputContractViolation { id, violations } => {
+                assert_eq!(id, "test.strict");
+                let paths: Vec<&str> = violations.iter().map(|v| v.path.as_str()).collect();
+                assert!(paths.contains(&"/name"), "paths: {paths:?}");
+                assert!(paths.contains(&"/env"), "paths: {paths:?}");
+            }
+            other => panic!("expected InputContractViolation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn explicit_unknown_parameter_rejected() {
+        let reg = fixture_registry();
+        let cfg = ExecutionConfig {
+            params: params(&[("name", "abc"), ("env", "prod"), ("extra", "x")]),
+            ..Default::default()
+        };
+        let err = run_action(&reg, "test.strict", &cfg).unwrap_err();
+        match err {
+            ExecutorError::InputContractViolation { violations, .. } => {
+                assert!(
+                    violations.iter().any(|v| v.path == "/extra"),
+                    "violations: {violations:?}"
+                );
+            }
+            other => panic!("expected InputContractViolation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn explicit_enum_violation_rejected() {
+        let reg = fixture_registry();
+        let cfg = ExecutionConfig {
+            params: params(&[("name", "abc"), ("env", "qa")]),
+            ..Default::default()
+        };
+        let err = run_action(&reg, "test.strict", &cfg).unwrap_err();
+        match err {
+            ExecutorError::InputContractViolation { violations, .. } => {
+                assert!(
+                    violations.iter().any(|v| v.path == "/env"),
+                    "violations: {violations:?}"
+                );
+            }
+            other => panic!("expected InputContractViolation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn explicit_min_length_violation_rejected() {
+        let reg = fixture_registry();
+        let cfg = ExecutionConfig {
+            params: params(&[("name", "ab"), ("env", "prod")]),
+            ..Default::default()
+        };
+        let err = run_action(&reg, "test.strict", &cfg).unwrap_err();
+        match err {
+            ExecutorError::InputContractViolation { violations, .. } => {
+                assert!(
+                    violations.iter().any(|v| v.path == "/name"),
+                    "violations: {violations:?}"
+                );
+            }
+            other => panic!("expected InputContractViolation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn legacy_missing_params_still_uses_missing_params_error() {
+        let reg = fixture_registry();
+        let cfg = ExecutionConfig::default();
+        let err = run_action(&reg, "test.legacy", &cfg).unwrap_err();
+        match err {
+            ExecutorError::MissingParams { id, missing } => {
+                assert_eq!(id, "test.legacy");
+                assert_eq!(missing, vec!["token".to_string()]);
+            }
+            other => panic!("expected MissingParams (legacy behavior unchanged), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn workflow_filters_disjoint_params_per_action() {
+        let reg = fixture_registry();
+        let cfg = ExecutionConfig {
+            params: params(&[("alpha", "x"), ("beta", "prod")]),
+            ..Default::default()
+        };
+        let run = run_workflow(&reg, "test.disjoint-workflow", &cfg).expect("plans");
+        assert_eq!(run.actions.len(), 2);
+        // Each action must receive ONLY its own declared keys — not the
+        // full workflow param map. Under the old (pre-filtering) executor
+        // `ActionRun.params` was always `cfg.params.clone()` unfiltered,
+        // so this assertion fails without Step 2's boundary filtering.
+        let a = &run.actions[0];
+        assert_eq!(a.action_id, "test.strict-a");
+        assert_eq!(a.params, params(&[("alpha", "x")]));
+        let b = &run.actions[1];
+        assert_eq!(b.action_id, "test.strict-b");
+        assert_eq!(b.params, params(&[("beta", "prod")]));
+    }
+
+    #[test]
+    fn nested_step_action_composition_plans_with_disjoint_params() {
+        let reg = fixture_registry();
+        let cfg = ExecutionConfig {
+            params: params(&[("alpha", "x"), ("beta", "prod")]),
+            ..Default::default()
+        };
+        let run = run_action(&reg, "test.nested-parent", &cfg).expect("plans");
+        assert_eq!(run.mode, "plan");
+        for s in &run.steps {
+            if s.kind == "command" {
+                assert_eq!(s.status, "planned");
+            }
+        }
+    }
+
+    /// The real discriminator for nested `Step::Action` filtering: the
+    /// *parent* (`test.nested-parent`) has no declared schema, so its own
+    /// top-level check is a permissive, generic-string inferred contract
+    /// that has no idea `test.strict-a.alpha` is constrained to an enum.
+    /// Only a genuine per-child boundary check (Step 2, inside
+    /// `run_steps`'s `Step::Action` arm) catches this — proving filtering
+    /// at this boundary does real validation, not just pass-through.
+    #[test]
+    fn nested_step_action_enforces_composed_childs_own_contract() {
+        let reg = fixture_registry();
+        let cfg = ExecutionConfig {
+            params: params(&[("alpha", "not-in-enum"), ("beta", "prod")]),
+            ..Default::default()
+        };
+        let err = run_action(&reg, "test.nested-parent", &cfg).unwrap_err();
+        match err {
+            ExecutorError::InputContractViolation { id, violations } => {
+                assert_eq!(id, "test.strict-a");
+                assert!(
+                    violations.iter().any(|v| v.path == "/alpha"),
+                    "violations: {violations:?}"
+                );
+            }
+            other => panic!("expected InputContractViolation for test.strict-a, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn action_output_schema_matches_in_plan_mode() {
+        let reg = fixture_registry();
+        let cfg = ExecutionConfig {
+            params: params(&[("name", "x")]),
+            ..Default::default()
+        };
+        let run = run_action(&reg, "test.output-match", &cfg).expect("output matches");
+        assert_eq!(run.mode, "plan");
+    }
+
+    #[test]
+    fn action_output_schema_mismatch_is_rejected() {
+        let reg = fixture_registry();
+        let cfg = ExecutionConfig {
+            params: params(&[("name", "x")]),
+            ..Default::default()
+        };
+        let err = run_action(&reg, "test.output-mismatch", &cfg).unwrap_err();
+        match err {
+            ExecutorError::OutputContractViolation { id, violations } => {
+                assert_eq!(id, "test.output-mismatch");
+                assert!(
+                    violations.iter().any(|v| v.path == "/action_id"),
+                    "violations: {violations:?}"
+                );
+            }
+            other => panic!("expected OutputContractViolation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn workflow_output_schema_matches_in_plan_mode() {
+        let reg = fixture_registry();
+        let cfg = ExecutionConfig {
+            params: params(&[("name", "x")]),
+            ..Default::default()
+        };
+        let run = run_workflow(&reg, "test.output-workflow", &cfg).expect("output matches");
+        assert_eq!(run.mode, "plan");
+    }
+
+    #[test]
+    fn workflow_output_schema_mismatch_is_rejected() {
+        let reg = fixture_registry();
+        let cfg = ExecutionConfig {
+            params: params(&[("name", "x")]),
+            ..Default::default()
+        };
+        let err = run_workflow(&reg, "test.output-workflow-mismatch", &cfg).unwrap_err();
+        match err {
+            ExecutorError::OutputContractViolation { id, violations } => {
+                assert_eq!(id, "test.output-workflow-mismatch");
+                assert!(
+                    violations.iter().any(|v| v.path == "/workflow_id"),
+                    "violations: {violations:?}"
+                );
+            }
+            other => panic!("expected OutputContractViolation, got {other:?}"),
         }
     }
 }

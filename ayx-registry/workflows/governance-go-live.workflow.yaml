@@ -19,3 +19,62 @@ success_criteria: |
   - SAML diagnose envelopes are all ok=true.
   - Target workspace flow + plan counts match the migration plan.
   - Mongo doctor reports no orphan / queue-stuck conditions.
+input_schema:
+  type: object
+  description: "Parameters for the governance go-live recipe: Mongo profile/timestamp, SAML IdP metadata URL, and the source/target environment + flow id used by the workspace migration step."
+  additionalProperties: false
+  required: [profile, ts, idp-metadata-url, source, target, flow_id]
+  properties:
+    profile:
+      type: string
+      description: "Named ayx CLI profile (as configured via ayx profiles) identifying which Alteryx Server environment to target."
+      minLength: 1
+    ts:
+      type: string
+      description: "Timestamp label used to name the backup/restore artifact directory (for example backups/<ts>)."
+      minLength: 1
+    idp-metadata-url:
+      type: string
+      description: "HTTPS URL to the identity provider's SAML metadata document, passed to ayx server auth diagnose saml --metadata-url."
+      minLength: 1
+    source:
+      type: string
+      description: "Environment name, as configured in ayx's environments file, to promote or migrate assets FROM."
+      minLength: 1
+    target:
+      type: string
+      description: "Environment name, as configured in ayx's environments file, to promote or migrate assets TO."
+      minLength: 1
+    flow_id:
+      type: string
+      description: "Alteryx One flow id being promoted between environments."
+      minLength: 1
+output_schema:
+  type: object
+  description: "The WorkflowRun record this workflow's run or plan produces."
+  required: [workflow_id, title, safety, apply, mode, actions]
+  properties:
+    workflow_id:
+      type: string
+      description: "Stable identifier for this workflow; always equals governance.go-live."
+      const: governance.go-live
+    title:
+      type: string
+      description: "Human-readable title for this workflow."
+    safety:
+      type: string
+      description: "Effective safety classification for this run, promoted to the maximum of any referenced action's safety: read_only, mutating, or destructive."
+      enum: [read_only, mutating, destructive]
+    apply:
+      type: boolean
+      description: "Whether this run was invoked with --apply (true) or produced a dry-run plan only (false)."
+    mode:
+      type: string
+      description: "Run mode: \"plan\" when --apply was not set, \"execute\" when it was."
+      enum: [plan, execute]
+    actions:
+      type: array
+      description: "Ordered per-action run/plan record, one for each action referenced by this workflow's actions list (see each action's own output_schema for its shape)."
+      items:
+        type: object
+        description: "One referenced action's ActionRun record for this workflow run."

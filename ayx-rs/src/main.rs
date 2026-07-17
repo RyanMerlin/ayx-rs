@@ -449,6 +449,8 @@ enum AuditCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum ActionsCommand {
     /// List every action, with title, safety classification, and tags.
+    /// Compact index only — no input/output schema. Call `describe` on a
+    /// candidate id for its full contract before constructing `--param`s.
     List {
         /// Filter by tag (substring match).
         #[arg(long)]
@@ -457,12 +459,17 @@ pub(crate) enum ActionsCommand {
         #[arg(long)]
         safety: Option<String>,
     },
-    /// Describe a single action: steps, validations, rollback.
+    /// Describe a single action: steps, validations, rollback, plus its
+    /// effective `input_schema` (declared or inferred, tagged by
+    /// `input_schema_source`) and declared `output_schema`, if any — the
+    /// agent-facing source of truth for what this action requires/returns.
     Describe {
         /// Action id, e.g. `mongo.backup-restore`.
         id: String,
     },
-    /// Resolve a free-text task description to a ranked list of candidate actions.
+    /// Resolve a free-text task description to a ranked list of candidate
+    /// actions. Ranking/lookup only — no schema. Call `describe` on the
+    /// chosen id for its full contract before constructing `--param`s.
     Resolve {
         /// The task description, e.g. "back up mongo before a migration".
         #[arg(long)]
@@ -517,11 +524,17 @@ pub(crate) enum ActionsCommand {
 #[derive(Subcommand, Debug)]
 pub(crate) enum WorkflowsCommand {
     /// List every workflow with its title, safety, and action count.
+    /// Compact index only — no input/output schema. Call `explain` on a
+    /// candidate id for its full contract before constructing `--param`s.
     List {
         #[arg(long)]
         tag: Option<String>,
     },
-    /// Explain a workflow: title, safety, ordered action ids with summaries.
+    /// Explain a workflow: title, safety, ordered action ids with summaries,
+    /// resolved/missing action detail, plus its effective `input_schema`
+    /// (declared or inferred, tagged by `input_schema_source`) and declared
+    /// `output_schema`, if any — the agent-facing source of truth for what
+    /// this workflow requires/returns.
     Explain {
         /// Workflow id, e.g. `governance.go-live`.
         id: String,
@@ -569,6 +582,19 @@ mod tests {
         // so the user gets the input/`--help` hint instead of a fabricated
         // transport diagnosis.
         let err = anyhow::anyhow!("id is required");
+        assert!(matches!(classify_anyhow_error(&err), ErrorCode::Validation));
+    }
+
+    #[test]
+    fn input_contract_violation_classifies_as_validation() {
+        // ayx-registry's ExecutorError::InputContractViolation ("action/workflow
+        // '<id>' input contract violation — '/ts': missing required property
+        // 'ts'") is caller-supplied bad input, same as a missing clap argument —
+        // it must classify as Validation, not Internal, so an agent knows fixing
+        // its params (not retrying blindly) is the right response.
+        let err = anyhow::anyhow!(
+            "action/workflow 'mongo.backup-restore' input contract violation — '/ts': missing required property 'ts'"
+        );
         assert!(matches!(classify_anyhow_error(&err), ErrorCode::Validation));
     }
 
@@ -5212,6 +5238,13 @@ fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
         || chain.contains("invalid format")
         || chain.contains("cannot be empty")
         || chain.contains("is required")
+        // ayx-registry's `ExecutorError::InputContractViolation` — a declared
+        // action/workflow's own `--param` map failed its input_schema (unknown
+        // key, missing required key, enum/const mismatch, etc.), caught before
+        // any step runs. This is caller-supplied bad input, exactly like the
+        // "is required" clap-argument case above — an agent needs Validation
+        // here (not Internal) to know retrying with the same params won't help.
+        || chain.contains("input contract violation")
     {
         return ErrorCode::Validation;
     }
