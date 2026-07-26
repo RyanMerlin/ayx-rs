@@ -18,7 +18,9 @@ pub struct MissingEndpoint {
 pub struct StaleEndpoint {
     pub method: String,
     pub path: String,
-    pub command: String,
+    /// Every CLI command that dispatches this endpoint. Was a single `command`
+    /// string; widened because one endpoint can legitimately back several commands.
+    pub commands: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -103,8 +105,10 @@ pub fn coverage(spec: &Value) -> CoverageReport {
     // Inventory canonical set + a lookup back to (method, path, command) for stale.
     let inv_full = inventory_endpoints_full();
     let mut inv_keys: HashSet<(String, String)> = HashSet::new();
-    let mut inv_meta: HashMap<(String, String), (&'static str, &'static str, &'static str)> =
-        HashMap::new();
+    let mut inv_meta: HashMap<
+        (String, String),
+        (&'static str, &'static str, &'static [&'static str]),
+    > = HashMap::new();
     for (m, p, c) in &inv_full {
         if let Some(key) = canonical_op(m, p) {
             inv_keys.insert(key.clone());
@@ -159,7 +163,7 @@ pub fn coverage(spec: &Value) -> CoverageReport {
         .map(|(m, p, c)| StaleEndpoint {
             method: (*m).to_string(),
             path: (*p).to_string(),
-            command: (*c).to_string(),
+            commands: c.iter().map(|name| (*name).to_string()).collect(),
         })
         .collect();
 
@@ -237,7 +241,13 @@ mod tests {
             !r.stale.is_empty(),
             "wired endpoints absent from spec must be stale"
         );
-        assert!(r.stale.iter().all(|s| !s.command.is_empty()));
+        assert!(r.stale.iter().all(|s| !s.commands.is_empty()));
+        assert!(
+            r.stale
+                .iter()
+                .all(|s| s.commands.iter().all(|c| c.starts_with("one "))),
+            "every stale row must name real `ayx one ...` commands"
+        );
     }
 
     #[test]
@@ -262,88 +272,63 @@ mod tests {
         assert!(r.unmatched_spec_paths.iter().any(|p| p.contains("/health")));
     }
 
+    /// The same raw `(METHOD, path)` may be cross-listed under more than one surface
+    /// (`GET /v4/people` is both an `iam` and a `person` endpoint). When it is, every
+    /// row must declare the **identical** command set, so `one inventory` never tells
+    /// two different stories about who calls an endpoint.
+    ///
+    /// This replaces an allowlist of colliding canonical keys. Two points matter:
+    ///   - Grouping is by RAW path, not canonical. `canonical_op` strips query strings,
+    ///     so `/v4/people` and `/v4/people?role=admin` collapse together — but they are
+    ///     genuinely different requests (`one workspace admins` filters server-side).
+    ///     Collapsing them is a coverage-matching artifact, not a wiring bug, and
+    ///     forcing their command sets to match would be a lie.
+    ///   - Now that a row carries every command that dispatches it, a true alias is
+    ///     expressed inside one row and needs no exemption.
     #[test]
-    fn inventory_has_no_duplicate_canonical_keys() {
+    fn cross_listed_endpoints_must_agree_on_their_command_set() {
         use std::collections::{BTreeSet, HashMap};
 
-        // Known, intentional command aliases that legitimately share a canonical
-        // (METHOD, path) key, keyed to the EXACT set of command names allowed to
-        // share it. Three distinct groups of CLI commands wire the same live
-        // endpoint on purpose:
-        //   - `one whoami` / `one person current` -> GET /v4/people/current
-        //   - `one workspace configuration` / `...configuration-v4` -> GET /v4/workspaces/{}/configuration
-        //   - `one person list` / `one workspace people` /
-        //     `one workspace admins` -> GET /v4/people. All three hit the
-        //     same live endpoint (`/v4/workspaces/{id}/people` and
-        //     `/v4/workspaces/{workspaceId}/admins` both 404; the workspace context
-        //     comes from the `x-alteryx-workspace-gid` header instead). `admins`
-        //     adds `?role=admin`, which `canonical_op` strips along with every
-        //     other query string, so it collapses onto the same canonical key.
-        //
-        // Keying on the exact command set (not just the (method, path) pair)
-        // means this test fails both on a brand-new accidental collision AND on
-        // an allowlisted key silently gaining or losing a member — e.g. a future
-        // 4th command accidentally landing on `GET /v4/people` still trips this,
-        // even though the key itself is already allowlisted.
-        let allowlisted_duplicates: HashMap<(&str, &str), &[&str]> = HashMap::from([
-            (
-                ("GET", "/v4/people/current"),
-                ["one whoami", "one person current"].as_slice(),
-            ),
-            (
-                ("GET", "/v4/workspaces/{}/configuration"),
-                [
-                    "one workspace configuration",
-                    "one workspace configuration-v4",
-                ]
-                .as_slice(),
-            ),
-            (
-                ("GET", "/v4/people"),
-                [
-                    "one person list",
-                    "one workspace people",
-                    "one workspace admins",
-                ]
-                .as_slice(),
-            ),
-        ]);
-
-        let mut by_key: HashMap<(String, String), Vec<&'static str>> = HashMap::new();
-        for (m, p, c) in inventory_endpoints_full() {
-            // Not every wired endpoint belongs to the /v4 API family — `iam/v1`,
-            // `plans/v1`, `scheduling/v1`, and `billing/v1` are separate versioned
-            // surfaces within Alteryx One, outside the /v4 OpenAPI spec this tool
-            // diffs against. Those are out of canonical-coverage scope by design
-            // (`canonical_op` returns `None`), so skip them rather than assume
-            // every path anchors at /v4.
-            let Some(key) = canonical_op(m, p) else {
-                continue;
-            };
-            by_key.entry(key).or_default().push(c);
+        let mut by_raw: HashMap<(&str, &str), Vec<&'static [&'static str]>> = HashMap::new();
+        for (m, p, commands) in inventory_endpoints_full() {
+            by_raw.entry((m, p)).or_default().push(commands);
         }
 
-        for (key, commands) in &by_key {
-            if commands.len() <= 1 {
+        for (key, rows) in &by_raw {
+            if rows.len() <= 1 {
                 continue;
             }
-            let key_ref = (key.0.as_str(), key.1.as_str());
-            let Some(expected) = allowlisted_duplicates.get(&key_ref) else {
-                panic!(
-                    "unexpected duplicate canonical inventory key {key:?} -> {commands:?} \
-                     (not in the known-alias allowlist; either fix the wiring or add it \
-                     to `allowlisted_duplicates` with a documented reason)"
+            let first: BTreeSet<&str> = rows[0].iter().copied().collect();
+            for other in &rows[1..] {
+                let other_set: BTreeSet<&str> = other.iter().copied().collect();
+                assert_eq!(
+                    first, other_set,
+                    "endpoint {} {} is cross-listed under multiple surfaces with different \
+                     command sets ({first:?} vs {other_set:?}); every row for one endpoint \
+                     must list every command that dispatches it",
+                    key.0, key.1
                 );
-            };
-            let actual: BTreeSet<&str> = commands.iter().copied().collect();
-            let expected: BTreeSet<&str> = expected.iter().copied().collect();
-            assert_eq!(
-                actual, expected,
-                "canonical inventory key {key:?} command set drifted from the \
-                 allowlist (actual {actual:?} vs allowlisted {expected:?}); update \
-                 `allowlisted_duplicates` if this is an intentional change, \
-                 otherwise fix the wiring"
+            }
+        }
+    }
+
+    /// Every row must name at least one dispatching command, and each name must be a
+    /// real `ayx one ...` path. An empty slice would silently vanish from `one
+    /// inventory` and from the stale-endpoint report.
+    #[test]
+    fn every_endpoint_row_names_at_least_one_one_command() {
+        for (method, path, commands) in inventory_endpoints_full() {
+            assert!(
+                !commands.is_empty(),
+                "inventory row {method} {path} lists no dispatching command"
             );
+            for name in commands {
+                assert!(
+                    name.starts_with("one "),
+                    "inventory row {method} {path} names command {name:?}, which is not an \
+                     `ayx one ...` command path"
+                );
+            }
         }
     }
 }
