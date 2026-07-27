@@ -260,4 +260,37 @@ mod tests {
         assert_eq!(records[0].name, "visible-child");
         assert_eq!(records[0].summary, "A visible child command.");
     }
+
+    /// The One endpoint inventory names the CLI commands that dispatch each endpoint,
+    /// and `one inventory` prints those names to operators. Nothing kept them honest,
+    /// so they drifted: the inventory said `one job-group ...`, `one output-object ...`,
+    /// `one write-setting ...` and `one webhooks test` long after those commands were
+    /// renamed to their plural/current forms.
+    ///
+    /// Validate every name against the live clap tree. A rename now fails here instead
+    /// of silently making `one inventory` uncopy-pasteable.
+    #[test]
+    fn inventory_command_names_exist_in_the_live_clap_tree() {
+        let live = visible_command_paths();
+        let mut unknown: Vec<String> = Vec::new();
+
+        for (method, path, commands) in ayx_one_api::inventory_endpoints_full() {
+            for name in commands {
+                let as_path = name.replace(' ', "/");
+                if !live.contains(&as_path) {
+                    unknown.push(format!("  {name:?} (from {method} {path})"));
+                }
+            }
+        }
+        unknown.sort();
+        unknown.dedup();
+
+        assert!(
+            unknown.is_empty(),
+            "ayx-one-api/src/inventory.rs names commands that do not exist in the live \
+             clap tree:\n{}\n\nEither the command was renamed (update the inventory) or \
+             the name is a typo.",
+            unknown.join("\n")
+        );
+    }
 }
