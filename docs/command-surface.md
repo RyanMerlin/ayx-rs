@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-07-27 00:20:16 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-07-27 01:09:52 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 354
+- Commands: 355
 - Capabilities: 6
 
 ## Commands
@@ -297,6 +297,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one workflows detail | `one/workflows/detail` | read-only | no | Inspect one cloud-native workflow |
 | one workflows engines | `one/workflows/engines` | read-only | no | Show which execution engines a workflow can run on |
 | one workflows list | `one/workflows/list` | read-only | no | List Alteryx One cloud-native workflows |
+| one workflows share | `one/workflows/share` | mutating | yes | Share a cloud-native workflow with people or groups |
 | one workflows tools | `one/workflows/tools` | read-only | no | List the tools available to cloud-native workflows |
 | one workspace | `one/workspace` | unclassified |  | Alteryx One workspace inspection and administration |
 | one workspace admins | `one/workspace/admins` | read-only | no | List workspace admins |

@@ -1812,6 +1812,21 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         ],
     },
     CatalogMetadata {
+        path: "one/workflows/share",
+        output: "one workflows share envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &[
+            "Maps to POST /svc-workflow/api/v2/workflows/{id}/share. Requires --apply.",
+            "--to-person accepts an email (resolved via one GET /v4/people call) or a numeric id; \
+             resolution runs before the --apply gate, so a dry run's would_send is byte-identical \
+             to what --apply sends.",
+            "--include-dependencies on a dry run also fetches /dependencies and attaches a \
+             dependency_preview so an unauthorized blast radius is visible before commit.",
+        ],
+    },
+    CatalogMetadata {
         path: "license/api/status",
         output: "license api status envelope",
         safety: "read-only",

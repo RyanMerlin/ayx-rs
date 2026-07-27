@@ -251,6 +251,11 @@ const WORKFLOW_ENDPOINTS: &[EndpointSpec] = &[
         path: "/svc-workflow/api/v2/workflows/{id}/duplicate",
         commands: &["one workflows copy"],
     },
+    EndpointSpec {
+        method: "POST",
+        path: "/svc-workflow/api/v2/workflows/{id}/share",
+        commands: &["one workflows share"],
+    },
 ];
 
 const FLOW_ENDPOINTS: &[EndpointSpec] = &[

@@ -348,6 +348,52 @@ fn require_live_write_setting_id(live: &LiveSmokeContext) -> Option<String> {
     )
 }
 
+/// A real, resolvable email in this workspace, for `workflows share` email
+/// resolution tests. Reads `GET /v4/people` (via `one person list`) rather than
+/// hardcoding an address — a hardcoded email is only ever valid for the one
+/// workspace it was captured from and silently starves this test on any other.
+///
+/// Live-verified 2026-07-27: this tenant's people directory contains at least
+/// one entry with a corrupted `email` field (two addresses concatenated with
+/// `". "`). Picking blindly picked that entry and made resolution fail for a
+/// perfectly valid address — so this scans for the first entry whose `email`
+/// looks like a single, well-formed address rather than taking the first item
+/// unconditionally.
+fn require_live_person_email(live: &LiveSmokeContext) -> Option<String> {
+    let (success, stdout, stderr) =
+        run_ayx_result(&["--output", "json", "one", "person", "list"], live);
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return None;
+        }
+        panic!("command failed: one person list\nstdout:\n{stdout}\nstderr:\n{stderr}");
+    }
+    assert_live_ok(&stdout);
+
+    let Some(value) = json_value(&stdout) else {
+        panic!("one person list did not return valid JSON:\n{stdout}");
+    };
+    let items = value["data"]["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let clean_email = items.iter().find_map(|item| {
+        let email = item.get("email")?.as_str()?.trim();
+        let well_formed = email.matches('@').count() == 1 && !email.contains(char::is_whitespace);
+        well_formed.then(|| email.to_string())
+    });
+    match clean_email {
+        Some(email) => Some(email),
+        None => {
+            eprintln!(
+                "live-smoke: skipping — no person with a clean, resolvable email exists in \
+                 this workspace"
+            );
+            None
+        }
+    }
+}
+
 fn require_live_list_item_id(
     live: &LiveSmokeContext,
     args: &[&str],
@@ -2263,6 +2309,132 @@ fn one_workflows_copy_dry_run_shape_live() {
     assert_contains(&stdout, "\"ayx-live-smoke-copy\"");
     // The version must already be resolved in the dry-run body.
     assert_contains(&stdout, "\"version\":");
+}
+
+/// `share` is mutating, so without --apply it must dry-run. Also proves the
+/// `--to-person` email was resolved to a numeric person id via `GET /v4/people`
+/// BEFORE the --apply gate: `would_send.toPersonIds` must already carry
+/// integers, not the raw email, so a later --apply sends byte-identical
+/// content. `--include-dependencies` must additionally attach a
+/// `dependency_preview` so the blast radius is visible before commit.
+#[test]
+fn one_workflows_share_dry_run_shape_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(workflow_id) = require_live_workflow_id(&live) else {
+        return;
+    };
+    let Some(person_email) = require_live_person_email(&live) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "workflows",
+            "share",
+            &workflow_id,
+            "--to-person",
+            &person_email,
+            "--privilege",
+            "read",
+            "--privilege",
+            "execute",
+            "--include-dependencies",
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: one workflows share {workflow_id} --to-person ... --privilege \
+             read --privilege execute --include-dependencies\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"workflow\"");
+    assert_contains(&stdout, "\"operation\": \"share\"");
+    assert_contains(&stdout, "\"mutating\": true");
+    assert_contains(&stdout, "\"dry_run\": true");
+
+    let value = json_value(&stdout).expect("stdout is valid JSON");
+    let would_send = &value["data"]["would_send"];
+    let to_person_ids = would_send["toPersonIds"]
+        .as_array()
+        .expect("would_send.toPersonIds must be an array");
+    assert!(
+        !to_person_ids.is_empty(),
+        "expected the email to resolve to at least one person id: {would_send}"
+    );
+    for id in to_person_ids {
+        assert!(
+            id.is_u64(),
+            "toPersonIds entries must already be resolved integers, not \
+             {id:?} — resolution must happen before the --apply gate"
+        );
+    }
+    assert_eq!(
+        would_send["privileges"],
+        serde_json::json!(["execute", "read"])
+    );
+    assert_eq!(would_send["includeDependencies"], serde_json::json!(true));
+
+    assert!(
+        value["data"].get("dependency_preview").is_some(),
+        "--include-dependencies on a dry run must attach a dependency_preview: {}",
+        value["data"]
+    );
+    assert_eq!(
+        value["data"]["dependency_preview_ok"],
+        serde_json::json!(true)
+    );
+}
+
+/// An email address that cannot be resolved against `GET /v4/people` must fail
+/// as a validation error naming the exact address — never silently dropped,
+/// never sent to the share endpoint as-is (the endpoint requires integers).
+#[test]
+fn one_workflows_share_email_resolution_failure_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(workflow_id) = require_live_workflow_id(&live) else {
+        return;
+    };
+    let bogus_email = "definitely-not-a-real-person-ayxrs-test@example.invalid";
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "workflows",
+            "share",
+            &workflow_id,
+            "--to-person",
+            bogus_email,
+            "--privilege",
+            "read",
+        ],
+        &live,
+    );
+    if success {
+        panic!("expected an unresolvable email to fail\nstdout:\n{stdout}");
+    }
+    if live_auth_unavailable(&stderr) {
+        return;
+    }
+    assert_contains(&stderr, "\"error_code\": \"validation\"");
+    assert_contains(&stderr, bogus_email);
 }
 
 live_case!(

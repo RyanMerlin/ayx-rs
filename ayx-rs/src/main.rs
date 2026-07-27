@@ -2645,6 +2645,46 @@ pub(crate) enum OneWorkflowsCommand {
         #[arg(long)]
         version: Option<u64>,
     },
+    /// Share a cloud-native workflow with people or groups.
+    Share {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
+        /// Recipient: an email address (resolved via GET /v4/people) or a
+        /// numeric person id. Repeatable.
+        #[arg(long = "to-person", value_name = "EMAIL|ID", action = clap::ArgAction::Append)]
+        to_person: Vec<String>,
+        /// Group id to share with. Repeatable.
+        #[arg(long = "to-group", value_name = "GROUP-ID", action = clap::ArgAction::Append)]
+        to_group: Vec<String>,
+        /// Privilege to grant. Repeatable; required unless --body is used.
+        #[arg(long = "privilege", value_enum, action = clap::ArgAction::Append)]
+        privilege: Vec<WorkflowPrivilege>,
+        /// Also share the workflow's connections and datasets in the same call.
+        #[arg(long)]
+        include_dependencies: bool,
+        /// Notify recipients by email.
+        #[arg(long)]
+        send_email: bool,
+        /// Optional note included with the share notification.
+        #[arg(long)]
+        message: Option<String>,
+        /// Treat every --to-person value as an already-numeric person id and
+        /// skip the GET /v4/people email-resolution lookup.
+        #[arg(long)]
+        no_resolve_emails: bool,
+        #[arg(
+            long,
+            value_name = "FILE",
+            help = "path to JSON body file",
+            conflicts_with_all = [
+                "to_person", "to_group", "privilege", "include_dependencies",
+                "send_email", "message", "no_resolve_emails",
+            ]
+        )]
+        body: Option<PathBuf>,
+    },
 }
 
 /// Access level for a shared connection. Mirrors the `policy` enum of
@@ -2678,6 +2718,37 @@ impl ShareSubjectType {
         match self {
             ShareSubjectType::Person => "person",
             ShareSubjectType::Group => "group",
+        }
+    }
+}
+
+/// Privilege grantable by `POST /svc-workflow/api/v2/workflows/{id}/share`.
+///
+/// A real clap `ValueEnum` so a typo (`--privilege raed`) is rejected by the
+/// parser before any network call, rather than surfacing as an opaque 400 from
+/// the service.
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum WorkflowPrivilege {
+    Create,
+    Delete,
+    Execute,
+    Read,
+    Share,
+    Update,
+}
+
+impl WorkflowPrivilege {
+    /// The API's privilege strings are lower-case, matching clap's own
+    /// rendering for these single-word variants — kept as an explicit
+    /// function rather than relying on that coincidence.
+    pub(crate) fn as_api_str(self) -> &'static str {
+        match self {
+            WorkflowPrivilege::Create => "create",
+            WorkflowPrivilege::Delete => "delete",
+            WorkflowPrivilege::Execute => "execute",
+            WorkflowPrivilege::Read => "read",
+            WorkflowPrivilege::Share => "share",
+            WorkflowPrivilege::Update => "update",
         }
     }
 }
