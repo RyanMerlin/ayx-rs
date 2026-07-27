@@ -727,6 +727,51 @@ pub fn one_api_list_request(
             false,
             path_params,
         )?;
+
+        // `one_api_live_request` returns transport failures as `Ok(envelope)` with
+        // `ok: false` — it does not surface them through `?`. Without this check a
+        // failed page (404/403/500/HTML/...) fell straight into `extract_items`,
+        // which found no items in the `Null` response and this function reported a
+        // perfectly successful, silently empty list. Never do that: a failure must
+        // stay a failure.
+        if !envelope.ok {
+            if pages_fetched == 0 {
+                // Nothing fetched yet — the caller gets the original failure as-is.
+                return Ok(envelope);
+            }
+            // A later page failed after earlier pages already succeeded. Keep
+            // reporting failure (partial data must never read as `ok: true`), but
+            // don't throw away what was already fetched — attach it, labeled, so
+            // the caller can see exactly how much was retrieved before the break.
+            let mut data = envelope.data.clone();
+            if let Value::Object(ref mut map) = data {
+                map.insert("partial".to_string(), Value::Bool(true));
+                map.insert(
+                    "pages_fetched_before_failure".to_string(),
+                    Value::from(pages_fetched),
+                );
+                map.insert("items".to_string(), json!(aggregated_items));
+                map.insert("page_envelopes".to_string(), json!(page_envelopes));
+            }
+            let code = envelope
+                .error_code
+                .unwrap_or(ayx_core::envelope::ErrorCode::Internal);
+            return Ok(Envelope::err_coded(
+                code,
+                format!(
+                    "{} {} failed on page {}, after {} item{} fetched across {} prior page{}: {}",
+                    surface,
+                    operation,
+                    pages_fetched + 1,
+                    aggregated_items.len(),
+                    if aggregated_items.len() == 1 { "" } else { "s" },
+                    pages_fetched,
+                    if pages_fetched == 1 { "" } else { "s" },
+                    envelope.message,
+                ),
+                data,
+            ));
+        }
         pages_fetched += 1;
 
         let response = envelope
@@ -1029,9 +1074,15 @@ pub fn one_api_live_request_with_body(
                                 data
                             }),
                         ),
-                        // A 2xx with a non-JSON body is a success, not a transport failure.
-                        // Only non-2xx non-JSON responses go to the failure builder.
-                        ParsedOneResponse::NonJson { .. } if status.is_success() => {
+                        // A 2xx response is only a success if we actually received the real
+                        // payload. `html`/`malformed_json` at 2xx mean the body was NOT the
+                        // API response (an SSO/gateway page, a truncated body, ...) even
+                        // though the status looks fine, so those still go to the failure
+                        // builder below. Only a genuinely non-JSON body (`non_json`, e.g.
+                        // `text/csv`) is a legitimate 2xx success.
+                        ParsedOneResponse::NonJson { response_kind, .. }
+                            if status.is_success() && response_kind == "non_json" =>
+                        {
                             one_non_json_success_envelope(
                                 status,
                                 surface,
@@ -2672,7 +2723,6 @@ mongo:
     }
 
     #[test]
-    #[ignore = "httpmock hangs in this environment; live smoke covers live transport"]
     fn live_request_turns_html_responses_into_transport_failures() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
@@ -2708,7 +2758,6 @@ mongo:
     }
 
     #[test]
-    #[ignore = "httpmock hangs in this environment; live smoke covers live transport"]
     fn live_request_turns_malformed_json_responses_into_transport_failures() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
@@ -2739,6 +2788,153 @@ mongo:
         assert_eq!(envelope.data["response_shape"], "malformed_json");
         assert_eq!(envelope.data["status_code"], 200);
         assert!(envelope.data["parse_error"].as_str().is_some());
+    }
+
+    /// T1 regression, end-to-end: commit 86965eb's whole point was that a 2xx
+    /// with a genuinely non-JSON body (e.g. `text/csv` on an export endpoint) is
+    /// a success, not a transport failure. The `html`/`malformed_json` fix above
+    /// must not regress this — assert it through the same `one_api_live_request`
+    /// entry point the html/malformed_json tests use, not just the lower-level
+    /// envelope builder unit test.
+    #[test]
+    fn live_request_treats_2xx_csv_body_as_success() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/v4/workflows/1/export");
+            then.status(200)
+                .header("content-type", "text/csv")
+                .body("id,name\n1,alpha\n");
+        });
+
+        let config = one_profile(&server.base_url());
+        let envelope = one_api_live_request(
+            &config,
+            "workflow",
+            "export",
+            "GET",
+            "/v4/workflows/1/export",
+            false,
+            &[],
+        )
+        .expect("request should return an envelope");
+
+        mock.assert();
+        assert!(envelope.ok, "2xx non-JSON body must not be an error");
+        assert_eq!(envelope.error_code, None);
+        assert_eq!(envelope.data["response_shape"], "non_json");
+        assert_eq!(envelope.data["status_code"], 200);
+    }
+
+    /// `one_api_live_request` returns transport failures as `Ok(envelope)` with
+    /// `ok: false` -- `?` does not catch that. `one_api_list_request` must check
+    /// `envelope.ok` itself, or a failed list (404 here) silently becomes a
+    /// successful empty list.
+    #[test]
+    fn list_request_json_404_is_reported_as_failure_not_an_empty_success() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/v4/widgets");
+            then.status(404)
+                .header("content-type", "application/json")
+                .body(r#"{"error":"not found"}"#);
+        });
+
+        let config = one_profile(&server.base_url());
+        let envelope = one_api_list_request(
+            &config,
+            "widget",
+            "list",
+            "/v4/widgets",
+            &[],
+            &OneListParams::new(),
+        )
+        .expect("request should return an envelope");
+
+        mock.assert();
+        assert!(!envelope.ok, "a 404 list page must not report ok: true");
+        assert_eq!(
+            envelope.error_code,
+            Some(ayx_core::envelope::ErrorCode::NotFound)
+        );
+    }
+
+    /// Same failure class as above, but the upstream answers with an HTML error
+    /// page instead of JSON (the shape a gateway/SSO redirect actually returns).
+    #[test]
+    fn list_request_html_404_is_reported_as_failure_not_an_empty_success() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/v4/widgets");
+            then.status(404)
+                .header("content-type", "text/html")
+                .body("<html><body>not found</body></html>");
+        });
+
+        let config = one_profile(&server.base_url());
+        let envelope = one_api_list_request(
+            &config,
+            "widget",
+            "list",
+            "/v4/widgets",
+            &[],
+            &OneListParams::new(),
+        )
+        .expect("request should return an envelope");
+
+        mock.assert();
+        assert!(
+            !envelope.ok,
+            "an HTML 404 list page must not report ok: true"
+        );
+        assert_eq!(envelope.data["response_shape"], "html");
+    }
+
+    /// A failure on page 2+ of an auto-paginated list must still report
+    /// `ok: false` -- it must never silently truncate to a "successful" partial
+    /// list -- but the already-fetched page(s) should still be visible, clearly
+    /// labeled `partial`, rather than thrown away.
+    #[test]
+    fn list_request_failure_on_a_later_page_stays_a_failure_but_keeps_partial_data() {
+        let server = MockServer::start();
+        let page1 = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v4/widgets")
+                .query_param("limit", "1")
+                .query_param_missing("pageToken");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"data":[{"id":"a"}],"nextPageToken":"tok2"}"#);
+        });
+        let page2 = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v4/widgets")
+                .query_param("limit", "1")
+                .query_param("pageToken", "tok2");
+            then.status(404)
+                .header("content-type", "application/json")
+                .body(r#"{"error":"not found"}"#);
+        });
+
+        let config = one_profile(&server.base_url());
+        let params = OneListParams::new()
+            .with_limit(Some(1))
+            .with_all(true, Some(5));
+        let envelope = one_api_list_request(&config, "widget", "list", "/v4/widgets", &[], &params)
+            .expect("request should return an envelope");
+
+        page1.assert();
+        page2.assert();
+        assert!(
+            !envelope.ok,
+            "partial data from a broken pagination run must never read as ok: true"
+        );
+        assert_eq!(envelope.data["partial"], true);
+        assert_eq!(envelope.data["pages_fetched_before_failure"], 1);
+        let items = envelope.data["items"]
+            .as_array()
+            .expect("partial items must still be attached");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], "a");
     }
 
     #[test]

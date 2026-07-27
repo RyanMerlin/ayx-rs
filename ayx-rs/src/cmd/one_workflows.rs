@@ -85,6 +85,53 @@ fn fetch_all_assets(config: &ayx_core::profile::Config) -> Result<Envelope> {
     )
 }
 
+/// Resolve a single workflow's detail from an already-fetched assets-list
+/// envelope.
+///
+/// If the list request itself failed (network/auth/upstream/HTML gateway
+/// error), that failure must be surfaced as-is. Collapsing it into the
+/// synthesized "no workflow with id" below would misreport a transport or
+/// auth problem as a missing record — indistinguishable failure modes were
+/// exactly the shape of the `one_api_list_request` bug this guards against
+/// (a failed list silently reading back as an empty, successful one).
+fn resolve_workflow_detail(assets_envelope: Envelope, id: &str) -> Envelope {
+    if !assets_envelope.ok {
+        return assets_envelope;
+    }
+    let items = assets_envelope
+        .data
+        .get("items")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let Some(workflow) = find_workflow_asset(&items, id) else {
+        return Envelope::err_coded(
+            ErrorCode::NotFound,
+            format!("workflow detail failed: no workflow with id {id}"),
+            json!({
+                "surface": "workflow",
+                "operation": "detail",
+                "workflow_id": id,
+                "detail_source": DETAIL_SOURCE,
+                "searched_items": items.len(),
+                "response": Value::Null,
+                "error_code": "not_found",
+            }),
+        );
+    };
+    Envelope::ok_with_data(
+        format!("workflow detail ok ({id})"),
+        json!({
+            "surface": "workflow",
+            "operation": "detail",
+            "workflow_id": id,
+            "detail_source": DETAIL_SOURCE,
+            "searched_items": items.len(),
+            "response": workflow,
+        }),
+    )
+}
+
 /// Body for `POST /svc-workflow/api/v2/workflows/{id}/share`.
 ///
 /// Recovered live from the service's own schema-validation errors — this shape
@@ -342,47 +389,16 @@ pub(crate) fn execute(
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let envelope = fetch_all_assets(&config)?;
-            if !envelope.ok {
-                return Ok(envelope);
-            }
-            let items = envelope
-                .data
-                .get("items")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            let Some(workflow) = find_workflow_asset(&items, &id) else {
-                return Ok(Envelope::err_coded(
-                    ErrorCode::NotFound,
-                    format!("workflow detail failed: no workflow with id {id}"),
-                    json!({
-                        "surface": "workflow",
-                        "operation": "detail",
-                        "workflow_id": id,
-                        "detail_source": DETAIL_SOURCE,
-                        "searched_items": items.len(),
-                        "response": Value::Null,
-                        "error_code": "not_found",
-                    }),
-                ));
-            };
-
-            let mut data = json!({
-                "surface": "workflow",
-                "operation": "detail",
-                "workflow_id": id,
-                "detail_source": DETAIL_SOURCE,
-                "searched_items": items.len(),
-                "response": workflow,
-            });
-            if include_dependencies {
+            let mut result = resolve_workflow_detail(envelope, &id);
+            if result.ok && include_dependencies {
                 let deps = fetch_dependencies(&config, &id)?;
                 if !deps.ok {
                     return Ok(deps);
                 }
-                data["dependencies"] = deps.data.get("response").cloned().unwrap_or(Value::Null);
+                result.data["dependencies"] =
+                    deps.data.get("response").cloned().unwrap_or(Value::Null);
             }
-            Envelope::ok_with_data(format!("workflow detail ok ({id})"), data)
+            result
         }
         OneWorkflowsCommand::Dependencies { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
@@ -586,7 +602,8 @@ fn resolve_workflow_version(config: &ayx_core::profile::Config, id: &str) -> Res
 
 #[cfg(test)]
 mod tests {
-    use super::{find_workflow_asset, synthesize_workflow_count};
+    use super::{find_workflow_asset, resolve_workflow_detail, synthesize_workflow_count};
+    use ayx_core::envelope::{Envelope, ErrorCode};
     use serde_json::json;
 
     #[test]
@@ -609,6 +626,49 @@ mod tests {
     fn workflow_lookup_tolerates_items_without_an_id() {
         let items = vec![json!({ "name": "no id here" }), json!("not even an object")];
         assert!(find_workflow_asset(&items, "x").is_none());
+    }
+
+    /// The bug this guards against: `one_api_list_request` failing (404/403/500/
+    /// HTML gateway page/...) must surface as that original failure, not collapse
+    /// into a misleading "no workflow with id" — a transport/auth problem is not
+    /// the same failure as a missing record, and reporting one as the other sends
+    /// an operator down the wrong path.
+    #[test]
+    fn resolve_workflow_detail_surfaces_the_list_failure_verbatim_not_as_not_found() {
+        let list_failure = Envelope::err_coded(
+            ErrorCode::Upstream,
+            "workflow assets failed",
+            json!({"status_code": 500, "response_shape": "html"}),
+        );
+        let result = resolve_workflow_detail(list_failure, "01KY5TC876M1GFEA2A4P2CZVBR");
+
+        assert!(!result.ok);
+        assert_eq!(result.error_code, Some(ErrorCode::Upstream));
+        assert_eq!(result.message, "workflow assets failed");
+        assert_eq!(result.data["status_code"], 500);
+    }
+
+    #[test]
+    fn resolve_workflow_detail_reports_not_found_only_when_the_list_actually_succeeded() {
+        let ok_but_empty =
+            Envelope::ok_with_data("workflow assets ok (0 items, 1 page)", json!({"items": []}));
+        let result = resolve_workflow_detail(ok_but_empty, "01KY5TC876M1GFEA2A4P2CZVBR");
+
+        assert!(!result.ok);
+        assert_eq!(result.error_code, Some(ErrorCode::NotFound));
+        assert_eq!(result.data["error_code"], "not_found");
+    }
+
+    #[test]
+    fn resolve_workflow_detail_returns_the_matching_workflow() {
+        let items = json!([
+            { "id": "01KY5TC876M1GFEA2A4P2CZVBR", "name": "land-lease-intel-LQ" },
+        ]);
+        let list_ok = Envelope::ok_with_data("workflow assets ok", json!({"items": items}));
+        let result = resolve_workflow_detail(list_ok, "01KY5TC876M1GFEA2A4P2CZVBR");
+
+        assert!(result.ok);
+        assert_eq!(result.data["response"]["name"], "land-lease-intel-LQ");
     }
 
     #[test]
