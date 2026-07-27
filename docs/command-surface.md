@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-07-17 06:57:30 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-07-27 00:12:05 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -159,10 +159,10 @@ cargo run -q -p xtask -- refresh-command-surface
 | one connections dry-run | `one/connections/dry-run` | read-only | no | Dry-run creation of a One connection |
 | one connections list | `one/connections/list` | read-only | no | List One connections |
 | one connections permissions | `one/connections/permissions` | unclassified |  | Manage permissions for a One connection |
-| one connections permissions create | `one/connections/permissions/create` | mutating | yes | Create permissions for a One connection |
-| one connections permissions delete | `one/connections/permissions/delete` | mutating | yes | Delete a One connection permission by subject id |
-| one connections permissions detail | `one/connections/permissions/detail` | read-only | no | Inspect a One connection permission by subject id |
-| one connections permissions list | `one/connections/permissions/list` | read-only | no | List permissions for a One connection |
+| one connections permissions create | `one/connections/permissions/create` | mutating | yes | Share a One connection with people or groups |
+| one connections permissions delete | `one/connections/permissions/delete` | mutating | yes | Revoke a subject's access to a One connection |
+| one connections permissions detail | `one/connections/permissions/detail` | read-only | no | Inspect one subject's access to a One connection |
+| one connections permissions list | `one/connections/permissions/list` | read-only | no | List the people and groups a One connection is shared with |
 | one connections status | `one/connections/status` | read-only | no | Inspect connection status |
 | one connections update | `one/connections/update` | mutating | yes | Update a One connection from JSON payload |
 | one datasets | `one/datasets` | unclassified |  | Read datasets from the Alteryx One dataset APIs |

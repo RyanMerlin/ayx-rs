@@ -610,24 +610,26 @@ const CONNECTION_ENDPOINTS: &[EndpointSpec] = &[
         path: "/v4/connections/{id}",
         commands: &["one connections delete"],
     },
+    // Live-verified 2026-07-26. The previous rows pointed at
+    // /v4/connections/{id}/permissions[/{aid}], which the API answers with
+    // RouteNotFoundException; sharing lives on a shared /v4/connections/share route
+    // that carries the connection id in the body (POST) or query (DELETE).
     EndpointSpec {
         method: "GET",
-        path: "/v4/connections/{id}/permissions",
-        commands: &["one connections permissions"],
+        path: "/v4/connections/{id}/permissions/sharedSubjects",
+        commands: &[
+            "one connections permissions",
+            "one connections permissions detail",
+        ],
     },
     EndpointSpec {
         method: "POST",
-        path: "/v4/connections/{id}/permissions",
+        path: "/v4/connections/share",
         commands: &["one connections permissions create"],
     },
     EndpointSpec {
-        method: "GET",
-        path: "/v4/connections/{id}/permissions/{aid}",
-        commands: &["one connections permissions detail"],
-    },
-    EndpointSpec {
         method: "DELETE",
-        path: "/v4/connections/{id}/permissions/{aid}",
+        path: "/v4/connections/share",
         commands: &["one connections permissions delete"],
     },
     EndpointSpec {

@@ -2493,23 +2493,38 @@ pub(crate) enum OneConnectorMetadataOverridesCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneConnectionPermissionCommand {
-    /// List permissions for a One connection.
+    /// List the people and groups a One connection is shared with.
     List {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
-    /// Create permissions for a One connection.
+    /// Share a One connection with people or groups.
+    #[command(alias = "share")]
     Create {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
+        /// Access level to grant. Required unless --body is used.
+        #[arg(long, value_enum)]
+        policy: Option<ConnectionSharePolicy>,
+        /// Person id to share with. Repeatable.
+        #[arg(long = "to-person", value_name = "PERSON-ID", action = clap::ArgAction::Append)]
+        to_person: Vec<String>,
+        /// Group id to share with. Repeatable.
+        #[arg(long = "to-group", value_name = "GROUP-ID", action = clap::ArgAction::Append)]
+        to_group: Vec<String>,
+        #[arg(
+            long,
+            value_name = "FILE",
+            help = "path to JSON body file",
+            conflicts_with_all = ["policy", "to_person", "to_group"]
+        )]
+        body: Option<PathBuf>,
     },
-    /// Inspect a One connection permission by subject id.
+    /// Inspect one subject's access to a One connection.
     Detail {
         #[arg(long)]
         profile: Option<String>,
@@ -2518,7 +2533,7 @@ pub(crate) enum OneConnectionPermissionCommand {
         #[arg(value_name = "SUBJECT-ID")]
         subject_id: String,
     },
-    /// Delete a One connection permission by subject id.
+    /// Revoke a subject's access to a One connection.
     Delete {
         #[arg(long)]
         profile: Option<String>,
@@ -2526,7 +2541,45 @@ pub(crate) enum OneConnectionPermissionCommand {
         connection_id: String,
         #[arg(value_name = "SUBJECT-ID")]
         subject_id: String,
+        /// Whether the subject id names a person or a group.
+        #[arg(long, value_enum, default_value_t = ShareSubjectType::Person)]
+        subject_type: ShareSubjectType,
     },
+}
+
+/// Access level for a shared connection. Mirrors the `policy` enum of
+/// `POST /v4/connections/share`.
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConnectionSharePolicy {
+    Editor,
+    Viewer,
+}
+
+impl ConnectionSharePolicy {
+    /// The API enum is upper-case; clap renders the variants lower-case.
+    pub(crate) fn as_api_str(self) -> &'static str {
+        match self {
+            ConnectionSharePolicy::Editor => "EDITOR",
+            ConnectionSharePolicy::Viewer => "VIEWER",
+        }
+    }
+}
+
+/// Whether a share subject id names a person or a group. Required by
+/// `DELETE /v4/connections/share`, which cannot infer it from the id alone.
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShareSubjectType {
+    Person,
+    Group,
+}
+
+impl ShareSubjectType {
+    pub(crate) fn as_api_str(self) -> &'static str {
+        match self {
+            ShareSubjectType::Person => "person",
+            ShareSubjectType::Group => "group",
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
