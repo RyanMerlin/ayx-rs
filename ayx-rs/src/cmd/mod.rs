@@ -32,6 +32,7 @@ mod one_scheduling;
 #[cfg(feature = "ui")]
 mod one_ui;
 mod one_webhook_flow_tasks;
+mod one_workflows;
 mod one_write_settings;
 pub mod registry;
 pub mod server;

@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-07-27 00:12:05 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-07-27 00:20:16 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 345
+- Commands: 354
 - Capabilities: 6
 
 ## Commands
@@ -289,6 +289,15 @@ cargo run -q -p xtask -- refresh-command-surface
 | one webhook-flow-tasks detail | `one/webhook-flow-tasks/detail` | read-only | no | Inspect a webhook flow task |
 | one webhook-flow-tasks test | `one/webhook-flow-tasks/test` | mutating | yes | Send a test webhook from JSON payload |
 | one whoami | `one/whoami` | read-only | no | Show the current One user profile |
+| one workflows | `one/workflows` | read-only | no | Alteryx One cloud-native workflows — list, inspect, copy, and share |
+| one workflows assets | `one/workflows/assets` | read-only | no | List workflow assets with the richer svc-workflow projection |
+| one workflows copy | `one/workflows/copy` | mutating | yes | Duplicate a cloud-native workflow |
+| one workflows count | `one/workflows/count` | read-only | no | Count cloud-native workflows in the workspace |
+| one workflows dependencies | `one/workflows/dependencies` | read-only | no | List the connections, datasets, and macros a workflow depends on |
+| one workflows detail | `one/workflows/detail` | read-only | no | Inspect one cloud-native workflow |
+| one workflows engines | `one/workflows/engines` | read-only | no | Show which execution engines a workflow can run on |
+| one workflows list | `one/workflows/list` | read-only | no | List Alteryx One cloud-native workflows |
+| one workflows tools | `one/workflows/tools` | read-only | no | List the tools available to cloud-native workflows |
 | one workspace | `one/workspace` | unclassified |  | Alteryx One workspace inspection and administration |
 | one workspace admins | `one/workspace/admins` | read-only | no | List workspace admins |
 | one workspace configuration | `one/workspace/configuration` | read-only | no | Inspect a One workspace configuration by id |

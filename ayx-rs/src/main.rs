@@ -1527,6 +1527,20 @@ pub(crate) enum OneCommand {
         command: OneConnectionsCommand,
     },
     #[command(
+        about = "Alteryx One cloud-native workflows — list, inspect, copy, and share",
+        long_about = "Alteryx One cloud-native workflows — list, inspect, copy, and share.\n\n\
+                      These are the Alteryx One canvas workflows (the \
+                      cloud-native/workflows/{id} web path), identified by ULIDs and served \
+                      by /svc-workflow. They are NOT `one flows`, which is the Designer \
+                      Cloud /v4/flows family keyed by integer ids — a workspace can hold \
+                      dozens of cloud-native workflows while `one flows list` returns none.",
+        arg_required_else_help = true
+    )]
+    Workflows {
+        #[command(subcommand)]
+        command: OneWorkflowsCommand,
+    },
+    #[command(
         about = "Alteryx One job groups — run, publish, and inspect",
         arg_required_else_help = true
     )]
@@ -2544,6 +2558,92 @@ pub(crate) enum OneConnectionPermissionCommand {
         /// Whether the subject id names a person or a group.
         #[arg(long, value_enum, default_value_t = ShareSubjectType::Person)]
         subject_type: ShareSubjectType,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum OneWorkflowsCommand {
+    /// List Alteryx One cloud-native workflows.
+    List {
+        #[arg(long)]
+        profile: Option<String>,
+        /// Cap results per page (server-side limit). Default is the server's own
+        /// page size (25 for /v4/workflows).
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Fetch a specific page; pass the `nextPageToken` returned by a previous call.
+        #[arg(long)]
+        page_token: Option<String>,
+        /// Automatically follow `nextPageToken` until all pages are fetched.
+        /// Capped by `--max-pages` (default 50).
+        #[arg(long)]
+        all: bool,
+        /// Hard cap on pages when `--all` is set. Prevents runaway loops against
+        /// very large tenants.
+        #[arg(long)]
+        max_pages: Option<u32>,
+    },
+    /// Count cloud-native workflows in the workspace.
+    Count {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Inspect one cloud-native workflow.
+    #[command(alias = "describe")]
+    Detail {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
+        /// Also resolve the workflow's connections, datasets, and macros.
+        #[arg(long)]
+        include_dependencies: bool,
+    },
+    /// List the connections, datasets, and macros a workflow depends on.
+    #[command(alias = "deps")]
+    Dependencies {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
+    },
+    /// List workflow assets with the richer svc-workflow projection.
+    Assets {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        page_token: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        max_pages: Option<u32>,
+    },
+    /// Show which execution engines a workflow can run on.
+    Engines {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
+    },
+    /// List the tools available to cloud-native workflows.
+    Tools {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Duplicate a cloud-native workflow.
+    Copy {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
+        /// Name for the copy.
+        #[arg(long)]
+        name: String,
+        /// Source version to copy. Defaults to the workflow's current version.
+        #[arg(long)]
+        version: Option<u64>,
     },
 }
 

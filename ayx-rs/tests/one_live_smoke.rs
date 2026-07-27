@@ -250,8 +250,16 @@ fn first_list_item_id(stdout: &str, id_keys: &[&str]) -> Option<String> {
             && let Some(first) = items.first()
         {
             for key in id_keys {
-                if let Some(id) = first.get(*key).and_then(|value| value.as_str()) {
-                    return Some(id.to_string());
+                // Ids come back in BOTH shapes: cloud-native workflows use ULID
+                // strings, while connections, flows, folders, job groups, output
+                // objects and write settings use JSON numbers. Accepting only
+                // strings silently starved every numeric-id `*_real_object` case —
+                // they panicked with "expected at least one live <thing> object"
+                // even though the listing had returned items.
+                match first.get(*key) {
+                    Some(serde_json::Value::String(id)) => return Some(id.clone()),
+                    Some(serde_json::Value::Number(id)) => return Some(id.to_string()),
+                    _ => {}
                 }
             }
         }
@@ -322,6 +330,15 @@ fn require_live_output_object_id(live: &LiveSmokeContext) -> Option<String> {
     )
 }
 
+fn require_live_workflow_id(live: &LiveSmokeContext) -> Option<String> {
+    require_live_list_item_id(
+        live,
+        &["--output", "json", "one", "workflows", "list"],
+        &["id", "workflowId", "workflow_id"],
+        "workflow",
+    )
+}
+
 fn require_live_write_setting_id(live: &LiveSmokeContext) -> Option<String> {
     require_live_list_item_id(
         live,
@@ -348,9 +365,25 @@ fn require_live_list_item_id(
         );
     }
     assert_live_ok(&stdout);
-    let id = first_list_item_id(&stdout, id_keys)
-        .unwrap_or_else(|| panic!("expected at least one live {label} object\nstdout:\n{stdout}"));
-    Some(id)
+    // A listing that SUCCEEDS but is empty means the tenant simply has no fixture of
+    // this kind — there is nothing to exercise, so skip (the `None` every caller
+    // already handles) rather than fail. Panicking here made every `*_real_object`
+    // case red on any workspace that happens not to use that resource, which is how
+    // the nightly live-smoke run ended up mostly red for reasons unrelated to the CLI.
+    //
+    // A listing that FAILS still panics above — "the endpoint is broken" and "this
+    // tenant has none of these" are different findings and must not be conflated.
+    match first_list_item_id(&stdout, id_keys) {
+        Some(id) => Some(id),
+        None => {
+            eprintln!(
+                "live-smoke: skipping — no {label} objects exist in this workspace, \
+                 so there is no fixture to exercise ({})",
+                args.join(" ")
+            );
+            None
+        }
+    }
 }
 
 fn error_code_from_stderr(stderr: &str) -> Option<String> {
@@ -2008,6 +2041,228 @@ fn one_output_objects_wrangle_to_python_dry_run_shape_live() {
     assert_contains(&stdout, "\"operation\": \"wrangle-to-python\"");
     assert_contains(&stdout, "\"mutating\": true");
     assert_contains(&stdout, "\"dry_run\": true");
+}
+
+// ---------------------------------------------------------------------------
+// Alteryx One cloud-native workflows (/svc-workflow). Distinct from `one flows`.
+// ---------------------------------------------------------------------------
+
+live_case!(
+    one_workflows_list_live,
+    args = ["--output", "json", "one", "workflows", "list"],
+    ok = [
+        "\"surface\": \"workflow\"",
+        "\"operation\": \"list\"",
+        "\"pages_fetched\":",
+        "\"items\":"
+    ],
+    fail = [
+        "\"error_code\": \"permission_denied\"",
+        "\"error_code\": \"not_found\""
+    ]
+);
+
+live_page_boundary_case!(
+    one_workflows_list_page_boundary_live,
+    args = [
+        "--output",
+        "json",
+        "one",
+        "workflows",
+        "list",
+        "--limit",
+        "1",
+        "--all",
+        "--max-pages",
+        "1"
+    ],
+    ok = ["\"surface\": \"workflow\"", "\"operation\": \"list\""]
+);
+
+live_case!(
+    one_workflows_tools_live,
+    args = ["--output", "json", "one", "workflows", "tools"],
+    ok = ["\"surface\": \"workflow\"", "\"operation\": \"tools\""],
+    fail = [
+        "\"error_code\": \"permission_denied\"",
+        "\"error_code\": \"not_found\""
+    ]
+);
+
+/// `count` must report the collection total, not the size of the page it fetched.
+/// It requests ?limit=1, so a naive implementation would answer 1.
+#[test]
+fn one_workflows_count_reports_collection_total_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let (success, stdout, stderr) =
+        run_ayx_result(&["--output", "json", "one", "workflows", "count"], &live);
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!("command failed: one workflows count\nstdout:\n{stdout}\nstderr:\n{stderr}");
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"workflow\"");
+    assert_contains(&stdout, "\"operation\": \"count\"");
+    // Proves the total came from the server envelope rather than the returned page.
+    assert_contains(&stdout, "\"count_source\": \"server\"");
+}
+
+/// `detail` is synthesized client-side (no GET /v4/workflows/{id} exists), so it
+/// must both resolve a real id and advertise that synthesis.
+#[test]
+fn one_workflows_detail_live_real_object() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(workflow_id) = require_live_workflow_id(&live) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "workflows",
+            "detail",
+            &workflow_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: one workflows detail {workflow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"workflow\"");
+    assert_contains(&stdout, "\"operation\": \"detail\"");
+    assert_contains(&stdout, "\"detail_source\":");
+    assert_contains(&stdout, &workflow_id);
+}
+
+#[test]
+fn one_workflows_dependencies_live_real_object() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(workflow_id) = require_live_workflow_id(&live) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "workflows",
+            "dependencies",
+            &workflow_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        assert_contains(&stderr, "\"surface\": \"workflow\"");
+        assert_live_error_code(&stderr, &["not_found", "permission_denied", "validation"]);
+        return;
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"operation\": \"dependencies\"");
+    assert_contains(&stdout, "\"connections\":");
+    assert_contains(&stdout, "\"datasets\":");
+}
+
+/// A ULID that parses but names nothing must be a clean not_found, not an HTML
+/// parse failure or an internal error.
+#[test]
+fn one_workflows_detail_not_found_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "workflows",
+            "detail",
+            "01AAAAAAAAAAAAAAAAAAAAAAAA",
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        assert_contains(&stderr, "\"surface\": \"workflow\"");
+        assert_contains(&stderr, "\"operation\": \"detail\"");
+        assert_live_error_code(&stderr, &["not_found"]);
+        return;
+    }
+    panic!("expected an unknown workflow id to fail\nstdout:\n{stdout}\nstderr:\n{stderr}");
+}
+
+/// `copy` is mutating, so without --apply it must dry-run. Also proves --version
+/// is resolved to the workflow's current version before the gate, so the body
+/// shown in would_send is exactly what --apply would send.
+#[test]
+fn one_workflows_copy_dry_run_shape_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(workflow_id) = require_live_workflow_id(&live) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "workflows",
+            "copy",
+            &workflow_id,
+            "--name",
+            "ayx-live-smoke-copy",
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: one workflows copy {workflow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"workflow\"");
+    assert_contains(&stdout, "\"operation\": \"copy\"");
+    assert_contains(&stdout, "\"mutating\": true");
+    assert_contains(&stdout, "\"dry_run\": true");
+    assert_contains(&stdout, "\"ayx-live-smoke-copy\"");
+    // The version must already be resolved in the dry-run body.
+    assert_contains(&stdout, "\"version\":");
 }
 
 live_case!(

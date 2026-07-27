@@ -207,6 +207,52 @@ const PLAN_ENDPOINTS: &[EndpointSpec] = &[
     },
 ];
 
+/// Alteryx One cloud-native workflows.
+///
+/// A separate service from the `/v4` gateway: ULID-keyed canvas workflows served by
+/// `/svc-workflow/api/vN`. `GET /v4/workflows` is the one listing route the gateway
+/// exposes and is absent from the published `/v4/open-api-spec`, so `one api coverage`
+/// will report it as stale — correctly, since the spec does not describe it.
+/// There is no `GET /v4/workflows/{id}` and no `/v4/workflows/count`.
+/// All rows live-verified 2026-07-26.
+const WORKFLOW_ENDPOINTS: &[EndpointSpec] = &[
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/workflows",
+        commands: &["one workflows list"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/workflows?limit=1",
+        commands: &["one workflows count"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/svc-workflow/api/v1/assets",
+        commands: &["one workflows assets", "one workflows detail"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/svc-workflow/api/v1/assets/{id}/dependencies",
+        commands: &["one workflows dependencies"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/svc-workflow/api/v0/workflows/{id}/availableEngines",
+        commands: &["one workflows engines"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/svc-workflow/api/v1/tools",
+        commands: &["one workflows tools"],
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/svc-workflow/api/v2/workflows/{id}/duplicate",
+        commands: &["one workflows copy"],
+    },
+];
+
 const FLOW_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "POST",
@@ -915,6 +961,16 @@ const SURFACES: &[SurfaceSpec] = &[
         status: "implemented",
         endpoints: PLANS_ENDPOINTS,
         notes: &["Managed plans surface."],
+    },
+    SurfaceSpec {
+        name: "workflow",
+        status: "implemented",
+        endpoints: WORKFLOW_ENDPOINTS,
+        notes: &[
+            "Alteryx One cloud-native (canvas) workflows, ULID-keyed, served by /svc-workflow.",
+            "Distinct from the `flow` surface, which is Designer Cloud /v4/flows keyed by integer ids.",
+            "detail and count are synthesized client-side; the API exposes no per-id or count route.",
+        ],
     },
     SurfaceSpec {
         name: "flow",
