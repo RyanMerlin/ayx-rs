@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-07-27 01:09:52 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-07-27 01:45:15 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -241,7 +241,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one output-objects inputs | `one/output-objects/inputs` | read-only | no | List inputs for a One output object |
 | one output-objects list | `one/output-objects/list` | read-only | no | List One output objects |
 | one output-objects update | `one/output-objects/update` | mutating | yes | Update a One output object from JSON payload |
-| one output-objects wrangle-to-python | `one/output-objects/wrangle-to-python` | read-only | no | Generate Python from a One output object |
+| one output-objects wrangle-to-python | `one/output-objects/wrangle-to-python` | mutating | yes | Generate Python from a One output object |
 | one person | `one/person` | unclassified |  | Alteryx One person (user) management |
 | one person count | `one/person/count` | read-only | no | Count One people |
 | one person create | `one/person/create` | mutating | yes | Create a One person from JSON payload |

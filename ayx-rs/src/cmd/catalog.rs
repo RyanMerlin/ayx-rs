@@ -1581,10 +1581,13 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
     CatalogMetadata {
         path: "one/output-objects/wrangle-to-python",
         output: "one output-object wrangle-to-python envelope",
-        safety: "read-only",
-        mutating: false,
+        safety: "mutating",
+        mutating: true,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to POST /v4/outputObjects/{id}/wrangleToPython in the One API docs."],
+        notes: &[
+            "Maps to POST /v4/outputObjects/{id}/wrangleToPython in the One API docs.",
+            "Requires --apply.",
+        ],
     },
     CatalogMetadata {
         path: "one/webhook-flow-tasks/create",

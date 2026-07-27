@@ -3,9 +3,9 @@
 //! Surfaces "who has access to what" across both backends:
 //!
 //! * **Connections** — One iterates `/v4/connections`; with `--deep` it
-//!   additionally fetches `/v4/connections/{id}/permissions` per id and
-//!   groups grantees by subject. Server falls back to a plan envelope
-//!   around `dcm_connections_list_envelope`.
+//!   additionally fetches `/v4/connections/{id}/permissions/sharedSubjects`
+//!   per id and groups grantees by subject. Server falls back to a plan
+//!   envelope around `dcm_connections_list_envelope`.
 //! * **Workflows** — One has no per-flow ACL endpoint, so we surface the
 //!   workspace people roster via `/iam/v1/workspaces/{id}/people`. Server
 //!   uses `v3/collections` (Gallery workflow-membership lives in the
@@ -124,8 +124,13 @@ fn connections_one(config: &Config, args: &TelemetryArgs, deep: bool) -> Result<
         ));
     }
 
-    // --deep: fetch /v4/connections/{id}/permissions per connection and group
-    // grantees by subject id. O(N) extra requests — operator gated.
+    // --deep: fetch /v4/connections/{id}/permissions/sharedSubjects per connection
+    // and group grantees by subject id. O(N) extra requests — operator gated.
+    //
+    // `/v4/connections/{id}/permissions` (no `/sharedSubjects` suffix) is a dead
+    // route that answers 404 — see one_connections.rs for the live-verified shape.
+    // A permissions lookup failing here must surface as a failure, not silently
+    // read back as "this connection has zero grantees".
     let mut per_connection: Vec<Value> = Vec::with_capacity(items.len());
     let mut by_subject: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for c in &items {
@@ -136,25 +141,15 @@ fn connections_one(config: &Config, args: &TelemetryArgs, deep: bool) -> Result<
             "platform",
             "connection-permissions",
             "GET",
-            "/v4/connections/{id}/permissions",
+            "/v4/connections/{id}/permissions/sharedSubjects",
             false,
             &[("id", &conn_id)],
         )?;
-        let perms = resp
-            .data
-            .get("response")
-            .and_then(extract_items_array)
-            .unwrap_or_default();
-        let grantee_ids: Vec<String> = perms
-            .iter()
-            .filter_map(|p| {
-                p.get("subjectId")
-                    .or_else(|| p.get("subject_id"))
-                    .or_else(|| p.get("aid"))
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string)
-            })
-            .collect();
+        if !resp.ok {
+            return Ok(resp);
+        }
+        let grantee_ids =
+            extract_shared_subject_ids(resp.data.get("response").unwrap_or(&Value::Null));
         for sid in &grantee_ids {
             by_subject
                 .entry(sid.clone())
@@ -371,16 +366,33 @@ fn resolve_workspace_id(config: &Config, explicit: Option<&str>) -> Result<Strin
         })
 }
 
-fn extract_items_array(v: &Value) -> Option<Vec<Value>> {
-    if let Some(arr) = v.as_array() {
-        return Some(arr.clone());
-    }
-    for k in ["items", "results", "data", "records", "value"] {
-        if let Some(arr) = v.get(k).and_then(Value::as_array) {
-            return Some(arr.clone());
+/// Extract every grantee's subject id from a `GET
+/// /v4/connections/{id}/permissions/sharedSubjects` response.
+///
+/// Unlike a plain list endpoint, this response groups grantees into `people`
+/// and `groups` buckets rather than one flat array (see
+/// `one_connections::find_shared_subject` for the sibling lookup that reads
+/// the same shape).
+fn extract_shared_subject_ids(shared_subjects: &Value) -> Vec<String> {
+    let mut ids = Vec::new();
+    for bucket in ["people", "groups"] {
+        let Some(entries) = shared_subjects.get(bucket).and_then(Value::as_array) else {
+            continue;
+        };
+        for entry in entries {
+            let id = ["subjectId", "id"]
+                .iter()
+                .find_map(|key| match entry.get(key) {
+                    Some(Value::String(s)) => Some(s.clone()),
+                    Some(Value::Number(n)) => Some(n.to_string()),
+                    _ => None,
+                });
+            if let Some(id) = id {
+                ids.push(id);
+            }
         }
     }
-    None
+    ids
 }
 
 fn wrap_server_envelope(inner: Envelope, resource: &str) -> Envelope {
@@ -472,20 +484,26 @@ mod tests {
     }
 
     #[test]
-    fn extract_items_array_handles_common_shapes() {
-        assert_eq!(
-            extract_items_array(&json!([{"id": 1}])).map(|v| v.len()),
-            Some(1)
-        );
-        assert_eq!(
-            extract_items_array(&json!({"items": [{"id": 1}, {"id": 2}]})).map(|v| v.len()),
-            Some(2)
-        );
-        assert_eq!(
-            extract_items_array(&json!({"records": [{"id": 1}]})).map(|v| v.len()),
-            Some(1)
-        );
-        assert_eq!(extract_items_array(&json!({"nope": 42})), None);
+    fn extract_shared_subject_ids_reads_both_people_and_group_buckets() {
+        let shared_subjects = json!({
+            "people": [
+                { "subjectId": 646, "policyTag": "connection_author" },
+                { "id": 113168, "policyTag": "editor" },
+            ],
+            "groups": [
+                { "subjectId": "grp-1" },
+            ],
+        });
+        let mut ids = extract_shared_subject_ids(&shared_subjects);
+        ids.sort();
+        assert_eq!(ids, vec!["113168", "646", "grp-1"]);
+    }
+
+    #[test]
+    fn extract_shared_subject_ids_tolerates_missing_or_empty_buckets() {
+        assert!(extract_shared_subject_ids(&json!({})).is_empty());
+        assert!(extract_shared_subject_ids(&Value::Null).is_empty());
+        assert!(extract_shared_subject_ids(&json!({"people": [], "groups": []})).is_empty());
     }
 
     #[test]

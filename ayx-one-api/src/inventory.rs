@@ -665,6 +665,14 @@ const CONNECTION_ENDPOINTS: &[EndpointSpec] = &[
     // /v4/connections/{id}/permissions[/{aid}], which the API answers with
     // RouteNotFoundException; sharing lives on a shared /v4/connections/share route
     // that carries the connection id in the body (POST) or query (DELETE).
+    //
+    // `telemetry permissions connections --deep` shipped wired to the same dead
+    // /permissions route (no /sharedSubjects suffix) until it was repaired
+    // alongside this inventory row's own fix -- see telemetry/permissions.rs. It
+    // is not listed in `commands` below: that field is `ayx one ...`-only (see
+    // `coverage::tests::every_endpoint_row_names_at_least_one_one_command`), and
+    // `telemetry permissions connections` is a different top-level surface that
+    // happens to dispatch the same endpoint.
     EndpointSpec {
         method: "GET",
         path: "/v4/connections/{id}/permissions/sharedSubjects",
