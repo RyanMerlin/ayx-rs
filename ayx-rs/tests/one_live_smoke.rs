@@ -1967,6 +1967,49 @@ fn one_output_objects_detail_not_found_live() {
     panic!("expected invalid output object id to fail\nstdout:\n{stdout}\nstderr:\n{stderr}");
 }
 
+/// `wrangle-to-python` without `--body` used to pass `mutating: false`, so a POST
+/// executed for real with no `--apply` gate and up to 4 retries on 5xx, while the
+/// `--body` arm of the same command was gated. Both arms are now one call with
+/// `mutating: true`; this asserts the no-body invocation dry-runs rather than
+/// firing, so the un-gated arm cannot come back.
+#[test]
+fn one_output_objects_wrangle_to_python_dry_run_shape_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(output_object_id) = require_live_output_object_id(&live) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json",
+            "one",
+            "output-objects",
+            "wrangle-to-python",
+            &output_object_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one output-objects wrangle-to-python \
+             {output_object_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"outputObject\"");
+    assert_contains(&stdout, "\"operation\": \"wrangle-to-python\"");
+    assert_contains(&stdout, "\"mutating\": true");
+    assert_contains(&stdout, "\"dry_run\": true");
+}
+
 live_case!(
     one_write_settings_list_live,
     args = ["--output", "json", "one", "write-settings", "list"],

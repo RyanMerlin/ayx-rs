@@ -108,30 +108,26 @@ pub(crate) fn execute(
         }
         OneOutputObjectCommand::WrangleToPython { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            match body {
-                Some(body) => {
-                    let payload = load_payload(&body)?;
-                    one_api_live_request_with_body(
-                        &config,
-                        "outputObject",
-                        "wrangle-to-python",
-                        "POST",
-                        "/v4/outputObjects/{id}/wrangleToPython",
-                        true,
-                        &[("id", id.as_str())],
-                        Some(payload),
-                    )?
-                }
-                None => one_api_live_request(
-                    &config,
-                    "outputObject",
-                    "wrangle-to-python",
-                    "POST",
-                    "/v4/outputObjects/{id}/wrangleToPython",
-                    false,
-                    &[("id", id.as_str())],
-                )?,
-            }
+            // One call for both arms, always `mutating: true`.
+            //
+            // These used to be two arms that disagreed: with `--body` it was
+            // mutating (and so `--apply`-gated), without `--body` it passed
+            // `mutating: false` — meaning a POST executed for real with no apply
+            // gate and up to 4 retries on 5xx. Whether the endpoint mutates cannot
+            // depend on whether the caller supplied a body, so the two arms are
+            // collapsed rather than merely corrected: there is no longer a second
+            // arm that can drift.
+            let payload = body.map(|path| load_payload(&path)).transpose()?;
+            one_api_live_request_with_body(
+                &config,
+                "outputObject",
+                "wrangle-to-python",
+                "POST",
+                "/v4/outputObjects/{id}/wrangleToPython",
+                true,
+                &[("id", id.as_str())],
+                payload,
+            )?
         }
     })
 }
