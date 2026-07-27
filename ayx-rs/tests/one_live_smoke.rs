@@ -2664,3 +2664,119 @@ fn one_connections_dry_run_shape_live() {
     assert_contains(&stdout, "\"mutating\": false");
     assert_contains(&stdout, "\"would_send\":");
 }
+
+/// Re-probes one representative read-only command per service from
+/// `docs/one-endpoint-matrix.md`, so the matrix's live evidence has an automated
+/// tripwire instead of going stale silently between hand re-verification passes.
+///
+/// Tolerant by design: a tenant without a Plans/Scheduling/Billing entitlement (like
+/// the one this doc's live sweep was built against, 2026-07-27) legitimately 404s on
+/// those services — see the doc's Methodology section — and a differently-scoped PAT
+/// can legitimately 403 on others (e.g. `person count` in that same session). This
+/// case only fails loud on a genuinely *unexpected* shape: neither success, nor one
+/// of the error codes this doc's live sweep already saw for these rows, nor an
+/// auth-unavailable signal. `plan` (no safe read-only row — every endpoint needs a
+/// live plan id or mutates) and `webhookFlowTask` (no `list`; `detail`/`delete`/`test`
+/// all need an id this suite has no way to resolve without creating one) are excluded
+/// for the same reason they're `unverified` in the doc itself.
+#[test]
+fn one_endpoint_matrix_spot_check_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let known_tenant_gaps = ["permission_denied", "not_found", "validation"];
+
+    let cases: &[(&str, &[&str], &str)] = &[
+        (
+            "platform.iam",
+            &["--output", "json", "one", "workspace", "current"],
+            "\"surface\": \"workspace\"",
+        ),
+        (
+            "misc",
+            &["--output", "json", "one", "api", "coverage"],
+            "\"coverage_pct\"",
+        ),
+        (
+            "plans",
+            &["--output", "json", "one", "plans", "list"],
+            "\"surface\": \"plans\"",
+        ),
+        (
+            "workflow",
+            &["--output", "json", "one", "workflows", "tools"],
+            "\"surface\": \"workflow\"",
+        ),
+        (
+            "flow",
+            &["--output", "json", "one", "flows", "count"],
+            "\"surface\": \"flow\"",
+        ),
+        (
+            "dataset",
+            &["--output", "json", "one", "datasets", "count"],
+            "\"surface\": \"datasets\"",
+        ),
+        (
+            "connection",
+            &["--output", "json", "one", "connections", "count"],
+            "\"surface\": \"connection\"",
+        ),
+        (
+            "jobGroup",
+            &["--output", "json", "one", "job-groups", "count"],
+            "\"surface\": \"jobGroup\"",
+        ),
+        (
+            "outputObject",
+            &["--output", "json", "one", "output-objects", "count"],
+            "\"surface\": \"outputObject\"",
+        ),
+        (
+            "writeSetting",
+            &["--output", "json", "one", "write-settings", "count"],
+            "\"surface\": \"writeSetting\"",
+        ),
+        (
+            "scheduling",
+            &["--output", "json", "one", "scheduling", "count"],
+            "\"surface\": \"scheduling\"",
+        ),
+        (
+            "billing",
+            &["--output", "json", "one", "billing", "current-account"],
+            "\"surface\": \"billing\"",
+        ),
+        (
+            "apiAccessTokens",
+            &["--output", "json", "one", "token"],
+            "\"surface\": \"token\"",
+        ),
+        (
+            "person",
+            &["--output", "json", "one", "person", "current"],
+            "\"surface\": \"person\"",
+        ),
+        (
+            "workspace",
+            &["--output", "json", "one", "workspace", "list"],
+            "\"surface\": \"workspace\"",
+        ),
+    ];
+
+    for (service, args, ok_needle) in cases {
+        let (success, stdout, stderr) = run_ayx_result(args, &live);
+        if !success {
+            if live_auth_unavailable(&stderr) {
+                continue;
+            }
+            assert_live_error_code(&stderr, &known_tenant_gaps);
+            continue;
+        }
+        assert_live_ok(&stdout);
+        assert_contains(&stdout, ok_needle);
+        let _ = service; // named for failure-message clarity only
+    }
+}
