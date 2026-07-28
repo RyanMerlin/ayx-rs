@@ -828,11 +828,6 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             },
             EndpointSpec {
                 method: "GET",
-                path: "/v4/people/current",
-                commands: &["one person current", "one whoami"],
-            },
-            EndpointSpec {
-                method: "GET",
                 path: "/v4/people/count",
                 commands: &["one person count"],
             },
