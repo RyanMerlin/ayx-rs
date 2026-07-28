@@ -43,7 +43,7 @@ Manually review:
 
 ## GitHub Protections
 
-Apply or verify protections for `main`:
+Target protections for `main` (the end state this checklist is driving toward):
 
 - no force pushes
 - no branch deletion
@@ -56,15 +56,53 @@ Apply or verify protections for `main`:
 
 If release tags are part of the trust model, also protect `v*` tags or cover them with a ruleset.
 
-Current required status checks should match:
+### Current state
+
+Verified against the live rulesets on `RyanMerlin/ayx-rs` via the GitHub API, 2026-07-28.
+
+`protect-main` (branch ruleset, active, `refs/heads/main`) enforces:
+
+- no branch deletion
+- no force pushes (non-fast-forward)
+- linear history
+- pull request required, with 1 approving review, stale approvals dismissed on new commits, and
+  conversation resolution before merge
+- required status checks: all nine listed below
+
+`protect-release-tags` (tag ruleset, active, `refs/tags/v*`) enforces no deletion and no
+non-fast-forward, so a published release tag cannot be deleted or repointed. This matters because
+the release trust model, sigstore keyless signing plus GitHub provenance attestations, is anchored
+to the `v*` tag.
+
+Both rulesets grant bypass to the repository-admin role and to the `merlinlabs-automation` GitHub
+App, so solo maintenance and automated merges still work. That is deliberate: the rules gate outside
+contributions and accidents, not the maintainer.
+
+Current CI (`.github/workflows/ci.yml`) defines these jobs:
 
 - `Rustfmt`
 - `Clippy`
-- `Test (ubuntu-latest)`
-- `Test (macos-latest)`
+- `Test (${{ matrix.os }})`: matrix is `ubuntu-latest`, `macos-latest`, `windows-latest`, so this
+  produces three separate checks: `Test (ubuntu-latest)`, `Test (macos-latest)`, `Test (windows-latest)`
+- `Command surface source-of-truth`
+- `Docs`
+- `cargo-audit`
+- `GitHub Actions lint`
 
-`cargo-audit` currently runs as advisory coverage and should remain optional unless you want it to block merges.
+**All nine are required status checks.** `cargo-audit` blocks merges; it is not advisory.
+`Test (windows-latest)` is required because the project ships Windows release binaries and has
+shipped a Windows-only defect before (the v0.13.1 exit panic, fixed in v0.13.2).
 
-## Manual Verification
+## Verification
 
-This repo does not assume GitHub admin API access from local tooling. Capture screenshots or export the live GitHub settings view and verify it against the protection checklist above before launch.
+Read the live rulesets rather than trusting this file, which can drift:
+
+```bash
+gh api repos/RyanMerlin/ayx-rs/rulesets
+gh api repos/RyanMerlin/ayx-rs/rulesets/<id>
+```
+
+The `merlinlabs-automation` App installation holds `administration` permission, so this check is
+scriptable and does not need screenshots of the settings UI. Re-run it before any launch or
+visibility change, and after any ruleset edit, since a required-status-check name that no longer
+matches a real CI job name silently stops gating.
