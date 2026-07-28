@@ -18,7 +18,12 @@
 //! (does it call a One transport function?), so a dispatcher's filename or
 //! location can no longer hide it from this gate.
 //!
-//! Strategy: parse every file under `cmd/**/*.rs` for calls into the One
+//! That widening was still not enough: it left `src/main.rs` out of scope, and
+//! the `one_doctor_*_envelope` / `one_platform_auth_*_envelope` dispatchers live
+//! there and issue real One transport calls. Discovery now covers `main.rs` too
+//! — scoping to a *directory* was the same mistake as scoping to a filename.
+//!
+//! Strategy: parse every file under `cmd/**/*.rs`, plus `src/main.rs`, for calls into the One
 //! transport, recover the `(METHOD, ENDPOINT, MUTATING)` each one passes by
 //! position (resolving simple same-file `const NAME: &str = "...";` endpoints
 //! along the way), and assert:
@@ -95,16 +100,39 @@ fn cmd_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cmd")
 }
 
-/// Every `.rs` file under `src/cmd`, found by walking the tree — no filename or
-/// directory-name filter. See the module doc: filtering by a `one*` naming
-/// convention is exactly what let `telemetry/permissions.rs` hide a wrong route
-/// from this gate. Paths are relative to `src/cmd` with `/` separators (e.g.
-/// `"telemetry/permissions.rs"`), not bare filenames, so files that share a
+/// Render a discovered source key as a real, repo-relative path.
+///
+/// Keys are relative to `src/cmd`, so most render as `src/cmd/<key>`. `main.rs`
+/// is discovered as `../main.rs` (it lives a level up); normalize it rather than
+/// emitting `cmd/../main.rs` in a failure message someone has to act on.
+fn display_path(file: &str) -> String {
+    match file.strip_prefix("../") {
+        Some(rest) => format!("src/{rest}"),
+        None => format!("src/cmd/{file}"),
+    }
+}
+
+/// Every `.rs` file under `src/cmd`, **plus `src/main.rs`**, found by walking the
+/// tree — no filename or directory-name filter. See the module doc: filtering by a
+/// `one*` naming convention is exactly what let `telemetry/permissions.rs` hide a
+/// wrong route from this gate. Paths are relative to `src/cmd` with `/` separators
+/// (e.g. `"telemetry/permissions.rs"`), not bare filenames, so files that share a
 /// basename across subdirectories (several `mod.rs`) stay distinguishable.
+///
+/// `main.rs` is included because the same class of blind spot survived the last
+/// widening: `one_doctor_*_envelope` and `one_platform_auth_*_envelope` live in
+/// `main.rs`, not under `src/cmd`, and issue real One transport calls. Scoping
+/// discovery to a directory is the same mistake as scoping it to a filename
+/// prefix — a dispatcher's *location* must not be able to hide it from this gate.
 fn cmd_sources() -> Vec<(String, String)> {
     let mut out = Vec::new();
     let mut stack = vec![cmd_dir()];
     let root = cmd_dir();
+
+    let main_rs = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs");
+    if let Ok(text) = std::fs::read_to_string(&main_rs) {
+        out.push(("../main.rs".to_string(), text));
+    }
     while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
@@ -441,8 +469,10 @@ fn every_wired_one_endpoint_is_in_the_inventory() {
             continue;
         }
         missing.push(format!(
-            "  {} {} (dispatched by cmd/{})",
-            call.method, call.endpoint, call.file
+            "  {} {} (dispatched by {})",
+            call.method,
+            call.endpoint,
+            display_path(&call.file)
         ));
     }
 
@@ -490,7 +520,8 @@ fn non_one_surface_allowlist_is_accurate_not_stale() {
             assert!(
                 !(file.starts_with("one") || file.contains("/one")),
                 "{method} {endpoint} is listed in NON_ONE_SURFACE_ENDPOINTS as non-`one`-surface, \
-                 but cmd/{file} is a `one` dispatcher -- add a real inventory row instead"
+                 but {} is a `one` dispatcher -- add a real inventory row instead",
+                display_path(file)
             );
         }
     }
@@ -506,9 +537,10 @@ fn dynamic_endpoint_allowlist_is_inventoried_and_not_stale() {
     for (file, method, endpoint) in DYNAMIC_ENDPOINTS {
         assert!(
             inventory.contains(&(method.to_ascii_uppercase(), (*endpoint).to_string())),
-            "allowlisted dynamic endpoint {method} {endpoint} (cmd/{file}) is not in the \
+            "allowlisted dynamic endpoint {method} {endpoint} ({}) is not in the \
              inventory; the allowlist exempts a call from static parsing, never from \
-             being inventoried"
+             being inventoried",
+            display_path(file)
         );
     }
 }
@@ -568,8 +600,11 @@ fn mutating_http_methods_pass_mutating_true_except_the_allowlist() {
         }
         if call.mutating != Some(true) {
             violations.push(format!(
-                "  {} {} mutating={:?} (dispatched by cmd/{})",
-                call.method, call.endpoint, call.mutating, call.file
+                "  {} {} mutating={:?} (dispatched by {})",
+                call.method,
+                call.endpoint,
+                call.mutating,
+                display_path(&call.file)
             ));
         }
     }
