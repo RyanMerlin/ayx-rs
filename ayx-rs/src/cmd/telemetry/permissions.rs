@@ -90,6 +90,9 @@ fn connections_one(config: &Config, args: &TelemetryArgs, deep: bool) -> Result<
         &[],
         &params,
     )?;
+    if !env.ok {
+        return Ok(env);
+    }
     let items = env
         .data
         .get("items")
@@ -134,8 +137,9 @@ fn connections_one(config: &Config, args: &TelemetryArgs, deep: bool) -> Result<
     let mut per_connection: Vec<Value> = Vec::with_capacity(items.len());
     let mut by_subject: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for c in &items {
-        let conn_id = c.get("id").and_then(Value::as_str).map(ToString::to_string);
-        let Some(conn_id) = conn_id else { continue };
+        let Some(conn_id) = resource_id(c) else {
+            continue;
+        };
         let resp = one_api_live_request(
             config,
             "platform",
@@ -208,6 +212,9 @@ fn workflows_one(
         &[("id", &workspace)],
         &params,
     )?;
+    if !env.ok {
+        return Ok(env);
+    }
     let items = env
         .data
         .get("items")
@@ -258,6 +265,9 @@ fn summary_one(
         &[],
         &params,
     )?;
+    if !conn_env.ok {
+        return Ok(conn_env);
+    }
     let connection_count = conn_env
         .data
         .get("items")
@@ -275,10 +285,16 @@ fn summary_one(
                 &[("id", &workspace)],
                 &params,
             )?;
-            env.data
-                .get("items")
-                .and_then(Value::as_array)
-                .map(Vec::len)
+            // A failed lookup is unknown, not zero. `None` renders as "member
+            // count omitted"; `Some(0)` would assert the workspace is empty.
+            if env.ok {
+                env.data
+                    .get("items")
+                    .and_then(Value::as_array)
+                    .map(Vec::len)
+            } else {
+                None
+            }
         }
         Err(_) => None,
     };
@@ -369,6 +385,23 @@ fn resolve_workspace_id(config: &Config, explicit: Option<&str>) -> Result<Strin
 /// Extract every grantee's subject id from a `GET
 /// /v4/connections/{id}/permissions/sharedSubjects` response.
 ///
+/// A resource's `id`, accepting either JSON shape the One API uses.
+///
+/// Ids come back both ways: cloud-native workflows use ULID strings, while
+/// connections, flows, folders, job groups, output objects, and write settings
+/// use JSON *numbers*. Reading only `as_str()` yielded `None` for every
+/// connection, so `telemetry permissions --deep`'s per-connection loop
+/// `continue`d on every item and reported `ok: true` with empty results on a
+/// tenant with dozens of shared connections. The same trap had already been
+/// found and fixed in the live-smoke helper and in `one_connections.rs`.
+fn resource_id(resource: &Value) -> Option<String> {
+    match resource.get("id") {
+        Some(Value::String(s)) => Some(s.clone()),
+        Some(Value::Number(n)) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
 /// Unlike a plain list endpoint, this response groups grantees into `people`
 /// and `groups` buckets rather than one flat array (see
 /// `one_connections::find_shared_subject` for the sibling lookup that reads
@@ -417,6 +450,27 @@ mod tests {
     use ayx_core::profile::{
         AlteryxOneProfile, MongoDatabases, MongoMode, MongoProfile, ServerProfile,
     };
+
+    /// The `--deep` per-connection loop read `id` with `as_str()` only. Live
+    /// connection ids are JSON numbers, so every item yielded `None` and was
+    /// skipped: the loop body never ran, and a tenant with dozens of shared
+    /// connections got `ok: true` with an empty result and no error.
+    #[test]
+    fn resource_id_accepts_the_numeric_ids_the_one_api_actually_returns() {
+        assert_eq!(
+            resource_id(&json!({ "id": 44865 })),
+            Some("44865".to_string()),
+            "connections, flows, folders, job groups, output objects and write \
+             settings all return numeric ids"
+        );
+        assert_eq!(
+            resource_id(&json!({ "id": "01KY5TC876M1GFEA2A4P2CZVBR" })),
+            Some("01KY5TC876M1GFEA2A4P2CZVBR".to_string()),
+            "cloud-native workflows return ULID strings"
+        );
+        assert_eq!(resource_id(&json!({ "name": "no id" })), None);
+        assert_eq!(resource_id(&json!({ "id": null })), None);
+    }
 
     fn base() -> Config {
         Config {
