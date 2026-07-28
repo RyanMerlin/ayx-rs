@@ -241,6 +241,7 @@ pub fn coverage(spec: &Value) -> CoverageReport {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::collections::BTreeSet;
 
     fn spec_with(paths: Value) -> Value {
         json!({ "openapi": "3.0.0", "servers": [{ "url": "https://x/" }], "paths": paths })
@@ -329,17 +330,30 @@ mod tests {
             "the real inventory wires sibling services (/svc-workflow, /plans/v1, \
              /scheduling/v1, /billing/v1, /iam/v1); none were reported"
         );
-        // The accounting must close: every wired row is either comparable
-        // against this spec or explicitly declared outside its namespace.
+        // Derive the expectation from the inventory independently, rather than
+        // re-stating how `coverage()` computes the field. Asserting
+        // `inventory_total == inventory_operations + outside.len()` would be a
+        // tautology -- that is the definition -- and would still pass if the
+        // partitioning silently started dropping rows on both sides at once.
+        let expected_outside: BTreeSet<(String, String)> = inventory_endpoints_full()
+            .iter()
+            .filter(|(m, p, _)| canonical_op(m, p).is_none())
+            .map(|(m, p, _)| ((*m).to_string(), (*p).to_string()))
+            .collect();
+        let reported_outside: BTreeSet<(String, String)> = r
+            .outside_spec_namespace
+            .iter()
+            .map(|e| (e.method.clone(), e.path.clone()))
+            .collect();
+        assert_eq!(
+            reported_outside, expected_outside,
+            "every inventory row that cannot be canonicalized must be reported, \
+             and nothing else"
+        );
         assert_eq!(
             r.inventory_total,
-            r.inventory_operations + r.outside_spec_namespace.len(),
-            "inventory_total must account for every row exactly once"
-        );
-        assert!(
-            r.inventory_total > r.inventory_operations,
-            "inventory_total must exceed the comparable count while sibling \
-             services are wired"
+            r.inventory_operations + expected_outside.len(),
+            "inventory_total must account for every wired row exactly once"
         );
         // Every reported row must name the command(s) that reach it, or the
         // report cannot be acted on.
