@@ -168,6 +168,7 @@ Endpoints the CLI fully dispatches for this surface (`inventory.rs` `SURFACES`).
 | GET | `/svc-workflow/api/v0/workflows/{id}/availableEngines` | live 200 | 2026-07-27T00:55Z | `one workflows engines` | object: raw API resource body, JSON-passthrough | json:NotFoundError (`{ kind: "NotFoundError", message, errors: [], params: {} }`) for a valid route / unknown resource id | `one workflows engines <real-id>`. |
 | GET | `/svc-workflow/api/v1/tools` | live 200 | 2026-07-27T00:55Z | `one workflows tools` | object: raw API resource body, JSON-passthrough | json:NotFoundError (`{ kind: "NotFoundError", message, errors: [], params: {} }`) for a valid route / unknown resource id | `one workflows tools`. |
 | POST | `/svc-workflow/api/v2/workflows/{id}/duplicate` | not re-probed | 2026-07-26 (prior session, see inventory.rs comments) | `one workflows copy` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:NotFoundError (`{ kind: "NotFoundError", message, errors: [], params: {} }`) for a valid route / unknown resource id | Mutating; not run this session to avoid any live side effect. `inventory.rs` records this row as "Live-verified 2026-07-26" (the session prior to this one). `one workflows copy` gates it behind `--apply` and resolves `--version` before the dry-run body is shown. |
+| POST | `/svc-workflow/api/v2/workflows/{id}/share` | not probed | unverified | `one workflows share` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:NotFoundError (`{ kind: "NotFoundError", message, errors: [], params: {} }`) for a valid route / unknown resource id | Mutating; deliberately not probed — a live call shares a real workflow with a real person and sends mail. Body shape is recorded under Contracts below, recovered from the service's own schema-validation errors rather than a published spec. `one workflows share` gates it behind `--apply` and resolves `--to-person` emails to person ids before the dry-run body is shown. |
 
 ### flow (implemented)
 
@@ -397,8 +398,10 @@ shapes are recorded; treat this section as load-bearing, not decorative.
 
 ### `POST /svc-workflow/api/v2/workflows/{id}/share`
 
-Not wired to any `ayx` command today (see Known-unwired services below — this one differs from the
-rest of that list in that its shape *is* known, just not its CLI wiring).
+Wired to `one workflows share`. The shape below is not in any published spec — it was recovered from
+the service's own schema-validation errors. Every one of `includeDependencies`, `privileges`, and
+`sendEmail` is required even when its value is `false` or empty-looking, and `additionalInfoMsg` must
+be *omitted* rather than sent as `null` when there is no message.
 
 ```
 {
