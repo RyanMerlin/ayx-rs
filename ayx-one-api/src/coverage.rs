@@ -23,15 +23,43 @@ pub struct StaleEndpoint {
     pub commands: Vec<String>,
 }
 
+/// A wired inventory endpoint that lives outside the namespace this spec can
+/// describe, and is therefore neither `covered`, `missing`, nor `stale`.
+///
+/// The One gateway spec (`GET /v4/open-api-spec`) documents `/v4` only, but the
+/// CLI also speaks several sibling services (`/svc-workflow`, `/plans/v1`,
+/// `/scheduling/v1`, `/billing/v1`, `/iam/v1`). Those rows used to be dropped on
+/// the floor, which understated `inventory_operations` and made it impossible to
+/// tell "we compared this and it matched" from "we never compared this at all".
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UncomparableEndpoint {
+    pub method: String,
+    pub path: String,
+    pub commands: Vec<String>,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CoverageReport {
+    /// Percentage of *comparable* spec operations that the inventory wires.
+    ///
+    /// Scoped to the namespace both sides can express — see
+    /// `outside_spec_namespace` for wired endpoints this figure deliberately
+    /// excludes. It is not "percent of the CLI's One surface that is covered".
     pub coverage_pct: f64,
     pub spec_operations: usize,
+    /// Inventory rows that are comparable against this spec. Always
+    /// `inventory_total - outside_spec_namespace.len()`.
     pub inventory_operations: usize,
+    /// Every wired inventory row, comparable or not.
+    pub inventory_total: usize,
     pub covered: usize,
     pub missing: Vec<MissingEndpoint>,
     pub stale: Vec<StaleEndpoint>,
     pub unmatched_spec_paths: Vec<String>,
+    /// Wired endpoints outside the spec's namespace. Not a defect — these are
+    /// real, working commands against sibling services — but they are unverified
+    /// by this diff, so they are reported rather than hidden.
+    pub outside_spec_namespace: Vec<UncomparableEndpoint>,
 }
 
 const HTTP_METHODS: &[&str] = &[
@@ -109,10 +137,22 @@ pub fn coverage(spec: &Value) -> CoverageReport {
         (String, String),
         (&'static str, &'static str, &'static [&'static str]),
     > = HashMap::new();
+    // A row that cannot be canonicalized is outside this spec's namespace, not
+    // absent. Recording it keeps `inventory_total` honest and stops a whole
+    // sibling service (all of `/svc-workflow`, say) from silently vanishing
+    // from the report.
+    let mut outside: Vec<UncomparableEndpoint> = Vec::new();
     for (m, p, c) in &inv_full {
-        if let Some(key) = canonical_op(m, p) {
-            inv_keys.insert(key.clone());
-            inv_meta.insert(key, (m, p, c));
+        match canonical_op(m, p) {
+            Some(key) => {
+                inv_keys.insert(key.clone());
+                inv_meta.insert(key, (m, p, c));
+            }
+            None => outside.push(UncomparableEndpoint {
+                method: (*m).to_string(),
+                path: (*p).to_string(),
+                commands: c.iter().map(|name| (*name).to_string()).collect(),
+            }),
         }
     }
 
@@ -172,6 +212,10 @@ pub fn coverage(spec: &Value) -> CoverageReport {
         .sort_by(|a, b| (&a.resource, &a.path, &a.method).cmp(&(&b.resource, &b.path, &b.method)));
     stale.sort_by(|a, b| (&a.path, &a.method).cmp(&(&b.path, &b.method)));
     unmatched.sort();
+    // Dedupe on the same key `inv_keys` dedupes on, so the two counts stay
+    // commensurable and `inventory_operations + outside == inventory_total`.
+    outside.sort_by(|a, b| (&a.path, &a.method).cmp(&(&b.path, &b.method)));
+    outside.dedup_by(|a, b| a.path == b.path && a.method == b.method);
 
     let covered = spec_keys.intersection(&inv_keys).count();
     let coverage_pct = if spec_keys.is_empty() {
@@ -184,10 +228,12 @@ pub fn coverage(spec: &Value) -> CoverageReport {
         coverage_pct,
         spec_operations: spec_ops,
         inventory_operations: inv_keys.len(),
+        inventory_total: inv_keys.len() + outside.len(),
         covered,
         missing,
         stale,
         unmatched_spec_paths: unmatched,
+        outside_spec_namespace: outside,
     }
 }
 
@@ -263,6 +309,82 @@ mod tests {
             "relative /flows must anchor to /v4/flows"
         );
         assert!(r.missing.iter().all(|m| m.path != "/flows/{id}"));
+    }
+
+    /// The inventory-side mirror of `non_v4_path_is_unmatched_not_dropped`.
+    ///
+    /// The spec side always recorded a non-`/v4` operation in
+    /// `unmatched_spec_paths`, but the inventory side silently dropped the
+    /// matching rows, so every endpoint on a sibling service — all of
+    /// `/svc-workflow`, `/plans/v1`, `/scheduling/v1`, `/billing/v1`,
+    /// `/iam/v1` — vanished from the report entirely: not covered, not stale,
+    /// not counted. `inventory_operations` then understated a 153-row inventory
+    /// as 128 while `coverage_pct` silently described only the `/v4` slice.
+    #[test]
+    fn wired_endpoints_outside_the_spec_namespace_are_reported_not_dropped() {
+        let r = coverage(&spec_with(json!({ "/v4/flows": { "get": {} } })));
+
+        assert!(
+            !r.outside_spec_namespace.is_empty(),
+            "the real inventory wires sibling services (/svc-workflow, /plans/v1, \
+             /scheduling/v1, /billing/v1, /iam/v1); none were reported"
+        );
+        // The accounting must close: every wired row is either comparable
+        // against this spec or explicitly declared outside its namespace.
+        assert_eq!(
+            r.inventory_total,
+            r.inventory_operations + r.outside_spec_namespace.len(),
+            "inventory_total must account for every row exactly once"
+        );
+        assert!(
+            r.inventory_total > r.inventory_operations,
+            "inventory_total must exceed the comparable count while sibling \
+             services are wired"
+        );
+        // Every reported row must name the command(s) that reach it, or the
+        // report cannot be acted on.
+        for e in &r.outside_spec_namespace {
+            assert!(
+                !e.commands.is_empty(),
+                "{} {} is reported with no dispatching command",
+                e.method,
+                e.path
+            );
+            assert!(
+                !e.path.contains("/v4/"),
+                "{} {} is comparable and must not be listed as outside",
+                e.method,
+                e.path
+            );
+        }
+        // Sanity-check the specific services this was written to catch.
+        let paths: Vec<&str> = r
+            .outside_spec_namespace
+            .iter()
+            .map(|e| e.path.as_str())
+            .collect();
+        assert!(
+            paths.iter().any(|p| p.starts_with("/svc-workflow/")),
+            "cloud-native workflows are wired but absent from the report: {paths:?}"
+        );
+    }
+
+    /// A row outside the spec namespace must never be miscounted as drift.
+    /// Reporting `/svc-workflow` as `stale` would send someone deleting live,
+    /// working commands.
+    #[test]
+    fn outside_namespace_rows_are_not_reported_as_stale() {
+        let r = coverage(&spec_with(json!({ "/v4/flows": { "get": {} } })));
+        for e in &r.outside_spec_namespace {
+            assert!(
+                !r.stale
+                    .iter()
+                    .any(|s| s.path == e.path && s.method == e.method),
+                "{} {} is outside the spec namespace but was reported as stale",
+                e.method,
+                e.path
+            );
+        }
     }
 
     #[test]
