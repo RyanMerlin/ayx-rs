@@ -136,14 +136,19 @@ jobs:
             echo "**AYX_REQUIRE_MACOS_SIGNING=true, so this is a hard failure.**" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
+      # Gated on the whole codesign triple, not just the certificate. With only
+      # the cert present, the import action or `codesign --sign ""` hard-fails
+      # the release -- turning a partially-configured secret set into a broken
+      # build rather than the unsigned-but-successful one the posture step above
+      # just reported.
       - name: Import macOS signing certificate
-        if: env.MACOS_CODESIGN_CERT_P12_B64 != ''
+        if: env.MACOS_CODESIGN_CERT_P12_B64 != '' && env.MACOS_CODESIGN_CERT_PASSWORD != '' && env.MACOS_CODESIGN_IDENTITY != ''
         uses: apple-actions/import-codesign-certs@v7
         with:
           p12-file-base64: ${{ secrets.AYX_MACOS_CODESIGN_CERT_P12_B64 }}
           p12-password: ${{ secrets.AYX_MACOS_CODESIGN_CERT_PASSWORD }}
       - name: Sign macOS release binary
-        if: env.MACOS_CODESIGN_CERT_P12_B64 != ''
+        if: env.MACOS_CODESIGN_CERT_P12_B64 != '' && env.MACOS_CODESIGN_CERT_PASSWORD != '' && env.MACOS_CODESIGN_IDENTITY != ''
         shell: bash
         run: |
           set -euo pipefail

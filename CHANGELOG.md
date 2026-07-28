@@ -17,7 +17,7 @@
 
 ### Changed
 
-- **BREAKING (internal API)** — `ayx_one_api::EndpointSpec::command` is now `commands: &[&str]`. One endpoint can legitimately back several commands (`GET /v4/people/current` serves both `one person current` and `one whoami`), and a single-string field forced those to be either duplicated or misattributed.
+- **BREAKING (agent-facing JSON)** — `ayx one api coverage --output json` changed shape. `stale[].command` (a string) is now `stale[].commands` (an array): one endpoint can legitimately back several commands (`GET /v4/people/current` serves both `one person current` and `one whoami`), and a single-string field forced those to be either duplicated or misattributed. `coverage_pct` is now nullable and is `null` when the spec contributes nothing comparable, rather than reporting `100.0` for an empty or malformed spec. New fields: `inventory_total` and `outside_spec_namespace`. Anything parsing this envelope must be updated; the underlying `ayx_one_api::EndpointSpec::command` field changed with it.
 - The One endpoint drift gate now scans `src/main.rs` in addition to `src/cmd/**`. The `one_doctor_*` and `one_platform_auth_*` dispatchers live in `main.rs` and issue real transport calls that the gate previously could not see.
 - All workspace crates declare `repository` and `homepage` metadata.
 

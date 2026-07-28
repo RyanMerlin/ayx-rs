@@ -69,16 +69,30 @@ const SAFE_NON_MUTATING_ALLOWLIST: &[(&str, &str)] = &[
 /// allowlisted call is exempt from *parsing*, never from *being inventoried*.
 const DYNAMIC_ENDPOINTS: &[(&str, &str, &str)] = &[
     // `flows parameters` appends `?outputObjectType=` when the flag is present.
-    ("one_flows.rs", "GET", "/v4/flows/{id}/recipeParameters"),
+    ("cmd/one_flows.rs", "GET", "/v4/flows/{id}/recipeParameters"),
     // library / folder listings append `?limit=&offset=` via a local helper.
-    ("one_flows.rs", "GET", "/v4/flowsLibrary"),
-    ("one_flows.rs", "GET", "/v4/folders"),
-    ("one_flows.rs", "GET", "/v4/folders/{id}/flows"),
-    ("one_datasets.rs", "GET", "/v4/datasetLibrary"),
-    ("one_datasets.rs", "GET", "/v4/wrangledDatasets"),
+    ("cmd/one_flows.rs", "GET", "/v4/flowsLibrary"),
+    ("cmd/one_flows.rs", "GET", "/v4/folders"),
+    ("cmd/one_flows.rs", "GET", "/v4/folders/{id}/flows"),
+    ("cmd/one_datasets.rs", "GET", "/v4/datasetLibrary"),
+    ("cmd/one_datasets.rs", "GET", "/v4/wrangledDatasets"),
     // `connections permissions delete` builds the unshare query (ids +
     // subject type) via `build_connection_unshare_query`.
-    ("one_connections.rs", "DELETE", "/v4/connections/share"),
+    ("cmd/one_connections.rs", "DELETE", "/v4/connections/share"),
+    // The v2 TUI worker dispatches whatever `kind_impl(kind).list_endpoint()` /
+    // `.detail_endpoint()` returns, so the call site passes `endpoint.path`
+    // rather than a literal. The literals live in `tui/v2/resource/*.rs`; every
+    // path that registry can produce is listed here, and each is asserted to be
+    // inventoried by `dynamic_endpoint_allowlist_is_inventoried_and_not_stale`.
+    ("tui/v2/worker.rs", "GET", "/v4/workspaces"),
+    ("tui/v2/worker.rs", "GET", "/v4/flows"),
+    ("tui/v2/worker.rs", "GET", "/v4/flows/{id}"),
+    ("tui/v2/worker.rs", "GET", "/v4/connections"),
+    ("tui/v2/worker.rs", "GET", "/v4/connections/{id}"),
+    ("tui/v2/worker.rs", "GET", "/v4/people"),
+    ("tui/v2/worker.rs", "GET", "/v4/people/{id}"),
+    ("tui/v2/worker.rs", "GET", "/v4/jobLibrary"),
+    ("tui/v2/worker.rs", "GET", "/v4/jobGroups/{id}"),
 ];
 
 /// `(method, endpoint)` pairs dispatched only by a non-`one`-namespace
@@ -94,45 +108,74 @@ const DYNAMIC_ENDPOINTS: &[(&str, &str, &str)] = &[
 /// never in the inventory at all. Listed here — not silently added to the
 /// `one`-only inventory (would break its own contract) and not silently
 /// dropped from this gate either.
-const NON_ONE_SURFACE_ENDPOINTS: &[(&str, &str)] = &[("GET", "/iam/v1/workspaces/{id}/people")];
+const NON_ONE_SURFACE_ENDPOINTS: &[(&str, &str)] = &[
+    // `telemetry permissions workflows` / `telemetry permissions summary`.
+    ("GET", "/iam/v1/workspaces/{id}/people"),
+    // `ayx tui`'s legacy One browser (`tui/one_browser.rs`) fetches a workspace
+    // by id. No `ayx one` command does: the `one workspace` tree exposes
+    // `list`, `current`, and configuration leaves, but no `detail <id>`. Found
+    // when discovery widened to the whole crate — until then this endpoint was
+    // wired and reachable while appearing in no inventory row at all.
+    //
+    // Adding `one workspace detail <id>` would make this a normal inventory row
+    // and is the better long-term fix; it is a new command, not a drift repair,
+    // so it is deliberately not bundled here.
+    ("GET", "/v4/workspaces/{id}"),
+];
 
-fn cmd_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("src/cmd")
+fn src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
 }
 
-/// Render a discovered source key as a real, repo-relative path.
-///
-/// Keys are relative to `src/cmd`, so most render as `src/cmd/<key>`. `main.rs`
-/// is discovered as `../main.rs` (it lives a level up); normalize it rather than
-/// emitting `cmd/../main.rs` in a failure message someone has to act on.
+/// Render a discovered source key as a real, repo-relative path. Keys are
+/// relative to `src`, so this is a plain prefix.
 fn display_path(file: &str) -> String {
-    match file.strip_prefix("../") {
-        Some(rest) => format!("src/{rest}"),
-        None => format!("src/cmd/{file}"),
-    }
+    format!("src/{file}")
 }
 
-/// Every `.rs` file under `src/cmd`, **plus `src/main.rs`**, found by walking the
-/// tree — no filename or directory-name filter. See the module doc: filtering by a
-/// `one*` naming convention is exactly what let `telemetry/permissions.rs` hide a
-/// wrong route from this gate. Paths are relative to `src/cmd` with `/` separators
-/// (e.g. `"telemetry/permissions.rs"`), not bare filenames, so files that share a
-/// basename across subdirectories (several `mod.rs`) stay distinguishable.
+/// Does this file implement an `ayx one ...` command?
 ///
-/// `main.rs` is included because the same class of blind spot survived the last
-/// widening: `one_doctor_*_envelope` and `one_platform_auth_*_envelope` live in
-/// `main.rs`, not under `src/cmd`, and issue real One transport calls. Scoping
-/// discovery to a directory is the same mistake as scoping it to a filename
-/// prefix — a dispatcher's *location* must not be able to hide it from this gate.
+/// Only such a file may put an endpoint in `ayx-one-api/src/inventory.rs`, whose
+/// `commands` field is contractually `ayx one ...`-only. Everything else that
+/// speaks the One API (`ayx telemetry`, `ayx tui`) belongs in
+/// `NON_ONE_SURFACE_ENDPOINTS` instead.
+///
+/// The test is `cmd/one*`: under the command tree, in a `one`-prefixed module or
+/// directory. It deliberately is not a bare substring match — the previous
+/// `file.contains("/one")` form classified `tui/one_browser.rs` as a `one`
+/// command module purely because of its filename, which is the same
+/// name-convention reasoning that let a dead route hide from this gate twice.
+fn is_one_command_module(file: &str) -> bool {
+    file.strip_prefix("cmd/")
+        .is_some_and(|rest| rest.starts_with("one"))
+}
+
+/// Every `.rs` file under `src`, found by walking the tree — no filename or
+/// directory filter of any kind.
+///
+/// This scope has been widened twice, both times after a dispatcher hid from the
+/// gate, so the rule is now the broadest one available: **scan the whole crate.**
+///   - First it walked only files whose *name* began with `one`, and
+///     `telemetry/permissions.rs` hid a dead route behind that convention.
+///   - Then it walked all of `src/cmd`, and `one_doctor_*_envelope` /
+///     `one_platform_auth_*_envelope` hid in `src/main.rs`.
+///   - Then it walked `src/cmd` plus `src/main.rs`, and `src/tui/one_browser.rs`
+///     hid `GET /v4/workspaces/{id}` — an endpoint that was in no inventory row
+///     at all, reachable from `ayx tui`.
+///
+/// Each fix was scoped to the specific hiding place that had just been found,
+/// which is why each one was followed by another. Filename, directory, and
+/// module location must all be irrelevant: if a file in this crate calls a One
+/// transport function, this gate sees it.
+///
+/// Paths are relative to `src` with `/` separators (e.g. `"cmd/telemetry/permissions.rs"`),
+/// not bare filenames, so files sharing a basename across subdirectories (several
+/// `mod.rs`) stay distinguishable.
 fn cmd_sources() -> Vec<(String, String)> {
     let mut out = Vec::new();
-    let mut stack = vec![cmd_dir()];
-    let root = cmd_dir();
+    let root = src_dir();
+    let mut stack = vec![root.clone()];
 
-    let main_rs = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs");
-    if let Ok(text) = std::fs::read_to_string(&main_rs) {
-        out.push(("../main.rs".to_string(), text));
-    }
     while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
@@ -518,7 +561,7 @@ fn non_one_surface_allowlist_is_accurate_not_stale() {
         );
         for file in dispatchers {
             assert!(
-                !(file.starts_with("one") || file.contains("/one")),
+                !is_one_command_module(file),
                 "{method} {endpoint} is listed in NON_ONE_SURFACE_ENDPOINTS as non-`one`-surface, \
                  but {} is a `one` dispatcher -- add a real inventory row instead",
                 display_path(file)

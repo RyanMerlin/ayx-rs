@@ -42,15 +42,30 @@ pub struct UncomparableEndpoint {
 pub struct CoverageReport {
     /// Percentage of *comparable* spec operations that the inventory wires.
     ///
+    /// `None` when the spec contributes nothing comparable (empty, malformed, or
+    /// entirely outside `/v4`). Reporting `100.0` there would read as total
+    /// coverage when the truth is that nothing was compared at all.
+    ///
     /// Scoped to the namespace both sides can express — see
     /// `outside_spec_namespace` for wired endpoints this figure deliberately
     /// excludes. It is not "percent of the CLI's One surface that is covered".
-    pub coverage_pct: f64,
+    pub coverage_pct: Option<f64>,
+    /// Raw HTTP operations in the spec, before canonical collapse.
     pub spec_operations: usize,
-    /// Inventory rows that are comparable against this spec. Always
-    /// `inventory_total - outside_spec_namespace.len()`.
+    /// Distinct *canonical* inventory keys comparable against this spec.
+    ///
+    /// This is deliberately not `inventory_total - outside_spec_namespace.len()`.
+    /// `canonical_op` strips query strings, so wired rows that differ only by
+    /// query — `/v4/people` vs `/v4/people?role=admin`, `/v4/workflows` vs
+    /// `/v4/workflows?limit=1` — collapse to one comparable key while remaining
+    /// two distinct wired rows. A spec cannot distinguish them, so matching
+    /// them separately is impossible; counting them separately here would
+    /// overstate what was compared.
     pub inventory_operations: usize,
-    /// Every wired inventory row, comparable or not.
+    /// Distinct wired inventory rows, by raw `(method, path)`, comparable or not.
+    ///
+    /// Always `>= inventory_operations + outside_spec_namespace.len()`, and
+    /// strictly greater whenever query-only variants are wired (see above).
     pub inventory_total: usize,
     pub covered: usize,
     pub missing: Vec<MissingEndpoint>,
@@ -212,23 +227,32 @@ pub fn coverage(spec: &Value) -> CoverageReport {
         .sort_by(|a, b| (&a.resource, &a.path, &a.method).cmp(&(&b.resource, &b.path, &b.method)));
     stale.sort_by(|a, b| (&a.path, &a.method).cmp(&(&b.path, &b.method)));
     unmatched.sort();
-    // Dedupe on the same key `inv_keys` dedupes on, so the two counts stay
-    // commensurable and `inventory_operations + outside == inventory_total`.
     outside.sort_by(|a, b| (&a.path, &a.method).cmp(&(&b.path, &b.method)));
     outside.dedup_by(|a, b| a.path == b.path && a.method == b.method);
 
+    // Counted from the raw rows, independently of either bucket. The two
+    // buckets use different dedup keys (canonical vs raw), so deriving this as
+    // their sum would silently undercount every query-only variant.
+    let inventory_total = inv_full
+        .iter()
+        .map(|(m, p, _)| (*m, *p))
+        .collect::<HashSet<_>>()
+        .len();
+
     let covered = spec_keys.intersection(&inv_keys).count();
+    // Nothing comparable in the spec means no coverage figure exists. `100.0`
+    // here would report a garbage or empty spec as fully covered.
     let coverage_pct = if spec_keys.is_empty() {
-        100.0
+        None
     } else {
-        (covered as f64 / spec_keys.len() as f64 * 1000.0).round() / 10.0
+        Some((covered as f64 / spec_keys.len() as f64 * 1000.0).round() / 10.0)
     };
 
     CoverageReport {
         coverage_pct,
         spec_operations: spec_ops,
         inventory_operations: inv_keys.len(),
-        inventory_total: inv_keys.len() + outside.len(),
+        inventory_total,
         covered,
         missing,
         stale,
@@ -350,10 +374,19 @@ mod tests {
             "every inventory row that cannot be canonicalized must be reported, \
              and nothing else"
         );
+        let distinct_raw_rows: BTreeSet<(&str, &str)> = inventory_endpoints_full()
+            .iter()
+            .map(|(m, p, _)| (*m, *p))
+            .collect();
         assert_eq!(
             r.inventory_total,
-            r.inventory_operations + expected_outside.len(),
-            "inventory_total must account for every wired row exactly once"
+            distinct_raw_rows.len(),
+            "inventory_total must count every distinct wired row"
+        );
+        assert!(
+            r.inventory_total >= r.inventory_operations + expected_outside.len(),
+            "the two buckets dedupe on different keys, so their sum can only \
+             ever be <= the raw row count"
         );
         // Every reported row must name the command(s) that reach it, or the
         // report cannot be acted on.
@@ -399,6 +432,66 @@ mod tests {
                 e.path
             );
         }
+    }
+
+    /// `inventory_total` must count raw wired rows, not the sum of the two
+    /// buckets. `canonical_op` strips query strings, so `/v4/people` and
+    /// `/v4/people?role=admin` are two wired rows but one comparable key; an
+    /// earlier version derived the total as `inv_keys.len() + outside.len()`
+    /// and silently undercounted every such pair.
+    #[test]
+    fn query_only_variants_are_counted_as_distinct_wired_rows() {
+        let collapsing: Vec<(&str, &str)> = inventory_endpoints_full()
+            .iter()
+            .filter(|(_, p, _)| p.contains('?'))
+            .map(|(m, p, _)| (*m, *p))
+            .collect();
+        assert!(
+            !collapsing.is_empty(),
+            "this test is meaningless without a wired query-string endpoint; \
+             the inventory has none, so re-derive the guard"
+        );
+
+        let r = coverage(&spec_with(json!({ "/v4/flows": { "get": {} } })));
+        // Each query variant shares a canonical key with its bare form, so it
+        // adds to the raw total without adding a comparable key.
+        for (method, path) in &collapsing {
+            let bare = path.split('?').next().unwrap();
+            let bare_is_wired = inventory_endpoints_full()
+                .iter()
+                .any(|(m, p, _)| m == method && *p == bare);
+            assert!(
+                bare_is_wired,
+                "{method} {path} has no bare counterpart; the collapse premise \
+                 does not hold and this guard needs rewriting"
+            );
+        }
+        assert!(
+            r.inventory_total > r.inventory_operations + r.outside_spec_namespace.len(),
+            "with {} query-only variant(s) wired, the raw total must exceed the \
+             sum of the deduped buckets",
+            collapsing.len()
+        );
+    }
+
+    #[test]
+    fn empty_or_uncomparable_spec_reports_no_coverage_figure() {
+        // A spec with nothing on /v4 compares nothing. Reporting 100.0 would
+        // read as "fully covered" when the real answer is "not measured".
+        let r = coverage(
+            &json!({ "servers": [{ "url": "https://host" }], "paths": { "/health": { "get": {} } } }),
+        );
+        assert_eq!(
+            r.coverage_pct, None,
+            "nothing comparable must not report a percentage"
+        );
+        assert_eq!(r.covered, 0);
+
+        let r = coverage(&spec_with(json!({ "/v4/flows": { "get": {} } })));
+        assert!(
+            r.coverage_pct.is_some(),
+            "a comparable spec must still report a figure"
+        );
     }
 
     #[test]
