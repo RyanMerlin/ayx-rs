@@ -36,7 +36,12 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/v4/people",
-        commands: &["one person list", "one workspace people"],
+        commands: &[
+            "one person list",
+            "one workspace people",
+            // `share` resolves --to-person emails to ids before building its body.
+            "one workflows share",
+        ],
     },
     EndpointSpec {
         method: "GET",
@@ -229,7 +234,13 @@ const WORKFLOW_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/svc-workflow/api/v1/assets",
-        commands: &["one workflows assets", "one workflows detail"],
+        commands: &[
+            "one workflows assets",
+            "one workflows detail",
+            // `copy` resolves the current version from the asset list when
+            // --version is omitted.
+            "one workflows copy",
+        ],
     },
     EndpointSpec {
         method: "GET",
@@ -824,7 +835,12 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             EndpointSpec {
                 method: "GET",
                 path: "/v4/people",
-                commands: &["one person list", "one workspace people"],
+                commands: &[
+                    "one person list",
+                    "one workspace people",
+                    // `share` resolves --to-person emails to ids before building its body.
+                    "one workflows share",
+                ],
             },
             EndpointSpec {
                 method: "GET",

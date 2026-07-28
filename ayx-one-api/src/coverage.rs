@@ -82,19 +82,28 @@ const HTTP_METHODS: &[&str] = &[
 ];
 
 /// Canonicalize an operation to `(UPPER_METHOD, canonical_path)`.
-/// Anchors the path at `/v4`, drops query/fragment and trailing slash, and
-/// replaces every `{param}` segment with `{}`. Returns `None` if no `/v4`.
+///
+/// Drops query/fragment and trailing slash, and replaces every `{param}`
+/// segment with `{}`. Returns `None` unless the path is rooted at `/v4` — the
+/// only namespace the One gateway spec describes.
+///
+/// The `/v4` must be the path's *first* segment. An earlier version searched
+/// for `/v4/` anywhere, so a sibling service's own v4 would be folded into the
+/// gateway namespace: `/svc-workflow/api/v4/workflows` matched the gateway's
+/// `GET /v4/workflows` row and reported as spec-verified. `/svc-workflow`
+/// already ships `/api/v0`, `/api/v1`, and `/api/v2`, so that collision was one
+/// version bump away, and it would have inverted the meaning of
+/// `outside_spec_namespace` for every row it hit.
+///
+/// A spec whose `servers[].url` carries a base path is already normalized by
+/// the caller before it gets here (`{base}{path}`), so `/v4` still lands first.
 pub fn canonical_op(method: &str, full_path: &str) -> Option<(String, String)> {
     let no_q = full_path.split(['?', '#']).next().unwrap_or(full_path);
     let trimmed = no_q.trim_end_matches('/');
-    let idx = trimmed.find("/v4/").or_else(|| {
-        if trimmed.ends_with("/v4") {
-            Some(trimmed.len() - 3)
-        } else {
-            None
-        }
-    })?;
-    let from_v4 = &trimmed[idx..];
+    if !(trimmed.starts_with("/v4/") || trimmed == "/v4") {
+        return None;
+    }
+    let from_v4 = trimmed;
     let canon = from_v4
         .split('/')
         .map(|seg| {
@@ -148,10 +157,8 @@ pub fn coverage(spec: &Value) -> CoverageReport {
     // Inventory canonical set + a lookup back to (method, path, command) for stale.
     let inv_full = inventory_endpoints_full();
     let mut inv_keys: HashSet<(String, String)> = HashSet::new();
-    let mut inv_meta: HashMap<
-        (String, String),
-        (&'static str, &'static str, &'static [&'static str]),
-    > = HashMap::new();
+    let mut inv_meta: HashMap<(String, String), (&'static str, &'static str, Vec<&'static str>)> =
+        HashMap::new();
     // A row that cannot be canonicalized is outside this spec's namespace, not
     // absent. Recording it keeps `inventory_total` honest and stops a whole
     // sibling service (all of `/svc-workflow`, say) from silently vanishing
@@ -161,7 +168,18 @@ pub fn coverage(spec: &Value) -> CoverageReport {
         match canonical_op(m, p) {
             Some(key) => {
                 inv_keys.insert(key.clone());
-                inv_meta.insert(key, (m, p, c));
+                // Merge, never overwrite. Rows that differ only by query string
+                // share a canonical key, and a plain `insert` kept only the
+                // last one — so a stale `/v4/workflows` reported `one workflows
+                // count` while `one workflows list` vanished from the report,
+                // telling the operator that half the affected commands were
+                // fine.
+                let entry = inv_meta.entry(key).or_insert_with(|| (m, p, Vec::new()));
+                for name in c.iter() {
+                    if !entry.2.contains(name) {
+                        entry.2.push(name);
+                    }
+                }
             }
             None => outside.push(UncomparableEndpoint {
                 method: (*m).to_string(),
@@ -343,8 +361,8 @@ mod tests {
     /// matching rows, so every endpoint on a sibling service — all of
     /// `/svc-workflow`, `/plans/v1`, `/scheduling/v1`, `/billing/v1`,
     /// `/iam/v1` — vanished from the report entirely: not covered, not stale,
-    /// not counted. `inventory_operations` then understated a 153-row inventory
-    /// as 128 while `coverage_pct` silently described only the `/v4` slice.
+    /// not counted. `inventory_operations` then reported 123 for a 150-row
+    /// inventory while `coverage_pct` silently described only the `/v4` slice.
     #[test]
     fn wired_endpoints_outside_the_spec_namespace_are_reported_not_dropped() {
         let r = coverage(&spec_with(json!({ "/v4/flows": { "get": {} } })));
@@ -472,6 +490,51 @@ mod tests {
              sum of the deduped buckets",
             collapsing.len()
         );
+    }
+
+    /// A sibling service's own `/v4` must not be folded into the gateway
+    /// namespace. `/svc-workflow` already ships `/api/v0`, `/api/v1`, and
+    /// `/api/v2`; when it reaches v4, an unanchored `find("/v4/")` would match
+    /// the gateway's `GET /v4/workflows` row and report those paths as
+    /// spec-verified instead of outside the namespace.
+    #[test]
+    fn only_a_leading_v4_segment_anchors_a_path() {
+        assert_eq!(
+            canonical_op("GET", "/v4/workflows"),
+            Some(("GET".into(), "/v4/workflows".into()))
+        );
+        assert_eq!(
+            canonical_op("GET", "/svc-workflow/api/v4/workflows"),
+            None,
+            "a sibling service's v4 must stay outside the gateway namespace"
+        );
+        assert_eq!(canonical_op("GET", "/plans/v1/plans"), None);
+        assert_eq!(
+            canonical_op("get", "/v4/flows/{flowId}"),
+            Some(("GET".into(), "/v4/flows/{}".into()))
+        );
+    }
+
+    /// Rows that collapse to one canonical key must contribute *all* their
+    /// commands to the stale report. `inv_meta.insert` overwrote, so a stale
+    /// `/v4/workflows` named only `one workflows count` and silently dropped
+    /// `one workflows list` — telling an operator that half the affected
+    /// commands were unaffected.
+    #[test]
+    fn stale_rows_name_every_command_that_shares_a_canonical_key() {
+        let r = coverage(&spec_with(json!({ "/v4/flows": { "get": {} } })));
+        let workflows = r
+            .stale
+            .iter()
+            .find(|s| s.path.starts_with("/v4/workflows"))
+            .expect("the workflows listing route is absent from the gateway spec, so it is stale");
+        for expected in ["one workflows list", "one workflows count"] {
+            assert!(
+                workflows.commands.iter().any(|c| c == expected),
+                "{expected} shares the canonical key but is missing from {:?}",
+                workflows.commands
+            );
+        }
     }
 
     #[test]
