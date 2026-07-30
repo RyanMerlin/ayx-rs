@@ -569,6 +569,33 @@ fn parse_param_kv(s: &str) -> Result<(String, String), String> {
 mod tests {
     use super::*;
 
+    /// `ayx-server-api` embeds the code it already computed as
+    /// `error_code=<code>`; the dispatcher must read that rather than scanning
+    /// prose. It previously did not: the prose scan looks for `"not found"`
+    /// (space) while the token is `not_found` (underscore), so a Server-side
+    /// 404 was classified only by accident of the body text, and a 410 fell
+    /// through to `Internal` — the same defect this change fixed on the One
+    /// side.
+    #[test]
+    fn classify_reads_the_structured_error_code_from_server_api() {
+        let gone = anyhow::anyhow!(
+            "api request failed [GET] status=410 code=http_error error_code=not_found \
+             url=https://example/v3/workflows/1 body={{\"message\":\"resource retired\"}}"
+        );
+        assert_eq!(classify_anyhow_error(&gone), ErrorCode::NotFound);
+
+        // No prose anywhere says "conflict"; only the structured token does.
+        let conflict = anyhow::anyhow!(
+            "api request failed [POST] status=412 code=http_error error_code=conflict \
+             url=https://example/v3/x body={{\"m\":\"precondition\"}}"
+        );
+        assert_eq!(classify_anyhow_error(&conflict), ErrorCode::Conflict);
+
+        // An unparseable token must not hijack the prose fallback.
+        let bogus = anyhow::anyhow!("api request failed error_code=not_a_real_code 404 not found");
+        assert_eq!(classify_anyhow_error(&bogus), ErrorCode::NotFound);
+    }
+
     #[test]
     fn parses_env_after_nested_subcommand() {
         let cli = Cli::try_parse_from(["ayx", "one", "flows", "list", "--env", "prod"])
@@ -5407,6 +5434,22 @@ fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
         .collect::<Vec<_>>()
         .join("\n")
         .to_ascii_lowercase();
+    // Prefer a classification that was already computed over re-guessing it
+    // from prose. `ayx-server-api` bails with `... error_code=<code> ...`,
+    // derived from `ErrorCode::from_http_status`, and its comment says the
+    // outer dispatcher picks that up. Nothing did: the scan below looks for
+    // `"not found"` with a space while the embedded token is `not_found` with
+    // an underscore, so a Server-side 404 was classified only when the body
+    // prose happened to say "not found", and a 410 matched nothing at all and
+    // fell through to `Internal`.
+    if let Some(code) = chain
+        .split("error_code=")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(ErrorCode::parse_code)
+    {
+        return code;
+    }
     if chain.contains("workspace mismatch") {
         return ErrorCode::WorkspaceMismatch;
     }
