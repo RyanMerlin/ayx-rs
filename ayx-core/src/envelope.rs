@@ -51,6 +51,28 @@ impl ErrorCode {
         }
     }
 
+    /// Parse a wire-format code string (the `as_str` output) back into a code.
+    ///
+    /// Needed because `ayx-server-api` embeds `error_code=<code>` in the anyhow
+    /// message it bails with, and the outer dispatcher has to recover the
+    /// classification rather than re-guessing it from prose.
+    pub fn parse_code(s: &str) -> Option<Self> {
+        Some(match s {
+            "config_missing" => ErrorCode::ConfigMissing,
+            "auth_failed" => ErrorCode::AuthFailed,
+            "permission_denied" => ErrorCode::PermissionDenied,
+            "not_found" => ErrorCode::NotFound,
+            "validation" => ErrorCode::Validation,
+            "conflict" => ErrorCode::Conflict,
+            "rate_limited" => ErrorCode::RateLimited,
+            "network" => ErrorCode::Network,
+            "upstream" => ErrorCode::Upstream,
+            "workspace_mismatch" => ErrorCode::WorkspaceMismatch,
+            "internal" => ErrorCode::Internal,
+            _ => return None,
+        })
+    }
+
     /// Classify an HTTP status code into an `ErrorCode`. 2xx returns `None`.
     ///
     /// Only statuses with an unambiguous home in this enum are mapped. The rest
@@ -234,6 +256,33 @@ mod tests {
                 "{status} indicates ayx built the request wrong"
             );
         }
+    }
+
+    /// `parse_code` must round-trip every variant, or the Server API path
+    /// silently loses the classification `from_http_status` just computed.
+    #[test]
+    fn every_error_code_round_trips_through_its_wire_string() {
+        for code in [
+            ErrorCode::ConfigMissing,
+            ErrorCode::AuthFailed,
+            ErrorCode::PermissionDenied,
+            ErrorCode::NotFound,
+            ErrorCode::Validation,
+            ErrorCode::Conflict,
+            ErrorCode::RateLimited,
+            ErrorCode::Network,
+            ErrorCode::Upstream,
+            ErrorCode::WorkspaceMismatch,
+            ErrorCode::Internal,
+        ] {
+            assert_eq!(
+                ErrorCode::parse_code(code.as_str()),
+                Some(code),
+                "{} does not round-trip",
+                code.as_str()
+            );
+        }
+        assert_eq!(ErrorCode::parse_code("not a code"), None);
     }
 
     #[test]
