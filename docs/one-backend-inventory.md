@@ -283,11 +283,49 @@ It also exercises edge coverage for representative families:
 - invalid-id detail failures across `flow` (flows and folders), `connection` (connections and permissions), `plans`, `platform.person`, `platform.token`, `jobGroup`, `outputObject`, `writeSetting`, and `workflow`
 - pagination-boundary list checks on the major list families using `--limit 1 --all --max-pages 1`
 
+## Live Coverage Baseline
+
+First real measurement of `ayx one api coverage` against the live `GET /v4/open-api-spec`, taken 2026-07-30 against workspace `alteryx-fde`.
+
+There is no earlier figure to compare against. Until the transport-unwrapping fix, the command was handed the transport's metadata envelope instead of the spec body, so it found no `paths`, reported `spec_operations: 0` with an empty `missing` list, and `--check` could not fail no matter how far the CLI drifted. Every number below is being observed for the first time.
+
+| metric | value |
+|---|---|
+| `coverage_pct` | **43.8%** |
+| `spec_operations` | 235 |
+| `covered` | 103 |
+| `missing` (spec documents it, CLI does not wire it) | **132** |
+| `stale` (inventory wires it, spec does not describe it) | 20 |
+| `outside_spec_namespace` (sibling services, not comparable) | 25 |
+| `inventory_total` / `inventory_operations` | 150 / 123 |
+
+Missing operations concentrate in a few resources:
+
+| count | resource |
+|---|---|
+| 23 | `workspaces` |
+| 9 | `plans` |
+| 9 | `schedules` |
+| 8 | `accounts` |
+| 7 | `importedDatasets` |
+| 7 | `people` |
+| 6 each | `authorization`, `environmentParameters`, `publications`, `sqlScripts`, `wrangledDatasets` |
+
+29 resources in total; the remainder are five or fewer each.
+
+### Reading these numbers correctly
+
+**`stale` does not mean broken.** It means the published spec does not describe an endpoint the CLI wires. Several entries on that list are live-verified working: `one connections update` (`PATCH /v4/connections/{id}`), `one person count` (`GET /v4/people/count`, reachable — it returns a scope 403, not a routing error), and `GET /v4/workflows`, which `inventory.rs` already documents as deliberately absent from the published spec. Treat `stale` as "the spec is incomplete here", and only investigate a row after confirming the route is genuinely dead.
+
+**`--check` currently exits 1.** It gates on `missing > 0`, and `missing` is 132. Wiring `ayx one api coverage --check` into CI — which `docs/one-roadmap.md` recommends — would red the build immediately. That is an honest signal rather than a bug, but it needs a decision first: either gate on a coverage threshold instead of `missing == 0`, or scope the gate to a resource allowlist expected to be complete. Do not wire it as-is.
+
 ## Next Backend Wiring Pass
 
 The `connection` permissions gap and the `outputObject`/`webhookFlowTask`/`writeSetting` command-or-not decision that used to head this list are both resolved: permissions now ride the repaired `/v4/connections/share` route, and all three families have first-class CLI CRUD commands wired.
 
 Priority order for the next implementation slice:
 
-1. Decide whether `dataset` needs mutating lifecycle commands (create/update/delete), or should stay a read-only surface; only list/count/detail reads are wired today.
-2. Extend edge-case live tests (invalid id, empty page, pagination boundary) to the families that don't have them yet: `dataset`, `webhookFlowTask`, `workspace`, `scheduling`, and `billing`.
+1. Decide the shape of the `--check` gate (see the coverage baseline above) before wiring it anywhere. A gate that cannot pass is a gate nobody turns on.
+2. Work the `missing` list by resource, starting with `workspaces` (23 operations, the largest single gap and an admin-facing surface).
+3. Decide whether `dataset` needs mutating lifecycle commands (create/update/delete), or should stay a read-only surface; only list/count/detail reads are wired today.
+4. Extend edge-case live tests (invalid id, empty page, pagination boundary) to the families that don't have them yet: `dataset`, `webhookFlowTask`, `workspace`, `scheduling`, and `billing`.
