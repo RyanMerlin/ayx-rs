@@ -3,9 +3,9 @@
 //! Surfaces "who has access to what" across both backends:
 //!
 //! * **Connections** — One iterates `/v4/connections`; with `--deep` it
-//!   additionally fetches `/v4/connections/{id}/permissions` per id and
-//!   groups grantees by subject. Server falls back to a plan envelope
-//!   around `dcm_connections_list_envelope`.
+//!   additionally fetches `/v4/connections/{id}/permissions/sharedSubjects`
+//!   per id and groups grantees by subject. Server falls back to a plan
+//!   envelope around `dcm_connections_list_envelope`.
 //! * **Workflows** — One has no per-flow ACL endpoint, so we surface the
 //!   workspace people roster via `/iam/v1/workspaces/{id}/people`. Server
 //!   uses `v3/collections` (Gallery workflow-membership lives in the
@@ -90,6 +90,9 @@ fn connections_one(config: &Config, args: &TelemetryArgs, deep: bool) -> Result<
         &[],
         &params,
     )?;
+    if !env.ok {
+        return Ok(env);
+    }
     let items = env
         .data
         .get("items")
@@ -124,37 +127,33 @@ fn connections_one(config: &Config, args: &TelemetryArgs, deep: bool) -> Result<
         ));
     }
 
-    // --deep: fetch /v4/connections/{id}/permissions per connection and group
-    // grantees by subject id. O(N) extra requests — operator gated.
+    // --deep: fetch /v4/connections/{id}/permissions/sharedSubjects per connection
+    // and group grantees by subject id. O(N) extra requests — operator gated.
+    //
+    // `/v4/connections/{id}/permissions` (no `/sharedSubjects` suffix) is a dead
+    // route that answers 404 — see one_connections.rs for the live-verified shape.
+    // A permissions lookup failing here must surface as a failure, not silently
+    // read back as "this connection has zero grantees".
     let mut per_connection: Vec<Value> = Vec::with_capacity(items.len());
     let mut by_subject: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for c in &items {
-        let conn_id = c.get("id").and_then(Value::as_str).map(ToString::to_string);
-        let Some(conn_id) = conn_id else { continue };
+        let Some(conn_id) = resource_id(c) else {
+            continue;
+        };
         let resp = one_api_live_request(
             config,
             "platform",
             "connection-permissions",
             "GET",
-            "/v4/connections/{id}/permissions",
+            "/v4/connections/{id}/permissions/sharedSubjects",
             false,
             &[("id", &conn_id)],
         )?;
-        let perms = resp
-            .data
-            .get("response")
-            .and_then(extract_items_array)
-            .unwrap_or_default();
-        let grantee_ids: Vec<String> = perms
-            .iter()
-            .filter_map(|p| {
-                p.get("subjectId")
-                    .or_else(|| p.get("subject_id"))
-                    .or_else(|| p.get("aid"))
-                    .and_then(Value::as_str)
-                    .map(ToString::to_string)
-            })
-            .collect();
+        if !resp.ok {
+            return Ok(resp);
+        }
+        let grantee_ids =
+            extract_shared_subject_ids(resp.data.get("response").unwrap_or(&Value::Null));
         for sid in &grantee_ids {
             by_subject
                 .entry(sid.clone())
@@ -213,6 +212,9 @@ fn workflows_one(
         &[("id", &workspace)],
         &params,
     )?;
+    if !env.ok {
+        return Ok(env);
+    }
     let items = env
         .data
         .get("items")
@@ -263,6 +265,9 @@ fn summary_one(
         &[],
         &params,
     )?;
+    if !conn_env.ok {
+        return Ok(conn_env);
+    }
     let connection_count = conn_env
         .data
         .get("items")
@@ -280,10 +285,16 @@ fn summary_one(
                 &[("id", &workspace)],
                 &params,
             )?;
-            env.data
-                .get("items")
-                .and_then(Value::as_array)
-                .map(Vec::len)
+            // A failed lookup is unknown, not zero. `None` renders as "member
+            // count omitted"; `Some(0)` would assert the workspace is empty.
+            if env.ok {
+                env.data
+                    .get("items")
+                    .and_then(Value::as_array)
+                    .map(Vec::len)
+            } else {
+                None
+            }
         }
         Err(_) => None,
     };
@@ -371,16 +382,50 @@ fn resolve_workspace_id(config: &Config, explicit: Option<&str>) -> Result<Strin
         })
 }
 
-fn extract_items_array(v: &Value) -> Option<Vec<Value>> {
-    if let Some(arr) = v.as_array() {
-        return Some(arr.clone());
+/// Extract every grantee's subject id from a `GET
+/// /v4/connections/{id}/permissions/sharedSubjects` response.
+///
+/// A resource's `id`, accepting either JSON shape the One API uses.
+///
+/// Ids come back both ways: cloud-native workflows use ULID strings, while
+/// connections, flows, folders, job groups, output objects, and write settings
+/// use JSON *numbers*. Reading only `as_str()` yielded `None` for every
+/// connection, so `telemetry permissions --deep`'s per-connection loop
+/// `continue`d on every item and reported `ok: true` with empty results on a
+/// tenant with dozens of shared connections. The same trap had already been
+/// found and fixed in the live-smoke helper and in `one_connections.rs`.
+fn resource_id(resource: &Value) -> Option<String> {
+    match resource.get("id") {
+        Some(Value::String(s)) => Some(s.clone()),
+        Some(Value::Number(n)) => Some(n.to_string()),
+        _ => None,
     }
-    for k in ["items", "results", "data", "records", "value"] {
-        if let Some(arr) = v.get(k).and_then(Value::as_array) {
-            return Some(arr.clone());
+}
+
+/// Unlike a plain list endpoint, this response groups grantees into `people`
+/// and `groups` buckets rather than one flat array (see
+/// `one_connections::find_shared_subject` for the sibling lookup that reads
+/// the same shape).
+fn extract_shared_subject_ids(shared_subjects: &Value) -> Vec<String> {
+    let mut ids = Vec::new();
+    for bucket in ["people", "groups"] {
+        let Some(entries) = shared_subjects.get(bucket).and_then(Value::as_array) else {
+            continue;
+        };
+        for entry in entries {
+            let id = ["subjectId", "id"]
+                .iter()
+                .find_map(|key| match entry.get(key) {
+                    Some(Value::String(s)) => Some(s.clone()),
+                    Some(Value::Number(n)) => Some(n.to_string()),
+                    _ => None,
+                });
+            if let Some(id) = id {
+                ids.push(id);
+            }
         }
     }
-    None
+    ids
 }
 
 fn wrap_server_envelope(inner: Envelope, resource: &str) -> Envelope {
@@ -405,6 +450,27 @@ mod tests {
     use ayx_core::profile::{
         AlteryxOneProfile, MongoDatabases, MongoMode, MongoProfile, ServerProfile,
     };
+
+    /// The `--deep` per-connection loop read `id` with `as_str()` only. Live
+    /// connection ids are JSON numbers, so every item yielded `None` and was
+    /// skipped: the loop body never ran, and a tenant with dozens of shared
+    /// connections got `ok: true` with an empty result and no error.
+    #[test]
+    fn resource_id_accepts_the_numeric_ids_the_one_api_actually_returns() {
+        assert_eq!(
+            resource_id(&json!({ "id": 44865 })),
+            Some("44865".to_string()),
+            "connections, flows, folders, job groups, output objects and write \
+             settings all return numeric ids"
+        );
+        assert_eq!(
+            resource_id(&json!({ "id": "01KY5TC876M1GFEA2A4P2CZVBR" })),
+            Some("01KY5TC876M1GFEA2A4P2CZVBR".to_string()),
+            "cloud-native workflows return ULID strings"
+        );
+        assert_eq!(resource_id(&json!({ "name": "no id" })), None);
+        assert_eq!(resource_id(&json!({ "id": null })), None);
+    }
 
     fn base() -> Config {
         Config {
@@ -472,20 +538,26 @@ mod tests {
     }
 
     #[test]
-    fn extract_items_array_handles_common_shapes() {
-        assert_eq!(
-            extract_items_array(&json!([{"id": 1}])).map(|v| v.len()),
-            Some(1)
-        );
-        assert_eq!(
-            extract_items_array(&json!({"items": [{"id": 1}, {"id": 2}]})).map(|v| v.len()),
-            Some(2)
-        );
-        assert_eq!(
-            extract_items_array(&json!({"records": [{"id": 1}]})).map(|v| v.len()),
-            Some(1)
-        );
-        assert_eq!(extract_items_array(&json!({"nope": 42})), None);
+    fn extract_shared_subject_ids_reads_both_people_and_group_buckets() {
+        let shared_subjects = json!({
+            "people": [
+                { "subjectId": 646, "policyTag": "connection_author" },
+                { "id": 113168, "policyTag": "editor" },
+            ],
+            "groups": [
+                { "subjectId": "grp-1" },
+            ],
+        });
+        let mut ids = extract_shared_subject_ids(&shared_subjects);
+        ids.sort();
+        assert_eq!(ids, vec!["113168", "646", "grp-1"]);
+    }
+
+    #[test]
+    fn extract_shared_subject_ids_tolerates_missing_or_empty_buckets() {
+        assert!(extract_shared_subject_ids(&json!({})).is_empty());
+        assert!(extract_shared_subject_ids(&Value::Null).is_empty());
+        assert!(extract_shared_subject_ids(&json!({"people": [], "groups": []})).is_empty());
     }
 
     #[test]

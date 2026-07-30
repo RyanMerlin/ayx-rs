@@ -105,14 +105,50 @@ jobs:
       - name: Build release
         run: cargo build --release --locked --target ${{ matrix.target }}
         shell: bash
+      # Runs unconditionally, unlike the sign/notarize steps below. Without it a
+      # release with no signing secrets skips all three of them and still reports
+      # green, which is exactly how v0.14.0 shipped unsigned macOS binaries under
+      # a passing check. Warn-only by default because signing is deliberately
+      # deferred; set the repo variable AYX_REQUIRE_MACOS_SIGNING=true to make it
+      # a hard gate the day the certificates land, with no workflow edit.
+      - name: Report macOS signing posture
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          REQUIRE_SIGNING: ${{ vars.AYX_REQUIRE_MACOS_SIGNING }}
+        run: |
+          set -euo pipefail
+          if [ -n "$MACOS_CODESIGN_CERT_P12_B64" ] && [ -n "$MACOS_CODESIGN_CERT_PASSWORD" ] && [ -n "$MACOS_CODESIGN_IDENTITY" ] && [ -n "$MACOS_NOTARY_KEY_ID" ] && [ -n "$MACOS_NOTARY_ISSUER_ID" ] && [ -n "$MACOS_NOTARY_PRIVATE_KEY_B64" ]; then
+            echo "macOS signing and notarization are ACTIVE for this build (target: ${TARGET})." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "### :warning: macOS binaries are UNSIGNED and NOT NOTARIZED"
+            echo
+            echo "Target \`${TARGET}\` is missing one or more \`AYX_MACOS_*\` signing/notary secrets."
+            echo "Users who download this release will hit Gatekeeper (\"cannot be opened because the developer cannot be verified\" / \"is damaged\") and must manually clear quarantine."
+            echo "Signing is deliberately deferred, not accidental, unless \`AYX_REQUIRE_MACOS_SIGNING\` says otherwise below."
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Workflow commands are parsed from stdout, so these must not be redirected.
+          echo "::warning title=Unsigned macOS release::Target ${TARGET} is missing AYX_MACOS_* signing/notary secrets. This release's macOS binaries are unsigned and not notarized; users will hit Gatekeeper."
+          if [ "${REQUIRE_SIGNING:-}" = "true" ]; then
+            echo "::error title=macOS signing required::AYX_REQUIRE_MACOS_SIGNING=true but signing/notary secrets are missing for target ${TARGET}. Failing the build."
+            echo "**AYX_REQUIRE_MACOS_SIGNING=true, so this is a hard failure.**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      # Gated on the whole codesign triple, not just the certificate. With only
+      # the cert present, the import action or `codesign --sign ""` hard-fails
+      # the release -- turning a partially-configured secret set into a broken
+      # build rather than the unsigned-but-successful one the posture step above
+      # just reported.
       - name: Import macOS signing certificate
-        if: env.MACOS_CODESIGN_CERT_P12_B64 != ''
+        if: env.MACOS_CODESIGN_CERT_P12_B64 != '' && env.MACOS_CODESIGN_CERT_PASSWORD != '' && env.MACOS_CODESIGN_IDENTITY != ''
         uses: apple-actions/import-codesign-certs@v7
         with:
           p12-file-base64: ${{ secrets.AYX_MACOS_CODESIGN_CERT_P12_B64 }}
           p12-password: ${{ secrets.AYX_MACOS_CODESIGN_CERT_PASSWORD }}
       - name: Sign macOS release binary
-        if: env.MACOS_CODESIGN_CERT_P12_B64 != ''
+        if: env.MACOS_CODESIGN_CERT_P12_B64 != '' && env.MACOS_CODESIGN_CERT_PASSWORD != '' && env.MACOS_CODESIGN_IDENTITY != ''
         shell: bash
         run: |
           set -euo pipefail

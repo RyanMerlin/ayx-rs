@@ -23,6 +23,20 @@ iwr https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.ps1
 
 The installer downloads the latest release, verifies its SHA-256 checksum, and puts the `ayx` binary on your PATH. On macOS and Linux it adds the install directory to `~/.profile`, so open a new terminal (or run the `export PATH=…` line it prints) before your first command.
 
+**macOS Gatekeeper:** release binaries aren't signed or notarized yet, so Gatekeeper will refuse to run the downloaded binary with something like "cannot be opened because the developer cannot be verified" or "is damaged and can't be opened". Clear the quarantine attribute to run it:
+
+```bash
+xattr -d com.apple.quarantine <path-to-binary-or-archive>
+```
+
+If you extracted a directory instead, add `-r` to clear it recursively:
+
+```bash
+xattr -dr com.apple.quarantine <path-to-directory>
+```
+
+Signing and notarization are planned.
+
 Confirm it's installed:
 
 ```bash

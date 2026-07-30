@@ -18,18 +18,63 @@ pub struct MissingEndpoint {
 pub struct StaleEndpoint {
     pub method: String,
     pub path: String,
-    pub command: String,
+    /// Every CLI command that dispatches this endpoint. Was a single `command`
+    /// string; widened because one endpoint can legitimately back several commands.
+    pub commands: Vec<String>,
+}
+
+/// A wired inventory endpoint that lives outside the namespace this spec can
+/// describe, and is therefore neither `covered`, `missing`, nor `stale`.
+///
+/// The One gateway spec (`GET /v4/open-api-spec`) documents `/v4` only, but the
+/// CLI also speaks several sibling services (`/svc-workflow`, `/plans/v1`,
+/// `/scheduling/v1`, `/billing/v1`, `/iam/v1`). Those rows used to be dropped on
+/// the floor, which understated `inventory_operations` and made it impossible to
+/// tell "we compared this and it matched" from "we never compared this at all".
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UncomparableEndpoint {
+    pub method: String,
+    pub path: String,
+    pub commands: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CoverageReport {
-    pub coverage_pct: f64,
+    /// Percentage of *comparable* spec operations that the inventory wires.
+    ///
+    /// `None` when the spec contributes nothing comparable (empty, malformed, or
+    /// entirely outside `/v4`). Reporting `100.0` there would read as total
+    /// coverage when the truth is that nothing was compared at all.
+    ///
+    /// Scoped to the namespace both sides can express — see
+    /// `outside_spec_namespace` for wired endpoints this figure deliberately
+    /// excludes. It is not "percent of the CLI's One surface that is covered".
+    pub coverage_pct: Option<f64>,
+    /// Raw HTTP operations in the spec, before canonical collapse.
     pub spec_operations: usize,
+    /// Distinct *canonical* inventory keys comparable against this spec.
+    ///
+    /// This is deliberately not `inventory_total - outside_spec_namespace.len()`.
+    /// `canonical_op` strips query strings, so wired rows that differ only by
+    /// query — `/v4/people` vs `/v4/people?role=admin`, `/v4/workflows` vs
+    /// `/v4/workflows?limit=1` — collapse to one comparable key while remaining
+    /// two distinct wired rows. A spec cannot distinguish them, so matching
+    /// them separately is impossible; counting them separately here would
+    /// overstate what was compared.
     pub inventory_operations: usize,
+    /// Distinct wired inventory rows, by raw `(method, path)`, comparable or not.
+    ///
+    /// Always `>= inventory_operations + outside_spec_namespace.len()`, and
+    /// strictly greater whenever query-only variants are wired (see above).
+    pub inventory_total: usize,
     pub covered: usize,
     pub missing: Vec<MissingEndpoint>,
     pub stale: Vec<StaleEndpoint>,
     pub unmatched_spec_paths: Vec<String>,
+    /// Wired endpoints outside the spec's namespace. Not a defect — these are
+    /// real, working commands against sibling services — but they are unverified
+    /// by this diff, so they are reported rather than hidden.
+    pub outside_spec_namespace: Vec<UncomparableEndpoint>,
 }
 
 const HTTP_METHODS: &[&str] = &[
@@ -37,19 +82,28 @@ const HTTP_METHODS: &[&str] = &[
 ];
 
 /// Canonicalize an operation to `(UPPER_METHOD, canonical_path)`.
-/// Anchors the path at `/v4`, drops query/fragment and trailing slash, and
-/// replaces every `{param}` segment with `{}`. Returns `None` if no `/v4`.
+///
+/// Drops query/fragment and trailing slash, and replaces every `{param}`
+/// segment with `{}`. Returns `None` unless the path is rooted at `/v4` — the
+/// only namespace the One gateway spec describes.
+///
+/// The `/v4` must be the path's *first* segment. An earlier version searched
+/// for `/v4/` anywhere, so a sibling service's own v4 would be folded into the
+/// gateway namespace: `/svc-workflow/api/v4/workflows` matched the gateway's
+/// `GET /v4/workflows` row and reported as spec-verified. `/svc-workflow`
+/// already ships `/api/v0`, `/api/v1`, and `/api/v2`, so that collision was one
+/// version bump away, and it would have inverted the meaning of
+/// `outside_spec_namespace` for every row it hit.
+///
+/// A spec whose `servers[].url` carries a base path is already normalized by
+/// the caller before it gets here (`{base}{path}`), so `/v4` still lands first.
 pub fn canonical_op(method: &str, full_path: &str) -> Option<(String, String)> {
     let no_q = full_path.split(['?', '#']).next().unwrap_or(full_path);
     let trimmed = no_q.trim_end_matches('/');
-    let idx = trimmed.find("/v4/").or_else(|| {
-        if trimmed.ends_with("/v4") {
-            Some(trimmed.len() - 3)
-        } else {
-            None
-        }
-    })?;
-    let from_v4 = &trimmed[idx..];
+    if !(trimmed.starts_with("/v4/") || trimmed == "/v4") {
+        return None;
+    }
+    let from_v4 = trimmed;
     let canon = from_v4
         .split('/')
         .map(|seg| {
@@ -103,12 +157,35 @@ pub fn coverage(spec: &Value) -> CoverageReport {
     // Inventory canonical set + a lookup back to (method, path, command) for stale.
     let inv_full = inventory_endpoints_full();
     let mut inv_keys: HashSet<(String, String)> = HashSet::new();
-    let mut inv_meta: HashMap<(String, String), (&'static str, &'static str, &'static str)> =
+    let mut inv_meta: HashMap<(String, String), (&'static str, &'static str, Vec<&'static str>)> =
         HashMap::new();
+    // A row that cannot be canonicalized is outside this spec's namespace, not
+    // absent. Recording it keeps `inventory_total` honest and stops a whole
+    // sibling service (all of `/svc-workflow`, say) from silently vanishing
+    // from the report.
+    let mut outside: Vec<UncomparableEndpoint> = Vec::new();
     for (m, p, c) in &inv_full {
-        if let Some(key) = canonical_op(m, p) {
-            inv_keys.insert(key.clone());
-            inv_meta.insert(key, (m, p, c));
+        match canonical_op(m, p) {
+            Some(key) => {
+                inv_keys.insert(key.clone());
+                // Merge, never overwrite. Rows that differ only by query string
+                // share a canonical key, and a plain `insert` kept only the
+                // last one — so a stale `/v4/workflows` reported `one workflows
+                // count` while `one workflows list` vanished from the report,
+                // telling the operator that half the affected commands were
+                // fine.
+                let entry = inv_meta.entry(key).or_insert_with(|| (m, p, Vec::new()));
+                for name in c.iter() {
+                    if !entry.2.contains(name) {
+                        entry.2.push(name);
+                    }
+                }
+            }
+            None => outside.push(UncomparableEndpoint {
+                method: (*m).to_string(),
+                path: (*p).to_string(),
+                commands: c.iter().map(|name| (*name).to_string()).collect(),
+            }),
         }
     }
 
@@ -159,7 +236,7 @@ pub fn coverage(spec: &Value) -> CoverageReport {
         .map(|(m, p, c)| StaleEndpoint {
             method: (*m).to_string(),
             path: (*p).to_string(),
-            command: (*c).to_string(),
+            commands: c.iter().map(|name| (*name).to_string()).collect(),
         })
         .collect();
 
@@ -168,22 +245,37 @@ pub fn coverage(spec: &Value) -> CoverageReport {
         .sort_by(|a, b| (&a.resource, &a.path, &a.method).cmp(&(&b.resource, &b.path, &b.method)));
     stale.sort_by(|a, b| (&a.path, &a.method).cmp(&(&b.path, &b.method)));
     unmatched.sort();
+    outside.sort_by(|a, b| (&a.path, &a.method).cmp(&(&b.path, &b.method)));
+    outside.dedup_by(|a, b| a.path == b.path && a.method == b.method);
+
+    // Counted from the raw rows, independently of either bucket. The two
+    // buckets use different dedup keys (canonical vs raw), so deriving this as
+    // their sum would silently undercount every query-only variant.
+    let inventory_total = inv_full
+        .iter()
+        .map(|(m, p, _)| (*m, *p))
+        .collect::<HashSet<_>>()
+        .len();
 
     let covered = spec_keys.intersection(&inv_keys).count();
+    // Nothing comparable in the spec means no coverage figure exists. `100.0`
+    // here would report a garbage or empty spec as fully covered.
     let coverage_pct = if spec_keys.is_empty() {
-        100.0
+        None
     } else {
-        (covered as f64 / spec_keys.len() as f64 * 1000.0).round() / 10.0
+        Some((covered as f64 / spec_keys.len() as f64 * 1000.0).round() / 10.0)
     };
 
     CoverageReport {
         coverage_pct,
         spec_operations: spec_ops,
         inventory_operations: inv_keys.len(),
+        inventory_total,
         covered,
         missing,
         stale,
         unmatched_spec_paths: unmatched,
+        outside_spec_namespace: outside,
     }
 }
 
@@ -191,6 +283,7 @@ pub fn coverage(spec: &Value) -> CoverageReport {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::collections::BTreeSet;
 
     fn spec_with(paths: Value) -> Value {
         json!({ "openapi": "3.0.0", "servers": [{ "url": "https://x/" }], "paths": paths })
@@ -237,7 +330,13 @@ mod tests {
             !r.stale.is_empty(),
             "wired endpoints absent from spec must be stale"
         );
-        assert!(r.stale.iter().all(|s| !s.command.is_empty()));
+        assert!(r.stale.iter().all(|s| !s.commands.is_empty()));
+        assert!(
+            r.stale
+                .iter()
+                .all(|s| s.commands.iter().all(|c| c.starts_with("one "))),
+            "every stale row must name real `ayx one ...` commands"
+        );
     }
 
     #[test]
@@ -255,6 +354,209 @@ mod tests {
         assert!(r.missing.iter().all(|m| m.path != "/flows/{id}"));
     }
 
+    /// The inventory-side mirror of `non_v4_path_is_unmatched_not_dropped`.
+    ///
+    /// The spec side always recorded a non-`/v4` operation in
+    /// `unmatched_spec_paths`, but the inventory side silently dropped the
+    /// matching rows, so every endpoint on a sibling service — all of
+    /// `/svc-workflow`, `/plans/v1`, `/scheduling/v1`, `/billing/v1`,
+    /// `/iam/v1` — vanished from the report entirely: not covered, not stale,
+    /// not counted. `inventory_operations` then reported 123 for a 150-row
+    /// inventory while `coverage_pct` silently described only the `/v4` slice.
+    #[test]
+    fn wired_endpoints_outside_the_spec_namespace_are_reported_not_dropped() {
+        let r = coverage(&spec_with(json!({ "/v4/flows": { "get": {} } })));
+
+        assert!(
+            !r.outside_spec_namespace.is_empty(),
+            "the real inventory wires sibling services (/svc-workflow, /plans/v1, \
+             /scheduling/v1, /billing/v1, /iam/v1); none were reported"
+        );
+        // Derive the expectation from the inventory independently, rather than
+        // re-stating how `coverage()` computes the field. Asserting
+        // `inventory_total == inventory_operations + outside.len()` would be a
+        // tautology -- that is the definition -- and would still pass if the
+        // partitioning silently started dropping rows on both sides at once.
+        let expected_outside: BTreeSet<(String, String)> = inventory_endpoints_full()
+            .iter()
+            .filter(|(m, p, _)| canonical_op(m, p).is_none())
+            .map(|(m, p, _)| ((*m).to_string(), (*p).to_string()))
+            .collect();
+        let reported_outside: BTreeSet<(String, String)> = r
+            .outside_spec_namespace
+            .iter()
+            .map(|e| (e.method.clone(), e.path.clone()))
+            .collect();
+        assert_eq!(
+            reported_outside, expected_outside,
+            "every inventory row that cannot be canonicalized must be reported, \
+             and nothing else"
+        );
+        let distinct_raw_rows: BTreeSet<(&str, &str)> = inventory_endpoints_full()
+            .iter()
+            .map(|(m, p, _)| (*m, *p))
+            .collect();
+        assert_eq!(
+            r.inventory_total,
+            distinct_raw_rows.len(),
+            "inventory_total must count every distinct wired row"
+        );
+        assert!(
+            r.inventory_total >= r.inventory_operations + expected_outside.len(),
+            "the two buckets dedupe on different keys, so their sum can only \
+             ever be <= the raw row count"
+        );
+        // Every reported row must name the command(s) that reach it, or the
+        // report cannot be acted on.
+        for e in &r.outside_spec_namespace {
+            assert!(
+                !e.commands.is_empty(),
+                "{} {} is reported with no dispatching command",
+                e.method,
+                e.path
+            );
+            assert!(
+                !e.path.contains("/v4/"),
+                "{} {} is comparable and must not be listed as outside",
+                e.method,
+                e.path
+            );
+        }
+        // Sanity-check the specific services this was written to catch.
+        let paths: Vec<&str> = r
+            .outside_spec_namespace
+            .iter()
+            .map(|e| e.path.as_str())
+            .collect();
+        assert!(
+            paths.iter().any(|p| p.starts_with("/svc-workflow/")),
+            "cloud-native workflows are wired but absent from the report: {paths:?}"
+        );
+    }
+
+    /// A row outside the spec namespace must never be miscounted as drift.
+    /// Reporting `/svc-workflow` as `stale` would send someone deleting live,
+    /// working commands.
+    #[test]
+    fn outside_namespace_rows_are_not_reported_as_stale() {
+        let r = coverage(&spec_with(json!({ "/v4/flows": { "get": {} } })));
+        for e in &r.outside_spec_namespace {
+            assert!(
+                !r.stale
+                    .iter()
+                    .any(|s| s.path == e.path && s.method == e.method),
+                "{} {} is outside the spec namespace but was reported as stale",
+                e.method,
+                e.path
+            );
+        }
+    }
+
+    /// `inventory_total` must count raw wired rows, not the sum of the two
+    /// buckets. `canonical_op` strips query strings, so `/v4/people` and
+    /// `/v4/people?role=admin` are two wired rows but one comparable key; an
+    /// earlier version derived the total as `inv_keys.len() + outside.len()`
+    /// and silently undercounted every such pair.
+    #[test]
+    fn query_only_variants_are_counted_as_distinct_wired_rows() {
+        let collapsing: Vec<(&str, &str)> = inventory_endpoints_full()
+            .iter()
+            .filter(|(_, p, _)| p.contains('?'))
+            .map(|(m, p, _)| (*m, *p))
+            .collect();
+        assert!(
+            !collapsing.is_empty(),
+            "this test is meaningless without a wired query-string endpoint; \
+             the inventory has none, so re-derive the guard"
+        );
+
+        let r = coverage(&spec_with(json!({ "/v4/flows": { "get": {} } })));
+        // Each query variant shares a canonical key with its bare form, so it
+        // adds to the raw total without adding a comparable key.
+        for (method, path) in &collapsing {
+            let bare = path.split('?').next().unwrap();
+            let bare_is_wired = inventory_endpoints_full()
+                .iter()
+                .any(|(m, p, _)| m == method && *p == bare);
+            assert!(
+                bare_is_wired,
+                "{method} {path} has no bare counterpart; the collapse premise \
+                 does not hold and this guard needs rewriting"
+            );
+        }
+        assert!(
+            r.inventory_total > r.inventory_operations + r.outside_spec_namespace.len(),
+            "with {} query-only variant(s) wired, the raw total must exceed the \
+             sum of the deduped buckets",
+            collapsing.len()
+        );
+    }
+
+    /// A sibling service's own `/v4` must not be folded into the gateway
+    /// namespace. `/svc-workflow` already ships `/api/v0`, `/api/v1`, and
+    /// `/api/v2`; when it reaches v4, an unanchored `find("/v4/")` would match
+    /// the gateway's `GET /v4/workflows` row and report those paths as
+    /// spec-verified instead of outside the namespace.
+    #[test]
+    fn only_a_leading_v4_segment_anchors_a_path() {
+        assert_eq!(
+            canonical_op("GET", "/v4/workflows"),
+            Some(("GET".into(), "/v4/workflows".into()))
+        );
+        assert_eq!(
+            canonical_op("GET", "/svc-workflow/api/v4/workflows"),
+            None,
+            "a sibling service's v4 must stay outside the gateway namespace"
+        );
+        assert_eq!(canonical_op("GET", "/plans/v1/plans"), None);
+        assert_eq!(
+            canonical_op("get", "/v4/flows/{flowId}"),
+            Some(("GET".into(), "/v4/flows/{}".into()))
+        );
+    }
+
+    /// Rows that collapse to one canonical key must contribute *all* their
+    /// commands to the stale report. `inv_meta.insert` overwrote, so a stale
+    /// `/v4/workflows` named only `one workflows count` and silently dropped
+    /// `one workflows list` — telling an operator that half the affected
+    /// commands were unaffected.
+    #[test]
+    fn stale_rows_name_every_command_that_shares_a_canonical_key() {
+        let r = coverage(&spec_with(json!({ "/v4/flows": { "get": {} } })));
+        let workflows = r
+            .stale
+            .iter()
+            .find(|s| s.path.starts_with("/v4/workflows"))
+            .expect("the workflows listing route is absent from the gateway spec, so it is stale");
+        for expected in ["one workflows list", "one workflows count"] {
+            assert!(
+                workflows.commands.iter().any(|c| c == expected),
+                "{expected} shares the canonical key but is missing from {:?}",
+                workflows.commands
+            );
+        }
+    }
+
+    #[test]
+    fn empty_or_uncomparable_spec_reports_no_coverage_figure() {
+        // A spec with nothing on /v4 compares nothing. Reporting 100.0 would
+        // read as "fully covered" when the real answer is "not measured".
+        let r = coverage(
+            &json!({ "servers": [{ "url": "https://host" }], "paths": { "/health": { "get": {} } } }),
+        );
+        assert_eq!(
+            r.coverage_pct, None,
+            "nothing comparable must not report a percentage"
+        );
+        assert_eq!(r.covered, 0);
+
+        let r = coverage(&spec_with(json!({ "/v4/flows": { "get": {} } })));
+        assert!(
+            r.coverage_pct.is_some(),
+            "a comparable spec must still report a figure"
+        );
+    }
+
     #[test]
     fn non_v4_path_is_unmatched_not_dropped() {
         let spec = json!({ "servers": [{ "url": "https://host" }], "paths": { "/health": { "get": {} } } });
@@ -262,88 +564,63 @@ mod tests {
         assert!(r.unmatched_spec_paths.iter().any(|p| p.contains("/health")));
     }
 
+    /// The same raw `(METHOD, path)` may be cross-listed under more than one surface
+    /// (`GET /v4/people` is both an `iam` and a `person` endpoint). When it is, every
+    /// row must declare the **identical** command set, so `one inventory` never tells
+    /// two different stories about who calls an endpoint.
+    ///
+    /// This replaces an allowlist of colliding canonical keys. Two points matter:
+    ///   - Grouping is by RAW path, not canonical. `canonical_op` strips query strings,
+    ///     so `/v4/people` and `/v4/people?role=admin` collapse together — but they are
+    ///     genuinely different requests (`one workspace admins` filters server-side).
+    ///     Collapsing them is a coverage-matching artifact, not a wiring bug, and
+    ///     forcing their command sets to match would be a lie.
+    ///   - Now that a row carries every command that dispatches it, a true alias is
+    ///     expressed inside one row and needs no exemption.
     #[test]
-    fn inventory_has_no_duplicate_canonical_keys() {
+    fn cross_listed_endpoints_must_agree_on_their_command_set() {
         use std::collections::{BTreeSet, HashMap};
 
-        // Known, intentional command aliases that legitimately share a canonical
-        // (METHOD, path) key, keyed to the EXACT set of command names allowed to
-        // share it. Three distinct groups of CLI commands wire the same live
-        // endpoint on purpose:
-        //   - `one whoami` / `one person current` -> GET /v4/people/current
-        //   - `one workspace configuration` / `...configuration-v4` -> GET /v4/workspaces/{}/configuration
-        //   - `one person list` / `one workspace people` /
-        //     `one workspace admins` -> GET /v4/people. All three hit the
-        //     same live endpoint (`/v4/workspaces/{id}/people` and
-        //     `/v4/workspaces/{workspaceId}/admins` both 404; the workspace context
-        //     comes from the `x-alteryx-workspace-gid` header instead). `admins`
-        //     adds `?role=admin`, which `canonical_op` strips along with every
-        //     other query string, so it collapses onto the same canonical key.
-        //
-        // Keying on the exact command set (not just the (method, path) pair)
-        // means this test fails both on a brand-new accidental collision AND on
-        // an allowlisted key silently gaining or losing a member — e.g. a future
-        // 4th command accidentally landing on `GET /v4/people` still trips this,
-        // even though the key itself is already allowlisted.
-        let allowlisted_duplicates: HashMap<(&str, &str), &[&str]> = HashMap::from([
-            (
-                ("GET", "/v4/people/current"),
-                ["one whoami", "one person current"].as_slice(),
-            ),
-            (
-                ("GET", "/v4/workspaces/{}/configuration"),
-                [
-                    "one workspace configuration",
-                    "one workspace configuration-v4",
-                ]
-                .as_slice(),
-            ),
-            (
-                ("GET", "/v4/people"),
-                [
-                    "one person list",
-                    "one workspace people",
-                    "one workspace admins",
-                ]
-                .as_slice(),
-            ),
-        ]);
-
-        let mut by_key: HashMap<(String, String), Vec<&'static str>> = HashMap::new();
-        for (m, p, c) in inventory_endpoints_full() {
-            // Not every wired endpoint belongs to the /v4 API family — `iam/v1`,
-            // `plans/v1`, `scheduling/v1`, and `billing/v1` are separate versioned
-            // surfaces within Alteryx One, outside the /v4 OpenAPI spec this tool
-            // diffs against. Those are out of canonical-coverage scope by design
-            // (`canonical_op` returns `None`), so skip them rather than assume
-            // every path anchors at /v4.
-            let Some(key) = canonical_op(m, p) else {
-                continue;
-            };
-            by_key.entry(key).or_default().push(c);
+        let mut by_raw: HashMap<(&str, &str), Vec<&'static [&'static str]>> = HashMap::new();
+        for (m, p, commands) in inventory_endpoints_full() {
+            by_raw.entry((m, p)).or_default().push(commands);
         }
 
-        for (key, commands) in &by_key {
-            if commands.len() <= 1 {
+        for (key, rows) in &by_raw {
+            if rows.len() <= 1 {
                 continue;
             }
-            let key_ref = (key.0.as_str(), key.1.as_str());
-            let Some(expected) = allowlisted_duplicates.get(&key_ref) else {
-                panic!(
-                    "unexpected duplicate canonical inventory key {key:?} -> {commands:?} \
-                     (not in the known-alias allowlist; either fix the wiring or add it \
-                     to `allowlisted_duplicates` with a documented reason)"
+            let first: BTreeSet<&str> = rows[0].iter().copied().collect();
+            for other in &rows[1..] {
+                let other_set: BTreeSet<&str> = other.iter().copied().collect();
+                assert_eq!(
+                    first, other_set,
+                    "endpoint {} {} is cross-listed under multiple surfaces with different \
+                     command sets ({first:?} vs {other_set:?}); every row for one endpoint \
+                     must list every command that dispatches it",
+                    key.0, key.1
                 );
-            };
-            let actual: BTreeSet<&str> = commands.iter().copied().collect();
-            let expected: BTreeSet<&str> = expected.iter().copied().collect();
-            assert_eq!(
-                actual, expected,
-                "canonical inventory key {key:?} command set drifted from the \
-                 allowlist (actual {actual:?} vs allowlisted {expected:?}); update \
-                 `allowlisted_duplicates` if this is an intentional change, \
-                 otherwise fix the wiring"
+            }
+        }
+    }
+
+    /// Every row must name at least one dispatching command, and each name must be a
+    /// real `ayx one ...` path. An empty slice would silently vanish from `one
+    /// inventory` and from the stale-endpoint report.
+    #[test]
+    fn every_endpoint_row_names_at_least_one_one_command() {
+        for (method, path, commands) in inventory_endpoints_full() {
+            assert!(
+                !commands.is_empty(),
+                "inventory row {method} {path} lists no dispatching command"
             );
+            for name in commands {
+                assert!(
+                    name.starts_with("one "),
+                    "inventory row {method} {path} names command {name:?}, which is not an \
+                     `ayx one ...` command path"
+                );
+            }
         }
     }
 }

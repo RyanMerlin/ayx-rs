@@ -41,19 +41,12 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `GET /v4/open-api-spec`
 - `plan`
   - `POST /v4/plans`
-  - `GET /v4/plans`
-  - `POST /v4/plans/{id}/run`
   - `POST /v4/plans/{id}/permissions`
-  - `GET /v4/plans/{id}/permissions`
-  - `POST /v4/plans/package`
-  - `GET /v4/plans/count`
-  - `GET /v4/plans/{id}/runParameters`
   - `GET /v4/plans/{id}/full`
-  - `GET /v4/plans/{id}/schedules`
-  - `GET /v4/plans/{id}/package`
   - `PATCH /v4/plans/{id}`
   - `DELETE /v4/plans/{id}`
-  - `DELETE /v4/plans/{id}/permissions/{subjectId}`
+  - Notes:
+    - Only the `/v4` plan endpoints the CLI actually dispatches are listed here. Read paths (list/count/run/permissions/package/runParameters/schedules) go through the `/plans/v1` service instead. See the `plans` surface below.
 - `plans`
   - `GET /plans/v1/plans`
   - `GET /plans/v1/plans/{id}`
@@ -74,6 +67,20 @@ The public One API surface exposed here does not provide a general-purpose workf
 - `billing`
   - `GET /billing/v1/my/billing-accounts/current`
   - `GET /billing/v1/usage/export`
+- `workflow`
+  - `GET /v4/workflows`
+  - `GET /v4/workflows?limit=1`
+  - `GET /svc-workflow/api/v1/assets`
+  - `GET /svc-workflow/api/v1/assets/{id}/dependencies`
+  - `GET /svc-workflow/api/v0/workflows/{id}/availableEngines`
+  - `GET /svc-workflow/api/v1/tools`
+  - `POST /svc-workflow/api/v2/workflows/{id}/duplicate`
+  - `POST /svc-workflow/api/v2/workflows/{id}/share`
+  - Notes:
+    - Alteryx One cloud-native (canvas) workflows, ULID-keyed, served by `/svc-workflow`.
+    - Distinct from the `flow` family below, which is Designer Cloud `/v4/flows` keyed by integer ids.
+    - `GET /v4/workflows` is the one listing route the gateway exposes; it is absent from the published `/v4/open-api-spec`, so `one api coverage` reports it as stale even though it is live-wired.
+    - `detail` and `count` are synthesized client-side; the API exposes no per-id or count route.
 - `flow`
   - `POST /v4/flows`
   - `GET /v4/flows`
@@ -102,6 +109,7 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `GET /v4/folders/{id}/flows`
   - `GET /v4/folders/{id}/flows/count`
   - `POST /v4/flows/{id}/permissions`
+  - `GET /v4/flows/{id}/permissions` (`flows permissions-get`; read side of the same path)
   - `POST /v4/flows/{id}/move`
   - `PATCH /v4/flows/{id}/replaceDataset`
   - Notes:
@@ -120,10 +128,9 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `GET /v4/connections/{id}/status`
   - `PATCH /v4/connections/{id}`
   - `DELETE /v4/connections/{id}`
-  - `GET /v4/connections/{id}/permissions`
-  - `POST /v4/connections/{id}/permissions`
-  - `GET /v4/connections/{id}/permissions/{aid}`
-  - `DELETE /v4/connections/{id}/permissions/{aid}`
+  - `GET /v4/connections/{id}/permissions/sharedSubjects` (permissions read; the old `/v4/connections/{id}/permissions[/{aid}]` paths 404 with `RouteNotFoundException`)
+  - `POST /v4/connections/share` (permissions create; the connection id travels in the request body, not the path)
+  - `DELETE /v4/connections/share` (permissions delete; the connection id travels in the query string, not the path)
   - `GET /v4/connectorMetadata/{connector}/defaults`
   - `GET /v4/connectorMetadata/{connector}`
   - `GET /v4/connectorMetadata/{connector}/publish/info`
@@ -135,6 +142,16 @@ The public One API surface exposed here does not provide a general-purpose workf
     - Connector metadata defaults, current values, and overrides are wired for JDBC behavior control.
     - Credential-backend specifics still live in the API payloads rather than a local domain model.
     - Delete operations prompt for TTY confirmation unless `--yes` is supplied, so destructive runs stay explicit in automation and interactive use.
+- `dataset`
+  - `GET /v4/datasetLibrary`
+  - `GET /v4/datasetLibrary/count`
+  - `GET /v4/wrangledDatasets`
+  - `GET /v4/wrangledDatasets/count`
+  - `GET /v4/wrangledDatasets/{id}`
+  - `GET /v4/importedDatasets/{id}`
+  - Notes:
+    - Dataset library list/count plus wrangled and imported dataset detail reads are wired.
+    - Mutating dataset lifecycle operations remain documented-only in this first cut.
 - `jobGroup`
   - `GET /v4/jobLibrary`
   - `GET /v4/jobLibrary/count`
@@ -158,7 +175,7 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `GET /v4/outputObjects/count`
   - `POST /v4/outputObjects`
   - `GET /v4/outputObjects/{id}`
-  - `PUT /v4/outputObjects/{id}`
+  - `PATCH /v4/outputObjects/{id}`
   - `DELETE /v4/outputObjects/{id}`
   - `GET /v4/outputObjects/{id}/inputs`
   - `POST /v4/outputObjects/{id}/wrangleToPython`
@@ -250,6 +267,12 @@ The live smoke suite currently proves a representative path for:
 - `write-settings.list`
 - `scheduling.list`
 - `billing.current-account`
+- `workflows.list`
+- `workflows.count`
+- `workflows.tools`
+- `workflows.detail`
+- `workflows.dependencies`
+- `datasets.count`
 - `doctor.discover`
 - `doctor.auth`
 - `platform.api.status`
@@ -257,13 +280,14 @@ The live smoke suite currently proves a representative path for:
 
 It also exercises edge coverage for representative families:
 
-- invalid-id detail failures on `flow`, `connection`, `plans`, and `platform.person`
+- invalid-id detail failures across `flow` (flows and folders), `connection` (connections and permissions), `plans`, `platform.person`, `platform.token`, `jobGroup`, `outputObject`, `writeSetting`, and `workflow`
 - pagination-boundary list checks on the major list families using `--limit 1 --all --max-pages 1`
 
 ## Next Backend Wiring Pass
 
+The `connection` permissions gap and the `outputObject`/`webhookFlowTask`/`writeSetting` command-or-not decision that used to head this list are both resolved: permissions now ride the repaired `/v4/connections/share` route, and all three families have first-class CLI CRUD commands wired.
+
 Priority order for the next implementation slice:
 
-1. Fill the remaining `connection` edges around permissions and metadata override ergonomics.
-2. Decide whether `outputObject`, `webhookFlowTask`, and `writeSetting` need first-class CLI commands or should stay API-only for now.
-3. Add edge-case live tests for invalid ids, empty lists, and pagination boundaries as each family is completed.
+1. Decide whether `dataset` needs mutating lifecycle commands (create/update/delete), or should stay a read-only surface; only list/count/detail reads are wired today.
+2. Extend edge-case live tests (invalid id, empty page, pagination boundary) to the families that don't have them yet: `dataset`, `webhookFlowTask`, `workspace`, `scheduling`, and `billing`.

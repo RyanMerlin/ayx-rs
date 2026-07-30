@@ -1,5 +1,15 @@
 # One Live Validation
 
+> **Stale snapshot.** The "Known Endpoint Status" table below reflects a live probe taken
+> 2026-06-22 against `ayx` v0.9.14. The repo is now at v0.14.0 (2026-07-28) and the One surface has
+> moved since: connection permissions/sharing were repaired off the dead
+> `/v4/connections/{id}/permissions[/{aid}]` routes (`RouteNotFoundException`) onto
+> `/v4/connections/{id}/permissions/sharedSubjects` (read) and the shared `/v4/connections/share`
+> route (create/delete), and a new cloud-native `workflow` surface (`ayx one workflows ...`,
+> ULID-keyed, served by `/svc-workflow`) has since been wired and live-verified. Treat the
+> endpoint-level claims below as historical evidence, not current status. For per-endpoint, dated
+> live evidence against the current inventory, see `docs/one-endpoint-matrix.md`.
+
 This document tracks the live validation strategy for the wired Alteryx One surface.
 
 ## Coverage Model
@@ -16,6 +26,8 @@ Test the currently wired One families in the CLI and API layers:
 - platform / auth / workspace / person / token / role
 - plans
 - flows
+- workflows (cloud-native, ULID-keyed, `/svc-workflow`)
+- datasets
 - connections
   - detail
   - permissions list
@@ -121,9 +133,9 @@ broader OAuth scope at the `POST /v4/apiAccessTokens` mint step would be require
 
 | Endpoint | Command | Notes |
 |---|---|---|
-| `/v4/billing/*` | `billing *` | 404 on the test workspace tier |
-| `/v4/plans/*` | `plans *` | 404 on the test workspace tier |
-| `/v4/scheduling/*` | `scheduling *` | 404 on the test workspace tier |
+| `/billing/v1/*` | `billing *` | 404 on the test workspace tier |
+| `/plans/v1/*` | `plans *` | 404 on the test workspace tier |
+| `/scheduling/v1/*` | `scheduling *` | 404 on the test workspace tier |
 
 ## Fixed panics (v0.9.14)
 
@@ -145,6 +157,10 @@ were never affected by the collision bug and work correctly at all versions:
 - `workflow recurse`
 - `workflow convert-cloud`
 - `workflow migrate`
+
+These are the local Designer `.yxmd`/`.yxzp` tooling commands, unrelated to the Alteryx One
+cloud-native `workflow` surface described in the banner above. As of v0.14.0 they moved to
+`designer workflow *` with no back-compat alias (`ayx workflow *` no longer resolves).
 
 ## Follow-Up
 

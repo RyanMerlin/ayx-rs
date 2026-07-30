@@ -154,6 +154,25 @@ Verification:
 - Release artifacts also publish `.sigstore` bundles and GitHub provenance
   attestations for operators who want stronger supply-chain verification.
 
+macOS Gatekeeper note: release binaries are not currently code-signed or
+notarized. Gatekeeper will refuse to run a downloaded binary or extracted
+archive with an error like "cannot be opened because the developer cannot
+be verified" or "is damaged and can't be opened". Clear the quarantine
+attribute to run it:
+
+```bash
+xattr -d com.apple.quarantine <path-to-binary-or-archive>
+```
+
+For an extracted directory, add `-r` to clear it recursively:
+
+```bash
+xattr -dr com.apple.quarantine <path-to-directory>
+```
+
+Signing and notarization are planned; each release's build summary states
+whether they were active for that build.
+
 Repo governance and pre-launch checks live in `docs/public-release-checklist.md`.
 
 The installers prefer dedicated bin directories such as `~/.local/bin` so

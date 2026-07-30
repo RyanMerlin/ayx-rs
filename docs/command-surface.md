@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-07-17 06:57:30 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-07-27 01:45:15 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 345
+- Commands: 355
 - Capabilities: 6
 
 ## Commands
@@ -159,10 +159,10 @@ cargo run -q -p xtask -- refresh-command-surface
 | one connections dry-run | `one/connections/dry-run` | read-only | no | Dry-run creation of a One connection |
 | one connections list | `one/connections/list` | read-only | no | List One connections |
 | one connections permissions | `one/connections/permissions` | unclassified |  | Manage permissions for a One connection |
-| one connections permissions create | `one/connections/permissions/create` | mutating | yes | Create permissions for a One connection |
-| one connections permissions delete | `one/connections/permissions/delete` | mutating | yes | Delete a One connection permission by subject id |
-| one connections permissions detail | `one/connections/permissions/detail` | read-only | no | Inspect a One connection permission by subject id |
-| one connections permissions list | `one/connections/permissions/list` | read-only | no | List permissions for a One connection |
+| one connections permissions create | `one/connections/permissions/create` | mutating | yes | Share a One connection with people or groups |
+| one connections permissions delete | `one/connections/permissions/delete` | mutating | yes | Revoke a subject's access to a One connection |
+| one connections permissions detail | `one/connections/permissions/detail` | read-only | no | Inspect one subject's access to a One connection |
+| one connections permissions list | `one/connections/permissions/list` | read-only | no | List the people and groups a One connection is shared with |
 | one connections status | `one/connections/status` | read-only | no | Inspect connection status |
 | one connections update | `one/connections/update` | mutating | yes | Update a One connection from JSON payload |
 | one datasets | `one/datasets` | unclassified |  | Read datasets from the Alteryx One dataset APIs |
@@ -241,7 +241,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one output-objects inputs | `one/output-objects/inputs` | read-only | no | List inputs for a One output object |
 | one output-objects list | `one/output-objects/list` | read-only | no | List One output objects |
 | one output-objects update | `one/output-objects/update` | mutating | yes | Update a One output object from JSON payload |
-| one output-objects wrangle-to-python | `one/output-objects/wrangle-to-python` | read-only | no | Generate Python from a One output object |
+| one output-objects wrangle-to-python | `one/output-objects/wrangle-to-python` | mutating | yes | Generate Python from a One output object |
 | one person | `one/person` | unclassified |  | Alteryx One person (user) management |
 | one person count | `one/person/count` | read-only | no | Count One people |
 | one person create | `one/person/create` | mutating | yes | Create a One person from JSON payload |
@@ -289,6 +289,16 @@ cargo run -q -p xtask -- refresh-command-surface
 | one webhook-flow-tasks detail | `one/webhook-flow-tasks/detail` | read-only | no | Inspect a webhook flow task |
 | one webhook-flow-tasks test | `one/webhook-flow-tasks/test` | mutating | yes | Send a test webhook from JSON payload |
 | one whoami | `one/whoami` | read-only | no | Show the current One user profile |
+| one workflows | `one/workflows` | read-only | no | Alteryx One cloud-native workflows — list, inspect, copy, and share |
+| one workflows assets | `one/workflows/assets` | read-only | no | List workflow assets with the richer svc-workflow projection |
+| one workflows copy | `one/workflows/copy` | mutating | yes | Duplicate a cloud-native workflow |
+| one workflows count | `one/workflows/count` | read-only | no | Count cloud-native workflows in the workspace |
+| one workflows dependencies | `one/workflows/dependencies` | read-only | no | List the connections, datasets, and macros a workflow depends on |
+| one workflows detail | `one/workflows/detail` | read-only | no | Inspect one cloud-native workflow |
+| one workflows engines | `one/workflows/engines` | read-only | no | Show which execution engines a workflow can run on |
+| one workflows list | `one/workflows/list` | read-only | no | List Alteryx One cloud-native workflows |
+| one workflows share | `one/workflows/share` | mutating | yes | Share a cloud-native workflow with people or groups |
+| one workflows tools | `one/workflows/tools` | read-only | no | List the tools available to cloud-native workflows |
 | one workspace | `one/workspace` | unclassified |  | Alteryx One workspace inspection and administration |
 | one workspace admins | `one/workspace/admins` | read-only | no | List workspace admins |
 | one workspace configuration | `one/workspace/configuration` | read-only | no | Inspect a One workspace configuration by id |

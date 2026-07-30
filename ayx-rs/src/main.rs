@@ -1527,6 +1527,20 @@ pub(crate) enum OneCommand {
         command: OneConnectionsCommand,
     },
     #[command(
+        about = "Alteryx One cloud-native workflows — list, inspect, copy, and share",
+        long_about = "Alteryx One cloud-native workflows — list, inspect, copy, and share.\n\n\
+                      These are the Alteryx One canvas workflows (the \
+                      cloud-native/workflows/{id} web path), identified by ULIDs and served \
+                      by /svc-workflow. They are NOT `one flows`, which is the Designer \
+                      Cloud /v4/flows family keyed by integer ids — a workspace can hold \
+                      dozens of cloud-native workflows while `one flows list` returns none.",
+        arg_required_else_help = true
+    )]
+    Workflows {
+        #[command(subcommand)]
+        command: OneWorkflowsCommand,
+    },
+    #[command(
         about = "Alteryx One job groups — run, publish, and inspect",
         arg_required_else_help = true
     )]
@@ -2493,23 +2507,38 @@ pub(crate) enum OneConnectorMetadataOverridesCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneConnectionPermissionCommand {
-    /// List permissions for a One connection.
+    /// List the people and groups a One connection is shared with.
     List {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
     },
-    /// Create permissions for a One connection.
+    /// Share a One connection with people or groups.
+    #[command(alias = "share")]
     Create {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
+        /// Access level to grant. Required unless --body is used.
+        #[arg(long, value_enum)]
+        policy: Option<ConnectionSharePolicy>,
+        /// Person id to share with. Repeatable.
+        #[arg(long = "to-person", value_name = "PERSON-ID", action = clap::ArgAction::Append)]
+        to_person: Vec<String>,
+        /// Group id to share with. Repeatable.
+        #[arg(long = "to-group", value_name = "GROUP-ID", action = clap::ArgAction::Append)]
+        to_group: Vec<String>,
+        #[arg(
+            long,
+            value_name = "FILE",
+            help = "path to JSON body file",
+            conflicts_with_all = ["policy", "to_person", "to_group"]
+        )]
+        body: Option<PathBuf>,
     },
-    /// Inspect a One connection permission by subject id.
+    /// Inspect one subject's access to a One connection.
     Detail {
         #[arg(long)]
         profile: Option<String>,
@@ -2518,7 +2547,7 @@ pub(crate) enum OneConnectionPermissionCommand {
         #[arg(value_name = "SUBJECT-ID")]
         subject_id: String,
     },
-    /// Delete a One connection permission by subject id.
+    /// Revoke a subject's access to a One connection.
     Delete {
         #[arg(long)]
         profile: Option<String>,
@@ -2526,7 +2555,202 @@ pub(crate) enum OneConnectionPermissionCommand {
         connection_id: String,
         #[arg(value_name = "SUBJECT-ID")]
         subject_id: String,
+        /// Whether the subject id names a person or a group.
+        #[arg(long, value_enum, default_value_t = ShareSubjectType::Person)]
+        subject_type: ShareSubjectType,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum OneWorkflowsCommand {
+    /// List Alteryx One cloud-native workflows.
+    List {
+        #[arg(long)]
+        profile: Option<String>,
+        /// Cap results per page (server-side limit). Default is the server's own
+        /// page size (25 for /v4/workflows).
+        #[arg(long)]
+        limit: Option<u32>,
+        /// Fetch a specific page; pass the `nextPageToken` returned by a previous call.
+        #[arg(long)]
+        page_token: Option<String>,
+        /// Automatically follow `nextPageToken` until all pages are fetched.
+        /// Capped by `--max-pages` (default 50).
+        #[arg(long)]
+        all: bool,
+        /// Hard cap on pages when `--all` is set. Prevents runaway loops against
+        /// very large tenants.
+        #[arg(long)]
+        max_pages: Option<u32>,
+    },
+    /// Count cloud-native workflows in the workspace.
+    Count {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Inspect one cloud-native workflow.
+    #[command(alias = "describe")]
+    Detail {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
+        /// Also resolve the workflow's connections, datasets, and macros.
+        #[arg(long)]
+        include_dependencies: bool,
+    },
+    /// List the connections, datasets, and macros a workflow depends on.
+    #[command(alias = "deps")]
+    Dependencies {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
+    },
+    /// List workflow assets with the richer svc-workflow projection.
+    Assets {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        page_token: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        max_pages: Option<u32>,
+    },
+    /// Show which execution engines a workflow can run on.
+    Engines {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
+    },
+    /// List the tools available to cloud-native workflows.
+    Tools {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Duplicate a cloud-native workflow.
+    Copy {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
+        /// Name for the copy.
+        #[arg(long)]
+        name: String,
+        /// Source version to copy. Defaults to the workflow's current version.
+        #[arg(long)]
+        version: Option<u64>,
+    },
+    /// Share a cloud-native workflow with people or groups.
+    Share {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
+        /// Recipient: an email address (resolved via GET /v4/people) or a
+        /// numeric person id. Repeatable.
+        #[arg(long = "to-person", value_name = "EMAIL|ID", action = clap::ArgAction::Append)]
+        to_person: Vec<String>,
+        /// Group id to share with. Repeatable.
+        #[arg(long = "to-group", value_name = "GROUP-ID", action = clap::ArgAction::Append)]
+        to_group: Vec<String>,
+        /// Privilege to grant. Repeatable; required unless --body is used.
+        #[arg(long = "privilege", value_enum, action = clap::ArgAction::Append)]
+        privilege: Vec<WorkflowPrivilege>,
+        /// Also share the workflow's connections and datasets in the same call.
+        #[arg(long)]
+        include_dependencies: bool,
+        /// Notify recipients by email.
+        #[arg(long)]
+        send_email: bool,
+        /// Optional note included with the share notification.
+        #[arg(long)]
+        message: Option<String>,
+        /// Treat every --to-person value as an already-numeric person id and
+        /// skip the GET /v4/people email-resolution lookup.
+        #[arg(long)]
+        no_resolve_emails: bool,
+        #[arg(
+            long,
+            value_name = "FILE",
+            help = "path to JSON body file",
+            conflicts_with_all = [
+                "to_person", "to_group", "privilege", "include_dependencies",
+                "send_email", "message", "no_resolve_emails",
+            ]
+        )]
+        body: Option<PathBuf>,
+    },
+}
+
+/// Access level for a shared connection. Mirrors the `policy` enum of
+/// `POST /v4/connections/share`.
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConnectionSharePolicy {
+    Editor,
+    Viewer,
+}
+
+impl ConnectionSharePolicy {
+    /// The API enum is upper-case; clap renders the variants lower-case.
+    pub(crate) fn as_api_str(self) -> &'static str {
+        match self {
+            ConnectionSharePolicy::Editor => "EDITOR",
+            ConnectionSharePolicy::Viewer => "VIEWER",
+        }
+    }
+}
+
+/// Whether a share subject id names a person or a group. Required by
+/// `DELETE /v4/connections/share`, which cannot infer it from the id alone.
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ShareSubjectType {
+    Person,
+    Group,
+}
+
+impl ShareSubjectType {
+    pub(crate) fn as_api_str(self) -> &'static str {
+        match self {
+            ShareSubjectType::Person => "person",
+            ShareSubjectType::Group => "group",
+        }
+    }
+}
+
+/// Privilege grantable by `POST /svc-workflow/api/v2/workflows/{id}/share`.
+///
+/// A real clap `ValueEnum` so a typo (`--privilege raed`) is rejected by the
+/// parser before any network call, rather than surfacing as an opaque 400 from
+/// the service.
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum WorkflowPrivilege {
+    Create,
+    Delete,
+    Execute,
+    Read,
+    Share,
+    Update,
+}
+
+impl WorkflowPrivilege {
+    /// The API's privilege strings are lower-case, matching clap's own
+    /// rendering for these single-word variants — kept as an explicit
+    /// function rather than relying on that coincidence.
+    pub(crate) fn as_api_str(self) -> &'static str {
+        match self {
+            WorkflowPrivilege::Create => "create",
+            WorkflowPrivilege::Delete => "delete",
+            WorkflowPrivilege::Execute => "execute",
+            WorkflowPrivilege::Read => "read",
+            WorkflowPrivilege::Share => "share",
+            WorkflowPrivilege::Update => "update",
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
