@@ -105,6 +105,9 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
         OneCommand::Connections { command } => {
             super::one_connections::execute(&runtime, cli.apply, cli.yes, command)?
         }
+        OneCommand::Workflows { command } => {
+            super::one_workflows::execute(&runtime, cli.apply, cli.yes, command)?
+        }
         OneCommand::Datasets { command } => super::one_datasets::execute(&runtime, command)?,
         OneCommand::Flows { command } => {
             super::one_flows::execute(&runtime, cli.apply, cli.yes, command)?

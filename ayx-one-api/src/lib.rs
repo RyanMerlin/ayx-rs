@@ -437,9 +437,93 @@ fn one_transport_failure_envelope(
     if let Some(parse_error) = parse_error {
         data.insert("parse_error".to_string(), Value::String(parse_error));
     }
+    // An HTML error body means we did not reach the JSON API gateway at all. The `/v4`
+    // gateway answers unknown routes with a JSON `RouteNotFoundException`; the sibling
+    // services (`/svc-workflow`, ...) fall through to an Express default handler that
+    // renders HTML. Distinguishing the two is the difference between "the resource is
+    // missing" and "this path does not exist on this service", so say so explicitly.
+    if response_shape == "html" {
+        data.insert(
+            "error_hints".to_string(),
+            Value::Array(vec![Value::String(
+                "the service returned an HTML error page rather than the JSON API gateway — \
+                 the route likely does not exist on this service; verify the path against \
+                 docs/one-endpoint-matrix.md"
+                    .to_string(),
+            )]),
+        );
+    }
     Envelope::err_coded(
         code,
         format!("{} {} failed", surface, operation),
+        Value::Object(data),
+    )
+}
+
+/// Build a success envelope for a 2xx response whose body is not JSON.
+///
+/// Without this, a `200 text/csv` (or any other non-JSON success) fell through to
+/// [`one_transport_failure_envelope`], where `ErrorCode::from_http_status` returns `None`
+/// for a success status and the `unwrap_or` turned it into `Internal` — reporting a
+/// perfectly good response as `ok: false`.
+#[allow(clippy::too_many_arguments)]
+fn one_non_json_success_envelope(
+    status: StatusCode,
+    surface: &str,
+    operation: &str,
+    method: &str,
+    url: &str,
+    endpoint_template: &str,
+    attempts: u32,
+    request_id: Option<String>,
+    retry_after_seconds: Option<u64>,
+    parsed: &ParsedOneResponse,
+    mutating: bool,
+    elapsed_ms: u64,
+) -> Envelope {
+    let (response_shape, body_preview, content_type, parse_error) = match parsed {
+        ParsedOneResponse::Json { .. } => ("null", String::new(), String::new(), None),
+        ParsedOneResponse::NonJson {
+            response_kind,
+            body_preview,
+            content_type,
+            parse_error,
+        } => (
+            *response_kind,
+            body_preview.clone(),
+            content_type.clone(),
+            parse_error.clone(),
+        ),
+    };
+    let mut data = one_response_metadata(
+        surface,
+        operation,
+        method,
+        url,
+        endpoint_template,
+        attempts,
+        Some(status.as_u16()),
+        request_id,
+        true,
+        response_shape,
+        retry_after_seconds,
+        mutating,
+        false,
+    );
+    data.insert("elapsed_ms".to_string(), Value::from(elapsed_ms));
+    data.insert("response".to_string(), Value::Null);
+    data.insert("error_code".to_string(), Value::Null);
+    if !body_preview.is_empty() {
+        data.insert("body_preview".to_string(), Value::String(body_preview));
+    }
+    if !content_type.is_empty() {
+        data.insert("content_type".to_string(), Value::String(content_type));
+    }
+    if let Some(parse_error) = parse_error {
+        data.insert("parse_error".to_string(), Value::String(parse_error));
+    }
+    Envelope::ok_with_data(
+        format!("{} {} ok (non-JSON body)", surface, operation),
         Value::Object(data),
     )
 }
@@ -643,6 +727,51 @@ pub fn one_api_list_request(
             false,
             path_params,
         )?;
+
+        // `one_api_live_request` returns transport failures as `Ok(envelope)` with
+        // `ok: false` — it does not surface them through `?`. Without this check a
+        // failed page (404/403/500/HTML/...) fell straight into `extract_items`,
+        // which found no items in the `Null` response and this function reported a
+        // perfectly successful, silently empty list. Never do that: a failure must
+        // stay a failure.
+        if !envelope.ok {
+            if pages_fetched == 0 {
+                // Nothing fetched yet — the caller gets the original failure as-is.
+                return Ok(envelope);
+            }
+            // A later page failed after earlier pages already succeeded. Keep
+            // reporting failure (partial data must never read as `ok: true`), but
+            // don't throw away what was already fetched — attach it, labeled, so
+            // the caller can see exactly how much was retrieved before the break.
+            let mut data = envelope.data.clone();
+            if let Value::Object(ref mut map) = data {
+                map.insert("partial".to_string(), Value::Bool(true));
+                map.insert(
+                    "pages_fetched_before_failure".to_string(),
+                    Value::from(pages_fetched),
+                );
+                map.insert("items".to_string(), json!(aggregated_items));
+                map.insert("page_envelopes".to_string(), json!(page_envelopes));
+            }
+            let code = envelope
+                .error_code
+                .unwrap_or(ayx_core::envelope::ErrorCode::Internal);
+            return Ok(Envelope::err_coded(
+                code,
+                format!(
+                    "{} {} failed on page {}, after {} item{} fetched across {} prior page{}: {}",
+                    surface,
+                    operation,
+                    pages_fetched + 1,
+                    aggregated_items.len(),
+                    if aggregated_items.len() == 1 { "" } else { "s" },
+                    pages_fetched,
+                    if pages_fetched == 1 { "" } else { "s" },
+                    envelope.message,
+                ),
+                data,
+            ));
+        }
         pages_fetched += 1;
 
         let response = envelope
@@ -697,7 +826,9 @@ fn extract_items(response: &Value) -> Vec<Value> {
     if let Some(arr) = response.as_array() {
         return arr.clone();
     }
-    for key in ["items", "results", "data", "records", "value"] {
+    // `assets` is the svc-workflow list key (`GET /svc-workflow/api/v1/assets`); the
+    // `/v4` gateway uses `data`. Both are live-verified.
+    for key in ["items", "results", "data", "records", "value", "assets"] {
         if let Some(arr) = response.get(key).and_then(|v| v.as_array()) {
             return arr.clone();
         }
@@ -943,6 +1074,30 @@ pub fn one_api_live_request_with_body(
                                 data
                             }),
                         ),
+                        // A 2xx response is only a success if we actually received the real
+                        // payload. `html`/`malformed_json` at 2xx mean the body was NOT the
+                        // API response (an SSO/gateway page, a truncated body, ...) even
+                        // though the status looks fine, so those still go to the failure
+                        // builder below. Only a genuinely non-JSON body (`non_json`, e.g.
+                        // `text/csv`) is a legitimate 2xx success.
+                        ParsedOneResponse::NonJson { response_kind, .. }
+                            if status.is_success() && response_kind == "non_json" =>
+                        {
+                            one_non_json_success_envelope(
+                                status,
+                                surface,
+                                operation,
+                                &method_name,
+                                &url,
+                                endpoint,
+                                attempt,
+                                request_id.clone(),
+                                retry_after_seconds,
+                                &parsed,
+                                mutating,
+                                started.elapsed().as_millis() as u64,
+                            )
+                        }
                         ParsedOneResponse::NonJson { .. } => one_transport_failure_envelope(
                             Some(status),
                             surface,
@@ -2568,7 +2723,6 @@ mongo:
     }
 
     #[test]
-    #[ignore = "httpmock hangs in this environment; live smoke covers live transport"]
     fn live_request_turns_html_responses_into_transport_failures() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
@@ -2604,7 +2758,6 @@ mongo:
     }
 
     #[test]
-    #[ignore = "httpmock hangs in this environment; live smoke covers live transport"]
     fn live_request_turns_malformed_json_responses_into_transport_failures() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
@@ -2635,6 +2788,153 @@ mongo:
         assert_eq!(envelope.data["response_shape"], "malformed_json");
         assert_eq!(envelope.data["status_code"], 200);
         assert!(envelope.data["parse_error"].as_str().is_some());
+    }
+
+    /// T1 regression, end-to-end: commit 86965eb's whole point was that a 2xx
+    /// with a genuinely non-JSON body (e.g. `text/csv` on an export endpoint) is
+    /// a success, not a transport failure. The `html`/`malformed_json` fix above
+    /// must not regress this — assert it through the same `one_api_live_request`
+    /// entry point the html/malformed_json tests use, not just the lower-level
+    /// envelope builder unit test.
+    #[test]
+    fn live_request_treats_2xx_csv_body_as_success() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/v4/workflows/1/export");
+            then.status(200)
+                .header("content-type", "text/csv")
+                .body("id,name\n1,alpha\n");
+        });
+
+        let config = one_profile(&server.base_url());
+        let envelope = one_api_live_request(
+            &config,
+            "workflow",
+            "export",
+            "GET",
+            "/v4/workflows/1/export",
+            false,
+            &[],
+        )
+        .expect("request should return an envelope");
+
+        mock.assert();
+        assert!(envelope.ok, "2xx non-JSON body must not be an error");
+        assert_eq!(envelope.error_code, None);
+        assert_eq!(envelope.data["response_shape"], "non_json");
+        assert_eq!(envelope.data["status_code"], 200);
+    }
+
+    /// `one_api_live_request` returns transport failures as `Ok(envelope)` with
+    /// `ok: false` -- `?` does not catch that. `one_api_list_request` must check
+    /// `envelope.ok` itself, or a failed list (404 here) silently becomes a
+    /// successful empty list.
+    #[test]
+    fn list_request_json_404_is_reported_as_failure_not_an_empty_success() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/v4/widgets");
+            then.status(404)
+                .header("content-type", "application/json")
+                .body(r#"{"error":"not found"}"#);
+        });
+
+        let config = one_profile(&server.base_url());
+        let envelope = one_api_list_request(
+            &config,
+            "widget",
+            "list",
+            "/v4/widgets",
+            &[],
+            &OneListParams::new(),
+        )
+        .expect("request should return an envelope");
+
+        mock.assert();
+        assert!(!envelope.ok, "a 404 list page must not report ok: true");
+        assert_eq!(
+            envelope.error_code,
+            Some(ayx_core::envelope::ErrorCode::NotFound)
+        );
+    }
+
+    /// Same failure class as above, but the upstream answers with an HTML error
+    /// page instead of JSON (the shape a gateway/SSO redirect actually returns).
+    #[test]
+    fn list_request_html_404_is_reported_as_failure_not_an_empty_success() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET).path("/v4/widgets");
+            then.status(404)
+                .header("content-type", "text/html")
+                .body("<html><body>not found</body></html>");
+        });
+
+        let config = one_profile(&server.base_url());
+        let envelope = one_api_list_request(
+            &config,
+            "widget",
+            "list",
+            "/v4/widgets",
+            &[],
+            &OneListParams::new(),
+        )
+        .expect("request should return an envelope");
+
+        mock.assert();
+        assert!(
+            !envelope.ok,
+            "an HTML 404 list page must not report ok: true"
+        );
+        assert_eq!(envelope.data["response_shape"], "html");
+    }
+
+    /// A failure on page 2+ of an auto-paginated list must still report
+    /// `ok: false` -- it must never silently truncate to a "successful" partial
+    /// list -- but the already-fetched page(s) should still be visible, clearly
+    /// labeled `partial`, rather than thrown away.
+    #[test]
+    fn list_request_failure_on_a_later_page_stays_a_failure_but_keeps_partial_data() {
+        let server = MockServer::start();
+        let page1 = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v4/widgets")
+                .query_param("limit", "1")
+                .query_param_missing("pageToken");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"data":[{"id":"a"}],"nextPageToken":"tok2"}"#);
+        });
+        let page2 = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v4/widgets")
+                .query_param("limit", "1")
+                .query_param("pageToken", "tok2");
+            then.status(404)
+                .header("content-type", "application/json")
+                .body(r#"{"error":"not found"}"#);
+        });
+
+        let config = one_profile(&server.base_url());
+        let params = OneListParams::new()
+            .with_limit(Some(1))
+            .with_all(true, Some(5));
+        let envelope = one_api_list_request(&config, "widget", "list", "/v4/widgets", &[], &params)
+            .expect("request should return an envelope");
+
+        page1.assert();
+        page2.assert();
+        assert!(
+            !envelope.ok,
+            "partial data from a broken pagination run must never read as ok: true"
+        );
+        assert_eq!(envelope.data["partial"], true);
+        assert_eq!(envelope.data["pages_fetched_before_failure"], 1);
+        let items = envelope.data["items"]
+            .as_array()
+            .expect("partial items must still be attached");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], "a");
     }
 
     #[test]
@@ -2886,6 +3186,146 @@ mongo:
         );
         assert_eq!(envelope.data["response_shape"], "html");
         assert_eq!(envelope.data["body_preview"], "<html>forbidden</html>");
+    }
+
+    /// Sibling services (`/svc-workflow`) answer unknown routes with an Express HTML
+    /// page instead of the `/v4` gateway's JSON `RouteNotFoundException`. Classify it
+    /// as `html` so the transport can hint at a wrong path rather than a missing record.
+    #[test]
+    fn parse_one_response_classifies_express_html_error_page() {
+        let body = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+                    <title>Error</title></head><body><pre>Cannot POST /api/v0/workflows/x/share\
+                    </pre></body></html>";
+        match parse_one_response("text/html; charset=utf-8", body) {
+            ParsedOneResponse::NonJson {
+                response_kind,
+                body_preview,
+                ..
+            } => {
+                assert_eq!(response_kind, "html");
+                assert!(body_preview.contains("Cannot POST"));
+            }
+            other => panic!("unexpected parse result: {other:?}"),
+        }
+    }
+
+    /// T2: an HTML error body means we never reached the JSON API gateway, so the
+    /// envelope must say the path is probably wrong for that service.
+    #[test]
+    fn transport_failure_envelope_hints_on_html_body() {
+        let parsed = ParsedOneResponse::NonJson {
+            response_kind: "html",
+            body_preview: "<pre>Cannot GET /svc-workflow/api/v1/nope</pre>".to_string(),
+            content_type: "text/html".to_string(),
+            parse_error: None,
+        };
+        let envelope = one_transport_failure_envelope(
+            Some(StatusCode::NOT_FOUND),
+            "workflow",
+            "detail",
+            "GET",
+            "https://example.test/svc-workflow/api/v1/nope",
+            "/svc-workflow/api/v1/nope",
+            1,
+            None,
+            &parsed,
+            false,
+            false,
+        );
+
+        assert!(!envelope.ok);
+        assert_eq!(
+            envelope.error_code,
+            Some(ayx_core::envelope::ErrorCode::NotFound)
+        );
+        let hints = envelope.data["error_hints"]
+            .as_array()
+            .expect("error_hints must be present for an html error body");
+        assert_eq!(hints.len(), 1);
+        assert!(
+            hints[0]
+                .as_str()
+                .unwrap_or_default()
+                .contains("HTML error page"),
+            "hint should explain the HTML page, got: {hints:?}"
+        );
+
+        // A JSON error body must NOT get the hint.
+        let json_parsed = ParsedOneResponse::NonJson {
+            response_kind: "malformed_json",
+            body_preview: "{".to_string(),
+            content_type: "application/json".to_string(),
+            parse_error: Some("eof".to_string()),
+        };
+        let json_envelope = one_transport_failure_envelope(
+            Some(StatusCode::NOT_FOUND),
+            "workflow",
+            "detail",
+            "GET",
+            "https://example.test/v4/x",
+            "/v4/x",
+            1,
+            None,
+            &json_parsed,
+            false,
+            false,
+        );
+        assert!(json_envelope.data.get("error_hints").is_none());
+    }
+
+    /// T1 regression: a 2xx whose body is not JSON is a SUCCESS. Before this, the
+    /// failure builder's `unwrap_or(Internal)` turned every `200 text/csv` into
+    /// `ok: false` with `error_code: "internal"`.
+    #[test]
+    fn non_json_success_envelope_is_ok_and_uncoded() {
+        let parsed = ParsedOneResponse::NonJson {
+            response_kind: "non_json",
+            body_preview: "id,name\n1,alpha".to_string(),
+            content_type: "text/csv".to_string(),
+            parse_error: None,
+        };
+        let envelope = one_non_json_success_envelope(
+            StatusCode::OK,
+            "workflow",
+            "export",
+            "GET",
+            "https://example.test/v4/thing",
+            "/v4/thing",
+            1,
+            Some("req-9".to_string()),
+            None,
+            &parsed,
+            false,
+            42,
+        );
+
+        assert!(envelope.ok, "2xx non-JSON must not be an error");
+        assert_eq!(envelope.error_code, None);
+        assert_eq!(envelope.data["error_code"], Value::Null);
+        assert_eq!(envelope.data["ok"], true);
+        assert_eq!(envelope.data["status_code"], 200);
+        assert_eq!(envelope.data["response_shape"], "non_json");
+        assert_eq!(envelope.data["content_type"], "text/csv");
+        assert_eq!(envelope.data["body_preview"], "id,name\n1,alpha");
+        assert_eq!(envelope.data["elapsed_ms"], 42);
+        assert_eq!(envelope.data["request_id"], "req-9");
+    }
+
+    /// T3: svc-workflow returns `{ "assets": [...] }`; the `/v4` gateway returns
+    /// `{ "data": [...] }`. Both must page.
+    #[test]
+    fn extract_items_handles_assets_and_data_keys() {
+        let assets = json!({ "assets": [{ "id": "a" }, { "id": "b" }] });
+        assert_eq!(extract_items(&assets).len(), 2);
+
+        let data = json!({ "data": [{ "id": "a" }], "count": 1 });
+        assert_eq!(extract_items(&data).len(), 1);
+
+        let bare = json!([{ "id": "a" }]);
+        assert_eq!(extract_items(&bare).len(), 1);
+
+        let none = json!({ "unrelated": 1 });
+        assert!(extract_items(&none).is_empty());
     }
 
     #[test]

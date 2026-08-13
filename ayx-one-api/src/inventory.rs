@@ -7,7 +7,9 @@ use serde_json::json;
 struct EndpointSpec {
     method: &'static str,
     path: &'static str,
-    command: &'static str,
+    /// Every CLI command that dispatches this endpoint. More than one is legitimate:
+    /// `one whoami` and `one person current` both hit `GET /v4/people/current`.
+    commands: &'static [&'static str],
 }
 
 struct SurfaceSpec {
@@ -21,62 +23,70 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/v4/workspaces/current",
-        command: "one workspace current",
+        commands: &["one workspace current"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/workspaces/{id}/configuration",
-        command: "one workspace configuration",
+        commands: &[
+            "one workspace configuration",
+            "one workspace configuration-v4",
+        ],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/people",
-        command: "one workspace people",
+        commands: &[
+            "one person list",
+            "one workspace people",
+            // `share` resolves --to-person emails to ids before building its body.
+            "one workflows share",
+        ],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/people?role=admin",
-        command: "one workspace admins",
+        commands: &["one workspace admins"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/workspaces/{id}/people/batch",
-        command: "one workspace invite-users",
+        commands: &["one workspace invite-users"],
     },
     EndpointSpec {
         method: "DELETE",
         path: "/v4/workspaces/{workspaceId}/people/{id}",
-        command: "one workspace remove-user",
+        commands: &["one workspace remove-user"],
     },
     EndpointSpec {
         method: "POST",
         path: "/iam/v1/workspaces/{id}/people/suspend",
-        command: "one workspace suspend-users",
+        commands: &["one workspace suspend-users"],
     },
     EndpointSpec {
         method: "POST",
         path: "/iam/v1/workspaces/{id}/people/unsuspend",
-        command: "one workspace unsuspend-users",
+        commands: &["one workspace unsuspend-users"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/workspaces/{id}/transfer",
-        command: "one workspace transfer",
+        commands: &["one workspace transfer"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/authorization/roles/{id}/people",
-        command: "one role list-assignments",
+        commands: &["one role list-assignments"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/authorization/roles/{id}/people/{subjectId}",
-        command: "one role assign",
+        commands: &["one role assign"],
     },
     EndpointSpec {
         method: "DELETE",
         path: "/v4/authorization/roles/{id}/people/{subjectId}",
-        command: "one role unassign",
+        commands: &["one role unassign"],
     },
 ];
 
@@ -84,52 +94,52 @@ const PLANS_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/plans/v1/plans",
-        command: "one plans list",
+        commands: &["one plans list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/plans/v1/plans/{id}",
-        command: "one plans detail",
+        commands: &["one plans detail"],
     },
     EndpointSpec {
         method: "POST",
         path: "/plans/v1/plans/{id}/run",
-        command: "one plans run",
+        commands: &["one plans run"],
     },
     EndpointSpec {
         method: "GET",
         path: "/plans/v1/plans/count",
-        command: "one plans count",
+        commands: &["one plans count"],
     },
     EndpointSpec {
         method: "GET",
         path: "/plans/v1/plans/{id}/runParameters",
-        command: "one plans run-parameters",
+        commands: &["one plans run-parameters"],
     },
     EndpointSpec {
         method: "GET",
         path: "/plans/v1/plans/{id}/schedules",
-        command: "one plans schedules",
+        commands: &["one plans schedules"],
     },
     EndpointSpec {
         method: "GET",
         path: "/plans/v1/plans/{id}/package",
-        command: "one plans export",
+        commands: &["one plans export"],
     },
     EndpointSpec {
         method: "POST",
         path: "/plans/v1/plans/package",
-        command: "one plans import",
+        commands: &["one plans import"],
     },
     EndpointSpec {
         method: "GET",
         path: "/plans/v1/plans/{id}/permissions",
-        command: "one plans permissions",
+        commands: &["one plans permissions"],
     },
     EndpointSpec {
         method: "DELETE",
         path: "/plans/v1/plans/{id}/permissions/{subjectId}",
-        command: "one plans permissions remove",
+        commands: &["one plans permissions"],
     },
 ];
 
@@ -137,27 +147,27 @@ const SCHEDULING_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/scheduling/v1/schedules",
-        command: "one scheduling list",
+        commands: &["one scheduling list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/scheduling/v1/schedules/{id}",
-        command: "one scheduling detail",
+        commands: &["one scheduling detail"],
     },
     EndpointSpec {
         method: "POST",
         path: "/scheduling/v1/schedules/{id}/enable",
-        command: "one scheduling enable",
+        commands: &["one scheduling enable"],
     },
     EndpointSpec {
         method: "POST",
         path: "/scheduling/v1/schedules/{id}/disable",
-        command: "one scheduling disable",
+        commands: &["one scheduling disable"],
     },
     EndpointSpec {
         method: "GET",
         path: "/scheduling/v1/schedules/count",
-        command: "one scheduling count",
+        commands: &["one scheduling count"],
     },
 ];
 
@@ -165,12 +175,12 @@ const BILLING_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/billing/v1/my/billing-accounts/current",
-        command: "one billing current-account",
+        commands: &["one billing current-account"],
     },
     EndpointSpec {
         method: "GET",
         path: "/billing/v1/usage/export",
-        command: "one billing usage-export",
+        commands: &["one billing usage-export"],
     },
 ];
 
@@ -178,72 +188,84 @@ const PLAN_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "POST",
         path: "/v4/plans",
-        command: "one plans create",
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/plans",
-        command: "one plans list",
-    },
-    EndpointSpec {
-        method: "POST",
-        path: "/v4/plans/{id}/run",
-        command: "one plans run",
+        commands: &["one plans create"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/plans/{id}/permissions",
-        command: "one plans share",
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/plans/{id}/permissions",
-        command: "one plans permissions",
-    },
-    EndpointSpec {
-        method: "POST",
-        path: "/v4/plans/package",
-        command: "one plans import",
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/plans/count",
-        command: "one plans count",
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/plans/{id}/runParameters",
-        command: "one plans run-parameters",
+        commands: &["one plans share"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/plans/{id}/full",
-        command: "one plans full",
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/plans/{id}/schedules",
-        command: "one plans schedules",
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/plans/{id}/package",
-        command: "one plans export",
+        commands: &["one plans full"],
     },
     EndpointSpec {
         method: "PATCH",
         path: "/v4/plans/{id}",
-        command: "one plans update",
+        commands: &["one plans update"],
     },
     EndpointSpec {
         method: "DELETE",
         path: "/v4/plans/{id}",
-        command: "one plans delete",
+        commands: &["one plans delete"],
+    },
+];
+
+/// Alteryx One cloud-native workflows.
+///
+/// A separate service from the `/v4` gateway: ULID-keyed canvas workflows served by
+/// `/svc-workflow/api/vN`. `GET /v4/workflows` is the one listing route the gateway
+/// exposes and is absent from the published `/v4/open-api-spec`, so `one api coverage`
+/// will report it as stale — correctly, since the spec does not describe it.
+/// There is no `GET /v4/workflows/{id}` and no `/v4/workflows/count`.
+/// All rows live-verified 2026-07-26.
+const WORKFLOW_ENDPOINTS: &[EndpointSpec] = &[
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/workflows",
+        commands: &["one workflows list"],
     },
     EndpointSpec {
-        method: "DELETE",
-        path: "/v4/plans/{id}/permissions/{subjectId}",
-        command: "one plans permissions remove",
+        method: "GET",
+        path: "/v4/workflows?limit=1",
+        commands: &["one workflows count"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/svc-workflow/api/v1/assets",
+        commands: &[
+            "one workflows assets",
+            "one workflows detail",
+            // `copy` resolves the current version from the asset list when
+            // --version is omitted.
+            "one workflows copy",
+        ],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/svc-workflow/api/v1/assets/{id}/dependencies",
+        commands: &["one workflows dependencies"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/svc-workflow/api/v0/workflows/{id}/availableEngines",
+        commands: &["one workflows engines"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/svc-workflow/api/v1/tools",
+        commands: &["one workflows tools"],
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/svc-workflow/api/v2/workflows/{id}/duplicate",
+        commands: &["one workflows copy"],
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/svc-workflow/api/v2/workflows/{id}/share",
+        commands: &["one workflows share"],
     },
 ];
 
@@ -251,147 +273,154 @@ const FLOW_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "POST",
         path: "/v4/flows",
-        command: "one flows create",
+        commands: &["one flows create"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/flows",
-        command: "one flows list",
+        commands: &["one flows list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/flows/count",
-        command: "one flows count",
+        commands: &["one flows count"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/flowsLibrary",
-        command: "one flows library list",
+        commands: &["one flows library list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/flowsLibrary/count",
-        command: "one flows library count",
+        commands: &["one flows library count"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/folders",
-        command: "one flows folders list",
+        commands: &["one flows folders list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/folders/count",
-        command: "one flows folders count",
+        commands: &["one flows folders count"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/folders/{id}",
-        command: "one flows folders detail",
+        commands: &["one flows folders detail"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/folders",
-        command: "one flows folders create",
+        commands: &["one flows folders create"],
     },
     EndpointSpec {
         method: "PATCH",
         path: "/v4/folders/{id}",
-        command: "one flows folders update",
+        commands: &["one flows folders update"],
     },
     EndpointSpec {
         method: "DELETE",
         path: "/v4/folders/{id}",
-        command: "one flows folders delete",
+        commands: &["one flows folders delete"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/folders/{id}/flows",
-        command: "one flows folders flows list",
+        commands: &["one flows folders flows list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/folders/{id}/flows/count",
-        command: "one flows folders flows count",
+        commands: &["one flows folders flows count"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/flows/{id}",
-        command: "one flows detail",
+        commands: &["one flows detail"],
     },
     EndpointSpec {
         method: "PATCH",
         path: "/v4/flows/{id}",
-        command: "one flows update",
+        commands: &["one flows update"],
     },
     EndpointSpec {
         method: "DELETE",
         path: "/v4/flows/{id}",
-        command: "one flows delete",
+        commands: &["one flows delete"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/flows/{id}/copy",
-        command: "one flows copy",
+        commands: &["one flows copy"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/flows/{id}/run",
-        command: "one flows run",
+        commands: &["one flows run"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/flows/{id}/validate",
-        command: "one flows validate",
+        commands: &["one flows validate"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/flows/{id}/recipeParameters",
-        command: "one flows parameters",
+        commands: &["one flows parameters"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/flows/{id}/inputs",
-        command: "one flows inputs",
+        commands: &["one flows inputs"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/flows/{id}/outputs",
-        command: "one flows outputs",
+        commands: &["one flows outputs"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/flows/{id}/permissions",
-        command: "one flows permissions",
+        commands: &["one flows permissions"],
+    },
+    // Read side of the same path. `one flows permissions-get` has always dispatched
+    // this; the inventory only ever recorded the POST.
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/flows/{id}/permissions",
+        commands: &["one flows permissions-get"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/flows/{id}/move",
-        command: "one flows move",
+        commands: &["one flows move"],
     },
     EndpointSpec {
         method: "PATCH",
         path: "/v4/flows/{id}/replaceDataset",
-        command: "one flows replace-dataset",
+        commands: &["one flows replace-dataset"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/flows/package",
-        command: "one flows import",
+        commands: &["one flows import"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/flows/package/dryRun",
-        command: "one flows import-dry-run",
+        commands: &["one flows import-dry-run"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/flows/{id}/package",
-        command: "one flows export",
+        commands: &["one flows export"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/flows/{id}/package/dryRun",
-        command: "one flows export-dry-run",
+        commands: &["one flows export-dry-run"],
     },
 ];
 
@@ -399,32 +428,32 @@ const DATASET_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/v4/datasetLibrary",
-        command: "one datasets list",
+        commands: &["one datasets list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/datasetLibrary/count",
-        command: "one datasets count",
+        commands: &["one datasets count"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/wrangledDatasets",
-        command: "one datasets wrangled list",
+        commands: &["one datasets wrangled list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/wrangledDatasets/count",
-        command: "one datasets wrangled count",
+        commands: &["one datasets wrangled count"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/wrangledDatasets/{id}",
-        command: "one datasets wrangled detail",
+        commands: &["one datasets wrangled detail"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/importedDatasets/{id}",
-        command: "one datasets imported detail",
+        commands: &["one datasets imported detail"],
     },
 ];
 
@@ -432,72 +461,72 @@ const JOB_GROUP_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/v4/jobLibrary",
-        command: "one job-group list",
+        commands: &["one job-groups list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobLibrary/count",
-        command: "one job-group count",
+        commands: &["one job-groups count"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/jobGroups",
-        command: "one job-group run",
+        commands: &["one job-groups run"],
     },
     EndpointSpec {
         method: "PUT",
         path: "/v4/jobGroups/{id}/publish",
-        command: "one job-group publish",
+        commands: &["one job-groups publish"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}",
-        command: "one job-group detail",
+        commands: &["one job-groups detail"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/jobGroups/{id}/cancel",
-        command: "one job-group cancel",
+        commands: &["one job-groups cancel"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/status",
-        command: "one job-group status",
+        commands: &["one job-groups status"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/inputs",
-        command: "one job-group inputs",
+        commands: &["one job-groups inputs"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/pdfResults",
-        command: "one job-group pdf-results",
+        commands: &["one job-groups pdf-results"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/outputs",
-        command: "one job-group outputs",
+        commands: &["one job-groups outputs"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/jobs",
-        command: "one job-group jobs",
+        commands: &["one job-groups jobs"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/publications",
-        command: "one job-group publications",
+        commands: &["one job-groups publications"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/profile",
-        command: "one job-group profile",
+        commands: &["one job-groups profile"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/profileResults",
-        command: "one job-group profile-results",
+        commands: &["one job-groups profile-results"],
     },
 ];
 
@@ -505,42 +534,44 @@ const OUTPUT_OBJECT_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/v4/outputObjects",
-        command: "one output-object list",
+        commands: &["one output-objects list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/outputObjects/count",
-        command: "one output-object count",
+        commands: &["one output-objects count"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/outputObjects",
-        command: "one output-object create",
+        commands: &["one output-objects create"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/outputObjects/{id}",
-        command: "one output-object detail",
+        commands: &["one output-objects detail"],
     },
+    // PATCH, not PUT: cmd/one_output_objects.rs sends PATCH and the live API is the
+    // authority. Same correction previously applied to `flows update`.
     EndpointSpec {
-        method: "PUT",
+        method: "PATCH",
         path: "/v4/outputObjects/{id}",
-        command: "one output-object update",
+        commands: &["one output-objects update"],
     },
     EndpointSpec {
         method: "DELETE",
         path: "/v4/outputObjects/{id}",
-        command: "one output-object delete",
+        commands: &["one output-objects delete"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/outputObjects/{id}/inputs",
-        command: "one output-object inputs",
+        commands: &["one output-objects inputs"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/outputObjects/{id}/wrangleToPython",
-        command: "one output-object wrangle-to-python",
+        commands: &["one output-objects wrangle-to-python"],
     },
 ];
 
@@ -548,22 +579,22 @@ const WEBHOOK_FLOW_TASK_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "POST",
         path: "/v4/webhookFlowTasks",
-        command: "one webhook-flow-task create",
+        commands: &["one webhook-flow-tasks create"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/webhookFlowTasks/{id}",
-        command: "one webhook-flow-task detail",
+        commands: &["one webhook-flow-tasks detail"],
     },
     EndpointSpec {
         method: "DELETE",
         path: "/v4/webhookFlowTasks/{id}",
-        command: "one webhook-flow-task delete",
+        commands: &["one webhook-flow-tasks delete"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/webhooks/test",
-        command: "one webhooks test",
+        commands: &["one webhook-flow-tasks test"],
     },
 ];
 
@@ -571,32 +602,32 @@ const WRITE_SETTING_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/v4/writeSettings",
-        command: "one write-setting list",
+        commands: &["one write-settings list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/writeSettings/count",
-        command: "one write-setting count",
+        commands: &["one write-settings count"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/writeSettings",
-        command: "one write-setting create",
+        commands: &["one write-settings create"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/writeSettings/{id}",
-        command: "one write-setting detail",
+        commands: &["one write-settings detail"],
     },
     EndpointSpec {
         method: "PATCH",
         path: "/v4/writeSettings/{id}",
-        command: "one write-setting update",
+        commands: &["one write-settings update"],
     },
     EndpointSpec {
         method: "DELETE",
         path: "/v4/writeSettings/{id}",
-        command: "one write-setting delete",
+        commands: &["one write-settings delete"],
     },
 ];
 
@@ -604,92 +635,105 @@ const CONNECTION_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/v4/connections",
-        command: "one connections list",
+        commands: &["one connections list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/connections/count",
-        command: "one connections count",
+        commands: &["one connections count"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/connections",
-        command: "one connections create",
+        commands: &["one connections create"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/connections/dryRun",
-        command: "one connections dry-run",
+        commands: &["one connections dry-run"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/connections/{id}",
-        command: "one connections detail",
+        commands: &["one connections detail"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/connections/{id}/status",
-        command: "one connections status",
+        commands: &["one connections status"],
     },
     EndpointSpec {
         method: "PATCH",
         path: "/v4/connections/{id}",
-        command: "one connections update",
+        commands: &["one connections update"],
     },
     EndpointSpec {
         method: "DELETE",
         path: "/v4/connections/{id}",
-        command: "one connections delete",
+        commands: &["one connections delete"],
     },
+    // Live-verified 2026-07-26. The previous rows pointed at
+    // /v4/connections/{id}/permissions[/{aid}], which the API answers with
+    // RouteNotFoundException; sharing lives on a shared /v4/connections/share route
+    // that carries the connection id in the body (POST) or query (DELETE).
+    //
+    // `telemetry permissions connections --deep` shipped wired to the same dead
+    // /permissions route (no /sharedSubjects suffix) until it was repaired
+    // alongside this inventory row's own fix -- see telemetry/permissions.rs. It
+    // is not listed in `commands` below: that field is `ayx one ...`-only (see
+    // `coverage::tests::every_endpoint_row_names_at_least_one_one_command`), and
+    // `telemetry permissions connections` is a different top-level surface that
+    // happens to dispatch the same endpoint.
     EndpointSpec {
         method: "GET",
-        path: "/v4/connections/{id}/permissions",
-        command: "one connections permissions",
+        path: "/v4/connections/{id}/permissions/sharedSubjects",
+        commands: &[
+            "one connections permissions",
+            "one connections permissions detail",
+        ],
     },
     EndpointSpec {
         method: "POST",
-        path: "/v4/connections/{id}/permissions",
-        command: "one connections permissions create",
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/connections/{id}/permissions/{aid}",
-        command: "one connections permissions detail",
+        path: "/v4/connections/share",
+        commands: &["one connections permissions create"],
     },
     EndpointSpec {
         method: "DELETE",
-        path: "/v4/connections/{id}/permissions/{aid}",
-        command: "one connections permissions delete",
+        path: "/v4/connections/share",
+        commands: &["one connections permissions delete"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/connectorMetadata/{connector}/defaults",
-        command: "one connections connector-metadata defaults",
+        commands: &[
+            "one connections connector-metadata defaults",
+            "one connections connector-metadata template",
+        ],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/connectorMetadata/{connector}",
-        command: "one connections connector-metadata detail",
+        commands: &["one connections connector-metadata detail"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/connectorMetadata/{connector}/publish/info",
-        command: "one connections connector-metadata publish-info",
+        commands: &["one connections connector-metadata publish-info"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/connectorMetadata/{connector}/overrides",
-        command: "one connections connector-metadata overrides list",
+        commands: &["one connections connector-metadata overrides list"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/connectorMetadata/{connector}/overrides",
-        command: "one connections connector-metadata overrides create",
+        commands: &["one connections connector-metadata overrides create"],
     },
     EndpointSpec {
         method: "DELETE",
         path: "/v4/connectorMetadata/{connector}/overrides",
-        command: "one connections connector-metadata overrides delete",
+        commands: &["one connections connector-metadata overrides delete"],
     },
 ];
 
@@ -752,22 +796,27 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             EndpointSpec {
                 method: "GET",
                 path: "/v4/apiAccessTokens",
-                command: "one token",
+                commands: &[
+                    "one auth diagnose",
+                    "one auth status",
+                    "one doctor auth",
+                    "one token",
+                ],
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/apiAccessTokens",
-                command: "one token create",
+                commands: &["one token create"],
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/apiAccessTokens/{tokenId}",
-                command: "one token detail",
+                commands: &["one token detail"],
             },
             EndpointSpec {
                 method: "DELETE",
                 path: "/v4/apiAccessTokens/{tokenId}",
-                command: "one token delete",
+                commands: &["one token delete"],
             },
         ],
         notes: &[
@@ -781,57 +830,57 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             EndpointSpec {
                 method: "GET",
                 path: "/v4/people/current",
-                command: "one whoami",
+                commands: &["one person current", "one whoami"],
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/people",
-                command: "one person list",
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/people/current",
-                command: "one person current",
+                commands: &[
+                    "one person list",
+                    "one workspace people",
+                    // `share` resolves --to-person emails to ids before building its body.
+                    "one workflows share",
+                ],
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/people/count",
-                command: "one person count",
+                commands: &["one person count"],
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/people/{id}",
-                command: "one person detail",
+                commands: &["one person detail"],
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/people",
-                command: "one person create",
+                commands: &["one person create"],
             },
             EndpointSpec {
                 method: "PUT",
                 path: "/v4/people/{id}",
-                command: "one person update",
+                commands: &["one person update"],
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/people/{id}",
-                command: "one person patch",
+                commands: &["one person patch"],
             },
             EndpointSpec {
                 method: "DELETE",
                 path: "/v4/people/{id}",
-                command: "one person delete",
+                commands: &["one person delete"],
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/people/current/updatePassword",
-                command: "one person update-password",
+                commands: &["one person update-password"],
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/passwordresetrequest",
-                command: "one person password-reset-request",
+                commands: &["one person password-reset-request"],
             },
         ],
         notes: &[
@@ -845,52 +894,55 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             EndpointSpec {
                 method: "GET",
                 path: "/v4/workspaces",
-                command: "one workspace list",
+                commands: &["one workspace list"],
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/workspaces/{id}/configuration",
-                command: "one workspace configuration-v4",
+                commands: &[
+                    "one workspace configuration",
+                    "one workspace configuration-v4",
+                ],
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/workspaces/current/transfer",
-                command: "one workspace transfer-assets",
+                commands: &["one workspace transfer-assets"],
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/workspaces/current/configuration",
-                command: "one workspace current-configuration",
+                commands: &["one workspace current-configuration"],
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/workspaces/current/configuration",
-                command: "one workspace save-current-configuration",
+                commands: &["one workspace save-current-configuration"],
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/workspaces/{id}/configuration",
-                command: "one workspace save-configuration-v4",
+                commands: &["one workspace save-configuration-v4"],
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/workspaces/{id}/configuration-schema",
-                command: "one workspace configuration-schema",
+                commands: &["one workspace configuration-schema"],
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/workspaces/current/configuration-schema",
-                command: "one workspace current-configuration-schema",
+                commands: &["one workspace current-configuration-schema"],
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/workspaces/current/delete-configuration",
-                command: "one workspace delete-current-configuration",
+                commands: &["one workspace delete-current-configuration"],
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/workspaces/{id}/delete-configuration",
-                command: "one workspace delete-configuration",
+                commands: &["one workspace delete-configuration"],
             },
         ],
         notes: &[
@@ -914,7 +966,7 @@ const SURFACES: &[SurfaceSpec] = &[
         endpoints: &[EndpointSpec {
             method: "GET",
             path: "/v4/open-api-spec",
-            command: "one api open-api-spec",
+            commands: &["one api coverage", "one api open-api-spec"],
         }],
         notes: &["The OpenAPI spec is now exposed through the CLI."],
     },
@@ -923,7 +975,9 @@ const SURFACES: &[SurfaceSpec] = &[
         status: "implemented",
         endpoints: PLAN_ENDPOINTS,
         notes: &[
-            "Indexed in the official Alteryx One API help pages; the repo now wires the plan surface.",
+            "Only the /v4 plan endpoints the CLI actually dispatches are listed. Read paths \
+             (list/count/run/permissions/package/runParameters/schedules) go through the \
+             /plans/v1 service instead — see the `plans` surface.",
         ],
     },
     SurfaceSpec {
@@ -931,6 +985,16 @@ const SURFACES: &[SurfaceSpec] = &[
         status: "implemented",
         endpoints: PLANS_ENDPOINTS,
         notes: &["Managed plans surface."],
+    },
+    SurfaceSpec {
+        name: "workflow",
+        status: "implemented",
+        endpoints: WORKFLOW_ENDPOINTS,
+        notes: &[
+            "Alteryx One cloud-native (canvas) workflows, ULID-keyed, served by /svc-workflow.",
+            "Distinct from the `flow` surface, which is Designer Cloud /v4/flows keyed by integer ids.",
+            "detail and count are synthesized client-side; the API exposes no per-id or count route.",
+        ],
     },
     SurfaceSpec {
         name: "flow",
@@ -971,14 +1035,18 @@ pub fn inventory_endpoints() -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
-/// Like [`inventory_endpoints`] but also returns the wired command name.
-pub fn inventory_endpoints_full() -> Vec<(&'static str, &'static str, &'static str)> {
+/// Like [`inventory_endpoints`] but also returns every wired command name.
+///
+/// One endpoint may be dispatched by several commands (`one whoami` and
+/// `one person current` both issue `GET /v4/people/current`), so this yields a slice
+/// rather than a single name.
+pub fn inventory_endpoints_full() -> Vec<(&'static str, &'static str, &'static [&'static str])> {
     SURFACES
         .iter()
         .chain(PARTIAL_SURFACES.iter())
         .chain(DOCUMENTED_ONLY_SURFACES.iter())
         .chain(DEFERRED_SURFACES.iter())
-        .flat_map(|s| s.endpoints.iter().map(|e| (e.method, e.path, e.command)))
+        .flat_map(|s| s.endpoints.iter().map(|e| (e.method, e.path, e.commands)))
         .collect()
 }
 
@@ -994,7 +1062,7 @@ pub fn one_surface_inventory_envelope(config: &Config) -> Result<Envelope> {
                     json!({
                         "method": endpoint.method,
                         "path": endpoint.path,
-                        "command": endpoint.command,
+                        "commands": endpoint.commands,
                     })
                 }).collect::<Vec<_>>(),
             })
@@ -1012,7 +1080,7 @@ pub fn one_surface_inventory_envelope(config: &Config) -> Result<Envelope> {
                     json!({
                         "method": endpoint.method,
                         "path": endpoint.path,
-                        "command": endpoint.command,
+                        "commands": endpoint.commands,
                     })
                 }).collect::<Vec<_>>(),
             })
@@ -1030,7 +1098,7 @@ pub fn one_surface_inventory_envelope(config: &Config) -> Result<Envelope> {
                     json!({
                         "method": endpoint.method,
                         "path": endpoint.path,
-                        "command": endpoint.command,
+                        "commands": endpoint.commands,
                     })
                 }).collect::<Vec<_>>(),
             })
@@ -1048,7 +1116,7 @@ pub fn one_surface_inventory_envelope(config: &Config) -> Result<Envelope> {
                     json!({
                         "method": endpoint.method,
                         "path": endpoint.path,
-                        "command": endpoint.command,
+                        "commands": endpoint.commands,
                     })
                 }).collect::<Vec<_>>(),
             })

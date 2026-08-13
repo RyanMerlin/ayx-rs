@@ -27,3 +27,4 @@ surface reliable for humans and agents while we widen coverage in measured steps
 4. Decide whether `catalog` remains a long-term registry helper or becomes a compatibility alias once discovery exposes the same stable concepts directly.
 5. Focus the next round on transport hardening and documented-only inventory gaps, not further dispatcher reshaping.
 6. Use `docs/one-backend-inventory.md` as the source of truth for remaining One backend wiring work.
+7. Decide the shape of the `ayx one api coverage --check` gate before wiring it into CI. It gates on `missing == 0`, and the first real measurement (2026-07-30) puts `missing` at 132 against 43.8% coverage, so it cannot pass today. See the Live Coverage Baseline in `docs/one-backend-inventory.md`.

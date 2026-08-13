@@ -203,8 +203,9 @@ pub enum TelemetryPermissionsCommand {
         #[command(flatten)]
         args: TelemetryArgs,
         /// Expand per-connection by iterating
-        /// `/v4/connections/{id}/permissions`. Cost is O(connections); on
-        /// large tenants pair with `--max-pages` to cap blast radius.
+        /// `/v4/connections/{id}/permissions/sharedSubjects`. Cost is
+        /// O(connections); on large tenants pair with `--max-pages` to cap
+        /// blast radius.
         #[arg(long)]
         deep: bool,
     },
