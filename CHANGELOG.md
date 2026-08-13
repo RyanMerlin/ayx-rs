@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.15.0 — 2026-08-13
+
 ### Added
 
 - **`ayx one workflows` — a real CLI surface for Alteryx One cloud-native (canvas) workflows.** These are not `one flows`: `flows` is the Designer Cloud `/v4/flows` family keyed by integer ids, while cloud-native workflows are the Alteryx One canvas product, keyed by ULIDs and served by a separate `/svc-workflow/api/vN` service — a workspace can hold dozens of cloud-native workflows while `GET /v4/flows` returns zero items. `list`, `count`, `assets`, `detail`, `dependencies`, `engines`, `tools`, `copy`, and `share` are wired. `detail` and `count` are synthesized client-side (the API exposes no per-id or count route) and say so via `detail_source`/`count_source`, so a caller can tell client-side assembly from a server lookup. `share` resolves `--to-person` email addresses to person ids before building its body; its request shape is not in any published spec and was recovered from the service's own schema-validation errors. Authoring is still out of scope — no public endpoint accepts arbitrary visual workflow logic.
