@@ -13,6 +13,8 @@ Release notes for each tagged version of `ayx`. For current behavior, use the li
 
 **BREAKING: `ayx one api coverage --output json` changed shape.** `stale[].command` is now `stale[].commands`, `coverage_pct` is nullable, and `inventory_total` plus `outside_spec_namespace` report endpoints outside the `/v4` spec namespace.
 
+**`one workflows list --all` no longer silently under-delivers, and `actions export --output json` is valid JSON again.** `--all` now reports `complete: true`/`false` against the endpoint's own item count rather than assuming one page is everything; `actions export`'s YAML moved into the JSON envelope instead of printing ahead of it.
+
 ## v0.14.0
 
 **Actions and workflows now have validated machine-readable I/O contracts.** Declared input/output schemas are checked at load and run time, before steps execute and after results complete; schema introspection reports whether a contract was declared or inferred.
