@@ -41,6 +41,10 @@ Manually review:
 - `site/scripts/sync-content.mjs`
 - `audits/*`
 
+## Functional Validation
+
+A live validation pass per [docs/one-live-validation.md](one-live-validation.md) must be green, or have every deviation explicitly recorded, before tagging a release; the last pass against tenant `alteryx-fde` (workspace `91946`) for this repo's v0.15.0 release candidate ran on 2026-08-14.
+
 ## GitHub Protections
 
 Target protections for `main` (the end state this checklist is driving toward):

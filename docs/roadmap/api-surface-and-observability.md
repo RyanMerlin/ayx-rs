@@ -58,6 +58,21 @@ Status: active
 - Move the generic license helpers out of `ayx-one-api` so HTTP/auth helper
   placement is product-pure.
 
+The following ten items came out of the 2026-08-14 v0.15.0 live validation pass against tenant
+`alteryx-fde` (see `docs/one-endpoint-matrix.md` and `docs/one-live-validation.md` for the
+evidence):
+
+- **Expand the `one_plans_count_live` fail-allowlist to include `not_found`.** The same tenant-tier outcome currently affects the plans list/detail live tests, scheduling, and billing-shaped checks where the whole service returns 404.
+- **Teach `one_flows_folders_list_page_boundary_live` to accept the genuine empty-result shape.** `GET /v4/folders?limit=1` returned 200 with `response: {"data": []}` for the zero-folder tenant.
+- **Make `one_job_groups_inspection_live_real_object` tolerate data-dependent inputs behavior.** A real non-JDBC job group correctly returned `400 DataServiceInvalidRequest` for its inputs sub-call, but the test currently treats that valid outcome as a failure.
+- **Implement `--output table` separately or document the alias deliberately.** The live UX pass confirmed that it is currently byte-identical to `--output text`.
+- **Add workflow-aware entries to `render_object_array`'s `PREFERRED` column list.** The generic picker exposes `contentChecksum`, a truncated hash, ahead of more useful workflow fields in the default demo table.
+- **Warn when `ayx one workflows list --all` under-delivers against the server total.** `/v4/workflows` is limit-only and non-cursor-paginated; the CLI can see the true `count` but currently reports only the default page without warning.
+- **Render workflow `tools`, `engines`, and `dependencies` cleanly in text mode.** The live pass found long, raw, single-line JSON blobs, unlike the readable list/count/detail output.
+- **Unify and document the One API base-URL configuration precedence.** `AYX_ONE_BASE_URL` and `AYX_ONE_API_BASE_URL` are similarly named but resolved in different layers, and a second `.env` lookup beside the resolved central profile can override the working-directory file.
+- **Investigate and wire cloud-native workflow DELETE.** The live probes found a route-level 404 for `/svc-workflow/api/v1/assets/...` but an application-level JSON `NotFoundError` for `/svc-workflow/api/v2/workflows/...`, strongly indicating a real server capability with no `ayx one workflows delete` command.
+- **Make plans, scheduling, and billing list-shaped tests tolerate tier-gated whole-surface 404s.** The outcome is already documented as expected tenant behavior, but the current tests do not consistently allow it.
+
 ## Exit Criteria
 
 - Product-specific command trees stay cleanly separated.
