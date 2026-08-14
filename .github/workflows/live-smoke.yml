@@ -40,10 +40,6 @@ jobs:
         if: steps.creds.outputs.configured == 'true'
         uses: actions/checkout@v7
 
-      - name: Rust toolchain
-        if: steps.creds.outputs.configured == 'true'
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Cache
         if: steps.creds.outputs.configured == 'true'
         uses: Swatinem/rust-cache@v2
