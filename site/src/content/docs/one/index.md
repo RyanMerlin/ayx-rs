@@ -14,9 +14,11 @@ All mutating commands are dry-run by default. Nothing changes on the server unti
 | Area | Command prefix | What you do |
 |---|---|---|
 | Flows | `ayx one flows` | List, create, run, validate, import/export, manage permissions |
+| Workflows | `ayx one workflows` | List, inspect, copy, and share cloud-native canvas workflows |
 | Plans | `ayx one plans` | Orchestrate multi-flow plans, manage schedules, share, import/export |
 | Connections | `ayx one connections` | Manage data connections and connector metadata |
 | Job groups | `ayx one job-groups` | Run, cancel, inspect, and retrieve results for job groups |
+| Datasets | `ayx one datasets` | Browse the One dataset library and inspect dataset details |
 | Output objects | `ayx one output-objects` | CRUD for output objects; inspect inputs; convert to Python |
 | Write settings | `ayx one write-settings` | Configure where flows write their output data |
 | Webhooks | `ayx one webhook-flow-tasks` | Create, inspect, delete, and test webhook-triggered flow tasks |

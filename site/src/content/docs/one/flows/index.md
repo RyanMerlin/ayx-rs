@@ -7,6 +7,8 @@ sidebar:
 
 Flows are the core execution unit in Alteryx One. The `ayx one flows` branch covers every lifecycle operation: browsing the catalog, running flows on demand, editing metadata, moving flows between folders, and managing the data connections they use.
 
+> These are **not** the same as Alteryx One's cloud-native workflows documented in [Workflows](/one/workflows/). A workspace can contain many cloud-native workflows while `ayx one flows list` returns no items, because `one flows` reads the separate integer-id-keyed Designer Cloud `/v4/flows` family.
+
 Mutating commands are dry-run by default — add `--apply` to commit.
 
 ## Quick reference
@@ -184,10 +186,10 @@ ayx --output json one flows validate <flow-id> \
 ### Target a specific environment
 
 ```bash
-ayx --output json --environment prod one flows list
+ayx --output json --env prod one flows list
 ```
 
-`--environment` is a root flag — place it before the subcommand.
+`--env` is a root flag — place it before the subcommand.
 
 ## Related
 

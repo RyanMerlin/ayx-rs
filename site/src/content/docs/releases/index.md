@@ -7,6 +7,34 @@ sidebar:
 
 Release notes for each tagged version of `ayx`. For current behavior, use the live docs above; for a specific binary, read the notes for that version.
 
+## v0.15.0
+
+**`ayx one workflows` adds a real CLI surface for Alteryx One cloud-native canvas workflows.** The ULID-keyed `/svc-workflow` family now supports list, count, assets, detail, dependencies, engines, tools, copy, and share; it is distinct from the integer-id-keyed Designer Cloud `one flows` family. Detail and count identify their client-side synthesis, share documents its recovered request shape, and arbitrary workflow authoring remains out of scope.
+
+**BREAKING: `ayx one api coverage --output json` changed shape.** `stale[].command` is now `stale[].commands`, `coverage_pct` is nullable, and `inventory_total` plus `outside_spec_namespace` report endpoints outside the `/v4` spec namespace.
+
+## v0.14.0
+
+**Actions and workflows now have validated machine-readable I/O contracts.** Declared input/output schemas are checked at load and run time, before steps execute and after results complete; schema introspection reports whether a contract was declared or inferred.
+
+**BREAKING: the tactics/action and workflow command renames are complete.** `ayx tactics` is now `ayx actions`, `ayx workflows` is now `ayx actions workflows`, and `ayx workflow` is now `ayx designer workflow`. JSON keys, registry filenames/directories, YAML `kind` and list keys, and the registry schema version all changed; there are no compatibility aliases.
+
+**Mongo mutations and undo now execute only through bounded, approval-backed templates.** Preview/apply audit artifacts, backup and approval evidence, and guarded undo checks are required for live mutation.
+
+## v0.13.2
+
+**Windows live commands no longer abort after successful output.** The cached HTTP client lifetime is safe at process exit, and sensitive profile/onboarding/audit writes are atomic and lock-protected. Workspace-password prompts are masked, and the two One flow list views now explain their distinction.
+
+## v0.13.1
+
+**Bare command groups now render real clap help, and every `one` command has a useful description.**
+
+## v0.13.0
+
+**BREAKING: the `ayx one` hierarchy is now primitive-first and required resource ids are positional.** The `platform` namespace was dissolved, login/auth/identity paths were renamed, and commands such as `one flows detail <id>` replace required `--<noun>-id` flags; no pre-release compatibility aliases exist.
+
+**Command help, output contracts, and release documentation were hardened.** Stable command families gained descriptions, error JSON no longer gets stray text, output values are constrained, and the project now carries its independent-status disclaimer.
+
 ## v0.12.2
 
 **`ayx update` still failed after v0.12.1 on Linux and macOS.** The `.tar.gz` release archive named every member `./ayx` (from `tar -C "$root" .`), but `self_update` matches archive entries against the exact path `ayx`, so `./ayx != ayx` and self-update failed with `Could not find the required path in the archive: "ayx"`. Archive members are now packaged explicitly so the binary sits at `ayx`. Windows was already fixed by v0.12.1 — its `.zip` stores `ayx.exe` at the root.

@@ -46,6 +46,7 @@ export default defineConfig({
                 'one/flows/permissions',
               ],
             },
+            'one/workflows',
             {
               label: 'Plans',
               collapsed: false,

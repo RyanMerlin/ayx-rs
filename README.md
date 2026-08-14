@@ -55,6 +55,7 @@ ayx onboard
 ayx profile current
 ayx one workspace current
 ayx one flows list
+ayx one workflows list
 ayx server api status
 ```
 
@@ -74,6 +75,7 @@ The shortest path from zero to useful output is usually one of:
 - `ayx doctor`
 - `ayx one workspace current`
 - `ayx one flows list`
+- `ayx one workflows list`
 - `ayx one connections list`
 - `ayx server api status --output json`
 - `ayx mongo inventory --output json`
@@ -205,6 +207,7 @@ ayx one doctor discover
 ayx one workspace current
 ayx one person count
 ayx one flows list
+ayx one workflows list
 ayx one connections list
 ayx one job-groups list
 ayx one output-objects list

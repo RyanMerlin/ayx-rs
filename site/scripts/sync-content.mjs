@@ -2,7 +2,7 @@
 // writes them into the Starlight content collection with the frontmatter
 // Starlight needs. The source files are the single source of truth; everything
 // under src/content/docs/reference/ and the release notes are GENERATED here.
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,12 +17,38 @@ const sources = [
   [path.join(docsRoot, 'command-surface.md'), 'reference/command-surface.md', 'Command Surface', 1],
   [path.join(docsRoot, 'cli-spec.md'), 'reference/cli-spec.md', 'CLI Spec', 2],
   [path.join(docsRoot, 'runtime-config-contract.md'), 'reference/runtime-config-contract.md', 'Runtime Config Contract', 3],
-  [path.join(docsRoot, 'releases', 'v0.9.14.md'), 'releases/v0.9.14.md', 'v0.9.14', 1],
-  [path.join(docsRoot, 'releases', 'v0.9.13.md'), 'releases/v0.9.13.md', 'v0.9.13', 2],
-  [path.join(docsRoot, 'releases', 'v0.9.12.md'), 'releases/v0.9.12.md', 'v0.9.12', 3],
-  [path.join(docsRoot, 'releases', 'v0.9.10.md'), 'releases/v0.9.10.md', 'v0.9.10', 4],
-  [path.join(docsRoot, 'releases', 'v0.9.9.md'), 'releases/v0.9.9.md', 'v0.9.9', 5],
 ];
+
+function releaseVersion(filename) {
+  const match = /^v(\d+)\.(\d+)\.(\d+)\.md$/.exec(filename);
+  if (!match) return null;
+  return match.slice(1).map(Number);
+}
+
+function compareVersionsDescending(a, b) {
+  const av = releaseVersion(a);
+  const bv = releaseVersion(b);
+  for (let i = 0; i < 3; i++) {
+    if (av[i] !== bv[i]) return bv[i] - av[i];
+  }
+  return 0;
+}
+
+const releaseDir = path.join(docsRoot, 'releases');
+const releaseFiles = (await readdir(releaseDir, { withFileTypes: true }))
+  .filter((entry) => entry.isFile() && releaseVersion(entry.name))
+  .map((entry) => entry.name)
+  .sort(compareVersionsDescending);
+
+for (const [order, filename] of releaseFiles.entries()) {
+  const version = filename.slice(0, -3);
+  sources.push([
+    path.join(releaseDir, filename),
+    `releases/${filename}`,
+    version,
+    order + 1,
+  ]);
+}
 
 // Drop a single leading "# Title" so it doesn't duplicate the Starlight page title.
 function stripLeadingH1(body) {
