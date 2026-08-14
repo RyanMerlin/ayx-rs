@@ -1,15 +1,18 @@
 name: Live Smoke (Alteryx One)
 
 # Exercises the ayx-rs live-smoke suite against a real Alteryx One tenant.
-# Dormant until the AYX_ONE_* secrets are configured on the repo: with no
-# access-token secret the job skips cleanly (green). Once secrets exist, the
-# nightly run authenticates and the token-liveness gate
-# (live_smoke_requires_a_live_token) goes RED when the PAT has expired — that
-# red run is the signal to rotate it via `ayx one login`.
+# Manual-only (workflow_dispatch) by design: this is a public repo, and putting
+# a long-lived real-tenant access token into its Actions secrets is a worse
+# posture than not running this on a schedule at all. No AYX_ONE_* secrets are
+# configured here -- run this manually against a private fork or a secured
+# environment when you need a live check, or use the local runbook at
+# docs/one-live-validation.md instead. If secrets are ever added here anyway,
+# with no access-token secret the job still skips cleanly (green) rather than
+# failing, and the token-liveness gate (live_smoke_requires_a_live_token) goes
+# RED when a configured PAT has expired -- that red run is the signal to
+# rotate it via `ayx one login`.
 
 on:
-  schedule:
-    - cron: "0 8 * * *" # 02:00 America/Denver (MDT) — nightly token-liveness + API smoke
   workflow_dispatch:
 
 permissions:
