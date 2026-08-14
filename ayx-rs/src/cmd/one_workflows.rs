@@ -609,17 +609,17 @@ mod tests {
     #[test]
     fn workflow_lookup_is_an_exact_case_sensitive_match() {
         let items = vec![
-            json!({ "id": "01KY5TC876M1GFEA2A4P2CZVBR", "name": "land-lease-intel-LQ" }),
-            json!({ "id": "01KVWJA412RB8PJ9CTA4BF67SH", "name": "AP_Intel_part1" }),
+            json!({ "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "name": "test-workflow-alpha" }),
+            json!({ "id": "01BX5ZZKBKACTAV9WEVGEMMVRZ", "name": "test-workflow-beta" }),
         ];
 
-        let found = find_workflow_asset(&items, "01KY5TC876M1GFEA2A4P2CZVBR").expect("found");
-        assert_eq!(found["name"], "land-lease-intel-LQ");
+        let found = find_workflow_asset(&items, "01ARZ3NDEKTSV4RRFFQ69G5FAV").expect("found");
+        assert_eq!(found["name"], "test-workflow-alpha");
 
         assert!(find_workflow_asset(&items, "01ky5tc876m1gfea2a4p2czvbr").is_none());
         assert!(find_workflow_asset(&items, "01KY5TC876").is_none());
         assert!(find_workflow_asset(&items, "nope").is_none());
-        assert!(find_workflow_asset(&[], "01KY5TC876M1GFEA2A4P2CZVBR").is_none());
+        assert!(find_workflow_asset(&[], "01ARZ3NDEKTSV4RRFFQ69G5FAV").is_none());
     }
 
     #[test]
@@ -640,7 +640,7 @@ mod tests {
             "workflow assets failed",
             json!({"status_code": 500, "response_shape": "html"}),
         );
-        let result = resolve_workflow_detail(list_failure, "01KY5TC876M1GFEA2A4P2CZVBR");
+        let result = resolve_workflow_detail(list_failure, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
 
         assert!(!result.ok);
         assert_eq!(result.error_code, Some(ErrorCode::Upstream));
@@ -652,7 +652,7 @@ mod tests {
     fn resolve_workflow_detail_reports_not_found_only_when_the_list_actually_succeeded() {
         let ok_but_empty =
             Envelope::ok_with_data("workflow assets ok (0 items, 1 page)", json!({"items": []}));
-        let result = resolve_workflow_detail(ok_but_empty, "01KY5TC876M1GFEA2A4P2CZVBR");
+        let result = resolve_workflow_detail(ok_but_empty, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
 
         assert!(!result.ok);
         assert_eq!(result.error_code, Some(ErrorCode::NotFound));
@@ -662,13 +662,13 @@ mod tests {
     #[test]
     fn resolve_workflow_detail_returns_the_matching_workflow() {
         let items = json!([
-            { "id": "01KY5TC876M1GFEA2A4P2CZVBR", "name": "land-lease-intel-LQ" },
+            { "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "name": "test-workflow-alpha" },
         ]);
         let list_ok = Envelope::ok_with_data("workflow assets ok", json!({"items": items}));
-        let result = resolve_workflow_detail(list_ok, "01KY5TC876M1GFEA2A4P2CZVBR");
+        let result = resolve_workflow_detail(list_ok, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
 
         assert!(result.ok);
-        assert_eq!(result.data["response"]["name"], "land-lease-intel-LQ");
+        assert_eq!(result.data["response"]["name"], "test-workflow-alpha");
     }
 
     #[test]

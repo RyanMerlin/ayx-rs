@@ -123,7 +123,7 @@ pre-approved commands below.
 ## Phase 0 — Offline pre-flight (~5 min, zero live calls)
 
 ```bash
-cd /home/merlin/code/ayx-rs
+cd /path/to/ayx-rs
 git status --porcelain && git log --oneline -1
 which ayx && ayx --version                       # must be ~/.local/bin/ayx, 0.15.0
 cargo nextest run --workspace -E 'not binary(one_live_smoke)'
@@ -140,7 +140,7 @@ must match it.
 Run the full suite, not a filtered subset — a partial run understates what's actually covered.
 
 ```bash
-cd /home/merlin/code/ayx-rs
+cd /path/to/ayx-rs
 set -a && source .env && set +a
 AYX_ONE_LIVE_SMOKE=1 cargo nextest run -p ayx-rs -E 'binary(one_live_smoke)'
 ```
@@ -172,7 +172,7 @@ If `live_smoke_requires_a_live_token` panics: stop, rotate via `ayx one login`, 
 Run against `~/.local/bin/ayx` this time.
 
 ```bash
-cd /home/merlin/code/ayx-rs
+cd /path/to/ayx-rs
 set -a && source .env && set +a
 
 # resolve ids the sweep needs

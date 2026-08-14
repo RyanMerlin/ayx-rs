@@ -10,7 +10,7 @@ already track family-level live results, and `one-api-surface-audit.md`'s Phase 
 already flagged `billing`/`plans`/`scheduling` as 404 on its test workspace back on 2026-06-22,
 open item: "Validate against an enterprise workspace before deciding whether these are bugs... or
 genuinely tier-gated." This session's live sweep reproduced the identical `RouteNotFoundException`
-404 on a **second, different tenant** (`alteryx-fde`, workspace `91946`, tier `platform_packaging`)
+404 on a **second, different tenant** (a private test workspace, non-enterprise tier)
 — evidence toward "genuinely tier-gated," not toward a wrong endpoint pattern, though still not a
 close on that open item since neither tenant tested is confirmed enterprise-tier. What none of the
 existing docs record is **per-endpoint** evidence: exact error-body shape, whether a `list` command
@@ -102,7 +102,7 @@ Endpoints the CLI fully dispatches for this surface (`inventory.rs` `SURFACES`).
 | Method | Path | Live status | Verified (UTC) | ayx command(s) | Response shape | Error-body flavor | Notes |
 |---|---|---|---|---|---|---|---|
 | GET | `/v4/workspaces/current` | live 200 | 2026-08-14T16:06Z | `one workspace current` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | `one workspace current` returned 200. Phase 2 `one doctor discover` also completed; its nested checks are recorded on the underlying endpoint rows. |
-| GET | `/v4/workspaces/{id}/configuration` | live 200 | 2026-07-27T00:55Z | `one workspace configuration`<br>`one workspace configuration-v4` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Probed both as `one workspace configuration-v4 91946` and `one workspace configuration 91946`. |
+| GET | `/v4/workspaces/{id}/configuration` | live 200 | 2026-07-27T00:55Z | `one workspace configuration`<br>`one workspace configuration-v4` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Probed both as `one workspace configuration-v4 <workspace-id>` and `one workspace configuration <workspace-id>`. |
 | GET | `/v4/people` | live 200 | 2026-08-14T16:07Z | `one person list`<br>`one workspace people` | paginated list: `{ items[], next_page_token, pages_fetched, page_envelopes[] }` (CLI-normalized) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Phase 2 returned 18 people. |
 | GET | `/v4/people?role=admin` | live 200 | 2026-07-27T00:55Z | `one workspace admins` | paginated list: `{ items[], next_page_token, pages_fetched, page_envelopes[] }` (CLI-normalized) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | `one workspace admins`. |
 | POST | `/v4/workspaces/{id}/people/batch` | unverified | not probed this session | `one workspace invite-users` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Mutating — not probed (would invite a real user). |
@@ -378,12 +378,12 @@ CLI needs it (`inventory.rs` `PARTIAL_SURFACES`).
 | Method | Path | Live status | Verified (UTC) | ayx command(s) | Response shape | Error-body flavor | Notes |
 |---|---|---|---|---|---|---|---|
 | GET | `/v4/workspaces` | live 200 | 2026-08-14T16:06Z | `one workspace list` | paginated list: `{ items[], next_page_token, pages_fetched, page_envelopes[] }` (CLI-normalized) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Phase 2 returned 15 workspaces. |
-| GET | `/v4/workspaces/{id}/configuration` | live 200 | 2026-07-27T00:55Z | `one workspace configuration`<br>`one workspace configuration-v4` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Probed both as `one workspace configuration-v4 91946` and `one workspace configuration 91946`. |
+| GET | `/v4/workspaces/{id}/configuration` | live 200 | 2026-07-27T00:55Z | `one workspace configuration`<br>`one workspace configuration-v4` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Probed both as `one workspace configuration-v4 <workspace-id>` and `one workspace configuration <workspace-id>`. |
 | PATCH | `/v4/workspaces/current/transfer` | unverified | not probed this session | `one workspace transfer-assets` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Mutating — not probed. |
 | GET | `/v4/workspaces/current/configuration` | live 200 | 2026-07-27T00:55Z | `one workspace current-configuration` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | `one workspace current-configuration`. |
 | PATCH | `/v4/workspaces/current/configuration` | unverified | not probed this session | `one workspace save-current-configuration` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Mutating — not probed. |
 | PATCH | `/v4/workspaces/{id}/configuration` | unverified | not probed this session | `one workspace save-configuration-v4` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Mutating — not probed (`save-configuration-v4`). |
-| GET | `/v4/workspaces/{id}/configuration-schema` | live 200 | 2026-07-27T00:55Z | `one workspace configuration-schema` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | `one workspace configuration-schema 91946`. |
+| GET | `/v4/workspaces/{id}/configuration-schema` | live 200 | 2026-07-27T00:55Z | `one workspace configuration-schema` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | `one workspace configuration-schema <workspace-id>`. |
 | GET | `/v4/workspaces/current/configuration-schema` | live 200 | 2026-07-27T00:55Z | `one workspace current-configuration-schema` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | `one workspace current-configuration-schema`. |
 | POST | `/v4/workspaces/current/delete-configuration` | unverified | not probed this session | `one workspace delete-current-configuration` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Mutating and destructive — not probed under any circumstance. |
 | POST | `/v4/workspaces/{id}/delete-configuration` | unverified | not probed this session | `one workspace delete-configuration` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Mutating and destructive — not probed under any circumstance. |
@@ -524,13 +524,13 @@ it and do not document it as a usable substitute anywhere in this file.
   entries under each. `coverage_pct` reported `100.0` as a result (division-by-zero guard, not a
   real 100% match) and `stale` listed all 123 canonicalized inventory operations. This looks like a
   live anomaly in how `coverage()`'s `spec_base_path()`/`canonical_op()` anchoring handled this
-  tenant's spec (this tenant's custom base URL is `alteryx-fde.us1.alteryxcloud.com`, not the
+  tenant's spec (this tenant uses a custom base URL, not the
   generic `us1.alteryxcloud.com` used elsewhere) rather than a real 0%-covered result. Not
   root-caused or fixed here — out of scope for this doc (`ayx-one-api/src/coverage.rs` is off
   limits) — but flagged because a `coverage_pct: 100.0` on a fresh tenant is exactly the kind of
   false-green a probe ledger like this one is meant to catch. Worth a follow-up issue.
-- **Live evidence in this doc comes from one tenant**: workspace `alteryx-fde` (id `91946`, tier
-  `platform_packaging`), `https://us1.alteryxcloud.com`, probed 2026-07-27 ~00:50–01:01 UTC using
+- **Live evidence in this doc comes from one tenant**: a private test workspace on a
+  non-enterprise tier, `https://us1.alteryxcloud.com`, probed 2026-07-27 ~00:50–01:01 UTC using
   the repo's `default`-profile PAT (workspace-bound, no OTP). A `not_found`/`RouteNotFoundException`
   recorded here for `/plans/v1/*`, `/scheduling/v1/*`, and `/billing/v1/*` most likely reflects this
   tenant's entitlements (Plans/Scheduling/Billing features not provisioned on this tier), not that

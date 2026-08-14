@@ -58,8 +58,8 @@ Status: active
 - Move the generic license helpers out of `ayx-one-api` so HTTP/auth helper
   placement is product-pure.
 
-The following ten items came out of the 2026-08-14 v0.15.0 live validation pass against tenant
-`alteryx-fde` (see `docs/one-endpoint-matrix.md` and `docs/one-live-validation.md` for the
+The following ten items came out of the 2026-08-14 v0.15.0 live validation pass against a private
+test tenant (see `docs/one-endpoint-matrix.md` and `docs/one-live-validation.md` for the
 evidence):
 
 - **Expand the `one_plans_count_live` fail-allowlist to include `not_found`.** The same tenant-tier outcome currently affects the plans list/detail live tests, scheduling, and billing-shaped checks where the whole service returns 404.

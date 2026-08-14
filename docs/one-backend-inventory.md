@@ -285,7 +285,7 @@ It also exercises edge coverage for representative families:
 
 ## Live Coverage Baseline
 
-First real measurement of `ayx one api coverage` against the live `GET /v4/open-api-spec`, taken 2026-07-30 against workspace `alteryx-fde`.
+First real measurement of `ayx one api coverage` against the live `GET /v4/open-api-spec`, taken 2026-07-30 against a private test workspace.
 
 There is no earlier figure to compare against. Until the transport-unwrapping fix, the command was handed the transport's metadata envelope instead of the spec body, so it found no `paths`, reported `spec_operations: 0` with an empty `missing` list, and `--check` could not fail no matter how far the CLI drifted. Every number below is being observed for the first time.
 

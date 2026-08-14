@@ -464,8 +464,8 @@ mod tests {
              settings all return numeric ids"
         );
         assert_eq!(
-            resource_id(&json!({ "id": "01KY5TC876M1GFEA2A4P2CZVBR" })),
-            Some("01KY5TC876M1GFEA2A4P2CZVBR".to_string()),
+            resource_id(&json!({ "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV" })),
+            Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string()),
             "cloud-native workflows return ULID strings"
         );
         assert_eq!(resource_id(&json!({ "name": "no id" })), None);

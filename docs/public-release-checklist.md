@@ -19,13 +19,25 @@ Use this checklist before changing repo visibility, publishing a release, or ann
 
 ## Sanitization Sweep
 
-Run full-text scans for:
+Run full-text scans with `git grep`, not `rg`/`grep -r`. Those tools silently skip
+gitignored-but-tracked files — a file can be `git add -f`'d past its own directory's `.gitignore`
+(as `docs/handoffs/` notes are, deliberately, on occasion) and still be fully present in the repo
+while invisible to a plain `rg` sweep. Confirmed directly: an `rg` sweep for a real tenant
+identifier found 4 files; the same search with `git grep` found 5 — the extra one was a handoff
+note with real tenant data that a routine sweep had missed. `git grep` (optionally paired with `git ls-files` to be
+explicit about scope) sees everything actually tracked, regardless of ignore rules.
+
+Scan for:
 
 - secrets and token-like values
 - internal domains and URLs
 - Jira-style ticket IDs
 - GitLab-only references
 - private handoff or reverse-engineering notes
+- real tenant/customer identifiers from live-testing sessions (workspace names, ids, tier names,
+  custom hostnames, real asset names) — these get pulled in easily by evidence docs recording a
+  live validation pass, and have regressed back into the repo before after an earlier scrub (see
+  git history around commit `d71b785`)
 
 Manually review:
 
@@ -43,7 +55,7 @@ Manually review:
 
 ## Functional Validation
 
-A live validation pass per [docs/one-live-validation.md](one-live-validation.md) must be green, or have every deviation explicitly recorded, before tagging a release; the last pass against tenant `alteryx-fde` (workspace `91946`) for this repo's v0.15.0 release candidate ran on 2026-08-14.
+A live validation pass per [docs/one-live-validation.md](one-live-validation.md) must be green, or have every deviation explicitly recorded, before tagging a release; the last pass for this repo's v0.15.0 release candidate ran on 2026-08-14 against a live test tenant.
 
 ## GitHub Protections
 
