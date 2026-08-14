@@ -192,15 +192,15 @@ pub fn execute_actions(apply: bool, command: ActionsCommand) -> Result<Envelope>
             let action = reg.action(&id)?;
             let yaml = serde_yaml::to_string(action)
                 .map_err(|e| anyhow!("failed to serialize action: {e}"))?;
-            print!("{}", yaml);
             Ok(Envelope::ok_with_data(
                 format!("action '{}' exported", id),
                 json!({
                     "action_id": id,
                     "source": action.source_path.clone(),
                     "bytes": yaml.len(),
+                    "yaml": yaml,
                     "save_hint": format!(
-                        "Redirect this output into ${{AYX_CONFIG_HOME}}/registry/{}.action.yaml to fork the bundled stdlib version.",
+                        "For raw YAML, run `ayx --output json actions export {id} | jq -r '.data.yaml' > ${{AYX_CONFIG_HOME}}/registry/{}.action.yaml` to fork the bundled stdlib version.",
                         id.replace('.', "-")
                     ),
                 }),

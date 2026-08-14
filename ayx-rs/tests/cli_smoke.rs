@@ -475,6 +475,20 @@ fn output_json_works_when_flag_is_trailing_for_actions_list() {
 }
 
 #[test]
+fn actions_export_json_is_parseable_and_contains_raw_yaml() {
+    assert_json_output_works_before_and_after(&["actions", "export", "mongo.doctor"], |json| {
+        assert_eq!(json["ok"], serde_json::json!(true));
+        assert!(json["data"]["yaml"].as_str().unwrap().contains("id:"));
+        assert!(
+            json["data"]["save_hint"]
+                .as_str()
+                .unwrap()
+                .contains("jq -r '.data.yaml'")
+        );
+    });
+}
+
+#[test]
 fn output_json_works_when_flag_is_trailing_for_workflows_list() {
     assert_json_output_works_before_and_after(&["actions", "workflows", "list"], |json| {
         assert_eq!(json["ok"], serde_json::json!(true));

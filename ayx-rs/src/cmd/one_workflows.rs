@@ -22,6 +22,7 @@ use ayx_one_api::{
     OneListParams, one_api_list_request, one_api_live_request, one_api_live_request_with_body,
 };
 use serde_json::{Value, json};
+use url::form_urlencoded::Serializer;
 
 use crate::{
     OneWorkflowsCommand, WorkflowPrivilege,
@@ -83,6 +84,97 @@ fn fetch_all_assets(config: &ayx_core::profile::Config) -> Result<Envelope> {
         &[],
         &params,
     )
+}
+
+/// Fetch the `/v4/workflows` collection in one generous request. Unlike the
+/// cursor-paginated list surfaces handled by `one_api_list_request`, this
+/// endpoint reports its collection total as `count` and does not return a
+/// usable cursor.
+fn fetch_all_workflows(
+    config: &ayx_core::profile::Config,
+    limit: Option<u32>,
+    page_token: Option<String>,
+) -> Result<Envelope> {
+    let mut query = Vec::new();
+    query.push(("limit", limit.unwrap_or(200).to_string()));
+    if let Some(page_token) = page_token {
+        query.push(("pageToken", page_token));
+    }
+    let mut serializer = Serializer::new(String::new());
+    for (key, value) in &query {
+        serializer.append_pair(key, value);
+    }
+    let endpoint = format!("{WORKFLOWS_LIST_ENDPOINT}?{}", serializer.finish());
+
+    let response_envelope =
+        one_api_live_request(config, "workflow", "list", "GET", &endpoint, false, &[])?;
+    if !response_envelope.ok {
+        return Ok(response_envelope);
+    }
+
+    let response = response_envelope
+        .data
+        .get("response")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let items = response
+        .get("data")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let next_page_token = response
+        .get("next_page_token")
+        .or_else(|| response.get("nextPageToken"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let mut envelope = Envelope::ok_with_data(
+        format!(
+            "workflow list ok ({} item{}, 1 page)",
+            items.len(),
+            if items.len() == 1 { "" } else { "s" }
+        ),
+        json!({
+            "surface": "workflow",
+            "operation": "list",
+            "items": items,
+            "pages_fetched": 1,
+            "next_page_token": next_page_token,
+            "page_envelopes": [{
+                "status_code": response_envelope.data.get("status_code"),
+                "elapsed_ms": response_envelope.data.get("elapsed_ms"),
+                "request_id": response_envelope.data.get("request_id"),
+                "next_page_token": response.get("next_page_token")
+                    .or_else(|| response.get("nextPageToken")),
+            }],
+        }),
+    );
+    let complete = add_workflow_completeness(&mut envelope, &response);
+    if !complete {
+        let fetched = envelope
+            .data
+            .get("items")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        let (total, _) = synthesize_workflow_count(&response);
+        eprintln!(
+            "warning: only {fetched} of {total} workflows were fetched; increase --limit or check for a pagination limitation"
+        );
+    }
+    Ok(envelope)
+}
+
+/// Add the workflow-specific completeness marker without changing the common
+/// paginator's envelope contract used by other One API surfaces.
+fn add_workflow_completeness(envelope: &mut Envelope, response: &Value) -> bool {
+    let fetched = envelope
+        .data
+        .get("items")
+        .and_then(Value::as_array)
+        .map_or(0, |items| items.len() as u64);
+    let (total, _) = synthesize_workflow_count(response);
+    let complete = fetched >= total;
+    envelope.data["complete"] = Value::Bool(complete);
+    complete
 }
 
 /// Resolve a single workflow's detail from an already-fetched assets-list
@@ -318,6 +410,9 @@ pub(crate) fn execute(
             max_pages,
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
+            if all {
+                return fetch_all_workflows(&config, limit, page_token);
+            }
             let params = OneListParams::new()
                 .with_limit(limit)
                 .with_page_token(page_token)
@@ -602,7 +697,10 @@ fn resolve_workflow_version(config: &ayx_core::profile::Config, id: &str) -> Res
 
 #[cfg(test)]
 mod tests {
-    use super::{find_workflow_asset, resolve_workflow_detail, synthesize_workflow_count};
+    use super::{
+        add_workflow_completeness, find_workflow_asset, resolve_workflow_detail,
+        synthesize_workflow_count,
+    };
     use ayx_core::envelope::{Envelope, ErrorCode};
     use serde_json::json;
 
@@ -693,6 +791,38 @@ mod tests {
             synthesize_workflow_count(&serde_json::Value::Null),
             (0, "returned-items")
         );
+    }
+
+    #[test]
+    fn workflow_list_marks_an_all_result_incomplete_when_server_count_exceeds_items() {
+        let mut envelope = Envelope::ok_with_data(
+            "workflow list ok",
+            json!({"items": [{"id": "a"}, {"id": "b"}]}),
+        );
+        let response = json!({
+            "count": 3,
+            "data": [{"id": "a"}, {"id": "b"}]
+        });
+
+        assert!(!add_workflow_completeness(&mut envelope, &response));
+        assert_eq!(envelope.data["complete"], json!(false));
+        assert_eq!(envelope.data["items"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn workflow_list_marks_an_all_result_complete_when_server_count_matches_items() {
+        let mut envelope = Envelope::ok_with_data(
+            "workflow list ok",
+            json!({"items": [{"id": "a"}, {"id": "b"}]}),
+        );
+        let response = json!({
+            "count": 2,
+            "data": [{"id": "a"}, {"id": "b"}]
+        });
+
+        assert!(add_workflow_completeness(&mut envelope, &response));
+        assert_eq!(envelope.data["complete"], json!(true));
+        assert_eq!(envelope.data["items"].as_array().unwrap().len(), 2);
     }
 }
 

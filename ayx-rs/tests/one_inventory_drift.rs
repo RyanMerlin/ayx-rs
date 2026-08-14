@@ -76,6 +76,11 @@ const DYNAMIC_ENDPOINTS: &[(&str, &str, &str)] = &[
     ("cmd/one_flows.rs", "GET", "/v4/folders/{id}/flows"),
     ("cmd/one_datasets.rs", "GET", "/v4/datasetLibrary"),
     ("cmd/one_datasets.rs", "GET", "/v4/wrangledDatasets"),
+    // `workflows list --all` bypasses the shared cursor-paginator (this
+    // endpoint has no real cursor) and builds its own `?limit=&pageToken=`
+    // query string via `fetch_all_workflows`, so the endpoint isn't a literal
+    // at the call site.
+    ("cmd/one_workflows.rs", "GET", "/v4/workflows"),
     // `connections permissions delete` builds the unshare query (ids +
     // subject type) via `build_connection_unshare_query`.
     ("cmd/one_connections.rs", "DELETE", "/v4/connections/share"),
