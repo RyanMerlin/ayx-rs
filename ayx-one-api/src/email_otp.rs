@@ -305,12 +305,13 @@ pub fn email_otp_login<F>(
     base_url: &str,
     email: &str,
     workspace_gid: &str,
+    workspace_password: Option<String>,
     get_otp: F,
 ) -> Result<OtpAuthResult>
 where
     F: Fn() -> Result<String> + Send + 'static,
 {
-    email_otp_login_pure_http(base_url, email, workspace_gid, &get_otp)
+    email_otp_login_pure_http(base_url, email, workspace_gid, workspace_password, &get_otp)
 }
 
 /// Pure-HTTP email-OTP login — replicates the browser flow with reqwest only.
@@ -332,6 +333,7 @@ fn email_otp_login_pure_http<F>(
     base_url: &str,
     email: &str,
     workspace_gid: &str,
+    workspace_password: Option<String>,
     get_otp: &F,
 ) -> Result<OtpAuthResult>
 where
@@ -381,7 +383,7 @@ where
     )?;
 
     // 4. Submit the workspace password, re-prompting on rejection.
-    workspace_login_with_reprompt(&client, base, email)?;
+    workspace_login_with_reprompt(&client, base, email, workspace_password)?;
 
     // 5. Resume the OIDC interaction; the BFF exchanges the code server-side and
     //    sets the local-auth-workspace cookie.
@@ -519,36 +521,43 @@ fn prompt_workspace_password() -> Result<String> {
 }
 
 /// Whether to try the workspace password again after a rejection.
-/// A password sourced from `AYX_ONE_WS_PASSWORD` never gets retried — a
-/// fixed environment value will fail identically every time, so retrying
-/// it would just burn attempts (and requests against the live auth
-/// endpoint) for nothing. Only an interactively-typed password, which
-/// could have been mistyped, gets the retry budget.
-fn should_retry_workspace_password(attempt: u32, from_env: bool) -> bool {
-    !from_env && attempt < WORKSPACE_PASSWORD_ATTEMPTS
+/// Passwords from any fixed source (`AYX_ONE_WS_PASSWORD` or the stored
+/// profile value) never get retried — a fixed value will fail identically
+/// every time, so retrying it would just burn attempts (and requests
+/// against the live auth endpoint) for nothing. Only an interactively
+/// typed password, which could have been mistyped, gets the retry budget.
+fn should_retry_workspace_password(attempt: u32, from_fixed_source: bool) -> bool {
+    !from_fixed_source && attempt < WORKSPACE_PASSWORD_ATTEMPTS
 }
 
-/// Submits the workspace password, re-prompting on rejection when the
-/// password came from interactive input (see should_retry_workspace_password).
-fn workspace_login_with_reprompt(client: &Client, base: &str, email: &str) -> Result<()> {
+/// Submits the workspace password, re-prompting only when the password
+/// came from interactive input. Fixed sources (`AYX_ONE_WS_PASSWORD` or
+/// the stored profile value) never get another attempt.
+fn workspace_login_with_reprompt(
+    client: &Client,
+    base: &str,
+    email: &str,
+    workspace_password: Option<String>,
+) -> Result<()> {
     let mut attempt = 0u32;
     loop {
         attempt += 1;
-        let password_source = workspace_password_from_env();
-        let from_env = password_source.is_some();
+        let password_source = workspace_password_from_env()
+            .or_else(|| workspace_password.as_ref().map(|value| value.to_string()));
+        let from_fixed_source = password_source.is_some();
         let password = match password_source {
             Some(pw) => pw,
             None => prompt_workspace_password()?,
         };
         match submit_workspace_password(client, base, email, &password) {
             Ok(()) => return Ok(()),
-            Err(err) if from_env => {
+            Err(err) if from_fixed_source => {
                 return Err(err.context(
-                    "AYX_ONE_WS_PASSWORD was rejected — not retrying, since a fixed \
-                     environment value won't change between attempts; check the secret",
+                    "a fixed workspace password was rejected — not retrying, since \
+                     the value won't change between attempts; check the secret",
                 ));
             }
-            Err(err) if !should_retry_workspace_password(attempt, from_env) => {
+            Err(err) if !should_retry_workspace_password(attempt, from_fixed_source) => {
                 return Err(err.context(format!(
                     "workspace password rejected {WORKSPACE_PASSWORD_ATTEMPTS} times — \
                      run `ayx one login` again"
@@ -1059,7 +1068,7 @@ mod tests {
     // ── workspace_password_from_env / prompt_workspace_password ─────────────
 
     #[test]
-    fn should_retry_workspace_password_false_when_from_env() {
+    fn should_retry_workspace_password_false_when_from_fixed_source() {
         assert!(!should_retry_workspace_password(1, true));
         assert!(!should_retry_workspace_password(3, true));
     }
