@@ -39,6 +39,8 @@ mongo:
         token_endpoint_url: None,
         client_secret: None,
         client_secret_ref: None,
+        sp_client_secret: None,
+        sp_client_secret_ref: None,
         access_token: Some("test-token".to_string()),
         access_token_ref: None,
         refresh_token: None,

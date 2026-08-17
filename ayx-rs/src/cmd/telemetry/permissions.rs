@@ -501,6 +501,8 @@ mod tests {
             oauth_client_id: None,
             client_secret: None,
             client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
             token_endpoint_url: None,
             access_token: None,
             access_token_ref: None,
