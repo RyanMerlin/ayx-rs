@@ -2264,6 +2264,8 @@ impl App {
             access_token_ref: None,
             refresh_token: None,
             refresh_token_ref: None,
+            workspace_password: None,
+            workspace_password_ref: None,
             workspace_credentials: Default::default(),
             expected_workspace_id: None,
             sp_client_id: None,

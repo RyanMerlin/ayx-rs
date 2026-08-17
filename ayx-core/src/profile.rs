@@ -430,6 +430,10 @@ pub struct WorkspaceCredential {
     #[serde(default)]
     pub refresh_token_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_password: Option<String>,
+    #[serde(default)]
+    pub workspace_password_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_client_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_secret: Option<String>,
@@ -473,6 +477,10 @@ pub struct AlteryxOneProfile {
     pub refresh_token: Option<String>,
     #[serde(default)]
     pub refresh_token_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_password: Option<String>,
+    #[serde(default)]
+    pub workspace_password_ref: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub workspace_credentials: BTreeMap<String, WorkspaceCredential>,
     /// Expected workspace id for mutation safety preflight.
@@ -515,6 +523,8 @@ impl Default for AlteryxOneProfile {
             access_token_ref: None,
             refresh_token: None,
             refresh_token_ref: None,
+            workspace_password: None,
+            workspace_password_ref: None,
             workspace_credentials: Default::default(),
             expected_workspace_id: None,
             sp_client_id: None,
@@ -576,6 +586,17 @@ impl AlteryxOneProfile {
             .filter(|value| !value.trim().is_empty())
             .or_else(|| {
                 self.refresh_token
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+            })
+    }
+
+    pub fn resolved_workspace_password(&self) -> Option<&str> {
+        self.active_workspace_credential()
+            .and_then(|credential| credential.workspace_password.as_deref())
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                self.workspace_password
                     .as_deref()
                     .filter(|value| !value.trim().is_empty())
             })
@@ -1033,6 +1054,11 @@ impl Config {
             {
                 one.refresh_token = resolve_secret_ref(reference)?;
             }
+            if one.workspace_password.is_none()
+                && let Some(reference) = one.workspace_password_ref.as_deref()
+            {
+                one.workspace_password = resolve_secret_ref(reference)?;
+            }
             if one.client_secret.is_none()
                 && let Some(reference) = one.client_secret_ref.as_deref()
             {
@@ -1048,6 +1074,11 @@ impl Config {
                     && let Some(reference) = credential.refresh_token_ref.as_deref()
                 {
                     credential.refresh_token = resolve_secret_ref(reference)?;
+                }
+                if credential.workspace_password.is_none()
+                    && let Some(reference) = credential.workspace_password_ref.as_deref()
+                {
+                    credential.workspace_password = resolve_secret_ref(reference)?;
                 }
                 if credential.client_secret.is_none()
                     && let Some(reference) = credential.client_secret_ref.as_deref()
@@ -1561,6 +1592,8 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
             access_token_ref: None,
             refresh_token: None,
             refresh_token_ref: None,
+            workspace_password: None,
+            workspace_password_ref: None,
             workspace_credentials: BTreeMap::new(),
             expected_workspace_id: None,
             sp_client_id: None,
@@ -1754,6 +1787,19 @@ fn merge_one_profiles(
     if current.refresh_token_ref.is_none() {
         current.refresh_token_ref = fallback.refresh_token_ref.clone();
     }
+    // `workspace_password` / `workspace_password_ref` are deliberately NOT overlaid
+    // from the fallback profile, unlike the token fields above.
+    //
+    // A workspace password authenticates against one specific workspace. Overlaying
+    // it would mean that loading profile B with `--profile B`, while profile A is
+    // active, silently submits A's password to B's workspace login endpoint — a
+    // credential sent somewhere it does not belong, and repeated rejections risk
+    // locking the account. Tokens are already workspace-bound and merely fail; a
+    // password is a reusable secret, so the blast radius differs in kind.
+    //
+    // `expected_workspace_id` and `auth_mode` are excluded from this overlay for the
+    // same class of reason: they express which workspace/identity a profile means,
+    // and inheriting them defeats the point of having separate profiles.
     for (workspace_id, credential) in &fallback.workspace_credentials {
         current
             .workspace_credentials
@@ -2588,6 +2634,8 @@ mod tests {
                 access_token_ref: None,
                 refresh_token: None,
                 refresh_token_ref: None,
+                workspace_password: None,
+                workspace_password_ref: None,
                 workspace_credentials: Default::default(),
                 expected_workspace_id: None,
                 sp_client_id: None,
@@ -2864,6 +2912,8 @@ mod tests {
             access_token_ref: None,
             refresh_token: None,
             refresh_token_ref: None,
+            workspace_password: None,
+            workspace_password_ref: None,
             workspace_credentials: Default::default(),
             expected_workspace_id: None,
             sp_client_id: None,
@@ -2895,6 +2945,8 @@ mod tests {
             access_token_ref: None,
             refresh_token: None,
             refresh_token_ref: None,
+            workspace_password: None,
+            workspace_password_ref: None,
             workspace_credentials: Default::default(),
             expected_workspace_id: None,
             sp_client_id: None,
@@ -2920,6 +2972,8 @@ mod tests {
                 access_token_ref: None,
                 refresh_token: Some("workspace-refresh".to_string()),
                 refresh_token_ref: None,
+                workspace_password: None,
+                workspace_password_ref: None,
                 oauth_client_id: Some("workspace-client".to_string()),
                 client_secret: None,
                 client_secret_ref: None,
@@ -2941,6 +2995,8 @@ mod tests {
             access_token_ref: None,
             refresh_token: Some("legacy-refresh".to_string()),
             refresh_token_ref: None,
+            workspace_password: None,
+            workspace_password_ref: None,
             workspace_credentials,
             expected_workspace_id: Some("ws-1".to_string()),
             sp_client_id: None,
@@ -2971,6 +3027,8 @@ mod tests {
                 access_token_ref: None,
                 refresh_token: Some("single-refresh".to_string()),
                 refresh_token_ref: None,
+                workspace_password: None,
+                workspace_password_ref: None,
                 oauth_client_id: Some("single-client".to_string()),
                 client_secret: None,
                 client_secret_ref: None,
@@ -2992,6 +3050,8 @@ mod tests {
             access_token_ref: None,
             refresh_token: Some("legacy-refresh".to_string()),
             refresh_token_ref: None,
+            workspace_password: None,
+            workspace_password_ref: None,
             workspace_credentials,
             expected_workspace_id: None,
             sp_client_id: None,
@@ -3009,6 +3069,124 @@ mod tests {
                 .effective_token_endpoint_url_for_workspace(profile.active_workspace_id())
                 .as_deref(),
             Some("https://tenant.example/as/token")
+        );
+    }
+
+    #[test]
+    fn one_workspace_password_prefers_workspace_credential_over_profile_fallback() {
+        let mut workspace_credentials = BTreeMap::new();
+        workspace_credentials.insert(
+            "ws-3".to_string(),
+            WorkspaceCredential {
+                access_token: Some("workspace-access".to_string()),
+                access_token_ref: None,
+                refresh_token: None,
+                refresh_token_ref: None,
+                workspace_password: Some("workspace-password".to_string()),
+                workspace_password_ref: None,
+                oauth_client_id: None,
+                client_secret: None,
+                client_secret_ref: None,
+                token_endpoint_url: None,
+                sp_client_id: None,
+                workspace_gid: None,
+                api_base_url: None,
+            },
+        );
+
+        let profile = AlteryxOneProfile {
+            account_email: "user@example.com".to_string(),
+            base_url: Some("https://us1.alteryxcloud.com".to_string()),
+            oauth_client_id: None,
+            client_secret: None,
+            client_secret_ref: None,
+            token_endpoint_url: None,
+            access_token: None,
+            access_token_ref: None,
+            refresh_token: None,
+            refresh_token_ref: None,
+            workspace_password: Some("profile-password".to_string()),
+            workspace_password_ref: None,
+            workspace_credentials,
+            expected_workspace_id: Some("ws-3".to_string()),
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
+        };
+
+        assert_eq!(
+            profile.resolved_workspace_password(),
+            Some("workspace-password")
+        );
+    }
+
+    /// A workspace password must NEVER be inherited from the active profile into a
+    /// different profile loaded via `--profile`. Overlaying it would submit one
+    /// workspace's password to another workspace's login endpoint. The token fields
+    /// above this in `merge_one_profiles` are deliberately overlaid; this one is
+    /// deliberately not. If someone "restores consistency" by adding it back, this
+    /// test is the tripwire.
+    #[test]
+    fn merge_one_profiles_never_overlays_workspace_password() {
+        let current = AlteryxOneProfile {
+            account_email: "current@example.com".to_string(),
+            workspace_password: None,
+            workspace_password_ref: None,
+            ..Default::default()
+        };
+        let fallback = AlteryxOneProfile {
+            account_email: "fallback@example.com".to_string(),
+            workspace_password: Some("fallback-password".to_string()),
+            workspace_password_ref: Some("inline:fallback-password".to_string()),
+            ..Default::default()
+        };
+
+        let merged = merge_one_profiles(current, &fallback);
+
+        assert_eq!(
+            merged.workspace_password, None,
+            "workspace_password must not be inherited across profiles"
+        );
+        assert_eq!(
+            merged.workspace_password_ref, None,
+            "workspace_password_ref must not be inherited across profiles"
+        );
+    }
+
+    #[test]
+    fn workspace_password_ref_round_trips_in_workspace_credential_yaml() {
+        let mut profile = base_config("roundtrip", "RoundTripDb");
+        profile.alteryx_one.as_mut().unwrap().workspace_credentials = BTreeMap::from([(
+            "ws-1".to_string(),
+            WorkspaceCredential {
+                access_token: Some("test-access".to_string()),
+                access_token_ref: None,
+                refresh_token: None,
+                refresh_token_ref: None,
+                workspace_password: None,
+                workspace_password_ref: Some("keyring:test/workspace.password".to_string()),
+                oauth_client_id: None,
+                client_secret: None,
+                client_secret_ref: None,
+                token_endpoint_url: None,
+                sp_client_id: None,
+                workspace_gid: None,
+                api_base_url: None,
+            },
+        )]);
+
+        let yaml = serde_yaml::to_string(&profile).unwrap();
+        let round_tripped: Config = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(
+            round_tripped
+                .alteryx_one
+                .as_ref()
+                .unwrap()
+                .workspace_credentials
+                .get("ws-1")
+                .and_then(|credential| credential.workspace_password_ref.as_deref()),
+            Some("keyring:test/workspace.password")
         );
     }
 
@@ -3410,6 +3588,15 @@ server:
             ref_form_for("", Some("inline:actual-secret"), "inline:***"),
             "inline:***",
             "inline: ref suffix must be redacted"
+        );
+    }
+
+    #[test]
+    fn ref_form_for_redacts_inline_workspace_password_ref() {
+        assert_eq!(
+            ref_form_for("", Some("inline:test-password"), "inline:***"),
+            "inline:***",
+            "workspace_password_ref must redact inline secrets"
         );
     }
 }

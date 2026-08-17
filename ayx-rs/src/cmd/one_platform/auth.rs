@@ -228,6 +228,11 @@ pub(crate) fn login(
             .and_then(|o| o.resolved_workspace_gid())
             .map(str::to_string)
             .unwrap_or_default();
+        let workspace_password = config
+            .alteryx_one
+            .as_ref()
+            .and_then(|o| o.resolved_workspace_password())
+            .map(str::to_string);
 
         if ws_gid.is_empty() {
             anyhow::bail!(
@@ -239,16 +244,17 @@ pub(crate) fn login(
         eprintln!("Sending one-time passcode to {}...", email);
         eprintln!("(Check your inbox for a 6-digit code)");
 
-        let result = ayx_one_api::email_otp_login(&base_url, &email, &ws_gid, || {
-            use std::io::Write as _;
-            eprint!("Enter the 6-digit passcode: ");
-            let _ = std::io::stderr().flush();
-            let mut line = String::new();
-            std::io::stdin()
-                .read_line(&mut line)
-                .map_err(|e| anyhow::anyhow!("failed to read OTP: {e}"))?;
-            Ok(line.trim().to_string())
-        })?;
+        let result =
+            ayx_one_api::email_otp_login(&base_url, &email, &ws_gid, workspace_password, || {
+                use std::io::Write as _;
+                eprint!("Enter the 6-digit passcode: ");
+                let _ = std::io::stderr().flush();
+                let mut line = String::new();
+                std::io::stdin()
+                    .read_line(&mut line)
+                    .map_err(|e| anyhow::anyhow!("failed to read OTP: {e}"))?;
+                Ok(line.trim().to_string())
+            })?;
 
         // Sync workspace_gid into the profile in case it was resolved from
         // the active workspace credential rather than the top-level field.
