@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **`WorkspaceCredential` gains `sp_client_secret` / `sp_client_secret_ref`, so a profile holding several One workspaces can carry a distinct service-principal secret per workspace instead of sharing one profile-level value.** Resolution order: workspace-level dedicated field → profile-level dedicated field → shared `client_secret`. The fallback to the shared field is deliberate, not incidental — profiles written before this change carry only `client_secret`, and without the fallback they would stop authenticating on upgrade. As with the existing `*_ref` fields, `sp_client_secret_ref` may hold an inline secret when no scheme prefix is present, so callers must not print it blind.
+
 ## 0.15.0 — 2026-08-13
 
 ### Added
