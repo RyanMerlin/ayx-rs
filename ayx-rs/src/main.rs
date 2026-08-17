@@ -573,16 +573,16 @@ mod tests {
     /// `error_code=<code>`; the dispatcher must read that rather than scanning
     /// prose. It previously did not: the prose scan looks for `"not found"`
     /// (space) while the token is `not_found` (underscore), so a Server-side
-    /// 404 was classified only by accident of the body text, and a 410 fell
-    /// through to `Internal` — the same defect this change fixed on the One
-    /// side.
+    /// 404 was classified only by accident of the body text. The 410 scream
+    /// test now carries its own structured code (`gone`) instead of collapsing
+    /// into `not_found`.
     #[test]
     fn classify_reads_the_structured_error_code_from_server_api() {
         let gone = anyhow::anyhow!(
-            "api request failed [GET] status=410 code=http_error error_code=not_found \
+            "api request failed [GET] status=410 code=http_error error_code=gone \
              url=https://example/v3/workflows/1 body={{\"message\":\"resource retired\"}}"
         );
-        assert_eq!(classify_anyhow_error(&gone), ErrorCode::NotFound);
+        assert_eq!(classify_anyhow_error(&gone), ErrorCode::Gone);
 
         // No prose anywhere says "conflict"; only the structured token does.
         let conflict = anyhow::anyhow!(
@@ -594,6 +594,93 @@ mod tests {
         // An unparseable token must not hijack the prose fallback.
         let bogus = anyhow::anyhow!("api request failed error_code=not_a_real_code 404 not found");
         assert_eq!(classify_anyhow_error(&bogus), ErrorCode::NotFound);
+    }
+
+    #[test]
+    fn datasets_list_defaults_to_all_and_accepts_comma_or_repeat_forms() {
+        let defaulted = Cli::try_parse_from(["ayx", "one", "datasets", "list"])
+            .expect("datasets list should parse with the default filter");
+        let Command::One {
+            command:
+                OneCommand::Datasets {
+                    command:
+                        OneDatasetsCommand::List {
+                            datasets_filter, ..
+                        },
+                },
+        } = defaulted.command
+        else {
+            panic!("expected one datasets list");
+        };
+        assert_eq!(datasets_filter, vec![DatasetFilter::All]);
+
+        let comma = Cli::try_parse_from([
+            "ayx",
+            "one",
+            "datasets",
+            "list",
+            "--datasets-filter",
+            "imported,reference",
+        ])
+        .expect("comma-separated filters should parse");
+        let Command::One {
+            command:
+                OneCommand::Datasets {
+                    command:
+                        OneDatasetsCommand::List {
+                            datasets_filter, ..
+                        },
+                },
+        } = comma.command
+        else {
+            panic!("expected one datasets list");
+        };
+        assert_eq!(
+            datasets_filter,
+            vec![DatasetFilter::Imported, DatasetFilter::Reference]
+        );
+
+        let repeated = Cli::try_parse_from([
+            "ayx",
+            "one",
+            "datasets",
+            "list",
+            "--datasets-filter",
+            "recipe",
+            "--datasets-filter",
+            "all",
+        ])
+        .expect("repeated filters should parse");
+        let Command::One {
+            command:
+                OneCommand::Datasets {
+                    command:
+                        OneDatasetsCommand::List {
+                            datasets_filter, ..
+                        },
+                },
+        } = repeated.command
+        else {
+            panic!("expected one datasets list");
+        };
+        assert_eq!(
+            datasets_filter,
+            vec![DatasetFilter::Recipe, DatasetFilter::All]
+        );
+    }
+
+    #[test]
+    fn datasets_list_rejects_unknown_filter_values() {
+        let err = Cli::try_parse_from([
+            "ayx",
+            "one",
+            "datasets",
+            "list",
+            "--datasets-filter",
+            "bogus",
+        ])
+        .expect_err("invalid dataset filters should fail clap parsing");
+        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
     }
 
     #[test]
@@ -2225,6 +2312,14 @@ pub(crate) enum OneDatasetsCommand {
     List {
         #[arg(long)]
         profile: Option<String>,
+        #[arg(
+            long = "datasets-filter",
+            value_enum,
+            value_delimiter = ',',
+            action = clap::ArgAction::Append,
+            default_values_t = [DatasetFilter::All]
+        )]
+        datasets_filter: Vec<DatasetFilter>,
         #[arg(long)]
         limit: Option<u32>,
         #[arg(long)]
@@ -2234,6 +2329,13 @@ pub(crate) enum OneDatasetsCommand {
     Count {
         #[arg(long)]
         profile: Option<String>,
+        #[arg(
+            long = "datasets-filter",
+            value_enum,
+            value_delimiter = ',',
+            action = clap::ArgAction::Append
+        )]
+        datasets_filter: Vec<DatasetFilter>,
     },
     /// Read wrangled-dataset resources.
     #[command(arg_required_else_help = true)]
@@ -2783,6 +2885,27 @@ impl WorkflowPrivilege {
             WorkflowPrivilege::Read => "read",
             WorkflowPrivilege::Share => "share",
             WorkflowPrivilege::Update => "update",
+        }
+    }
+}
+
+/// Dataset-library filter accepted by `GET /v4/datasetLibrary` and
+/// `GET /v4/datasetLibrary/count`.
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DatasetFilter {
+    All,
+    Imported,
+    Reference,
+    Recipe,
+}
+
+impl DatasetFilter {
+    pub(crate) fn as_api_str(self) -> &'static str {
+        match self {
+            DatasetFilter::All => "all",
+            DatasetFilter::Imported => "imported",
+            DatasetFilter::Reference => "reference",
+            DatasetFilter::Recipe => "recipe",
         }
     }
 }
@@ -5405,6 +5528,9 @@ fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static s
         NotFound => Some(
             "Verify the id is correct. Use 'ayx <surface> list' to enumerate available resources.",
         ),
+        Gone => Some(
+            "The upstream endpoint or resource was removed. Recheck the docs or switch to a list-based workflow if one exists.",
+        ),
         Validation => Some(
             "Inspect the failed flag or input; '--help' on the subcommand documents accepted values.",
         ),
@@ -5446,9 +5572,9 @@ fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
     // derived from `ErrorCode::from_http_status`, and its comment says the
     // outer dispatcher picks that up. Nothing did: the scan below looks for
     // `"not found"` with a space while the embedded token is `not_found` with
-    // an underscore, so a Server-side 404 was classified only when the body
-    // prose happened to say "not found", and a 410 matched nothing at all and
-    // fell through to `Internal`.
+    // an underscore. A Server-side 404 was classified only when the body
+    // prose happened to say "not found"; a 410 scream test now carries `gone`
+    // and should stay distinct from `not_found`.
     if let Some(code) = chain
         .split("error_code=")
         .nth(1)
@@ -5477,6 +5603,12 @@ fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
     }
     if chain.contains("forbidden") || chain.contains("403") || chain.contains("permission denied") {
         return ErrorCode::PermissionDenied;
+    }
+    if chain.contains("gone") || chain.contains("410") {
+        return ErrorCode::Gone;
+    }
+    if chain.contains("gone") || chain.contains("410") {
+        return ErrorCode::Gone;
     }
     if chain.contains("not found") || chain.contains("404") {
         return ErrorCode::NotFound;

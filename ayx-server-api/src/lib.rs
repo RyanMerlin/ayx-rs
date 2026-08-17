@@ -1730,6 +1730,7 @@ fn status_error_code(status: u16) -> &'static str {
         401 => "unauthorized",
         403 => "forbidden",
         404 => "not_found",
+        410 => "gone",
         409 => "conflict",
         429 => "rate_limited",
         500 => "server_error",

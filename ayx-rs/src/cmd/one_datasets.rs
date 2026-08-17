@@ -4,7 +4,8 @@ use ayx_one_api::one_api_live_request;
 use url::form_urlencoded::Serializer;
 
 use crate::{
-    OneDatasetsCommand, OneDatasetsImportedCommand, OneDatasetsWrangledCommand, cmd::RuntimeCtx,
+    DatasetFilter, OneDatasetsCommand, OneDatasetsImportedCommand, OneDatasetsWrangledCommand,
+    cmd::RuntimeCtx,
 };
 
 fn append_query(endpoint: &str, query: &[(&str, String)]) -> String {
@@ -18,15 +19,24 @@ fn append_query(endpoint: &str, query: &[(&str, String)]) -> String {
     format!("{endpoint}?{}", serializer.finish())
 }
 
+fn datasets_filter_query(filters: &[DatasetFilter]) -> Vec<(&'static str, String)> {
+    filters
+        .iter()
+        .map(|filter| ("datasetsFilter", filter.as_api_str().to_string()))
+        .collect()
+}
+
 pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneDatasetsCommand) -> Result<Envelope> {
     Ok(match command {
         OneDatasetsCommand::List {
             profile,
+            datasets_filter,
             limit,
             offset,
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let mut query = Vec::new();
+            query.extend(datasets_filter_query(&datasets_filter));
             if let Some(limit) = limit {
                 query.push(("limit", limit.to_string()));
             }
@@ -36,17 +46,17 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneDatasetsCommand) -> 
             let endpoint = append_query("/v4/datasetLibrary", &query);
             one_api_live_request(&config, "datasets", "list", "GET", &endpoint, false, &[])?
         }
-        OneDatasetsCommand::Count { profile } => {
+        OneDatasetsCommand::Count {
+            profile,
+            datasets_filter,
+        } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            one_api_live_request(
-                &config,
-                "datasets",
-                "count",
-                "GET",
-                "/v4/datasetLibrary/count",
-                false,
-                &[],
-            )?
+            let mut query = Vec::new();
+            if !datasets_filter.is_empty() {
+                query.extend(datasets_filter_query(&datasets_filter));
+            }
+            let endpoint = append_query("/v4/datasetLibrary/count", &query);
+            one_api_live_request(&config, "datasets", "count", "GET", &endpoint, false, &[])?
         }
         OneDatasetsCommand::Wrangled { command } => match command {
             OneDatasetsWrangledCommand::List {
@@ -113,4 +123,28 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneDatasetsCommand) -> 
             }
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DatasetFilter, datasets_filter_query};
+
+    #[test]
+    fn datasets_filter_query_serializes_single_value_as_one_pair() {
+        assert_eq!(
+            datasets_filter_query(&[DatasetFilter::All]),
+            vec![("datasetsFilter", "all".to_string())]
+        );
+    }
+
+    #[test]
+    fn datasets_filter_query_serializes_multiple_values_as_repeated_pairs() {
+        assert_eq!(
+            datasets_filter_query(&[DatasetFilter::Imported, DatasetFilter::Recipe]),
+            vec![
+                ("datasetsFilter", "imported".to_string()),
+                ("datasetsFilter", "recipe".to_string()),
+            ]
+        );
+    }
 }
