@@ -27,7 +27,7 @@ All mutating commands are dry-run by default. Nothing changes on the server unti
 
 | Area | Command prefix | What you do |
 |---|---|---|
-| Workflows | `ayx one workflows` | List, inspect, copy, and share cloud-native canvas workflows |
+| Workflows | `ayx one workflows` | List, inspect, copy, share, and delete cloud-native canvas workflows |
 | Connections | `ayx one connections` | Manage data connections and connector metadata |
 | Datasets | `ayx one datasets` | Browse the One dataset library and inspect dataset details |
 | Job groups | `ayx one job-groups` | Run, cancel, inspect, and retrieve results for job groups |
@@ -37,8 +37,7 @@ All mutating commands are dry-run by default. Nothing changes on the server unti
 | Identity & users | `ayx one login` / `logout` / `whoami` / `auth` / `workspace` / `person` / `token` / `role` | Sign in/out, inspect identity, and administer workspaces, users, tokens, and roles |
 | Write settings | `ayx one write-settings` | Configure where flows write their output data |
 | Webhooks | `ayx one webhook-flow-tasks` | Create, inspect, delete, and test webhook-triggered flow tasks |
-| Billing | `ayx one billing` | Account information and usage exports |
-| Diagnostics | `ayx one doctor` / `ayx one inventory` | Health checks across auth, identity, plans, scheduling, and billing |
+| Diagnostics | `ayx one doctor` / `ayx one inventory` / `ayx one api` | Health checks across auth, identity, plans, and scheduling; plus OpenAPI-spec and coverage introspection |
 | Flows (DC Legacy) | `ayx one flows` | The older Designer Cloud `/v4/flows` surface: list, create, run, validate, import/export, manage permissions |
 
 ## How `--apply` keeps you safe
@@ -79,7 +78,6 @@ ayx one flows list --profile staging
 - [Output objects](/one/output-objects/) — CRUD and Python conversion for output objects
 - [Write settings](/one/write-settings/) — configure flow output destinations
 - [Webhooks](/one/webhooks/) — webhook-triggered flow tasks
-- [Billing](/one/billing/) — account and usage data
 - [Diagnostics](/one/diagnostics/) — health checks and status
 - [Identity & auth](/one/identity/) — sign in/out, whoami, auth status, workspaces, users, roles, tokens
 - [Safety model](/safety-model/) — dry-run and `--apply` in detail

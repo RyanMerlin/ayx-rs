@@ -1,6 +1,6 @@
 ---
 title: Workflows
-description: List, count, inspect, copy, and share Alteryx One cloud-native canvas workflows from the CLI.
+description: List, count, inspect, copy, share, and delete Alteryx One cloud-native canvas workflows from the CLI.
 sidebar:
   order: 1
 ---
@@ -29,6 +29,7 @@ Mutating commands are dry-run by default — add `--apply` to commit.
 | `ayx one workflows assets` | `--profile`, `--env`, `--limit`, `--page-token`, `--all`, `--max-pages` | List the richer workflow-asset projection — see [Inspect](/one/workflows/inspect/) |
 | `ayx one workflows copy <id>` | `--profile`, `--env`, `--name`, `--version` | Duplicate a workflow — see [Copy & share](/one/workflows/share/) |
 | `ayx one workflows share <id>` | `--profile`, `--env`, `--to-person`, `--to-group`, `--privilege`, `--include-dependencies`, `--send-email`, `--message`, `--body`, `--no-resolve-emails` | Share a workflow with people or groups — see [Copy & share](/one/workflows/share/) |
+| `ayx one workflows delete <id>` | `--profile`, `--env` | Permanently delete a workflow — see [Delete](/one/workflows/delete/) |
 
 Every leaf also accepts the global `--output`, `--apply`, `--verbose`, `--debug`, `--no-verify-tls`, and `--yes` flags. Use `--output json` for automation, `--env <ENVIRONMENT_FLAG>` to select a named environment, and `--profile <name>` on the leaves that expose it.
 
@@ -88,6 +89,7 @@ ayx --output json one workflows count | jq '{count: .data.count, source: .data.c
 
 - [Inspect](/one/workflows/inspect/) — detail, dependencies, engines, tools, and assets
 - [Copy & share](/one/workflows/share/) — duplicate a workflow or grant access
+- [Delete](/one/workflows/delete/) — permanently remove a workflow; no restore endpoint exists
 - [Flows](/one/flows/) — the separate integer-id-keyed Designer Cloud `/v4/flows` family
 - [Datasets](/one/datasets/) — the One dataset library
 - [Plans](/one/plans/) — orchestrate multi-flow plans

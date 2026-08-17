@@ -16,7 +16,6 @@ Two commands give you a quick read on the health of your Alteryx One environment
 | `ayx one doctor identity` | Check identity surface health |
 | `ayx one doctor plans` | Check plans surface health |
 | `ayx one doctor scheduling` | Check scheduling surface health |
-| `ayx one doctor billing` | Check billing surface health |
 | `ayx one inventory` | Asset inventory across the workspace |
 
 ## Running a full health check
@@ -29,7 +28,6 @@ ayx one doctor discover
 ayx one doctor identity
 ayx one doctor plans
 ayx one doctor scheduling
-ayx one doctor billing
 ```
 
 Each check is independent. A failure in one does not block the others.
@@ -56,7 +54,7 @@ ayx one doctor auth --profile staging
 ayx one doctor discover
 ```
 
-## Identity, plans, scheduling, and billing checks
+## Identity, plans, and scheduling checks
 
 These targeted checks verify that specific API surfaces are healthy:
 
@@ -64,10 +62,7 @@ These targeted checks verify that specific API surfaces are healthy:
 ayx one doctor identity
 ayx one doctor plans
 ayx one doctor scheduling
-ayx one doctor billing
 ```
-
-Run `ayx one doctor billing` before investigating billing data issues — it confirms the billing API is reachable before you try an export.
 
 ## Inventory
 
@@ -99,7 +94,7 @@ ayx --output json one doctor auth | jq '.ok'
 
 ## Related
 
-- [Billing](/one/billing/) — account and usage data
+- [API introspection](/one/diagnostics/api/) — spec fetch and coverage diff, separate from the health checks on this page
 - [Connecting](/connecting/) — how to configure profiles and credentials
 - [Alteryx One overview](/one/) — all `ayx one` areas
 - [Troubleshooting](/troubleshooting/) — common errors and fixes

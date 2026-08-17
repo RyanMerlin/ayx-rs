@@ -43,6 +43,7 @@ export default defineConfig({
                 'one/workflows',
                 'one/workflows/inspect',
                 'one/workflows/share',
+                'one/workflows/delete',
               ],
             },
             {
@@ -91,8 +92,11 @@ export default defineConfig({
               items: [
                 'one/write-settings',
                 'one/webhooks',
-                'one/billing',
-                'one/diagnostics',
+                {
+                  label: 'Diagnostics',
+                  collapsed: true,
+                  items: ['one/diagnostics', 'one/diagnostics/api'],
+                },
               ],
             },
             {
