@@ -1,11 +1,13 @@
 ---
 title: Alteryx One overview
-description: What ayx one covers — flows, plans, connections, job groups, scheduling, platform administration, and more.
+description: What ayx one covers — workflows, connections, datasets, jobs, scheduling, platform administration, and the legacy Designer Cloud flows surface.
 sidebar:
   order: 0
 ---
 
-`ayx one` is the primary command surface for Alteryx One. It gives you programmatic access to every major area of the platform: running and managing flows, orchestrating plans, managing data connections, inspecting job groups, administering users and workspaces, and more.
+`ayx one` is the primary command surface for Alteryx One. It gives you programmatic access to every major area of the platform: browsing and sharing cloud-native canvas workflows, managing data connections and datasets, running and inspecting jobs, orchestrating schedules and plans, and administering users and workspaces.
+
+Two distinct workflow-like surfaces exist, and they are not interchangeable. `ayx one workflows` is the cloud-native canvas surface, keyed by ULIDs. `ayx one flows` is the older Designer Cloud (DC) surface at `/v4/flows`, keyed by integer ids. A workspace can hold dozens of cloud-native workflows while `ayx one flows list` returns zero items.
 
 All mutating commands are dry-run by default. Nothing changes on the server until you add `--apply`. Add `--yes` to skip the confirmation prompt in scripts. See the [Safety model](/safety-model/) for the full rules.
 
@@ -13,19 +15,19 @@ All mutating commands are dry-run by default. Nothing changes on the server unti
 
 | Area | Command prefix | What you do |
 |---|---|---|
-| Flows | `ayx one flows` | List, create, run, validate, import/export, manage permissions |
 | Workflows | `ayx one workflows` | List, inspect, copy, and share cloud-native canvas workflows |
-| Plans | `ayx one plans` | Orchestrate multi-flow plans, manage schedules, share, import/export |
 | Connections | `ayx one connections` | Manage data connections and connector metadata |
-| Job groups | `ayx one job-groups` | Run, cancel, inspect, and retrieve results for job groups |
 | Datasets | `ayx one datasets` | Browse the One dataset library and inspect dataset details |
+| Job groups | `ayx one job-groups` | Run, cancel, inspect, and retrieve results for job groups |
 | Output objects | `ayx one output-objects` | CRUD for output objects; inspect inputs; convert to Python |
+| Scheduling | `ayx one scheduling` | List schedules, enable and disable them |
+| Plans | `ayx one plans` | Orchestrate multi-flow plans, manage schedules, share, import/export |
+| Identity & users | `ayx one login` / `logout` / `whoami` / `auth` / `workspace` / `person` / `token` / `role` | Sign in/out, inspect identity, and administer workspaces, users, tokens, and roles |
 | Write settings | `ayx one write-settings` | Configure where flows write their output data |
 | Webhooks | `ayx one webhook-flow-tasks` | Create, inspect, delete, and test webhook-triggered flow tasks |
-| Scheduling | `ayx one scheduling` | List schedules, enable and disable them |
-| Identity & users | `ayx one login` / `logout` / `whoami` / `auth` / `workspace` / `person` / `token` / `role` | Sign in/out, inspect identity, and administer workspaces, users, tokens, and roles |
 | Billing | `ayx one billing` | Account information and usage exports |
 | Diagnostics | `ayx one doctor` / `ayx one inventory` | Health checks across auth, identity, plans, scheduling, and billing |
+| Flows (DC Legacy) | `ayx one flows` | The older Designer Cloud `/v4/flows` surface: list, create, run, validate, import/export, manage permissions |
 
 ## How `--apply` keeps you safe
 
