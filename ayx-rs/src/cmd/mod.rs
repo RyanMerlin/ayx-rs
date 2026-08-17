@@ -19,7 +19,6 @@ pub mod discover;
 pub mod mongo;
 pub mod one;
 mod one_api;
-mod one_billing;
 mod one_connections;
 pub mod one_datasets;
 mod one_doctor;

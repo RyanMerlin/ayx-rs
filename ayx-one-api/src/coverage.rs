@@ -27,10 +27,20 @@ pub struct StaleEndpoint {
 /// describe, and is therefore neither `covered`, `missing`, nor `stale`.
 ///
 /// The One gateway spec (`GET /v4/open-api-spec`) documents `/v4` only, but the
-/// CLI also speaks sibling services such as `/svc-workflow` and `/billing/v1`.
-/// Those rows used to be dropped on the floor, which understated
-/// `inventory_operations` and made it impossible to tell "we compared this and
-/// it matched" from "we never compared this at all".
+/// CLI also speaks sibling services such as `/svc-workflow`. Those rows used to
+/// be dropped on the floor, which understated `inventory_operations` and made
+/// it impossible to tell "we compared this and it matched" from "we never
+/// compared this at all".
+///
+/// This is purely a namespace/comparability classification — a path either
+/// starts with `/v4` or it doesn't (see `canonical_op`). It says nothing about
+/// whether the endpoint actually works. A sibling-service row that 404s forever
+/// lands here identically to one that returns 200 every time; the two `/billing/v1`
+/// rows that used to sit in this bucket were the former, and their removal (not a
+/// reclassification) is what makes every row here today a working `/svc-workflow`
+/// call — an accident of the current inventory, not a guarantee this field makes.
+/// Per-endpoint liveness evidence lives in `docs/one-endpoint-matrix.md`'s `Live
+/// status` column, not here.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct UncomparableEndpoint {
     pub method: String,
@@ -71,9 +81,12 @@ pub struct CoverageReport {
     pub missing: Vec<MissingEndpoint>,
     pub stale: Vec<StaleEndpoint>,
     pub unmatched_spec_paths: Vec<String>,
-    /// Wired endpoints outside the spec's namespace. Not a defect — these are
-    /// real, working commands against sibling services — but they are unverified
-    /// by this diff, so they are reported rather than hidden.
+    /// Wired endpoints outside the spec's namespace. Not a defect — the spec
+    /// simply cannot describe a sibling service — but liveness is a separate,
+    /// unverified axis: this diff never probes the network, so a row here may
+    /// be a working command or a dead one. See `UncomparableEndpoint`'s doc
+    /// comment and `docs/one-endpoint-matrix.md`'s `Live status` column for the
+    /// evidence this field deliberately does not carry.
     pub outside_spec_namespace: Vec<UncomparableEndpoint>,
 }
 
@@ -358,19 +371,19 @@ mod tests {
     ///
     /// The spec side always recorded a non-`/v4` operation in
     /// `unmatched_spec_paths`, but the inventory side silently dropped the
-    /// matching rows, so every endpoint on the still-outside sibling
-    /// services — `/svc-workflow` and `/billing/v1` — vanished from the
-    /// report entirely: not covered, not stale, not counted. The plan,
-    /// scheduling, and workspace suspend/unsuspend rows now live under `/v4`
-    /// and should stay in the comparable bucket.
+    /// matching rows, so every endpoint on the still-outside sibling service
+    /// (`/svc-workflow`) vanished from the report entirely: not covered, not
+    /// stale, not counted. The plan, scheduling, workspace suspend/unsuspend,
+    /// and (former) billing rows now live under `/v4` or are removed, and
+    /// should stay in — or never re-enter — the comparable bucket.
     #[test]
     fn wired_endpoints_outside_the_spec_namespace_are_reported_not_dropped() {
         let r = coverage(&spec_with(json!({ "/v4/flows": { "get": {} } })));
 
         assert!(
             !r.outside_spec_namespace.is_empty(),
-            "the real inventory wires sibling services (/svc-workflow and \
-             /billing/v1); none were reported"
+            "the real inventory wires the /svc-workflow sibling service; \
+             none were reported"
         );
         // Derive the expectation from the inventory independently, rather than
         // re-stating how `coverage()` computes the field. Asserting

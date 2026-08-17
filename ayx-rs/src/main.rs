@@ -1697,17 +1697,6 @@ pub(crate) enum OneCommand {
         #[command(subcommand)]
         command: OneSchedulingCommand,
     },
-    #[command(
-        about = "Alteryx One billing account and usage export",
-        long_about = "Alteryx One billing account and usage export. Note: the Billing API \
-                      requires an enterprise-tier workspace — returns 404 on some workspace \
-                      tiers.",
-        arg_required_else_help = true
-    )]
-    Billing {
-        #[command(subcommand)]
-        command: OneBillingCommand,
-    },
     #[cfg(feature = "ui")]
     #[command(
         about = "Experimental Alteryx One visual interface surface",
@@ -3214,20 +3203,6 @@ pub(crate) enum OneSchedulingCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub(crate) enum OneBillingCommand {
-    /// Inspect the current One billing account.
-    CurrentAccount {
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Export One billing usage data.
-    UsageExport {
-        #[arg(long)]
-        profile: Option<String>,
-    },
-}
-
-#[derive(Subcommand, Debug)]
 pub(crate) enum OneDoctorCommand {
     /// Run the One auth doctor workflow.
     Auth {
@@ -3251,11 +3226,6 @@ pub(crate) enum OneDoctorCommand {
     },
     /// Run the One scheduling doctor workflow.
     Scheduling {
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Run the One billing doctor workflow.
-    Billing {
         #[arg(long)]
         profile: Option<String>,
     },
@@ -4238,16 +4208,6 @@ pub(crate) fn one_doctor_discover_envelope(config: &Config) -> Result<Envelope> 
         false,
         &[],
     )?;
-    let billing = one_api_live_request(
-        config,
-        "billing",
-        "discover-billing-account",
-        "GET",
-        "/billing/v1/my/billing-accounts/current",
-        false,
-        &[],
-    )?;
-
     Ok(Envelope::ok_with_data(
         "one discovery doctor workflow generated",
         json!({
@@ -4256,13 +4216,12 @@ pub(crate) fn one_doctor_discover_envelope(config: &Config) -> Result<Envelope> 
                 workspace.data,
                 plans.data,
                 schedules.data,
-                billing.data,
             ],
             "recommendations": [
                 "Use one workspace current to identify the workspace context",
                 "Use one plans list/detail/run to resolve plan ids",
                 "Use one scheduling list/detail/enable/disable to resolve schedule ids",
-                "Use the workflow guidance layer to decide whether a symptom belongs to identity, plans, scheduling, or billing",
+                "Use the workflow guidance layer to decide whether a symptom belongs to identity, plans, or scheduling",
             ]
         }),
     ))
@@ -4333,41 +4292,6 @@ pub(crate) fn one_doctor_scheduling_envelope(config: &Config) -> Result<Envelope
             "recommendations": [
                 "Use one scheduling detail/enable/disable when a schedule id is known",
                 "Route operator selection and escalation guidance through the workflow guidance layer",
-            ]
-        }),
-    ))
-}
-
-pub(crate) fn one_doctor_billing_envelope(config: &Config) -> Result<Envelope> {
-    let account = one_api_live_request(
-        config,
-        "billing",
-        "doctor-billing-account",
-        "GET",
-        "/billing/v1/my/billing-accounts/current",
-        false,
-        &[],
-    )?;
-    let usage = one_api_live_request(
-        config,
-        "billing",
-        "doctor-billing-usage",
-        "GET",
-        "/billing/v1/usage/export",
-        false,
-        &[],
-    )?;
-    Ok(Envelope::ok_with_data(
-        "one billing doctor workflow generated",
-        json!({
-            "profile": config.profile_name,
-            "checks": [
-                account.data,
-                usage.data,
-            ],
-            "recommendations": [
-                "Keep billing reference-only unless a repeatable operator workflow appears",
-                "Use the workflow guidance layer to decide whether billing belongs in CLI or documentation only",
             ]
         }),
     ))

@@ -2,9 +2,8 @@ use anyhow::Result;
 use ayx_core::envelope::Envelope;
 
 use crate::{
-    OneDoctorCommand, cmd::RuntimeCtx, one_doctor_billing_envelope, one_doctor_discover_envelope,
-    one_doctor_identity_envelope, one_doctor_plans_envelope, one_doctor_scheduling_envelope,
-    one_platform_auth_diagnose_envelope,
+    OneDoctorCommand, cmd::RuntimeCtx, one_doctor_discover_envelope, one_doctor_identity_envelope,
+    one_doctor_plans_envelope, one_doctor_scheduling_envelope, one_platform_auth_diagnose_envelope,
 };
 
 pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneDoctorCommand) -> Result<Envelope> {
@@ -28,10 +27,6 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneDoctorCommand) -> Re
         OneDoctorCommand::Scheduling { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_doctor_scheduling_envelope(&config)?
-        }
-        OneDoctorCommand::Billing { profile } => {
-            let config = runtime.load_profile_lenient(profile.as_deref())?;
-            one_doctor_billing_envelope(&config)?
         }
     })
 }

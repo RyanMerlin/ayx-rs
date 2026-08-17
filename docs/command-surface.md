@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-08-14 23:35:53 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-08-17 22:33:27 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 356
+- Commands: 352
 - Capabilities: 6
 
 ## Commands
@@ -139,9 +139,6 @@ cargo run -q -p xtask -- refresh-command-surface
 | one auth | `one/auth` | unclassified |  | Summarize One API token posture for managed IAM |
 | one auth diagnose | `one/auth/diagnose` | read-only | no | Validate One API token reachability and workspace scope |
 | one auth status | `one/auth/status` | read-only | no | Summarize One API token posture for managed IAM |
-| one billing | `one/billing` | unclassified |  | Alteryx One billing account and usage export |
-| one billing current-account | `one/billing/current-account` | read-only | no | Inspect the current One billing account |
-| one billing usage-export | `one/billing/usage-export` | read-only | no | Export One billing usage data |
 | one connections | `one/connections` | unclassified |  | Alteryx One connections — list, create, and manage credentials |
 | one connections connector-metadata | `one/connections/connector-metadata` | unclassified |  | Inspect connector metadata — defaults, detail, publish info, and overrides |
 | one connections connector-metadata defaults | `one/connections/connector-metadata/defaults` | read-only | no | Inspect connector defaults |
@@ -176,7 +173,6 @@ cargo run -q -p xtask -- refresh-command-surface
 | one datasets wrangled list | `one/datasets/wrangled/list` | read-only | no | List wrangled datasets |
 | one doctor | `one/doctor` | unclassified |  | Alteryx One configuration, auth, and product health diagnostics |
 | one doctor auth | `one/doctor/auth` | read-only | no | Run the One auth doctor workflow |
-| one doctor billing | `one/doctor/billing` | read-only | no | Run the One billing doctor workflow |
 | one doctor discover | `one/doctor/discover` | read-only | no | Run the One discovery doctor workflow |
 | one doctor identity | `one/doctor/identity` | read-only | no | Run the One identity doctor workflow |
 | one doctor plans | `one/doctor/plans` | read-only | no | Run the One plans doctor workflow |

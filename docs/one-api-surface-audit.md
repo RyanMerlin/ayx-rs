@@ -70,12 +70,17 @@ Connection create is broken in practice because the required body schema is undi
 
 ## Phase 4 — Dead Routes (Tier-Gated Surfaces)
 
-The billing rows still return `RouteNotFoundException` on the test workspace. The plans and scheduling rows were repointed to `/v4` in this change; re-probe those live before treating any remaining failure as a tier gate.
+The plans and scheduling rows were repointed to `/v4`; billing was removed rather than repointed,
+since no `/v4` equivalent exists.
 
-- [ ] **Billing surface — `/billing/v1/`**  
+- [x] **Billing surface — `/billing/v1/`** — DONE, removed  
   - `billing current-account` → 404: `/billing/v1/my/billing-accounts/current`  
   - `billing usage-export` → 404: `/billing/v1/usage/export`  
-  Action: confirm if these endpoints exist on enterprise tier. If tier-gated, emit a clean error: "Billing API is not available on this workspace tier." If the URL pattern is wrong, fix the endpoint template.
+  Not tier-gated: `GET /v4/open-api-spec` (172 live paths) contains no billing, usage, credit,
+  license, or quota route at all, and the spec is not entitlement-filtered — this tenant lacks the
+  Plans entitlement, yet 22 `/v4/plan*` paths still appear in its own spec. Unlike plans/scheduling,
+  there was no wrong-path to fix. `one billing`, `one billing current-account`, `one billing
+  usage-export`, and `one doctor billing` are removed from the CLI, catalog, and inventory.
 
 - [x] **Plans surface — `/v4/plans`**  
   - `plans list/count/run/permissions/package/runParameters/schedules` → repointed from `/plans/v1/*` to `/v4/plans`  

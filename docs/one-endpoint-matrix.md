@@ -9,10 +9,14 @@ call returned. `docs/one-live-validation.md` and `docs/one-api-surface-audit.md`
 already track family-level live results, and `one-api-surface-audit.md`'s Phase 4 ("Dead Routes")
 already flagged `billing`/`plans`/`scheduling` as 404 on its test workspace back on 2026-06-22,
 open item: "Validate against an enterprise workspace before deciding whether these are bugs... or
-genuinely tier-gated." This session's live sweep reproduced the identical `RouteNotFoundException`
-404 on a **second, different tenant** (a private test workspace, non-enterprise tier)
-— evidence toward "genuinely tier-gated," not toward a wrong endpoint pattern, though still not a
-close on that open item since neither tenant tested is confirmed enterprise-tier. What none of the
+genuinely tier-gated." **That question is now closed, and the answer was neither.** `GET
+/v4/open-api-spec` (172 live paths) confirmed `/plans/v1` and `/scheduling/v1` were simply wrong
+paths — the spec-documented `/v4/plans` and `/v4/schedules` exist and are what the web UI calls —
+and the spec is not entitlement-filtered (this tenant lacks the Plans entitlement, yet 22
+`/v4/plan*` paths still appear in its spec), so a 404 here was never evidence of tier-gating in the
+first place. Both were repointed. `billing` had no `/v4` equivalent anywhere in the spec and no
+usage/credit/license/quota route either; it was removed rather than kept as a permanently-failing
+command. What none of the
 existing docs record is **per-endpoint** evidence: exact error-body shape, whether a `list` command
 reporting `"ok": true` can be trusted, and a literal command to re-run to check again. That gap is
 why `one connections permissions` shipped for a full release cycle calling
@@ -46,7 +50,6 @@ ayx --output json one token
 ayx --output json one doctor discover
 ayx --output json one doctor plans
 ayx --output json one doctor scheduling
-ayx --output json one doctor billing
 ayx --output json one plans list
 ayx --output json one plans count
 ayx --output json one flows list
@@ -63,7 +66,6 @@ ayx --output json one job-groups detail <job_group_id>
 ayx --output json one output-objects list
 ayx --output json one write-settings list
 ayx --output json one scheduling list
-ayx --output json one billing current-account
 ayx --output json one api open-api-spec
 ayx --output json one api coverage
 ```
@@ -220,15 +222,6 @@ Endpoints the CLI fully dispatches for this surface (`inventory.rs` `SURFACES`).
 | POST | `/v4/schedules/{id}/enable` | unverified | not probed since repoint | `one scheduling enable` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Repointed from `/scheduling/v1/schedules/{id}/enable` (in no spec, live 404 RouteNotFoundException) to the spec-documented path. Not yet re-probed live. |
 | POST | `/v4/schedules/{id}/disable` | unverified | not probed since repoint | `one scheduling disable` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Repointed from `/scheduling/v1/schedules/{id}/disable` (in no spec, live 404 RouteNotFoundException) to the spec-documented path. Not yet re-probed live. |
 | GET | `/v4/schedules/count` | unverified | not probed since repoint | `one scheduling count` | object: raw API count body (`{ count }`/`{ total }`, service-specific) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Repointed from `/scheduling/v1/schedules/count` (in no spec, live 404 RouteNotFoundException) to the spec-documented path. Not yet re-probed live. |
-
-### billing (implemented)
-
-> Managed billing posture and usage export surface.
-
-| Method | Path | Live status | Verified (UTC) | ayx command(s) | Response shape | Error-body flavor | Notes |
-|---|---|---|---|---|---|---|---|
-| GET | `/billing/v1/my/billing-accounts/current` | live 404 RouteNotFoundException | 2026-08-14T16:13Z | `one billing current-account` | object: raw API resource body, JSON-passthrough | json:RouteNotFoundException (same gateway error shape as `/v4`, confirmed live for plans/scheduling/billing) | Phase 2 and `one doctor billing` confirmed 404 `RouteNotFoundException`/`not_found`. This remains a correctly tolerated tenant-entitlement gap; the smoke test allowlists `not_found`. |
-| GET | `/billing/v1/usage/export` | live 404 RouteNotFoundException | 2026-07-27T00:55Z | `one billing usage-export` | object: raw API resource body, JSON-passthrough | json:RouteNotFoundException (same gateway error shape as `/v4`, confirmed live for plans/scheduling/billing) | `one billing usage-export` confirms the same 404 shape. |
 
 ## Partial surfaces
 
@@ -534,12 +527,17 @@ it and do not document it as a usable substitute anywhere in this file.
   false-green a probe ledger like this one is meant to catch. Worth a follow-up issue.
 - **Live evidence in this doc comes from one tenant**: a private test workspace on a
   non-enterprise tier, `https://us1.alteryxcloud.com`, probed 2026-07-27 ~00:50–01:01 UTC using
-  the repo's `default`-profile PAT (workspace-bound, no OTP). The `not_found`/`RouteNotFoundException`
-  recorded here for `/billing/v1/*` may still reflect this tenant's entitlements (Billing
-  features not provisioned on this tier), but the old `/plans/v1/*`, `/scheduling/v1/*`, and
-  `/iam/v1/*` entries were repointed to `/v4` and should no longer be read as tier evidence.
-  Re-verify against an entitled tenant before concluding a managed-service route does not exist at
-  all.
+  the repo's `default`-profile PAT (workspace-bound, no OTP). The old `/plans/v1/*`,
+  `/scheduling/v1/*`, and `/iam/v1/*` entries were repointed to `/v4` and should no longer be read
+  as tier evidence. `/billing/v1/*` is a different case, settled rather than open: `GET
+  /v4/open-api-spec` (172 paths, probed a second time this session) contains no billing, usage,
+  credit, license, or quota route at all, and the spec is demonstrably not entitlement-filtered —
+  this tenant lacks the Plans entitlement, yet 22 `/v4/plan*` paths still appear in its own spec
+  response. A route the spec never describes at all is a different fact than a route the spec
+  describes but this tenant can't reach; the `not_found` here was the former, and the commands
+  were removed rather than left as permanently-failing. Re-verify managed-service routes generally
+  against an entitled tenant before concluding a route does not exist — but that caveat no longer
+  applies to billing specifically.
 - **This tenant has no fixtures for several resources** — flows, folders, wrangled/imported
   datasets, output objects, write settings, and API access tokens all listed as empty (genuine `200`
   with 0 items, confirmed via `page_envelopes[].status_code`, not the masked-404 case above). Rows

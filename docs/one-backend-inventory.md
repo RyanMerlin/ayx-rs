@@ -63,9 +63,6 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `POST /v4/schedules/{id}/enable`
   - `POST /v4/schedules/{id}/disable`
   - `GET /v4/schedules/count`
-- `billing`
-  - `GET /billing/v1/my/billing-accounts/current`
-  - `GET /billing/v1/usage/export`
 - `workflow`
   - `GET /v4/workflows`
   - `GET /v4/workflows?limit=1`
@@ -266,7 +263,6 @@ The live smoke suite currently proves a representative path for:
 - `output-objects.list`
 - `write-settings.list`
 - `scheduling.list`
-- `billing.current-account`
 - `workflows.list`
 - `workflows.count`
 - `workflows.tools`
@@ -328,4 +324,4 @@ Priority order for the next implementation slice:
 1. Decide the shape of the `--check` gate (see the coverage baseline above) before wiring it anywhere. A gate that cannot pass is a gate nobody turns on.
 2. Work the `missing` list by resource, starting with `workspaces` (23 operations, the largest single gap and an admin-facing surface).
 3. Decide whether `dataset` needs mutating lifecycle commands (create/update/delete), or should stay a read-only surface; only list/count/detail reads are wired today.
-4. Extend edge-case live tests (invalid id, empty page, pagination boundary) to the families that don't have them yet: `dataset`, `webhookFlowTask`, `workspace`, `scheduling`, and `billing`.
+4. Extend edge-case live tests (invalid id, empty page, pagination boundary) to the families that don't have them yet: `dataset`, `webhookFlowTask`, `workspace`, and `scheduling`.

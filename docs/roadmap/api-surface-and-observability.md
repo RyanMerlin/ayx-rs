@@ -11,16 +11,21 @@ Status: active
 
 ## Next Steps
 
-- **Configure `AYX_ONE_API_ACCESS_TOKEN` so the nightly live smoke actually
-  runs.** The secret is not set, so `live-smoke.yml` skips every meaningful step
-  and still reports success — 21+ consecutive green runs in which nothing was
-  validated. Local `one_live_smoke` tests behave the same way, passing in
-  milliseconds without a network call. This is the highest-value item in this
-  file. Every One-surface defect found in the 2026-07-28..30 sweep (the dead
-  connections-permissions route, the transport masking failures as empty
-  successes, the coverage gate that could not fail, the `410` misclassification)
-  was found by hand, because CI has never made a live call. Treat a green
-  nightly as meaningless until this is set.
+- **CI still makes no live call to Alteryx One, and that stays true by deliberate choice, not
+  neglect.** `live-smoke.yml` skips every meaningful step because no `AYX_ONE_API_ACCESS_TOKEN`
+  secret is configured; local `one_live_smoke` tests behave the same way, passing in milliseconds
+  without a network call. Commit `7702c26` resolved this differently than "configure the token":
+  the nightly schedule trigger was dropped and the workflow made `workflow_dispatch`-only,
+  reasoning that a long-lived real-tenant token sitting in a public repo's Actions secrets is a
+  worse posture than an honest gap. Do not reinstate the schedule without re-litigating that
+  call. The underlying problem this bullet used to describe is still real and still the
+  highest-value gap in this file: every One-surface defect found across the 2026-07-28..30 and
+  2026-08-14/17 sweeps (the dead connections-permissions route, the transport masking failures as
+  empty successes, the coverage gate that could not fail, the `410` misclassification, 17
+  wrong-path endpoints, a dead `billing` surface, an `/iam/v1` leak in `telemetry permissions`) was
+  found by hand, because CI has never made a live call. Treat a green nightly-that-no-longer-runs
+  as meaningless; treat a green `workflow_dispatch` run as meaningful only for whoever ran it
+  against their own tenant. `docs/one-live-validation.md` is the runbook for doing that by hand.
 - **Decide the shape of the `ayx one api coverage --check` gate before wiring
   it into CI.** It gates on `missing == 0`; the first real measurement
   (2026-07-30) is 43.8% coverage with 132 missing, so it cannot pass today.
@@ -62,16 +67,33 @@ The following ten items came out of the 2026-08-14 v0.15.0 live validation pass 
 test tenant (see `docs/one-endpoint-matrix.md` and `docs/one-live-validation.md` for the
 evidence):
 
-- **Expand the `one_plans_count_live` fail-allowlist to include `not_found`.** The same tenant-tier outcome currently affects the plans list/detail live tests, scheduling, and billing-shaped checks where the whole service returns 404.
+- ~~**Expand the `one_plans_count_live` fail-allowlist to include `not_found`.**~~ Withdrawn: this
+  was written from the tier-gating misdiagnosis. `/plans/v1` and `/scheduling/v1` were simply
+  wrong paths (fixed, repointed to `/v4/plans` and `/v4/schedules`), and `billing` had no `/v4`
+  equivalent at all (removed, not repointed). The correct follow-up is to **re-probe** the
+  repointed `/v4/plans` and `/v4/schedules` rows live and then *tighten* the live-smoke allowlist
+  once real evidence exists, not widen it further on the old diagnosis.
 - **Teach `one_flows_folders_list_page_boundary_live` to accept the genuine empty-result shape.** `GET /v4/folders?limit=1` returned 200 with `response: {"data": []}` for the zero-folder tenant.
 - **Make `one_job_groups_inspection_live_real_object` tolerate data-dependent inputs behavior.** A real non-JDBC job group correctly returned `400 DataServiceInvalidRequest` for its inputs sub-call, but the test currently treats that valid outcome as a failure.
 - **Implement `--output table` separately or document the alias deliberately.** The live UX pass confirmed that it is currently byte-identical to `--output text`.
 - **Add workflow-aware entries to `render_object_array`'s `PREFERRED` column list.** The generic picker exposes `contentChecksum`, a truncated hash, ahead of more useful workflow fields in the default demo table.
-- **Warn when `ayx one workflows list --all` under-delivers against the server total.** `/v4/workflows` is limit-only and non-cursor-paginated; the CLI can see the true `count` but currently reports only the default page without warning.
+- ~~**Warn when `ayx one workflows list --all` under-delivers against the server total.**~~
+  Delivered in `2ba1abd`: `--all` now requests a generous limit, compares against the endpoint's
+  own `count`, and emits `complete: true/false` plus a stderr warning when the two disagree.
 - **Render workflow `tools`, `engines`, and `dependencies` cleanly in text mode.** The live pass found long, raw, single-line JSON blobs, unlike the readable list/count/detail output.
 - **Unify and document the One API base-URL configuration precedence.** `AYX_ONE_BASE_URL` and `AYX_ONE_API_BASE_URL` are similarly named but resolved in different layers, and a second `.env` lookup beside the resolved central profile can override the working-directory file.
-- ~~**Investigate and wire cloud-native workflow DELETE.**~~ Wired: `ayx one workflows delete` (`DELETE /svc-workflow/api/v2/workflows/{id}`, gated behind `--apply` + TTY confirmation, mirrors `one flows delete`). Still needs one thing this item didn't require: a live call against a real id to confirm the route actually deletes (only the fake-ULID route-existence probe has run so far) — see `docs/one-endpoint-matrix.md`.
-- **Make plans, scheduling, and billing list-shaped tests tolerate tier-gated whole-surface 404s.** The outcome is already documented as expected tenant behavior, but the current tests do not consistently allow it.
+- ~~**Investigate and wire cloud-native workflow DELETE.**~~ Wired and now fully live-verified:
+  `ayx one workflows delete` (`DELETE /svc-workflow/api/v2/workflows/{id}`, gated behind `--apply`
+  + TTY confirmation, mirrors `one flows delete`). The residual this item used to carry — a live
+  call against a real id — is satisfied: duplicated a real workflow (`201`), deleted the copy
+  (`200 {}`), and confirmed removal three ways (absent from `list --all`, count dropped by one,
+  `detail` → `not_found`). The unknown-id guard was also verified live, rejecting before any
+  mutating request. `docs/one-endpoint-matrix.md`'s DELETE row is updated to `live 200`.
+- ~~**Make plans, scheduling, and billing list-shaped tests tolerate tier-gated whole-surface 404s.**~~
+  Withdrawn along with the sibling item above: this was the same misdiagnosis. Plans and scheduling
+  are repointed to real `/v4` paths and need live re-verification, not a wider tolerance for a
+  wrong path. Billing had no `/v4` route at all and is removed — there is no billing test left to
+  make tolerant.
 
 ## Exit Criteria
 

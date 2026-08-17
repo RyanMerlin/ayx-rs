@@ -171,19 +171,6 @@ const SCHEDULING_ENDPOINTS: &[EndpointSpec] = &[
     },
 ];
 
-const BILLING_ENDPOINTS: &[EndpointSpec] = &[
-    EndpointSpec {
-        method: "GET",
-        path: "/billing/v1/my/billing-accounts/current",
-        commands: &["one billing current-account"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/billing/v1/usage/export",
-        commands: &["one billing usage-export"],
-    },
-];
-
 const PLAN_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "POST",
@@ -1011,12 +998,6 @@ const SURFACES: &[SurfaceSpec] = &[
         endpoints: SCHEDULING_ENDPOINTS,
         notes: &["Managed scheduling surface."],
     },
-    SurfaceSpec {
-        name: "billing",
-        status: "implemented",
-        endpoints: BILLING_ENDPOINTS,
-        notes: &["Managed billing posture and usage export surface."],
-    },
 ];
 
 /// Returns every (method, path-template) pair declared in the inventory.
@@ -1208,7 +1189,6 @@ mod tests {
                 .iter()
                 .any(|surface| surface["name"] == "scheduling")
         );
-        assert!(surfaces.iter().any(|surface| surface["name"] == "billing"));
         let partial = env.data["partial_surfaces"]
             .as_array()
             .expect("partial_surfaces");
