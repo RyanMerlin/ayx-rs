@@ -7,7 +7,19 @@ sidebar:
 
 `ayx one` is the primary command surface for Alteryx One. It gives you programmatic access to every major area of the platform: browsing and sharing cloud-native canvas workflows, managing data connections and datasets, running and inspecting jobs, orchestrating schedules and plans, and administering users and workspaces.
 
-Two distinct workflow-like surfaces exist, and they are not interchangeable. `ayx one workflows` is the cloud-native canvas surface, keyed by ULIDs. `ayx one flows` is the older Designer Cloud (DC) surface at `/v4/flows`, keyed by integer ids. A workspace can hold dozens of cloud-native workflows while `ayx one flows list` returns zero items.
+## Three workflow surfaces, deliberately kept separate
+
+This CLI reaches three different workflow-like surfaces. They are built on different underlying technologies, they do not share resources, and they are not interchangeable:
+
+| Surface | Command prefix | What it is |
+|---|---|---|
+| Cloud-native workflows | `ayx one workflows` | Alteryx One's canvas surface, keyed by ULIDs. The execution unit in Alteryx One. See [Workflows](/one/workflows/). |
+| On-prem Designer/Server workflows | `ayx designer workflow` | Local `.yxmd` / `.yxmc` / `.yxzp` packages for Alteryx Designer and Server. The execution unit on-prem, and where the large majority of existing customer workflows still live. See [Workflows & packages](/server/workflow/). |
+| Designer Cloud flows | `ayx one flows` | The older Designer Cloud (DC) surface at `/v4/flows`, keyed by integer ids. See [Flows (DC Legacy)](/one/flows/). |
+
+Because these are separate technologies rather than separate views of the same data, moving work between them is a **migration**, not a configuration change. A workspace can hold dozens of cloud-native workflows while `ayx one flows list` returns zero items. Commands that cross the boundary say so explicitly — see `ayx designer workflow migrate` and the cloud-conversion notes in [Workflows & packages](/server/workflow/).
+
+Keep the distinction when reading the rest of these docs: a page under **Alteryx One** never describes on-prem Designer/Server behavior, and a page under **Alteryx Server** never describes cloud behavior.
 
 All mutating commands are dry-run by default. Nothing changes on the server until you add `--apply`. Add `--yes` to skip the confirmation prompt in scripts. See the [Safety model](/safety-model/) for the full rules.
 

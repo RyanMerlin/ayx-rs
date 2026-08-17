@@ -5,7 +5,12 @@ sidebar:
   order: 1
 ---
 
-Alteryx One **workflows** are not the same resource as `ayx one flows`. `one flows` is the older Designer Cloud family at `/v4/flows`, keyed by integer ids. These cloud-native canvas workflows are keyed by ULIDs and served by the separate `/svc-workflow/api/vN` service. A workspace can hold dozens of cloud-native workflows while `ayx one flows list` returns zero items.
+Cloud-native **workflows** are the execution unit in Alteryx One. They are keyed by ULIDs and served by the `/svc-workflow/api/vN` service.
+
+Two other surfaces in this CLI are also called workflows or flows, and none of the three are interchangeable:
+
+- `ayx one flows` is the older Designer Cloud family at `/v4/flows`, keyed by integer ids. A workspace can hold dozens of cloud-native workflows while `ayx one flows list` returns zero items. See [Flows (DC Legacy)](/one/flows/).
+- `ayx designer workflow` operates on on-prem Designer/Server packages (`.yxmd`, `.yxzp`) — a different technology entirely, reached by migration rather than configuration. See [Workflows & packages](/server/workflow/).
 
 The workflows surface is for browsing and managing existing canvas workflows. Authoring arbitrary visual workflow logic is out of scope: no public endpoint accepts it.
 
