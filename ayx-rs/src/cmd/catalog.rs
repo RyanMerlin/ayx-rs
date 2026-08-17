@@ -1830,6 +1830,20 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         ],
     },
     CatalogMetadata {
+        path: "one/workflows/delete",
+        output: "one workflows delete envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &["central runtime profile", "server_api"],
+        notes: &[
+            "Maps to DELETE /svc-workflow/api/v2/workflows/{id}. Requires --apply.",
+            "Resolves the workflow's name from the assets listing before prompting and before \
+             the live call, both to name the target in the confirmation and to reject an \
+             unknown id before any mutating request is sent.",
+            "No known restore/trash endpoint exists for this resource; treat as irreversible.",
+        ],
+    },
+    CatalogMetadata {
         path: "license/api/status",
         output: "license api status envelope",
         safety: "read-only",

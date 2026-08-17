@@ -1554,8 +1554,8 @@ pub(crate) enum OneCommand {
         command: OneConnectionsCommand,
     },
     #[command(
-        about = "Alteryx One cloud-native workflows — list, inspect, copy, and share",
-        long_about = "Alteryx One cloud-native workflows — list, inspect, copy, and share.\n\n\
+        about = "Alteryx One cloud-native workflows — list, inspect, copy, share, and delete",
+        long_about = "Alteryx One cloud-native workflows — list, inspect, copy, share, and delete.\n\n\
                       These are the Alteryx One canvas workflows (the \
                       cloud-native/workflows/{id} web path), identified by ULIDs and served \
                       by /svc-workflow. They are NOT `one flows`, which is the Designer \
@@ -2658,6 +2658,13 @@ pub(crate) enum OneWorkflowsCommand {
     Tools {
         #[arg(long)]
         profile: Option<String>,
+    },
+    /// Delete a cloud-native workflow. Irreversible — no known restore/trash endpoint exists.
+    Delete {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
     },
     /// Duplicate a cloud-native workflow.
     Copy {

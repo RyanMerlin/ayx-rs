@@ -70,7 +70,7 @@ evidence):
 - **Warn when `ayx one workflows list --all` under-delivers against the server total.** `/v4/workflows` is limit-only and non-cursor-paginated; the CLI can see the true `count` but currently reports only the default page without warning.
 - **Render workflow `tools`, `engines`, and `dependencies` cleanly in text mode.** The live pass found long, raw, single-line JSON blobs, unlike the readable list/count/detail output.
 - **Unify and document the One API base-URL configuration precedence.** `AYX_ONE_BASE_URL` and `AYX_ONE_API_BASE_URL` are similarly named but resolved in different layers, and a second `.env` lookup beside the resolved central profile can override the working-directory file.
-- **Investigate and wire cloud-native workflow DELETE.** The live probes found a route-level 404 for `/svc-workflow/api/v1/assets/...` but an application-level JSON `NotFoundError` for `/svc-workflow/api/v2/workflows/...`, strongly indicating a real server capability with no `ayx one workflows delete` command.
+- ~~**Investigate and wire cloud-native workflow DELETE.**~~ Wired: `ayx one workflows delete` (`DELETE /svc-workflow/api/v2/workflows/{id}`, gated behind `--apply` + TTY confirmation, mirrors `one flows delete`). Still needs one thing this item didn't require: a live call against a real id to confirm the route actually deletes (only the fake-ULID route-existence probe has run so far) — see `docs/one-endpoint-matrix.md`.
 - **Make plans, scheduling, and billing list-shaped tests tolerate tier-gated whole-surface 404s.** The outcome is already documented as expected tenant behavior, but the current tests do not consistently allow it.
 
 ## Exit Criteria
