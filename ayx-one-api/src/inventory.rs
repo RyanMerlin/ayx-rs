@@ -267,6 +267,11 @@ const WORKFLOW_ENDPOINTS: &[EndpointSpec] = &[
         path: "/svc-workflow/api/v2/workflows/{id}/share",
         commands: &["one workflows share"],
     },
+    EndpointSpec {
+        method: "DELETE",
+        path: "/svc-workflow/api/v2/workflows/{id}",
+        commands: &["one workflows delete"],
+    },
 ];
 
 const FLOW_ENDPOINTS: &[EndpointSpec] = &[

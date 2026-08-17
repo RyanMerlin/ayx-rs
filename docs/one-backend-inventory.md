@@ -76,6 +76,7 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `GET /svc-workflow/api/v1/tools`
   - `POST /svc-workflow/api/v2/workflows/{id}/duplicate`
   - `POST /svc-workflow/api/v2/workflows/{id}/share`
+  - `DELETE /svc-workflow/api/v2/workflows/{id}`
   - Notes:
     - Alteryx One cloud-native (canvas) workflows, ULID-keyed, served by `/svc-workflow`.
     - Distinct from the `flow` family below, which is Designer Cloud `/v4/flows` keyed by integer ids.

@@ -525,6 +525,40 @@ pub(crate) fn execute(
                 None,
             )?
         }
+        OneWorkflowsCommand::Delete { profile, id } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            // Resolve the target before prompting or sending anything: names the
+            // workflow in the confirmation message (a bare ULID gives the operator
+            // nothing to verify against) and, as a side effect, rejects an unknown
+            // or empty id with a clean NotFound before any mutating request fires.
+            let assets_envelope = fetch_all_assets(&config)?;
+            let detail = resolve_workflow_detail(assets_envelope, &id);
+            if !detail.ok {
+                return Ok(detail);
+            }
+            let name = detail.data["response"]["name"]
+                .as_str()
+                .unwrap_or("<unnamed>");
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::destructive_action_message(
+                        "delete",
+                        &format!("workflow '{name}' (id='{id}')"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            one_api_live_request(
+                &config,
+                "workflow",
+                "delete",
+                "DELETE",
+                "/svc-workflow/api/v2/workflows/{id}",
+                true,
+                &[("id", id.as_str())],
+            )?
+        }
         OneWorkflowsCommand::Copy {
             profile,
             id,
