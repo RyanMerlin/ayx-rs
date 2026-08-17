@@ -31,8 +31,8 @@ The public One API surface exposed here does not provide a general-purpose workf
     `/v4/workspaces/{workspaceId}/admins` 404s)
   - `POST /v4/workspaces/{id}/people/batch`
   - `DELETE /v4/workspaces/{workspaceId}/people/{id}`
-  - `POST /iam/v1/workspaces/{id}/people/suspend`
-  - `POST /iam/v1/workspaces/{id}/people/unsuspend`
+  - `POST /v4/workspaces/{id}/people/suspend`
+  - `POST /v4/workspaces/{id}/people/unsuspend`
   - `POST /v4/workspaces/{id}/transfer`
   - `GET /v4/authorization/roles/{id}/people`
   - `POST /v4/authorization/roles/{id}/people/{subjectId}`
@@ -42,28 +42,27 @@ The public One API surface exposed here does not provide a general-purpose workf
 - `plan`
   - `POST /v4/plans`
   - `POST /v4/plans/{id}/permissions`
-  - `GET /v4/plans/{id}/full`
   - `PATCH /v4/plans/{id}`
   - `DELETE /v4/plans/{id}`
   - Notes:
-    - Only the `/v4` plan endpoints the CLI actually dispatches are listed here. Read paths (list/count/run/permissions/package/runParameters/schedules) go through the `/plans/v1` service instead. See the `plans` surface below.
+    - Only the `/v4` plan endpoints the CLI actually dispatches are listed here. Read paths (list/count/run/permissions/package/runParameters/schedules) now use the spec-documented `/v4` paths instead. See the `plans` surface below.
 - `plans`
-  - `GET /plans/v1/plans`
-  - `GET /plans/v1/plans/{id}`
-  - `POST /plans/v1/plans/{id}/run`
-  - `GET /plans/v1/plans/count`
-  - `GET /plans/v1/plans/{id}/runParameters`
-  - `GET /plans/v1/plans/{id}/schedules`
-  - `GET /plans/v1/plans/{id}/package`
-  - `POST /plans/v1/plans/package`
-  - `GET /plans/v1/plans/{id}/permissions`
-  - `DELETE /plans/v1/plans/{id}/permissions/{subjectId}`
+  - `GET /v4/plans`
+  - `GET /v4/plans/{id}/full` (`one plans detail` and `one plans full`)
+  - `POST /v4/plans/{id}/run`
+  - `GET /v4/plans/count`
+  - `GET /v4/plans/{id}/runParameters`
+  - `GET /v4/plans/{id}/schedules`
+  - `GET /v4/plans/{id}/package`
+  - `POST /v4/plans/package`
+  - `GET /v4/plans/{id}/permissions`
+  - `DELETE /v4/plans/{id}/permissions/{subjectId}`
 - `scheduling`
-  - `GET /scheduling/v1/schedules`
-  - `GET /scheduling/v1/schedules/{id}`
-  - `POST /scheduling/v1/schedules/{id}/enable`
-  - `POST /scheduling/v1/schedules/{id}/disable`
-  - `GET /scheduling/v1/schedules/count`
+  - `GET /v4/schedules`
+  - `GET /v4/schedules/{id}`
+  - `POST /v4/schedules/{id}/enable`
+  - `POST /v4/schedules/{id}/disable`
+  - `GET /v4/schedules/count`
 - `billing`
   - `GET /billing/v1/my/billing-accounts/current`
   - `GET /billing/v1/usage/export`

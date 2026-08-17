@@ -27,10 +27,10 @@ pub struct StaleEndpoint {
 /// describe, and is therefore neither `covered`, `missing`, nor `stale`.
 ///
 /// The One gateway spec (`GET /v4/open-api-spec`) documents `/v4` only, but the
-/// CLI also speaks several sibling services (`/svc-workflow`, `/plans/v1`,
-/// `/scheduling/v1`, `/billing/v1`, `/iam/v1`). Those rows used to be dropped on
-/// the floor, which understated `inventory_operations` and made it impossible to
-/// tell "we compared this and it matched" from "we never compared this at all".
+/// CLI also speaks sibling services such as `/svc-workflow` and `/billing/v1`.
+/// Those rows used to be dropped on the floor, which understated
+/// `inventory_operations` and made it impossible to tell "we compared this and
+/// it matched" from "we never compared this at all".
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct UncomparableEndpoint {
     pub method: String,
@@ -358,19 +358,19 @@ mod tests {
     ///
     /// The spec side always recorded a non-`/v4` operation in
     /// `unmatched_spec_paths`, but the inventory side silently dropped the
-    /// matching rows, so every endpoint on a sibling service — all of
-    /// `/svc-workflow`, `/plans/v1`, `/scheduling/v1`, `/billing/v1`,
-    /// `/iam/v1` — vanished from the report entirely: not covered, not stale,
-    /// not counted. `inventory_operations` then reported 123 for a 150-row
-    /// inventory while `coverage_pct` silently described only the `/v4` slice.
+    /// matching rows, so every endpoint on the still-outside sibling
+    /// services — `/svc-workflow` and `/billing/v1` — vanished from the
+    /// report entirely: not covered, not stale, not counted. The plan,
+    /// scheduling, and workspace suspend/unsuspend rows now live under `/v4`
+    /// and should stay in the comparable bucket.
     #[test]
     fn wired_endpoints_outside_the_spec_namespace_are_reported_not_dropped() {
         let r = coverage(&spec_with(json!({ "/v4/flows": { "get": {} } })));
 
         assert!(
             !r.outside_spec_namespace.is_empty(),
-            "the real inventory wires sibling services (/svc-workflow, /plans/v1, \
-             /scheduling/v1, /billing/v1, /iam/v1); none were reported"
+            "the real inventory wires sibling services (/svc-workflow and \
+             /billing/v1); none were reported"
         );
         // Derive the expectation from the inventory independently, rather than
         // re-stating how `coverage()` computes the field. Asserting

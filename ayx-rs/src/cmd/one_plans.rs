@@ -27,14 +27,7 @@ pub(crate) fn execute(
                 .with_limit(limit)
                 .with_page_token(page_token)
                 .with_all(all, max_pages);
-            ayx_one_api::one_api_list_request(
-                &config,
-                "plans",
-                "list",
-                "/plans/v1/plans",
-                &[],
-                &params,
-            )?
+            ayx_one_api::one_api_list_request(&config, "plans", "list", "/v4/plans", &[], &params)?
         }
         OnePlansCommand::Create { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
@@ -57,7 +50,7 @@ pub(crate) fn execute(
                 "plans",
                 "detail",
                 "GET",
-                "/plans/v1/plans/{id}",
+                "/v4/plans/{id}/full",
                 false,
                 &[("id", id.as_str())],
             )?
@@ -81,7 +74,7 @@ pub(crate) fn execute(
                 "plans",
                 "run",
                 "POST",
-                "/plans/v1/plans/{id}/run",
+                "/v4/plans/{id}/run",
                 true,
                 &[("id", id.as_str())],
             )?
@@ -93,7 +86,7 @@ pub(crate) fn execute(
                 "plans",
                 "count",
                 "GET",
-                "/plans/v1/plans/count",
+                "/v4/plans/count",
                 false,
                 &[],
             )?
@@ -105,7 +98,7 @@ pub(crate) fn execute(
                 "plans",
                 "run-parameters",
                 "GET",
-                "/plans/v1/plans/{id}/runParameters",
+                "/v4/plans/{id}/runParameters",
                 false,
                 &[("id", id.as_str())],
             )?
@@ -117,7 +110,7 @@ pub(crate) fn execute(
                 "plans",
                 "schedules",
                 "GET",
-                "/plans/v1/plans/{id}/schedules",
+                "/v4/plans/{id}/schedules",
                 false,
                 &[("id", id.as_str())],
             )?
@@ -129,7 +122,7 @@ pub(crate) fn execute(
                 "plans",
                 "export",
                 "GET",
-                "/plans/v1/plans/{id}/package",
+                "/v4/plans/{id}/package",
                 false,
                 &[("id", id.as_str())],
             )?
@@ -190,7 +183,7 @@ pub(crate) fn execute(
                 "plans",
                 "import",
                 "POST",
-                "/plans/v1/plans/package",
+                "/v4/plans/package",
                 true,
                 &[],
             )?
@@ -208,7 +201,7 @@ pub(crate) fn execute(
                     "plans",
                     "permissions",
                     "GET",
-                    "/plans/v1/plans/{id}/permissions",
+                    "/v4/plans/{id}/permissions",
                     false,
                     &[("id", id.as_str())],
                 )?
@@ -218,7 +211,7 @@ pub(crate) fn execute(
                     "plans",
                     "permissions",
                     "DELETE",
-                    "/plans/v1/plans/{id}/permissions/{subjectId}",
+                    "/v4/plans/{id}/permissions/{subjectId}",
                     true,
                     &[("id", id.as_str()), ("subjectId", subject_id.as_str())],
                 )?
