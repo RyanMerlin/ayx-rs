@@ -37,20 +37,14 @@ export default defineConfig({
           items: [
             'one',
             {
-              label: 'Flows',
+              label: 'Workflows',
               collapsed: false,
               items: [
-                'one/flows',
-                'one/flows/folders',
-                'one/flows/import-export',
-                'one/flows/permissions',
+                'one/workflows',
+                'one/workflows/inspect',
+                'one/workflows/share',
+                'one/workflows/delete',
               ],
-            },
-            'one/workflows',
-            {
-              label: 'Plans',
-              collapsed: false,
-              items: ['one/plans', 'one/plans/schedules', 'one/plans/import-export'],
             },
             {
               label: 'Connections',
@@ -61,10 +55,25 @@ export default defineConfig({
                 'one/connections/permissions',
               ],
             },
+            'one/datasets',
             {
-              label: 'Job groups',
+              label: 'Jobs & runs',
               collapsed: true,
-              items: ['one/job-groups', 'one/job-groups/results'],
+              items: [
+                'one/job-groups',
+                'one/job-groups/results',
+                'one/output-objects',
+              ],
+            },
+            {
+              label: 'Scheduling',
+              collapsed: true,
+              items: [
+                'one/scheduling',
+                'one/plans',
+                'one/plans/schedules',
+                'one/plans/import-export',
+              ],
             },
             {
               label: 'Identity & users',
@@ -77,13 +86,29 @@ export default defineConfig({
                 'one/token',
               ],
             },
-            'one/datasets',
-            'one/scheduling',
-            'one/output-objects',
-            'one/write-settings',
-            'one/webhooks',
-            'one/billing',
-            'one/diagnostics',
+            {
+              label: 'Settings & admin',
+              collapsed: true,
+              items: [
+                'one/write-settings',
+                'one/webhooks',
+                {
+                  label: 'Diagnostics',
+                  collapsed: true,
+                  items: ['one/diagnostics', 'one/diagnostics/api'],
+                },
+              ],
+            },
+            {
+              label: 'Flows (DC Legacy)',
+              collapsed: true,
+              items: [
+                'one/flows',
+                'one/flows/folders',
+                'one/flows/import-export',
+                'one/flows/permissions',
+              ],
+            },
           ],
         },
         {

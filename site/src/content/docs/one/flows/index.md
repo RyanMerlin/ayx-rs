@@ -1,13 +1,15 @@
 ---
-title: Flows
-description: List, inspect, run, and manage Alteryx One flows from the CLI.
+title: Flows (DC Legacy)
+description: List, inspect, run, and manage flows on the legacy Designer Cloud /v4/flows surface from the CLI.
 sidebar:
   order: 1
 ---
 
-Flows are the core execution unit in Alteryx One. The `ayx one flows` branch covers every lifecycle operation: browsing the catalog, running flows on demand, editing metadata, moving flows between folders, and managing the data connections they use.
+:::caution[Legacy surface]
+`ayx one flows` targets the older Designer Cloud (DC) surface at `/v4/flows`, keyed by integer ids. It remains fully functional and supported by the CLI, but it is **not** the cloud-native canvas surface. If you are looking for Alteryx One's cloud-native workflows, see [Workflows](/one/workflows/) — a workspace can contain many cloud-native workflows while `ayx one flows list` returns no items at all, because the two read entirely different services.
+:::
 
-> These are **not** the same as Alteryx One's cloud-native workflows documented in [Workflows](/one/workflows/). A workspace can contain many cloud-native workflows while `ayx one flows list` returns no items, because `one flows` reads the separate integer-id-keyed Designer Cloud `/v4/flows` family.
+Within that Designer Cloud surface, flows are the execution unit. The `ayx one flows` branch covers every lifecycle operation: browsing the catalog, running flows on demand, editing metadata, moving flows between folders, and managing the data connections they use.
 
 Mutating commands are dry-run by default — add `--apply` to commit.
 
