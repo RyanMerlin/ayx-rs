@@ -279,6 +279,8 @@ fn config() -> Config {
             oauth_client_id: Some("client-id".to_string()),
             client_secret: None,
             client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
             token_endpoint_url: Some("https://example.invalid/token".to_string()),
             access_token: Some("placeholder".to_string()),
             access_token_ref: None,

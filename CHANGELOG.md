@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **`WorkspaceCredential` gains `sp_client_secret` / `sp_client_secret_ref`, so a profile holding several One workspaces can carry a distinct service-principal secret per workspace instead of sharing one profile-level value.** Resolution order: workspace-level dedicated field → profile-level dedicated field → shared `client_secret`. The fallback to the shared field is deliberate, not incidental — profiles written before this change carry only `client_secret`, and without the fallback they would stop authenticating on upgrade. As with the existing `*_ref` fields, `sp_client_secret_ref` may hold an inline secret when no scheme prefix is present, so callers must not print it blind.
+
 ### Changed
 
 - **BREAKING (agent-facing JSON)** — HTTP `410` now classifies as `error_code: "gone"`, not `"not_found"`. v0.15.0 deliberately collapsed `410` into `not_found`, reasoning that "for a caller the outcome is identical to 404." Live evidence now shows that reasoning was wrong: `GET /v4/people/count` returns `410 GoneException` with `code: IAM_ENDPOINT_SCREAM_TEST`, `flagName: IAM_SCREAM_PEOPLE` — a deliberate, in-progress vendor withdrawal, not a missing resource. Collapsing the two let that withdrawal sit misfiled as a permissions/not-found gap for weeks. Anything branching on `error_code` to distinguish "never existed" from "existed and was deliberately removed" must add a `gone` arm; an exhaustive match on the prior value set will now fail to compile or fail a runtime `_ => unreachable!()`-style arm.

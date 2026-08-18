@@ -80,6 +80,8 @@ impl LiveSmokeContext {
                 oauth_client_id: Some(repo_env(&env, "AYX_ONE_OAUTH_CLIENT_ID", "client-id")),
                 client_secret: None,
                 client_secret_ref: None,
+                sp_client_secret: None,
+                sp_client_secret_ref: None,
                 token_endpoint_url: Some(repo_env(
                     &env,
                     "AYX_ONE_TOKEN_ENDPOINT_URL",
