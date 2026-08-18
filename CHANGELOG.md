@@ -6,9 +6,19 @@
 
 - **`WorkspaceCredential` gains `sp_client_secret` / `sp_client_secret_ref`, so a profile holding several One workspaces can carry a distinct service-principal secret per workspace instead of sharing one profile-level value.** Resolution order: workspace-level dedicated field → profile-level dedicated field → shared `client_secret`. The fallback to the shared field is deliberate, not incidental — profiles written before this change carry only `client_secret`, and without the fallback they would stop authenticating on upgrade. As with the existing `*_ref` fields, `sp_client_secret_ref` may hold an inline secret when no scheme prefix is present, so callers must not print it blind.
 
+### Changed
+
+- **BREAKING (agent-facing JSON)** — HTTP `410` now classifies as `error_code: "gone"`, not `"not_found"`. v0.15.0 deliberately collapsed `410` into `not_found`, reasoning that "for a caller the outcome is identical to 404." Live evidence now shows that reasoning was wrong: `GET /v4/people/count` returns `410 GoneException` with `code: IAM_ENDPOINT_SCREAM_TEST`, `flagName: IAM_SCREAM_PEOPLE` — a deliberate, in-progress vendor withdrawal, not a missing resource. Collapsing the two let that withdrawal sit misfiled as a permissions/not-found gap for weeks. Anything branching on `error_code` to distinguish "never existed" from "existed and was deliberately removed" must add a `gone` arm; an exhaustive match on the prior value set will now fail to compile or fail a runtime `_ => unreachable!()`-style arm.
+
 ### Fixed
 
+- **`ayx one datasets list` never worked.** `GET /v4/datasetLibrary` declares the query parameter `datasetsFilter` as `required: true`, and the CLI never sent it, so every call failed with `400 ApiValidationFailed`. Adds `--datasets-filter`, defaulting to `all` so the bare command works, accepting the spec's enum (`all`/`imported`/`reference`/`recipe`) as either a single value or a list. The parallel `/v4/datasetLibrary/count` declares the same parameter `required: false`, so it stays optional there and is omitted rather than silently defaulted.
+
 - **Seventeen `one` endpoints pointed at base paths that exist in no API spec and returned live `404 RouteNotFoundException`.** They had been recorded as "tier-gated" — a tenant-entitlement gap the CLI correctly tolerated. That reading was wrong: the paths were simply incorrect. `GET /v4/open-api-spec` (172 live paths) documents the real routes, and they are what the Alteryx One web UI actually calls (confirmed against browser HAR capture). `/plans/v1/plans*` → `/v4/plans*` (10 rows), `/scheduling/v1/schedules*` → `/v4/schedules*` (5 rows), and the `/iam/v1/workspaces/{id}/people/{,un}suspend` pair → their `/v4/workspaces/...` equivalents (2 rows). One target had no direct equivalent: `GET /plans/v1/plans/{id}` (`one plans detail`) is merged onto the already-wired `GET /v4/plans/{id}/full` (`one plans full`), since the spec defines `/v4/plans/{id}` with `DELETE`/`PATCH` only. The "tier-gated surface" reading that had been recorded for these paths — and for `/billing/v1` alongside them — was a misdiagnosis, not tenant entitlement.
+
+### Deprecated
+
+- **`ayx one person count` is being withdrawn by the vendor, not failing on our side.** Verified live: `410 GoneException`, `code IAM_ENDPOINT_SCREAM_TEST`, `flagName IAM_SCREAM_PEOPLE`. It is also absent from the live `/v4/open-api-spec`'s 172 paths — de-documented, scream-tested, and `410` all point the same direction. The command now warns on use and points at `one person list`; it still functions and is not removed.
 
 ## 0.15.0 — 2026-08-13
 

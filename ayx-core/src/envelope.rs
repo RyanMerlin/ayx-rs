@@ -18,6 +18,8 @@ pub enum ErrorCode {
     PermissionDenied,
     /// Resource (workflow, plan, person, …) was not found.
     NotFound,
+    /// Resource or endpoint was removed upstream.
+    Gone,
     /// Caller-side validation failure: malformed input, bad flag combination.
     Validation,
     /// State conflict (409): resource already exists, version stale, etc.
@@ -41,6 +43,7 @@ impl ErrorCode {
             ErrorCode::AuthFailed => "auth_failed",
             ErrorCode::PermissionDenied => "permission_denied",
             ErrorCode::NotFound => "not_found",
+            ErrorCode::Gone => "gone",
             ErrorCode::Validation => "validation",
             ErrorCode::Conflict => "conflict",
             ErrorCode::RateLimited => "rate_limited",
@@ -62,6 +65,7 @@ impl ErrorCode {
             "auth_failed" => ErrorCode::AuthFailed,
             "permission_denied" => ErrorCode::PermissionDenied,
             "not_found" => ErrorCode::NotFound,
+            "gone" => ErrorCode::Gone,
             "validation" => ErrorCode::Validation,
             "conflict" => ErrorCode::Conflict,
             "rate_limited" => ErrorCode::RateLimited,
@@ -89,11 +93,12 @@ impl ErrorCode {
             // 402 is an entitlement/plan-tier denial and 451 a policy denial;
             // both are "you may not have this", not "your input was malformed".
             402 | 403 | 451 => Some(ErrorCode::PermissionDenied),
-            // A deleted resource answers 410, not 404 — Alteryx One returns
-            // `GoneException` for a flow that existed and was removed
-            // (live-verified against a flow create/delete/read cycle). For a
-            // caller the outcome is identical to 404: the object is not there.
-            404 | 410 => Some(ErrorCode::NotFound),
+            // 404 means the object was never there or cannot be resolved.
+            404 => Some(ErrorCode::NotFound),
+            // 410 means the upstream has intentionally removed the object or
+            // endpoint. Keep it distinct so callers can tell "gone" apart from
+            // "never found".
+            410 => Some(ErrorCode::Gone),
             // Precondition/lock failures are state conflicts, which is what
             // `Conflict` already covers for 409.
             409 | 412 | 423 | 428 => Some(ErrorCode::Conflict),
@@ -188,6 +193,7 @@ mod tests {
             Some(ErrorCode::PermissionDenied)
         );
         assert_eq!(ErrorCode::from_http_status(404), Some(ErrorCode::NotFound));
+        assert_eq!(ErrorCode::from_http_status(410), Some(ErrorCode::Gone));
         assert_eq!(ErrorCode::from_http_status(409), Some(ErrorCode::Conflict));
         assert_eq!(
             ErrorCode::from_http_status(429),
@@ -201,13 +207,11 @@ mod tests {
     }
 
     /// Found live: deleting a One flow and then reading it back returns 410
-    /// `GoneException`, which fell through the catch-all and was reported as
-    /// `error_code: "internal"`. That tells an agent branching on the code that
-    /// `ayx` malfunctioned and the call is worth retrying, when in fact the
-    /// object is gone and the answer will never change.
+    /// `GoneException`. That should not be collapsed into 404 `not_found`:
+    /// callers need to know the endpoint or resource was intentionally removed.
     #[test]
-    fn a_deleted_resource_is_not_found_not_internal() {
-        assert_eq!(ErrorCode::from_http_status(410), Some(ErrorCode::NotFound));
+    fn a_gone_resource_maps_to_gone_not_not_found() {
+        assert_eq!(ErrorCode::from_http_status(410), Some(ErrorCode::Gone));
     }
 
     /// Each mapped 4xx must land in the bucket a caller can act on. An earlier
@@ -267,6 +271,7 @@ mod tests {
             ErrorCode::AuthFailed,
             ErrorCode::PermissionDenied,
             ErrorCode::NotFound,
+            ErrorCode::Gone,
             ErrorCode::Validation,
             ErrorCode::Conflict,
             ErrorCode::RateLimited,
