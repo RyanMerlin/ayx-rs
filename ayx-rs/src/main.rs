@@ -4102,7 +4102,7 @@ pub(crate) fn one_doctor_discover_envelope(config: &Config) -> Result<Envelope> 
         "plans",
         "discover-plans-list",
         "GET",
-        "/plans/v1/plans",
+        "/v4/plans",
         false,
         &[],
     )?;
@@ -4111,7 +4111,7 @@ pub(crate) fn one_doctor_discover_envelope(config: &Config) -> Result<Envelope> 
         "scheduling",
         "discover-schedules-list",
         "GET",
-        "/scheduling/v1/schedules",
+        "/v4/schedules",
         false,
         &[],
     )?;
@@ -4151,7 +4151,7 @@ pub(crate) fn one_doctor_plans_envelope(config: &Config) -> Result<Envelope> {
         "plans",
         "doctor-plans-list",
         "GET",
-        "/plans/v1/plans",
+        "/v4/plans",
         false,
         &[],
     )?;
@@ -4160,7 +4160,7 @@ pub(crate) fn one_doctor_plans_envelope(config: &Config) -> Result<Envelope> {
         "plans",
         "doctor-plans-count",
         "GET",
-        "/plans/v1/plans/count",
+        "/v4/plans/count",
         false,
         &[],
     )?;
@@ -4186,7 +4186,7 @@ pub(crate) fn one_doctor_scheduling_envelope(config: &Config) -> Result<Envelope
         "scheduling",
         "doctor-schedules-list",
         "GET",
-        "/scheduling/v1/schedules",
+        "/v4/schedules",
         false,
         &[],
     )?;
@@ -4195,7 +4195,7 @@ pub(crate) fn one_doctor_scheduling_envelope(config: &Config) -> Result<Envelope
         "scheduling",
         "doctor-schedules-count",
         "GET",
-        "/scheduling/v1/schedules/count",
+        "/v4/schedules/count",
         false,
         &[],
     )?;

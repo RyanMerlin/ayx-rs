@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Seventeen `one` endpoints pointed at base paths that exist in no API spec and returned live `404 RouteNotFoundException`.** They had been recorded as "tier-gated" — a tenant-entitlement gap the CLI correctly tolerated. That reading was wrong: the paths were simply incorrect. `GET /v4/open-api-spec` (172 live paths) documents the real routes, and they are what the Alteryx One web UI actually calls (confirmed against browser HAR capture). `/plans/v1/plans*` → `/v4/plans*` (10 rows), `/scheduling/v1/schedules*` → `/v4/schedules*` (5 rows), and the `/iam/v1/workspaces/{id}/people/{,un}suspend` pair → their `/v4/workspaces/...` equivalents (2 rows). One target had no direct equivalent: `GET /plans/v1/plans/{id}` (`one plans detail`) is merged onto the already-wired `GET /v4/plans/{id}/full` (`one plans full`), since the spec defines `/v4/plans/{id}` with `DELETE`/`PATCH` only. The "tier-gated surface" reading that had been recorded for these paths — and for `/billing/v1` alongside them — was a misdiagnosis, not tenant entitlement.
+
 ## 0.15.0 — 2026-08-13
 
 ### Added

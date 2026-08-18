@@ -22,7 +22,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneSchedulingCommand) -
                 &config,
                 "scheduling",
                 "list",
-                "/scheduling/v1/schedules",
+                "/v4/schedules",
                 &[],
                 &params,
             )?
@@ -34,7 +34,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneSchedulingCommand) -
                 "scheduling",
                 "detail",
                 "GET",
-                "/scheduling/v1/schedules/{id}",
+                "/v4/schedules/{id}",
                 false,
                 &[("id", id.as_str())],
             )?
@@ -46,7 +46,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneSchedulingCommand) -
                 "scheduling",
                 "enable",
                 "POST",
-                "/scheduling/v1/schedules/{id}/enable",
+                "/v4/schedules/{id}/enable",
                 true,
                 &[("id", id.as_str())],
             )?
@@ -58,7 +58,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneSchedulingCommand) -
                 "scheduling",
                 "disable",
                 "POST",
-                "/scheduling/v1/schedules/{id}/disable",
+                "/v4/schedules/{id}/disable",
                 true,
                 &[("id", id.as_str())],
             )?
@@ -70,7 +70,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneSchedulingCommand) -
                 "scheduling",
                 "count",
                 "GET",
-                "/scheduling/v1/schedules/count",
+                "/v4/schedules/count",
                 false,
                 &[],
             )?

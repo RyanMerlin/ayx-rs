@@ -92,9 +92,10 @@ The current smoke harness lives in `ayx-rs/tests/one_live_smoke.rs` and already:
 **Two different classes of "404."**
 
 - **Route-level 404** — the path itself is not registered on the server. On the `/v4` gateway and
-  the `/plans/v1`, `/scheduling/v1`, `/billing/v1` managed services, this comes back as JSON with a
-  `RouteNotFoundException`. On `/svc-workflow`, an unrouted path can come back as an Express default
-  HTML 404 page.
+  the `/billing/v1` managed service, this comes back as JSON with a `RouteNotFoundException`. The
+  plans, scheduling, and workspace suspend/unsuspend commands in the current CLI now point at
+  `/v4`; the old `/plans/v1`, `/scheduling/v1`, and `/iam/v1` routes were path bugs, not tier
+  gates. On `/svc-workflow`, an unrouted path can come back as an Express default HTML 404 page.
 - **Application-level 404** — the route exists and parsed the request, but the specific resource id
   does not. On `/svc-workflow`, a well-formed but nonexistent ULID can return clean JSON
   `NotFoundError`. Do not conflate this with a route-level 404.
@@ -102,8 +103,8 @@ The current smoke harness lives in `ayx-rs/tests/one_live_smoke.rs` and already:
 **`one X list` reporting `"ok": true` does not prove the underlying route returned 200.** The shared
 `one_api_list_request` helper extracts items without first checking whether each page's HTTP call
 succeeded. A page that 404s can therefore report `"ok": true` with 0 items. When re-verifying a list
-row, always check `data.page_envelopes[].status_code`, or cross-check against the matching count row
-or `one doctor <surface>`, rather than trusting `ok: true` alone.
+row, always check `data.page_envelopes[].status_code`, or cross-check against the matching count
+row or `one doctor <surface>`, rather than trusting `ok: true` alone.
 
 ## Safety boundaries (apply throughout)
 
