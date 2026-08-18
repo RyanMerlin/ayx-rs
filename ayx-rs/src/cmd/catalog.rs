@@ -658,7 +658,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
-        notes: &["Maps to POST /iam/v1/workspaces/{id}/people/suspend in the One API docs."],
+        notes: &["Maps to POST /v4/workspaces/{id}/people/suspend in the One API docs."],
     },
     CatalogMetadata {
         path: "one/workspace/unsuspend-users",
@@ -666,7 +666,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
-        notes: &["Maps to POST /iam/v1/workspaces/{id}/people/unsuspend in the One API docs."],
+        notes: &["Maps to POST /v4/workspaces/{id}/people/unsuspend in the One API docs."],
     },
     CatalogMetadata {
         path: "one/workspace/transfer",
@@ -867,7 +867,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /plans/v1/plans in managed-plans-v1.yaml."],
+        notes: &["Maps to GET /v4/plans in the One API docs."],
     },
     CatalogMetadata {
         path: "one/plans/create",
@@ -883,7 +883,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /plans/v1/plans/{id} in managed-plans-v1.yaml."],
+        notes: &["Maps to GET /v4/plans/{id}/full in the One API docs."],
     },
     CatalogMetadata {
         path: "one/plans/run",
@@ -891,7 +891,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to POST /plans/v1/plans/{id}/run in managed-plans-v1.yaml."],
+        notes: &["Maps to POST /v4/plans/{id}/run in the One API docs."],
     },
     CatalogMetadata {
         path: "one/plans/count",
@@ -899,7 +899,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /plans/v1/plans/count in managed-plans-v1.yaml."],
+        notes: &["Maps to GET /v4/plans/count in the One API docs."],
     },
     CatalogMetadata {
         path: "one/plans/full",
@@ -915,7 +915,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /plans/v1/plans/{id}/runParameters in managed-plans-v1.yaml."],
+        notes: &["Maps to GET /v4/plans/{id}/runParameters in the One API docs."],
     },
     CatalogMetadata {
         path: "one/plans/schedules",
@@ -923,7 +923,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /plans/v1/plans/{id}/schedules in managed-plans-v1.yaml."],
+        notes: &["Maps to GET /v4/plans/{id}/schedules in the One API docs."],
     },
     CatalogMetadata {
         path: "one/plans/export",
@@ -931,7 +931,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /plans/v1/plans/{id}/package in managed-plans-v1.yaml."],
+        notes: &["Maps to GET /v4/plans/{id}/package in the One API docs."],
     },
     CatalogMetadata {
         path: "one/plans/update",
@@ -963,7 +963,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to POST /plans/v1/plans/package in managed-plans-v1.yaml."],
+        notes: &["Maps to POST /v4/plans/package in the One API docs."],
     },
     CatalogMetadata {
         path: "one/plans/permissions",
@@ -972,8 +972,8 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         mutating: true,
         prerequisites: &["central runtime profile", "server_api"],
         notes: &[
-            "Maps to GET /plans/v1/plans/{id}/permissions in managed-plans-v1.yaml.",
-            "When `--subject-id` is set, maps to DELETE /plans/v1/plans/{id}/permissions/{subjectId}.",
+            "Maps to GET /v4/plans/{id}/permissions in the One API docs.",
+            "When `--subject-id` is set, maps to DELETE /v4/plans/{id}/permissions/{subjectId}.",
         ],
     },
     CatalogMetadata {
@@ -1675,7 +1675,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /scheduling/v1/schedules in managed-scheduling-v1.yaml."],
+        notes: &["Maps to GET /v4/schedules in the One API docs."],
     },
     CatalogMetadata {
         path: "one/scheduling/detail",
@@ -1683,7 +1683,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /scheduling/v1/schedules/{id} in managed-scheduling-v1.yaml."],
+        notes: &["Maps to GET /v4/schedules/{id} in the One API docs."],
     },
     CatalogMetadata {
         path: "one/scheduling/enable",
@@ -1691,9 +1691,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &[
-            "Maps to POST /scheduling/v1/schedules/{id}/enable in managed-scheduling-v1.yaml.",
-        ],
+        notes: &["Maps to POST /v4/schedules/{id}/enable in the One API docs."],
     },
     CatalogMetadata {
         path: "one/scheduling/disable",
@@ -1701,9 +1699,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "mutating",
         mutating: true,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &[
-            "Maps to POST /scheduling/v1/schedules/{id}/disable in managed-scheduling-v1.yaml.",
-        ],
+        notes: &["Maps to POST /v4/schedules/{id}/disable in the One API docs."],
     },
     CatalogMetadata {
         path: "one/scheduling/count",
@@ -1711,7 +1707,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /scheduling/v1/schedules/count in managed-scheduling-v1.yaml."],
+        notes: &["Maps to GET /v4/schedules/count in the One API docs."],
     },
     CatalogMetadata {
         path: "one/billing/current-account",
