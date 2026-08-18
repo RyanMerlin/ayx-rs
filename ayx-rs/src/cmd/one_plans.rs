@@ -8,6 +8,22 @@ use crate::{
     load_payload,
 };
 
+fn confirm_plan_mutation(
+    apply: bool,
+    yes: bool,
+    action: &str,
+    subject: &str,
+    profile: &str,
+) -> Result<()> {
+    if apply {
+        cmd::confirm::require_tty_confirmation(
+            yes,
+            &cmd::confirm::destructive_action_message(action, subject, profile),
+        )?;
+    }
+    Ok(())
+}
+
 pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
     apply: bool,
@@ -32,6 +48,7 @@ pub(crate) fn execute(
         OnePlansCommand::Create { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
+            confirm_plan_mutation(apply, yes, "create", "a plan", &config.profile_name)?;
             one_api_live_request_with_body(
                 &config,
                 "plans",
@@ -69,6 +86,13 @@ pub(crate) fn execute(
         }
         OnePlansCommand::Run { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
+            confirm_plan_mutation(
+                apply,
+                yes,
+                "run",
+                &format!("plan id='{id}'"),
+                &config.profile_name,
+            )?;
             one_api_live_request(
                 &config,
                 "plans",
@@ -130,6 +154,13 @@ pub(crate) fn execute(
         OnePlansCommand::Update { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
+            confirm_plan_mutation(
+                apply,
+                yes,
+                "update",
+                &format!("plan id='{id}'"),
+                &config.profile_name,
+            )?;
             one_api_live_request_with_body(
                 &config,
                 "plans",
@@ -143,15 +174,13 @@ pub(crate) fn execute(
         }
         OnePlansCommand::Delete { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            if apply {
-                cmd::confirm::require_tty_confirmation(
-                    yes,
-                    &format!(
-                        "About to DELETE plan id='{id}' on profile '{}'. This cannot be undone.",
-                        config.profile_name
-                    ),
-                )?;
-            }
+            confirm_plan_mutation(
+                apply,
+                yes,
+                "delete",
+                &format!("plan id='{id}'"),
+                &config.profile_name,
+            )?;
             one_api_live_request(
                 &config,
                 "plans",
@@ -165,6 +194,13 @@ pub(crate) fn execute(
         OnePlansCommand::Share { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
+            confirm_plan_mutation(
+                apply,
+                yes,
+                "share",
+                &format!("plan id='{id}'"),
+                &config.profile_name,
+            )?;
             one_api_live_request_with_body(
                 &config,
                 "plans",
@@ -178,6 +214,7 @@ pub(crate) fn execute(
         }
         OnePlansCommand::Import { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
+            confirm_plan_mutation(apply, yes, "import", "a plan package", &config.profile_name)?;
             one_api_live_request(
                 &config,
                 "plans",
@@ -206,6 +243,13 @@ pub(crate) fn execute(
                     &[("id", id.as_str())],
                 )?
             } else {
+                confirm_plan_mutation(
+                    apply,
+                    yes,
+                    "revoke access to",
+                    &format!("plan id='{id}' for subject id='{subject_id}'"),
+                    &config.profile_name,
+                )?;
                 one_api_live_request(
                     &config,
                     "plans",
@@ -218,4 +262,21 @@ pub(crate) fn execute(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::confirm_plan_mutation;
+
+    #[test]
+    fn plan_mutation_confirmation_is_skipped_for_dry_run() {
+        confirm_plan_mutation(false, false, "update", "a plan", "test")
+            .expect("dry-run should not prompt");
+    }
+
+    #[test]
+    fn plan_mutation_confirmation_accepts_yes() {
+        confirm_plan_mutation(true, true, "update", "a plan", "test")
+            .expect("--yes should bypass the prompt");
+    }
 }

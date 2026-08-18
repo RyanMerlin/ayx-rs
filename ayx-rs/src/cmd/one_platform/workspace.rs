@@ -1,7 +1,10 @@
 use anyhow::{Result, anyhow};
 use ayx_core::envelope::Envelope;
 use ayx_core::profile::profile_storage_path;
-use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
+use ayx_one_api::{
+    one_api_live_request, one_api_live_request_with_body, one_api_live_request_with_query,
+};
+use serde_json::Value;
 use serde_json::json;
 
 use crate::{
@@ -11,38 +14,117 @@ use crate::{
     onboard::{InlineSecretPolicy, inline_secret_warning, write_config_with_policy},
 };
 
-/// Resolve a workspace id from the explicit arg or fall back to the profile's
-/// configured `workspace_gid`. Returns an error if neither is available.
-///
-/// When an explicit workspace-id is supplied AND the profile has an active
-/// workspace, they must match — the token is workspace-bound. Passing the
-/// wrong id would silently mutate a different workspace than the caller
-/// expected, so we fail closed with a clear remediation message.
-fn resolve_workspace_id(
+/// Resolve and validate the numeric workspace id required by path-scoped
+/// `/v4/workspaces` operations. The profile's active workspace is a ULID/GID
+/// for header scope, so it cannot be substituted into these numeric path
+/// segments. Always discover the current workspace from the live read, then
+/// reject an explicit path id that does not match both the current numeric id
+/// and the profile's current workspace GID.
+fn resolve_workspace_path_id(
     explicit: Option<String>,
     config: &ayx_core::profile::Config,
 ) -> Result<String> {
-    let active = config
-        .alteryx_one
-        .as_ref()
-        .and_then(|o| o.resolved_workspace_gid())
-        .map(str::to_string);
-
-    match (explicit, active) {
-        (Some(exp), Some(act)) if exp != act => Err(anyhow!(
-            "--workspace-id '{}' does not match the active workspace '{}'. \
-             The token is workspace-bound; switch with `ayx one workspace switch` \
-             or re-authenticate. Omit --workspace-id to use the active workspace.",
-            exp,
-            act
-        )),
-        (Some(exp), _) => Ok(exp),
-        (None, Some(act)) => Ok(act),
-        (None, None) => Err(anyhow!(
-            "workspace-id not specified and could not be inferred from profile; \
-             pass --workspace-id explicitly"
-        )),
+    let envelope = one_api_live_request(
+        config,
+        "workspace",
+        "workspace-current-for-path-id",
+        "GET",
+        "/v4/workspaces/current",
+        false,
+        &[],
+    )?;
+    if !envelope.ok {
+        return Err(anyhow!(
+            "could not resolve the numeric workspace id from /v4/workspaces/current"
+        ));
     }
+
+    let response = envelope
+        .data
+        .get("response")
+        .filter(|value| value.is_object())
+        .unwrap_or(&envelope.data);
+    validate_workspace_gid(
+        config
+            .alteryx_one
+            .as_ref()
+            .and_then(|one| one.resolved_workspace_gid()),
+        response.get("gid").and_then(Value::as_str),
+    )?;
+
+    let current_id = response.get("id").and_then(|candidate| {
+        candidate
+            .as_i64()
+            .map(|id| id.to_string())
+            .or_else(|| candidate.as_u64().map(|id| id.to_string()))
+            .or_else(|| {
+                candidate.as_str().and_then(|id| {
+                    id.chars()
+                        .all(|ch| ch.is_ascii_digit())
+                        .then(|| id.to_string())
+                })
+            })
+    });
+    let current_id = current_id.ok_or_else(|| {
+        let response_preview = if response.is_object() {
+            "current workspace response did not include a numeric id"
+        } else {
+            "current workspace response was not an object"
+        };
+        anyhow!(response_preview)
+    })?;
+
+    validate_workspace_path_id(explicit.as_deref(), current_id)
+}
+
+fn validate_workspace_path_id(explicit: Option<&str>, current_id: String) -> Result<String> {
+    if let Some(explicit_id) = explicit
+        && explicit_id != current_id
+    {
+        return Err(anyhow!(
+            "--workspace-id '{}' does not match the current numeric workspace id '{}'; refusing to target a different workspace",
+            explicit_id,
+            current_id
+        ));
+    }
+    Ok(current_id)
+}
+
+fn validate_workspace_gid(expected: Option<&str>, actual: Option<&str>) -> Result<()> {
+    let expected = expected.ok_or_else(|| {
+        anyhow!(
+            "workspace preflight could not determine the profile workspace GID; refusing to target a workspace path"
+        )
+    })?;
+    let actual = actual.ok_or_else(|| {
+        anyhow!(
+            "workspace preflight response did not include a workspace GID; refusing to target a workspace path"
+        )
+    })?;
+    if expected != actual {
+        return Err(anyhow!(
+            "workspace preflight mismatch: profile workspace GID '{}' is not the current workspace GID '{}'; refusing to target a workspace path",
+            expected,
+            actual
+        ));
+    }
+    Ok(())
+}
+
+fn confirm_workspace_mutation(
+    apply: bool,
+    yes: bool,
+    action: &str,
+    subject: &str,
+    profile: &str,
+) -> Result<()> {
+    if apply {
+        cmd::confirm::require_tty_confirmation(
+            yes,
+            &cmd::confirm::access_change_message(action, subject, profile),
+        )?;
+    }
+    Ok(())
 }
 
 pub(crate) fn execute(
@@ -73,8 +155,47 @@ pub(crate) fn execute(
                 &params,
             )?
         }
+        OneWorkspaceCommand::Create { profile, body } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let payload = load_payload(&body)?;
+            confirm_workspace_mutation(apply, yes, "create", "a workspace", &config.profile_name)?;
+            one_api_live_request_with_body(
+                &config,
+                "workspace",
+                "workspace-create",
+                "POST",
+                "/v4/workspaces",
+                true,
+                &[],
+                Some(payload),
+            )?
+        }
+        OneWorkspaceCommand::Delete { id } => {
+            let config = runtime.load_profile_lenient(None)?;
+            let path_id = resolve_workspace_path_id(Some(id), &config)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "delete",
+                        &format!("workspace id='{path_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            one_api_live_request(
+                &config,
+                "workspace",
+                "workspace-delete",
+                "DELETE",
+                "/v4/workspaces/{id}",
+                true,
+                &[("id", &path_id)],
+            )?
+        }
         OneWorkspaceCommand::ConfigurationV4 { id } => {
             let config = runtime.load_profile_lenient(None)?;
+            let path_id = resolve_workspace_path_id(Some(id), &config)?;
             one_api_live_request(
                 &config,
                 "workspace",
@@ -82,7 +203,7 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/workspaces/{id}/configuration",
                 false,
-                &[("id", &id)],
+                &[("id", &path_id)],
             )?
         }
         OneWorkspaceCommand::CurrentConfiguration => {
@@ -100,6 +221,13 @@ pub(crate) fn execute(
         OneWorkspaceCommand::SaveCurrentConfiguration { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
+            confirm_workspace_mutation(
+                apply,
+                yes,
+                "update",
+                "the current workspace configuration",
+                &config.profile_name,
+            )?;
             one_api_live_request_with_body(
                 &config,
                 "workspace",
@@ -113,7 +241,15 @@ pub(crate) fn execute(
         }
         OneWorkspaceCommand::SaveConfigurationV4 { profile, id, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let path_id = resolve_workspace_path_id(Some(id), &config)?;
             let payload = load_payload(&body)?;
+            confirm_workspace_mutation(
+                apply,
+                yes,
+                "update",
+                &format!("workspace configuration id='{path_id}'"),
+                &config.profile_name,
+            )?;
             one_api_live_request_with_body(
                 &config,
                 "workspace",
@@ -121,7 +257,7 @@ pub(crate) fn execute(
                 "PATCH",
                 "/v4/workspaces/{id}/configuration",
                 true,
-                &[("id", &id)],
+                &[("id", &path_id)],
                 Some(payload),
             )?
         }
@@ -145,6 +281,7 @@ pub(crate) fn execute(
         }
         OneWorkspaceCommand::ConfigurationSchema { id } => {
             let config = runtime.load_profile_lenient(None)?;
+            let path_id = resolve_workspace_path_id(Some(id), &config)?;
             one_api_live_request(
                 &config,
                 "workspace",
@@ -152,7 +289,7 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/workspaces/{id}/configuration-schema",
                 false,
-                &[("id", &id)],
+                &[("id", &path_id)],
             )?
         }
         OneWorkspaceCommand::CurrentConfigurationSchema => {
@@ -169,6 +306,13 @@ pub(crate) fn execute(
         }
         OneWorkspaceCommand::DeleteCurrentConfiguration { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
+            confirm_workspace_mutation(
+                apply,
+                yes,
+                "delete",
+                "the current workspace configuration",
+                &config.profile_name,
+            )?;
             one_api_live_request(
                 &config,
                 "workspace",
@@ -181,6 +325,14 @@ pub(crate) fn execute(
         }
         OneWorkspaceCommand::DeleteConfiguration { id } => {
             let config = runtime.load_profile_lenient(None)?;
+            let path_id = resolve_workspace_path_id(Some(id), &config)?;
+            confirm_workspace_mutation(
+                apply,
+                yes,
+                "delete",
+                &format!("workspace configuration id='{path_id}'"),
+                &config.profile_name,
+            )?;
             one_api_live_request(
                 &config,
                 "workspace",
@@ -188,11 +340,12 @@ pub(crate) fn execute(
                 "POST",
                 "/v4/workspaces/{id}/delete-configuration",
                 true,
-                &[("id", &id)],
+                &[("id", &path_id)],
             )?
         }
         OneWorkspaceCommand::Configuration { id } => {
             let config = runtime.load_profile_lenient(None)?;
+            let path_id = resolve_workspace_path_id(Some(id), &config)?;
             one_api_live_request(
                 &config,
                 "workspace",
@@ -200,7 +353,7 @@ pub(crate) fn execute(
                 "GET",
                 "/v4/workspaces/{id}/configuration",
                 false,
-                &[("id", &id)],
+                &[("id", &path_id)],
             )?
         }
         OneWorkspaceCommand::People => {
@@ -230,6 +383,233 @@ pub(crate) fn execute(
                 "/v4/people?role=admin",
                 false,
                 &[],
+            )?
+        }
+        OneWorkspaceCommand::Groups { workspace_id } => {
+            let config = runtime.load_profile_lenient(None)?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            one_api_live_request(
+                &config,
+                "workspace",
+                "workspace-groups",
+                "GET",
+                "/v4/workspaces/{id}/groups",
+                false,
+                &[("id", &path_id)],
+            )?
+        }
+        OneWorkspaceCommand::GroupsGlobal => {
+            let config = runtime.load_profile_lenient(None)?;
+            one_api_live_request(
+                &config,
+                "workspace",
+                "workspace-groups-global",
+                "GET",
+                "/v4/groups",
+                false,
+                &[],
+            )?
+        }
+        OneWorkspaceCommand::CreateGroup {
+            profile,
+            workspace_id,
+            body,
+        } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let payload = load_payload(&body)?;
+            confirm_workspace_mutation(
+                apply,
+                yes,
+                "create",
+                &format!("a group in workspace id='{path_id}'"),
+                &config.profile_name,
+            )?;
+            one_api_live_request_with_body(
+                &config,
+                "workspace",
+                "workspace-group-create",
+                "POST",
+                "/v4/workspaces/{id}/groups",
+                true,
+                &[("id", &path_id)],
+                Some(payload),
+            )?
+        }
+        OneWorkspaceCommand::DeleteGroup {
+            workspace_id,
+            group_id,
+        } => {
+            let config = runtime.load_profile_lenient(None)?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "delete",
+                        &format!("group id='{group_id}' from workspace id='{path_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            one_api_live_request(
+                &config,
+                "workspace",
+                "workspace-group-delete",
+                "DELETE",
+                "/v4/workspaces/{id}/groups/{groupId}",
+                true,
+                &[("id", &path_id), ("groupId", &group_id)],
+            )?
+        }
+        OneWorkspaceCommand::UpdateGroup {
+            profile,
+            workspace_id,
+            group_id,
+            body,
+        } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let payload = load_payload(&body)?;
+            confirm_workspace_mutation(
+                apply,
+                yes,
+                "update",
+                &format!("group id='{group_id}' in workspace id='{path_id}'"),
+                &config.profile_name,
+            )?;
+            one_api_live_request_with_body(
+                &config,
+                "workspace",
+                "workspace-group-update",
+                "PUT",
+                "/v4/workspaces/{id}/groups/{groupId}",
+                true,
+                &[("id", &path_id), ("groupId", &group_id)],
+                Some(payload),
+            )?
+        }
+        OneWorkspaceCommand::SetGroupRoles {
+            profile,
+            workspace_id,
+            group_id,
+            body,
+        } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let payload = load_payload(&body)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "update",
+                        &format!("roles for group id='{group_id}' in workspace id='{path_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            one_api_live_request_with_body(
+                &config,
+                "workspace",
+                "workspace-group-set-roles",
+                "PUT",
+                "/v4/workspaces/{id}/groups/{groupId}/roles",
+                true,
+                &[("id", &path_id), ("groupId", &group_id)],
+                Some(payload),
+            )?
+        }
+        OneWorkspaceCommand::AddGroupUsers {
+            workspace_id,
+            group_id,
+            user_ids,
+        } => {
+            let config = runtime.load_profile_lenient(None)?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "add",
+                        &format!("users to group id='{group_id}' in workspace id='{path_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            let query_params: Vec<(&str, &str)> = user_ids
+                .iter()
+                .map(|user_id| ("userIds", user_id.as_str()))
+                .collect();
+            one_api_live_request_with_query(
+                &config,
+                "workspace",
+                "workspace-group-add-users",
+                "POST",
+                "/v4/workspaces/{id}/groups/{groupId}/users",
+                true,
+                &[("id", &path_id), ("groupId", &group_id)],
+                &query_params,
+            )?
+        }
+        OneWorkspaceCommand::RemoveGroupUsers {
+            workspace_id,
+            group_id,
+            user_ids,
+        } => {
+            let config = runtime.load_profile_lenient(None)?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "remove",
+                        &format!("users from group id='{group_id}' in workspace id='{path_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            let query_params: Vec<(&str, &str)> = user_ids
+                .iter()
+                .map(|user_id| ("userIds", user_id.as_str()))
+                .collect();
+            one_api_live_request_with_query(
+                &config,
+                "workspace",
+                "workspace-group-remove-users",
+                "DELETE",
+                "/v4/workspaces/{id}/groups/{groupId}/users",
+                true,
+                &[("id", &path_id), ("groupId", &group_id)],
+                &query_params,
+            )?
+        }
+        OneWorkspaceCommand::InvitationLink {
+            workspace_id,
+            person_id,
+        } => {
+            let config = runtime.load_profile_lenient(None)?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            one_api_live_request(
+                &config,
+                "workspace",
+                "workspace-invitation-link",
+                "GET",
+                "/v4/workspaces/{id}/invitationLink?personId={personId}",
+                false,
+                &[("id", &path_id), ("personId", &person_id)],
+            )?
+        }
+        OneWorkspaceCommand::CloudConfigs { workspace_id } => {
+            let config = runtime.load_profile_lenient(None)?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            one_api_live_request(
+                &config,
+                "workspace",
+                "workspace-cloud-configs",
+                "GET",
+                "/v4/workspaces/{workspaceId}/cloudConfigs",
+                false,
+                &[("workspaceId", &path_id)],
             )?
         }
         OneWorkspaceCommand::Switch { profile, id } => {
@@ -282,7 +662,17 @@ pub(crate) fn execute(
         }
         OneWorkspaceCommand::InviteUsers { workspace_id } => {
             let config = runtime.load_profile_lenient(None)?;
-            let ws_id = resolve_workspace_id(workspace_id, &config)?;
+            let ws_id = resolve_workspace_path_id(workspace_id, &config)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "invite",
+                        &format!("users to workspace id='{ws_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
             one_api_live_request(
                 &config,
                 "workspace",
@@ -293,9 +683,96 @@ pub(crate) fn execute(
                 &[("id", &ws_id)],
             )?
         }
+        OneWorkspaceCommand::Invite {
+            profile,
+            workspace_id,
+            body,
+        } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let payload = load_payload(&body)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "invite",
+                        &format!("user(s) to workspace id='{path_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            one_api_live_request_with_body(
+                &config,
+                "workspace",
+                "workspace-invite",
+                "POST",
+                "/v4/workspaces/{id}/people",
+                true,
+                &[("id", &path_id)],
+                Some(payload),
+            )?
+        }
+        OneWorkspaceCommand::InviteList {
+            profile,
+            workspace_id,
+            body,
+        } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let payload = load_payload(&body)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "invite",
+                        &format!("user list to workspace id='{path_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            one_api_live_request_with_body(
+                &config,
+                "workspace",
+                "workspace-invite-list",
+                "POST",
+                "/v4/workspaces/{id}/people/batch",
+                true,
+                &[("id", &path_id)],
+                Some(payload),
+            )?
+        }
+        OneWorkspaceCommand::ReinviteUsers {
+            profile,
+            workspace_id,
+            body,
+        } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let payload = load_payload(&body)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "reinvite",
+                        &format!("users in workspace id='{path_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            one_api_live_request_with_body(
+                &config,
+                "workspace",
+                "workspace-reinvite-users",
+                "PATCH",
+                "/v4/workspaces/{id}/people/batch",
+                true,
+                &[("id", &path_id)],
+                Some(payload),
+            )?
+        }
         OneWorkspaceCommand::RemoveUser { workspace_id, id } => {
             let config = runtime.load_profile_lenient(None)?;
-            let ws_id = resolve_workspace_id(workspace_id, &config)?;
+            let ws_id = resolve_workspace_path_id(workspace_id, &config)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
@@ -318,7 +795,7 @@ pub(crate) fn execute(
         }
         OneWorkspaceCommand::SuspendUsers { workspace_id } => {
             let config = runtime.load_profile_lenient(None)?;
-            let ws_id = resolve_workspace_id(workspace_id, &config)?;
+            let ws_id = resolve_workspace_path_id(workspace_id, &config)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
@@ -341,7 +818,7 @@ pub(crate) fn execute(
         }
         OneWorkspaceCommand::UnsuspendUsers { workspace_id } => {
             let config = runtime.load_profile_lenient(None)?;
-            let ws_id = resolve_workspace_id(workspace_id, &config)?;
+            let ws_id = resolve_workspace_path_id(workspace_id, &config)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
@@ -362,9 +839,35 @@ pub(crate) fn execute(
                 &[("id", &ws_id)],
             )?
         }
+        OneWorkspaceCommand::SuspendUser {
+            workspace_id,
+            person_id,
+        } => {
+            let config = runtime.load_profile_lenient(None)?;
+            let ws_id = resolve_workspace_path_id(workspace_id, &config)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "suspend",
+                        &format!("user person id='{person_id}' in workspace id='{ws_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            one_api_live_request(
+                &config,
+                "workspace",
+                "workspace-suspend-user",
+                "PUT",
+                "/v4/workspaces/{id}/people/{personId}/suspended",
+                true,
+                &[("id", &ws_id), ("personId", &person_id)],
+            )?
+        }
         OneWorkspaceCommand::Transfer { workspace_id } => {
             let config = runtime.load_profile_lenient(None)?;
-            let ws_id = resolve_workspace_id(workspace_id, &config)?;
+            let ws_id = resolve_workspace_path_id(workspace_id, &config)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
@@ -379,7 +882,7 @@ pub(crate) fn execute(
                 &config,
                 "workspace",
                 "workspace-transfer",
-                "POST",
+                "PATCH",
                 "/v4/workspaces/{id}/transfer",
                 true,
                 &[("id", &ws_id)],
@@ -388,6 +891,13 @@ pub(crate) fn execute(
         OneWorkspaceCommand::TransferAssets { profile, body } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let payload = load_payload(&body)?;
+            confirm_workspace_mutation(
+                apply,
+                yes,
+                "transfer",
+                "workspace assets",
+                &config.profile_name,
+            )?;
             one_api_live_request_with_body(
                 &config,
                 "workspace",
@@ -399,125 +909,161 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
+        OneWorkspaceCommand::CreateCloudConfig {
+            profile,
+            workspace_id,
+            cloud_provider,
+            body,
+        } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let payload = load_payload(&body)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "create",
+                        &format!("cloud config for workspace id='{path_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            one_api_live_request_with_body(
+                &config,
+                "workspace",
+                "workspace-cloud-config-create",
+                "POST",
+                "/v4/workspaces/{workspaceId}/cloudConfigs/{cloudProvider}",
+                true,
+                &[
+                    ("workspaceId", &path_id),
+                    ("cloudProvider", &cloud_provider),
+                ],
+                Some(payload),
+            )?
+        }
+        OneWorkspaceCommand::UpdateCloudConfig {
+            profile,
+            workspace_id,
+            cloud_provider,
+            body,
+        } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let payload = load_payload(&body)?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "update",
+                        &format!("cloud config for workspace id='{path_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            one_api_live_request_with_body(
+                &config,
+                "workspace",
+                "workspace-cloud-config-update",
+                "PATCH",
+                "/v4/workspaces/{workspaceId}/cloudConfigs/{cloudProvider}",
+                true,
+                &[
+                    ("workspaceId", &path_id),
+                    ("cloudProvider", &cloud_provider),
+                ],
+                Some(payload),
+            )?
+        }
+        OneWorkspaceCommand::PatchUser {
+            profile,
+            workspace_id,
+            person_id,
+            body,
+        } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let payload = load_payload(&body)?;
+            confirm_workspace_mutation(
+                apply,
+                yes,
+                "update",
+                &format!("user person id='{person_id}' in workspace id='{path_id}'"),
+                &config.profile_name,
+            )?;
+            one_api_live_request_with_body(
+                &config,
+                "workspace",
+                "workspace-user-patch",
+                "PATCH",
+                "/v4/workspaces/{workspaceId}/people/{id}",
+                true,
+                &[("workspaceId", &path_id), ("id", &person_id)],
+                Some(payload),
+            )?
+        }
+        OneWorkspaceCommand::UpdateUser {
+            profile,
+            workspace_id,
+            person_id,
+            body,
+        } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let payload = load_payload(&body)?;
+            confirm_workspace_mutation(
+                apply,
+                yes,
+                "update",
+                &format!("user person id='{person_id}' in workspace id='{path_id}'"),
+                &config.profile_name,
+            )?;
+            one_api_live_request_with_body(
+                &config,
+                "workspace",
+                "workspace-user-update",
+                "PUT",
+                "/v4/workspaces/{workspaceId}/people/{id}",
+                true,
+                &[("workspaceId", &path_id), ("id", &person_id)],
+                Some(payload),
+            )?
+        }
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_workspace_id;
-    use ayx_core::profile::{
-        AlteryxOneProfile, Config, MongoDatabases, MongoMode, MongoProfile, WorkspaceCredential,
-    };
+    use super::{confirm_workspace_mutation, validate_workspace_gid, validate_workspace_path_id};
 
-    /// Minimal Config with an Alteryx One section and optionally a workspace credential
-    /// so `resolved_workspace_gid()` resolves via `active_workspace_id()`.
-    fn base_config(active_gid: Option<&str>) -> Config {
-        let mut one = AlteryxOneProfile {
-            account_email: "test@example.com".into(),
-            base_url: Some("https://example.alteryxcloud.com".into()),
-            ..Default::default()
-        };
-        if let Some(gid) = active_gid {
-            let cred = WorkspaceCredential {
-                access_token: Some("tok".into()),
-                workspace_gid: Some(gid.into()),
-                ..Default::default()
-            };
-            one.workspace_credentials.insert(gid.into(), cred);
-            one.expected_workspace_id = Some(gid.into());
-        }
-        Config {
-            profile_name: "test-profile".into(),
-            mongo: MongoProfile {
-                mode: MongoMode::Embedded,
-                databases: MongoDatabases {
-                    gallery_name: "g".into(),
-                    service_name: "s".into(),
-                },
-                embedded: None,
-                managed: None,
-            },
-            alteryx_one: Some(one),
-            observability: None,
-            server_api: None,
-            api: None,
-            server: None,
-            sqlserver: None,
-            upgrade: None,
-        }
-    }
-
-    fn config_no_one() -> Config {
-        Config {
-            profile_name: "test-profile".into(),
-            mongo: MongoProfile {
-                mode: MongoMode::Embedded,
-                databases: MongoDatabases {
-                    gallery_name: "g".into(),
-                    service_name: "s".into(),
-                },
-                embedded: None,
-                managed: None,
-            },
-            alteryx_one: None,
-            observability: None,
-            server_api: None,
-            api: None,
-            server: None,
-            sqlserver: None,
-            upgrade: None,
-        }
+    #[test]
+    fn workspace_mutation_confirmation_is_skipped_for_dry_run() {
+        confirm_workspace_mutation(false, false, "update", "a workspace", "test")
+            .expect("dry-run should not prompt");
     }
 
     #[test]
-    fn explicit_id_matching_active_gid_returns_it() {
-        let config = base_config(Some("ws-001"));
-        let result = resolve_workspace_id(Some("ws-001".into()), &config);
-        assert_eq!(result.unwrap(), "ws-001");
+    fn workspace_mutation_confirmation_accepts_yes() {
+        confirm_workspace_mutation(true, true, "update", "a workspace", "test")
+            .expect("--yes should bypass the prompt");
     }
 
     #[test]
-    fn explicit_id_differing_from_active_gid_returns_mismatch_error() {
-        let config = base_config(Some("ws-001"));
-        let err = resolve_workspace_id(Some("ws-OTHER".into()), &config).unwrap_err();
-        let msg = format!("{err}");
-        assert!(
-            msg.contains("ws-OTHER") && msg.contains("ws-001"),
-            "error message should reference both ids: {msg}"
-        );
-        assert!(
-            msg.contains("workspace-bound") || msg.contains("switch"),
-            "error should mention workspace-bound or switch: {msg}"
+    fn explicit_workspace_path_id_must_match_current_numeric_id() {
+        let error = validate_workspace_path_id(Some("91947"), "91946".to_string())
+            .expect_err("a different workspace path must be rejected");
+        assert!(error.to_string().contains("91946"));
+        assert_eq!(
+            validate_workspace_path_id(Some("91946"), "91946".to_string()).unwrap(),
+            "91946"
         );
     }
 
     #[test]
-    fn no_explicit_id_profile_has_active_gid_returns_it() {
-        let config = base_config(Some("ws-002"));
-        let result = resolve_workspace_id(None, &config);
-        assert_eq!(result.unwrap(), "ws-002");
-    }
-
-    #[test]
-    fn no_explicit_id_no_active_gid_returns_error() {
-        // Profile with alteryx_one block but no workspace credentials → no active gid.
-        let config = base_config(None);
-        let err = resolve_workspace_id(None, &config).unwrap_err();
-        let msg = format!("{err}");
-        assert!(
-            msg.contains("workspace-id") || msg.contains("specify"),
-            "error should tell user to specify workspace-id: {msg}"
-        );
-    }
-
-    #[test]
-    fn no_explicit_id_no_alteryx_one_section_returns_error() {
-        let config = config_no_one();
-        let err = resolve_workspace_id(None, &config).unwrap_err();
-        let msg = format!("{err}");
-        assert!(
-            msg.contains("workspace-id") || msg.contains("specify"),
-            "error should tell user to specify workspace-id: {msg}"
-        );
+    fn workspace_gid_validation_fails_closed() {
+        assert!(validate_workspace_gid(Some("gid-1"), Some("gid-2")).is_err());
+        assert!(validate_workspace_gid(None, Some("gid-1")).is_err());
+        assert!(validate_workspace_gid(Some("gid-1"), None).is_err());
+        assert!(validate_workspace_gid(Some("gid-1"), Some("gid-1")).is_ok());
     }
 }

@@ -214,7 +214,7 @@ fn one_dry_run_envelope(
     data.insert("apply".to_string(), Value::Bool(false));
     data.insert(
         "would_send".to_string(),
-        body.cloned().unwrap_or(Value::Null),
+        body.map(redact_json_value).unwrap_or(Value::Null),
     );
     data.insert("response".to_string(), Value::Null);
     data.insert(
@@ -629,6 +629,98 @@ pub fn one_api_live_request(
         path_params,
         None,
     )
+}
+
+fn redact_json_value(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => Value::Object(
+            object
+                .iter()
+                .map(|(key, value)| {
+                    let normalized = key.to_ascii_lowercase().replace(['_', '-'], "");
+                    let redacted = normalized.contains("password")
+                        || normalized.contains("secret")
+                        || normalized.contains("token")
+                        || normalized.contains("apikey")
+                        || normalized.contains("accesskey")
+                        || normalized.contains("accountkey")
+                        || normalized.contains("sharedkey")
+                        || normalized.contains("privatekey")
+                        || normalized.contains("credential")
+                        || normalized.contains("connectionstring")
+                        || normalized.contains("authorization")
+                        || normalized.contains("sas");
+                    (
+                        key.clone(),
+                        if redacted {
+                            Value::String("[REDACTED]".to_string())
+                        } else {
+                            redact_json_value(value)
+                        },
+                    )
+                })
+                .collect(),
+        ),
+        Value::Array(array) => Value::Array(array.iter().map(redact_json_value).collect()),
+        _ => value.clone(),
+    }
+}
+
+/// Send a One API request with repeated URL query parameters.
+///
+/// OpenAPI array query parameters use the form style by default, so a value
+/// such as `userIds=["1", "2"]` is encoded as `?userIds=1&userIds=2`.
+/// Keeping this in the transport layer avoids each command hand-building an
+/// unsafe query string.
+#[allow(clippy::too_many_arguments)]
+pub fn one_api_live_request_with_query(
+    config: &Config,
+    surface: &str,
+    operation: &str,
+    method: &str,
+    endpoint: &str,
+    mutating: bool,
+    path_params: &[(&str, &str)],
+    query_params: &[(&str, &str)],
+) -> Result<Envelope> {
+    if query_params.is_empty() {
+        return one_api_live_request(
+            config,
+            surface,
+            operation,
+            method,
+            endpoint,
+            mutating,
+            path_params,
+        );
+    }
+
+    let endpoint_with_query = endpoint_with_query_params(endpoint, query_params);
+    one_api_live_request(
+        config,
+        surface,
+        operation,
+        method,
+        &endpoint_with_query,
+        mutating,
+        path_params,
+    )
+}
+
+fn endpoint_with_query_params(endpoint: &str, query_params: &[(&str, &str)]) -> String {
+    let mut endpoint_with_query = endpoint.to_string();
+    let mut serializer = Serializer::new(String::new());
+    for (key, value) in query_params {
+        serializer.append_pair(key, value);
+    }
+    let separator = if endpoint_with_query.contains('?') {
+        '&'
+    } else {
+        '?'
+    };
+    endpoint_with_query.push(separator);
+    endpoint_with_query.push_str(&serializer.finish());
+    endpoint_with_query
 }
 
 /// Pagination parameters for One list endpoints.
@@ -3106,6 +3198,25 @@ mongo:
     }
 
     #[test]
+    fn dry_run_body_redacts_provider_secrets_recursively() {
+        let body = json!({
+            "clientId": "safe-to-show",
+            "clientSecret": "do-not-show",
+            "accountKey": "also-do-not-show",
+            "sharedKey": "another-secret",
+            "nested": {"access_key": "also-secret"},
+            "items": [{"connectionString": "secret-connection"}],
+        });
+        let redacted = redact_json_value(&body);
+        assert_eq!(redacted["clientId"], "safe-to-show");
+        assert_eq!(redacted["clientSecret"], "[REDACTED]");
+        assert_eq!(redacted["accountKey"], "[REDACTED]");
+        assert_eq!(redacted["sharedKey"], "[REDACTED]");
+        assert_eq!(redacted["nested"]["access_key"], "[REDACTED]");
+        assert_eq!(redacted["items"][0]["connectionString"], "[REDACTED]");
+    }
+
+    #[test]
     fn parse_one_response_classifies_json_html_and_malformed() {
         match parse_one_response("application/json", r#"{"id":"1"}"#) {
             ParsedOneResponse::Json {
@@ -3376,6 +3487,17 @@ mongo:
             true
         ));
         assert!(!should_retry_status(StatusCode::NOT_FOUND, false));
+    }
+
+    #[test]
+    fn repeated_query_values_are_form_encoded() {
+        assert_eq!(
+            endpoint_with_query_params(
+                "/v4/groups/users",
+                &[("userIds", "u/1"), ("userIds", "u?2")],
+            ),
+            "/v4/groups/users?userIds=u%2F1&userIds=u%3F2"
+        );
     }
 
     #[test]

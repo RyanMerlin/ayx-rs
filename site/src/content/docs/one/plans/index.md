@@ -7,7 +7,8 @@ sidebar:
 
 Plans in Alteryx One group flows into a single orchestrated unit that can be run on demand or on a schedule. The `ayx one plans` branch covers the full lifecycle: browsing, creating, running, updating, sharing, and managing access.
 
-Mutating commands are dry-run by default — add `--apply` to commit.
+Mutating commands are dry-run by default — add `--apply` to commit. Applied
+mutations prompt for confirmation; add `--yes` for non-interactive scripts.
 
 > **Enterprise tier required.** Plans endpoints return 404 on some workspace tiers. Commands are present in all builds but will only succeed on enterprise-tier accounts.
 
@@ -87,6 +88,7 @@ ayx one plans permissions <plan-id> --subject-id <subject-id>
 ```
 
 `--subject-id` filters the response to a specific user or group. Omit it to return all permission entries for the plan.
+When `--subject-id` is provided, the command revokes that permission and is treated as a mutation.
 
 ## Run
 
@@ -105,25 +107,32 @@ ayx one plans run <plan-id> --apply --yes
 
 ```bash
 # Preview
-ayx one plans create --body '<json>'
+ayx one plans create --body plan.json
 
 # Create
-ayx one plans create --body '<json>' --apply
+ayx one plans create --body plan.json --apply
 
 # Update
-ayx one plans update <plan-id> --body '<json>' --apply
+ayx one plans update <plan-id> --body patch.json --apply
+
+# Non-interactive create/update
+ayx one plans create --body plan.json --apply --yes
+ayx one plans update <plan-id> --body patch.json --apply --yes
 ```
 
-Both commands require `--body` with the plan definition or patch as a JSON string.
+Both commands require `--body` with a path to a JSON file containing the plan definition or patch.
 
 ## Share
 
 ```bash
 # Preview
-ayx one plans share <plan-id> --body '<json>'
+ayx one plans share <plan-id> --body permissions.json
 
 # Commit
-ayx one plans share <plan-id> --body '<json>' --apply
+ayx one plans share <plan-id> --body permissions.json --apply
+
+# Non-interactive
+ayx one plans share <plan-id> --body permissions.json --apply --yes
 ```
 
 ## Delete
@@ -145,14 +154,14 @@ ayx one plans delete <plan-id> --apply --yes
 
 ```bash
 ayx --output json one plans list --all \
-  | jq '.data[]'
+  | jq '.data.items[]'
 ```
 
 ### Find a plan by name
 
 ```bash
 ayx --output json one plans list --all \
-  | jq -r '.data[] | select(.name == "Daily ETL") | .id'
+  | jq -r '.data.items[] | select(.name == "Daily ETL") | .id'
 ```
 
 ### Run a plan and check success

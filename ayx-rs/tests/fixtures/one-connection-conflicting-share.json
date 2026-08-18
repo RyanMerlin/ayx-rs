@@ -1,0 +1,7 @@
+{
+  "connectionId": "99999",
+  "policy": "VIEWER",
+  "subjects": {
+    "person": ["4477"]
+  }
+}

@@ -214,7 +214,7 @@ pub enum TelemetryPermissionsCommand {
     Workflows {
         #[command(flatten)]
         args: TelemetryArgs,
-        /// Workspace id for `/iam/v1/workspaces/{id}/people` (One only).
+        /// Workspace id associated with the header-scoped `/v4/people` lookup (One only).
         /// Falls back to `alteryx_one.expected_workspace_id` if unset.
         #[arg(long)]
         workspace_id: Option<String>,

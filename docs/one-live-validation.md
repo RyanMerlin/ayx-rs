@@ -75,7 +75,7 @@ The current smoke harness lives in `ayx-rs/tests/one_live_smoke.rs` and already:
 - short-circuits cleanly when auth acquisition is unavailable
 - validates the most important read paths across the One surface
 - reports the surface and operation names in the envelope assertions
-- contains 76 live tests as of this repo state
+- contains 75 live tests as of this repo state (73 passed and 2 were blocked by the expired `live` profile token in the latest run)
 
 ## Methodology traps
 
@@ -150,9 +150,11 @@ Phase 1 and Phase 2 test different artifacts (coverage, not a gap, as long as it
 
 **Expected, not bugs to fix now:**
 
-- `one_plans_count_live` fails — its allowlist covers `permission_denied` but this tenant answers
-  `not_found`. Known gap.
 - `one_connections_dry_run_shape_live` — documented pre-existing failure.
+
+The current entitled `local-dev` probe returned HTTP 200 for `one plans count`, so its live-smoke
+allowlist is intentionally narrow: only `permission_denied` remains an accepted backend result.
+Unexpected `not_found` or transport failures are findings, not expected noise.
 
 **Silent-skip audit** — capture which `*_real_object` tests self-skip (no fixture: flows, folders,
 output-objects, write-settings, token detail) versus actually ran:
@@ -284,7 +286,7 @@ unit-test-validated only.
    ```
 
    PASS: `stale[].commands` is an array, `coverage_pct` is `null` if `spec_operations` is still 0
-   (not falsely `100.0`), and `outside_spec_namespace` is present (about 25 rows expected).
+   (not falsely `100.0`), and `outside_spec_namespace` is present (7 rows in the current baseline).
 
 3. **`one connections permissions` route fix**:
 
@@ -379,3 +381,27 @@ ayx --output json one workflows copy <CHOSEN_ULID> --name "<CHOSEN_NAME>" --appl
 
 (`--send-email` is intentionally omitted from `share` in this pass — no real share, only the copy,
 unless a real share is separately requested.)
+
+### 5c. Completed Phase 1 — groups, schedules, connection permissions, and plans
+
+This phase was executed against workspace `91946` / GID `01KMGF85WTTEJZ397MW1RBD9ZB` on
+2026-08-18 using the authenticated `local-dev` profile. Every mutation was dry-run reviewed first.
+
+- Created group `ayx-rs-codex-group-canary-20260818`, added Javier (`4477`) and Suresh (`203464`),
+  verified both memberships, removed both, and deleted the group. The workspace returned to its
+  original single-group baseline.
+- Added and live-verified schedule lifecycle commands for `POST /v4/schedules`,
+  `PUT /v4/schedules/{id}`, and `DELETE /v4/schedules/{id}`. Created schedule `39631` for
+  workflow `01M00M9CRWSANK79MBCA0V9VXX`, renamed it, disabled it, deleted it, and verified the
+  schedule list returned to the original one-schedule baseline. The list endpoint reflected the
+  deletion immediately; the detail endpoint remained eventually consistent and served the deleted
+  record afterward.
+- Shared connection `44865` (`land-lease-intel-bq`) with both people as viewers, verified access,
+  revoked both shares, and verified the original permission list. Connection credentials and
+  configuration were not changed. The request builder was corrected to omit empty subject buckets
+  because the live API rejects an empty `group` array when sharing with people.
+- Created plan `156184`, inspected its empty node/edge graph, deleted it, and verified the plan list
+  returned to its original four entries.
+
+No workflow execution, plan execution, connection update/delete, invitations, role changes, or
+other deferred API families were run in this phase.

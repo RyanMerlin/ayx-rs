@@ -29,13 +29,19 @@ The public One API surface exposed here does not provide a general-purpose workf
     `/v4/workspaces/{id}/people` 404s)
   - `GET /v4/people?role=admin` (same header-scoped workspace context;
     `/v4/workspaces/{workspaceId}/admins` 404s)
+  - `GET /v4/workspaces/{id}/groups`
+  - `GET /v4/groups`
+  - `GET /v4/workspaces/{id}/invitationLink` (required `personId` query parameter)
+  - `GET /v4/workspaces/{workspaceId}/cloudConfigs`
   - `POST /v4/workspaces/{id}/people/batch`
   - `DELETE /v4/workspaces/{workspaceId}/people/{id}`
   - `POST /v4/workspaces/{id}/people/suspend`
   - `POST /v4/workspaces/{id}/people/unsuspend`
   - `POST /v4/workspaces/{id}/transfer`
   - `GET /v4/authorization/roles/{id}/people`
-  - `POST /v4/authorization/roles/{id}/people/{subjectId}`
+  - `GET /v4/authorization/roles`
+  - `GET /v4/authorization/roles/{id}`
+  - `PUT /v4/authorization/roles/{id}/people` (request body: `{"items":[subjectId]}`)
   - `DELETE /v4/authorization/roles/{id}/people/{subjectId}`
 - `misc`
   - `GET /v4/open-api-spec`
@@ -58,10 +64,13 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `GET /v4/plans/{id}/permissions`
   - `DELETE /v4/plans/{id}/permissions/{subjectId}`
 - `scheduling`
+  - `POST /v4/schedules`
   - `GET /v4/schedules`
   - `GET /v4/schedules/{id}`
+  - `PUT /v4/schedules/{id}`
   - `POST /v4/schedules/{id}/enable`
   - `POST /v4/schedules/{id}/disable`
+  - `DELETE /v4/schedules/{id}`
   - `GET /v4/schedules/count`
 - `workflow`
   - `GET /v4/workflows`
@@ -213,6 +222,14 @@ The public One API surface exposed here does not provide a general-purpose workf
     - Remaining person-adjacent families stay open.
 - `workspace`
   - `GET /v4/workspaces`
+  - `POST /v4/workspaces`
+  - `DELETE /v4/workspaces/{id}`
+  - `POST /v4/workspaces/{id}/groups`
+  - `DELETE /v4/workspaces/{id}/groups/{groupId}`
+  - `PUT /v4/workspaces/{id}/groups/{groupId}`
+  - `PUT /v4/workspaces/{id}/groups/{groupId}/roles`
+  - `POST /v4/workspaces/{id}/groups/{groupId}/users`
+  - `DELETE /v4/workspaces/{id}/groups/{groupId}/users`
   - `GET /v4/workspaces/{id}/configuration`
   - `PATCH /v4/workspaces/current/transfer`
   - `GET /v4/workspaces/current/configuration`
@@ -222,8 +239,15 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `GET /v4/workspaces/current/configuration-schema`
   - `POST /v4/workspaces/current/delete-configuration`
   - `POST /v4/workspaces/{id}/delete-configuration`
+  - `POST /v4/workspaces/{id}/people`
+  - `PATCH /v4/workspaces/{id}/people/batch`
+  - `PUT /v4/workspaces/{id}/people/{personId}/suspended`
+  - `POST /v4/workspaces/{workspaceId}/cloudConfigs/{cloudProvider}`
+  - `PATCH /v4/workspaces/{workspaceId}/cloudConfigs/{cloudProvider}`
+  - `PATCH /v4/workspaces/{workspaceId}/people/{id}`
+  - `PUT /v4/workspaces/{workspaceId}/people/{id}`
   - Notes:
-    - Workspace listing, configuration, transfer, and configuration schema endpoints are wired.
+    - Workspace listing, lifecycle, groups, configuration, transfer, people, and cloud-config endpoints are wired.
     - Other workspace families remain open.
 
 ## Documented-Only Surfaces
@@ -281,39 +305,40 @@ It also exercises edge coverage for representative families:
 
 ## Live Coverage Baseline
 
-First real measurement of `ayx one api coverage` against the live `GET /v4/open-api-spec`, taken 2026-07-30 against a private test workspace.
+Current measurement of `ayx one api coverage` against the live `GET /v4/open-api-spec`, taken 2026-08-18 against the authenticated local-dev workspace.
 
-There is no earlier figure to compare against. Until the transport-unwrapping fix, the command was handed the transport's metadata envelope instead of the spec body, so it found no `paths`, reported `spec_operations: 0` with an empty `missing` list, and `--check` could not fail no matter how far the CLI drifted. Every number below is being observed for the first time.
+For comparison, the previous baseline was 43.8% coverage (2026-07-30). The current source also
+normalizes both `{param}` and `:param` path-template styles, removing two false missing rows and
+two false stale rows from the prior inventory comparison. The transport-unwrapping fix remains
+important historical context: before it, the command was handed the transport metadata envelope
+instead of the spec body and reported `spec_operations: 0` with an empty `missing` list.
 
 | metric | value |
 |---|---|
-| `coverage_pct` | **43.8%** |
+| `coverage_pct` | **62.6%** |
 | `spec_operations` | 235 |
-| `covered` | 103 |
-| `missing` (spec documents it, CLI does not wire it) | **132** |
-| `stale` (inventory wires it, spec does not describe it) | 20 |
-| `outside_spec_namespace` (sibling services, not comparable) | 25 |
-| `inventory_total` / `inventory_operations` | 150 / 123 |
+| `covered` | 147 |
+| `missing` (spec documents it, CLI does not wire it) | **88** |
+| `stale` (inventory wires it, spec does not describe it) | 16 |
+| `outside_spec_namespace` (sibling services, not comparable) | 7 |
+| `inventory_total` / `inventory_operations` | 172 / 163 |
 
 Missing operations concentrate in a few resources:
 
 | count | resource |
 |---|---|
-| 23 | `workspaces` |
-| 9 | `plans` |
-| 9 | `schedules` |
 | 8 | `accounts` |
-| 7 | `importedDatasets` |
 | 7 | `people` |
+| 7 | `importedDatasets` |
 | 6 each | `authorization`, `environmentParameters`, `publications`, `sqlScripts`, `wrangledDatasets` |
 
-29 resources in total; the remainder are five or fewer each.
+26 resources in total; the remainder are five or fewer each.
 
 ### Reading these numbers correctly
 
-**`stale` does not mean broken.** It means the published spec does not describe an endpoint the CLI wires. Several entries on that list are live-verified working: `one connections update` (`PATCH /v4/connections/{id}`), `one person count` (`GET /v4/people/count`, reachable — it returns a scope 403, not a routing error), and `GET /v4/workflows`, which `inventory.rs` already documents as deliberately absent from the published spec. Treat `stale` as "the spec is incomplete here", and only investigate a row after confirming the route is genuinely dead.
+**`stale` does not mean broken.** It means the published spec does not describe an endpoint the CLI wires. Several entries on that list are live-verified working: `one connections dry-run` reaches `POST /v4/connections/dryRun` and returns body validation, `one person count` reaches `GET /v4/people/count` but is intentionally retired with HTTP 410 `gone`, and `GET /v4/workflows` is live while absent from the published spec. Treat `stale` as "the spec is incomplete here", and only investigate a row after confirming the route is genuinely dead.
 
-**`--check` currently exits 1.** It gates on `missing > 0`, and `missing` is 132. Wiring `ayx one api coverage --check` into CI — which `docs/one-roadmap.md` recommends — would red the build immediately. That is an honest signal rather than a bug, but it needs a decision first: either gate on a coverage threshold instead of `missing == 0`, or scope the gate to a resource allowlist expected to be complete. Do not wire it as-is.
+**`--check` currently exits 1.** It gates on `missing > 0`, and `missing` is 88. Wiring `ayx one api coverage --check` into CI — which `docs/one-roadmap.md` recommends — would red the build immediately. That is an honest signal rather than a bug, but it needs a decision first: either gate on a coverage threshold instead of `missing == 0`, or scope the gate to a resource allowlist expected to be complete. Do not wire it as-is.
 
 ## Next Backend Wiring Pass
 
@@ -322,6 +347,6 @@ The `connection` permissions gap and the `outputObject`/`webhookFlowTask`/`write
 Priority order for the next implementation slice:
 
 1. Decide the shape of the `--check` gate (see the coverage baseline above) before wiring it anywhere. A gate that cannot pass is a gate nobody turns on.
-2. Work the `missing` list by resource, starting with `workspaces` (23 operations, the largest single gap and an admin-facing surface).
+2. Work the `missing` list by resource, starting with `accounts` and `people` (8 and 7 operations respectively); the workspace slice is now largely wired, with only two documented routes known to 404 on this tenant.
 3. Decide whether `dataset` needs mutating lifecycle commands (create/update/delete), or should stay a read-only surface; only list/count/detail reads are wired today.
 4. Extend edge-case live tests (invalid id, empty page, pagination boundary) to the families that don't have them yet: `dataset`, `webhookFlowTask`, `workspace`, and `scheduling`.

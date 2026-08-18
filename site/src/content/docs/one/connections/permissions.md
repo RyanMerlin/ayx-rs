@@ -44,19 +44,38 @@ ayx one connections permissions detail \
 ## Granting a permission
 
 ```bash
-# Dry-run
+# Dry-run using the convenience flags
 ayx one connections permissions create \
   <id> \
-  --body '{"subjectId":"<subject-id>","role":"viewer"}'
+  --policy viewer \
+  --to-person <subject-id>
 
-# Commit
+# Dry-run using a raw body
 ayx one connections permissions create \
   <id> \
-  --body '{"subjectId":"<subject-id>","role":"viewer"}' \
-  --apply
+  --body permissions.json
+
+# Commit (requires --apply and confirmation; use --yes for non-interactive runs)
+ayx one connections permissions create \
+  <id> \
+  --policy viewer \
+  --to-person <subject-id> \
+  --apply --yes
 ```
 
-The `--body` JSON structure depends on your Alteryx One version. Use `ayx one connections permissions list` on an existing connection to see the shape of current permission records.
+`permissions.json`:
+
+```json
+{
+  "connectionId": "<id>",
+  "policy": "VIEWER",
+  "subjects": {"person": ["<subject-id>"]}
+}
+```
+
+The raw body must contain only non-empty `person` and/or `group` subject buckets. If
+`connectionId` is omitted, the CLI binds the positional id; if it is present and differs, the
+request is rejected before confirmation or network I/O.
 
 ## Revoking a permission
 
@@ -79,19 +98,19 @@ Audit all subjects with access to a connection:
 
 ```bash
 ayx --output json one connections permissions list <id> \
-  | jq -r '.data[] | [.subjectId, .role] | @tsv'
+  | jq -r '.data.response.people[]? | [.subjectId, .roleType] | @tsv'
 ```
 
 Remove all permissions for a decommissioned user across multiple connections:
 
 ```bash
 # First collect connection IDs
-ayx --output json one connections list --all | jq -r '.data[].id' > conn-ids.txt
+ayx --output json one connections list --all | jq -r '.data.items[].id' > conn-ids.txt
 
 # Then revoke per connection where the subject appears
 while read conn_id; do
-  ayx --output json one connections permissions list "$conn_id" \
-    | jq -r '.data[] | select(.subjectId == "<subject-id>") | .subjectId' \
+ayx --output json one connections permissions list "$conn_id" \
+    | jq -r '.data.response.people[]? | select(.subjectId == "<subject-id>") | .subjectId' \
     | grep -q . && \
     ayx one connections permissions delete \
       "$conn_id" \

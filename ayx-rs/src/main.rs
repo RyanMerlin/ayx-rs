@@ -1687,8 +1687,8 @@ pub(crate) enum OneCommand {
         command: OneWriteSettingCommand,
     },
     #[command(
-        about = "Alteryx One schedules — list, enable, and disable",
-        long_about = "Alteryx One schedules — list, enable, and disable. Note: the Scheduling \
+        about = "Alteryx One schedules — create, inspect, and manage",
+        long_about = "Alteryx One schedules — create, inspect, and manage. Note: the Scheduling \
                       API requires an enterprise-tier workspace — returns 404 on some workspace \
                       tiers.",
         arg_required_else_help = true
@@ -1824,6 +1824,18 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(long)]
         max_pages: Option<u32>,
     },
+    /// Create a One workspace from a JSON payload.
+    Create {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
+    /// Delete a One workspace.
+    Delete {
+        #[arg(value_name = "ID")]
+        id: String,
+    },
     /// Inspect the current One workspace posture.
     Current,
     /// Inspect the current One workspace configuration.
@@ -1875,6 +1887,81 @@ pub(crate) enum OneWorkspaceCommand {
     People,
     /// List workspace admins.
     Admins,
+    /// List groups in a One workspace.
+    Groups {
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+    },
+    /// List groups visible to the current One user.
+    GroupsGlobal,
+    /// Create a group in a One workspace from a JSON payload.
+    CreateGroup {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
+    /// Delete a group from a One workspace.
+    DeleteGroup {
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(value_name = "GROUP-ID")]
+        group_id: String,
+    },
+    /// Update a One workspace group from a JSON payload.
+    UpdateGroup {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(value_name = "GROUP-ID")]
+        group_id: String,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
+    /// Set roles for a One workspace group from a JSON payload.
+    SetGroupRoles {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(value_name = "GROUP-ID")]
+        group_id: String,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
+    /// Add users to a One workspace group.
+    AddGroupUsers {
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(value_name = "GROUP-ID")]
+        group_id: String,
+        #[arg(long = "user-id", value_name = "USER-ID", required = true)]
+        user_ids: Vec<String>,
+    },
+    /// Remove users from a One workspace group.
+    RemoveGroupUsers {
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(value_name = "GROUP-ID")]
+        group_id: String,
+        #[arg(long = "user-id", value_name = "USER-ID", required = true)]
+        user_ids: Vec<String>,
+    },
+    /// Get the invitation link for a person in a One workspace.
+    InvitationLink {
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(long, value_name = "PERSON-ID")]
+        person_id: String,
+    },
+    /// Get workspace cloud configuration records.
+    CloudConfigs {
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+    },
     /// Select which authenticated workspace is active for this profile.
     Switch {
         #[arg(long)]
@@ -1886,6 +1973,33 @@ pub(crate) enum OneWorkspaceCommand {
     InviteUsers {
         #[arg(long)]
         workspace_id: Option<String>,
+    },
+    /// Invite a single user to a One workspace from a JSON payload.
+    Invite {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
+    /// Invite a list of users to a One workspace from a JSON payload.
+    InviteList {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
+    /// Reinvite workspace users from a JSON payload.
+    ReinviteUsers {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
     },
     /// Remove a user from a One workspace.
     RemoveUser {
@@ -1904,6 +2018,13 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(long)]
         workspace_id: Option<String>,
     },
+    /// Suspend one workspace user.
+    SuspendUser {
+        #[arg(long)]
+        workspace_id: Option<String>,
+        #[arg(value_name = "PERSON-ID")]
+        person_id: String,
+    },
     /// Start a transfer for a One workspace.
     Transfer {
         #[arg(long)]
@@ -1916,10 +2037,61 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(long, value_name = "FILE", help = "path to JSON body file")]
         body: PathBuf,
     },
+    /// Create workspace cloud configuration from a JSON payload.
+    CreateCloudConfig {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(value_name = "CLOUD-PROVIDER")]
+        cloud_provider: String,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
+    /// Update workspace cloud configuration from a JSON payload.
+    UpdateCloudConfig {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(value_name = "CLOUD-PROVIDER")]
+        cloud_provider: String,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
+    /// Patch a workspace user from a JSON payload.
+    PatchUser {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(value_name = "PERSON-ID")]
+        person_id: String,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
+    /// Replace a workspace user from a JSON payload.
+    UpdateUser {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "WORKSPACE-ID")]
+        workspace_id: String,
+        #[arg(value_name = "PERSON-ID")]
+        person_id: String,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
 }
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneRoleCommand {
+    /// List managed IAM roles.
+    List,
+    /// Inspect a managed IAM role.
+    Detail {
+        #[arg(value_name = "ID")]
+        id: String,
+    },
     /// Inspect role assignments for One managed IAM.
     ListAssignments {
         #[arg(value_name = "ID")]
@@ -3174,12 +3346,28 @@ pub(crate) enum OneSchedulingCommand {
         #[arg(long)]
         max_pages: Option<u32>,
     },
+    /// Create a One schedule from a JSON payload.
+    Create {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
     /// Inspect a One schedule by id.
     Detail {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
+    },
+    /// Update a One schedule from a JSON payload.
+    Update {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
     },
     /// Enable a One schedule.
     Enable {
@@ -3190,6 +3378,13 @@ pub(crate) enum OneSchedulingCommand {
     },
     /// Disable a One schedule.
     Disable {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
+    },
+    /// Delete a One schedule.
+    Delete {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "ID")]

@@ -7,7 +7,8 @@
 //!   per id and groups grantees by subject. Server falls back to a plan
 //!   envelope around `dcm_connections_list_envelope`.
 //! * **Workflows** — One has no per-flow ACL endpoint, so we surface the
-//!   workspace people roster via `/v4/workspaces/{id}/people`. Server
+//!   workspace people roster via `/v4/people`; the workspace is conveyed by
+//!   the `x-alteryx-workspace-gid` header. Server
 //!   uses `v3/collections` (Gallery workflow-membership lives in the
 //!   collection ACLs).
 //! * **Collections** — Server-only.
@@ -208,8 +209,8 @@ fn workflows_one(
         config,
         "platform",
         "workspace-people-list",
-        "/v4/workspaces/{id}/people",
-        &[("id", &workspace)],
+        "/v4/people",
+        &[],
         &params,
     )?;
     if !env.ok {
@@ -276,13 +277,13 @@ fn summary_one(
         .unwrap_or(0);
 
     let people_count = match resolve_workspace_id(config, workspace_id) {
-        Ok(workspace) => {
+        Ok(_workspace) => {
             let env = one_api_list_request(
                 config,
                 "platform",
                 "workspace-people-list",
-                "/v4/workspaces/{id}/people",
-                &[("id", &workspace)],
+                "/v4/people",
+                &[],
                 &params,
             )?;
             // A failed lookup is unknown, not zero. `None` renders as "member

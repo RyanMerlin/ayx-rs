@@ -1,6 +1,7 @@
 use anyhow::Result;
 use ayx_core::envelope::Envelope;
-use ayx_one_api::one_api_live_request;
+use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
+use serde_json::json;
 
 use crate::{
     OneRoleCommand,
@@ -14,6 +15,30 @@ pub(crate) fn execute(
     command: OneRoleCommand,
 ) -> Result<Envelope> {
     Ok(match command {
+        OneRoleCommand::List => {
+            let config = runtime.load_profile_lenient(None)?;
+            one_api_live_request(
+                &config,
+                "role",
+                "role-list",
+                "GET",
+                "/v4/authorization/roles",
+                false,
+                &[],
+            )?
+        }
+        OneRoleCommand::Detail { id } => {
+            let config = runtime.load_profile_lenient(None)?;
+            one_api_live_request(
+                &config,
+                "role",
+                "role-detail",
+                "GET",
+                "/v4/authorization/roles/{id}",
+                false,
+                &[("id", &id)],
+            )?
+        }
         OneRoleCommand::ListAssignments { id } => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
@@ -31,14 +56,26 @@ pub(crate) fn execute(
             subject_id,
         } => {
             let config = runtime.load_profile_lenient(None)?;
-            one_api_live_request(
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::access_change_message(
+                        "assign",
+                        &format!("subject id='{subject_id}' to role id='{role_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            let payload = json!({"items": [subject_id]});
+            one_api_live_request_with_body(
                 &config,
                 "role",
                 "role-assign",
-                "POST",
-                "/v4/authorization/roles/{id}/people/{subjectId}",
+                "PUT",
+                "/v4/authorization/roles/{id}/people",
                 true,
-                &[("id", &role_id), ("subjectId", &subject_id)],
+                &[("id", &role_id)],
+                Some(payload),
             )?
         }
         OneRoleCommand::Unassign {

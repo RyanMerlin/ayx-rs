@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use ayx_core::envelope::{Envelope, ErrorCode};
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::{
     ConnectionSharePolicy, OneConnectionPermissionCommand, OneConnectionsCommand,
@@ -26,17 +26,52 @@ pub(crate) fn build_connection_share_body(
     if person_ids.is_empty() && group_ids.is_empty() {
         bail!("no share recipients: pass at least one --to-person or --to-group");
     }
+    let mut subjects = serde_json::Map::new();
+    if !person_ids.is_empty() {
+        subjects.insert("person".to_string(), json!(person_ids));
+    }
+    if !group_ids.is_empty() {
+        subjects.insert("group".to_string(), json!(group_ids));
+    }
     Ok(json!({
         "connectionId": connection_id,
         "policy": policy.as_api_str(),
-        // Both arrays are always present. The API's `subjects` is an anyOf over
-        // {person} / {group} / {person,group}; sending both (possibly empty)
-        // satisfies every branch and keeps the emitted body shape stable.
-        "subjects": {
-            "person": person_ids,
-            "group": group_ids,
-        },
+        "subjects": subjects,
     }))
+}
+
+/// Bind a raw permission body to the positional connection id.
+///
+/// The share endpoint takes the resource id from the JSON body rather than
+/// the URL. Refusing a conflicting body value prevents an operator from
+/// confirming one connection while actually sharing another. A missing id is
+/// filled from the positional argument so raw bodies remain convenient.
+pub(crate) fn validate_connection_share_body(
+    connection_id: &str,
+    mut payload: Value,
+) -> Result<Value> {
+    let object = payload
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("connection share body must be a JSON object"))?;
+    if let Some(existing) = object.get("connectionId") {
+        let matches = match existing {
+            Value::String(value) => value == connection_id,
+            Value::Number(value) => value.to_string() == connection_id,
+            _ => false,
+        };
+        if !matches {
+            bail!(
+                "connection share body connectionId does not match positional connection id '{}', refusing to send",
+                connection_id
+            );
+        }
+    } else {
+        object.insert(
+            "connectionId".to_string(),
+            Value::String(connection_id.to_string()),
+        );
+    }
+    Ok(payload)
 }
 
 /// Query string for `DELETE /v4/connections/share`.
@@ -474,7 +509,7 @@ pub(crate) fn execute(
             } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
                 let payload = match body {
-                    Some(path) => load_payload(&path)?,
+                    Some(path) => validate_connection_share_body(&id, load_payload(&path)?)?,
                     None => {
                         let Some(policy) = policy else {
                             bail!(
@@ -599,12 +634,15 @@ pub(crate) fn execute(
 
 #[cfg(test)]
 mod share_tests {
-    use super::{build_connection_share_body, build_connection_unshare_query, find_shared_subject};
+    use super::{
+        build_connection_share_body, build_connection_unshare_query, find_shared_subject,
+        validate_connection_share_body,
+    };
     use crate::{ConnectionSharePolicy, ShareSubjectType};
     use serde_json::json;
 
     #[test]
-    fn share_body_moves_the_id_into_the_body_and_keeps_both_subject_arrays() {
+    fn share_body_moves_the_id_into_the_body_and_omits_empty_subject_buckets() {
         let body = build_connection_share_body(
             "44865",
             ConnectionSharePolicy::Editor,
@@ -616,8 +654,21 @@ mod share_tests {
         assert_eq!(body["connectionId"], "44865");
         assert_eq!(body["policy"], "EDITOR");
         assert_eq!(body["subjects"]["person"], json!(["113168"]));
-        // Present but empty, so the emitted shape is stable across invocations.
-        assert_eq!(body["subjects"]["group"], json!([]));
+        assert!(body["subjects"].get("group").is_none());
+    }
+
+    #[test]
+    fn share_body_includes_both_non_empty_subject_buckets() {
+        let body = build_connection_share_body(
+            "44865",
+            ConnectionSharePolicy::Viewer,
+            &["113168".to_string()],
+            &["900".to_string()],
+        )
+        .expect("valid share");
+
+        assert_eq!(body["subjects"]["person"], json!(["113168"]));
+        assert_eq!(body["subjects"]["group"], json!(["900"]));
     }
 
     #[test]
@@ -639,6 +690,26 @@ mod share_tests {
         let msg = err.to_string();
         assert!(msg.contains("--to-person"), "actionable message: {msg}");
         assert!(msg.contains("--to-group"), "actionable message: {msg}");
+    }
+
+    #[test]
+    fn raw_share_body_injects_missing_connection_id() {
+        let body = validate_connection_share_body(
+            "44865",
+            json!({"policy": "VIEWER", "subjects": {"person": ["4477"]}}),
+        )
+        .expect("missing id should be bound");
+        assert_eq!(body["connectionId"], "44865");
+    }
+
+    #[test]
+    fn raw_share_body_rejects_conflicting_connection_id() {
+        let err = validate_connection_share_body(
+            "44865",
+            json!({"connectionId": "99999", "policy": "VIEWER"}),
+        )
+        .expect_err("conflicting id must be rejected");
+        assert!(err.to_string().contains("does not match"));
     }
 
     #[test]

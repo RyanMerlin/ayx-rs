@@ -96,8 +96,8 @@ const HTTP_METHODS: &[&str] = &[
 
 /// Canonicalize an operation to `(UPPER_METHOD, canonical_path)`.
 ///
-/// Drops query/fragment and trailing slash, and replaces every `{param}`
-/// segment with `{}`. Returns `None` unless the path is rooted at `/v4` — the
+/// Drops query/fragment and trailing slash, and replaces every `{param}` or
+/// `:param` segment with `{}`. Returns `None` unless the path is rooted at `/v4` — the
 /// only namespace the One gateway spec describes.
 ///
 /// The `/v4` must be the path's *first* segment. An earlier version searched
@@ -120,7 +120,9 @@ pub fn canonical_op(method: &str, full_path: &str) -> Option<(String, String)> {
     let canon = from_v4
         .split('/')
         .map(|seg| {
-            if seg.starts_with('{') && seg.ends_with('}') && seg.len() >= 2 {
+            if (seg.starts_with('{') && seg.ends_with('}') && seg.len() >= 2)
+                || (seg.starts_with(':') && seg.len() >= 2)
+            {
                 "{}"
             } else {
                 seg
@@ -308,6 +310,10 @@ mod tests {
             canonical_op("get", "/v4/flows/{flowId}"),
             Some(("GET".into(), "/v4/flows/{}".into()))
         );
+        assert_eq!(
+            canonical_op("delete", "/v4/apiAccessTokens/:tokenId"),
+            Some(("DELETE".into(), "/v4/apiAccessTokens/{}".into()))
+        );
     }
 
     #[test]
@@ -316,6 +322,30 @@ mod tests {
         let spec = spec_with(json!({ "/v4/flows/{flowId}": { "get": { "summary": "Get flow" } } }));
         let r = coverage(&spec);
         assert!(r.missing.iter().all(|m| m.path != "/v4/flows/{flowId}"));
+    }
+
+    #[test]
+    fn colon_param_style_matches_braced_inventory_paths() {
+        // The live spec has emitted colon-style path parameters for these two
+        // operations, while inventory.rs uses the usual OpenAPI brace form.
+        // They describe the same route and must not appear as one missing plus
+        // one stale operation each.
+        let spec = spec_with(json!({
+            "/v4/apiAccessTokens/:tokenId": {
+                "get": {},
+                "delete": {}
+            }
+        }));
+        let r = coverage(&spec);
+
+        assert!(!r.missing.iter().any(|m| {
+            m.path == "/v4/apiAccessTokens/:tokenId"
+                && matches!(m.method.as_str(), "GET" | "DELETE")
+        }));
+        assert!(!r.stale.iter().any(|s| {
+            s.path == "/v4/apiAccessTokens/{tokenId}"
+                && matches!(s.method.as_str(), "GET" | "DELETE")
+        }));
     }
 
     #[test]

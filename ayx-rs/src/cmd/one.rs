@@ -115,7 +115,9 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
         OneCommand::Plans { command } => {
             super::one_plans::execute(&runtime, cli.apply, cli.yes, command)?
         }
-        OneCommand::Scheduling { command } => super::one_scheduling::execute(&runtime, command)?,
+        OneCommand::Scheduling { command } => {
+            super::one_scheduling::execute(&runtime, cli.apply, cli.yes, command)?
+        }
         #[cfg(feature = "ui")]
         OneCommand::Ui { command } => super::one_ui::execute(&runtime, command)?,
     })

@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-The `ayx one plans schedules` command returns the schedules configured for a plan. It is a read-only command — schedule creation and modification are handled through the Alteryx One platform.
+The `ayx one plans schedules` command returns the schedules configured for a plan. Schedule lifecycle operations are available through `ayx one scheduling`.
 
 ## Quick reference
 
@@ -47,16 +47,16 @@ The response follows the standard envelope:
 
 ```bash
 ayx --output json one plans schedules <plan-id> \
-  | jq '[.data[] | select(.enabled == true)] | length'
+  | jq '[.data.items[] | select(.enabled == true)] | length'
 ```
 
 ### List all plans with their next run times
 
 ```bash
-ayx --output json one plans list --all | jq -r '.data[].id' \
+ayx --output json one plans list --all | jq -r '.data.items[].id' \
   | while IFS= read -r id; do
       ayx --output json one plans schedules "$id" \
-        | jq -r --arg id "$id" '.data[] | [$id, .nextRun] | @tsv'
+        | jq -r --arg id "$id" '.data.items[] | [$id, .nextFireDate] | @tsv'
     done
 ```
 

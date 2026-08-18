@@ -1,0 +1,24 @@
+{
+  "name": "ayx-rs-codex-schedule-canary-updated",
+  "tasks": [
+    {
+      "runWorkflow": {
+        "workflowId": "01M00M9CRWSANK79MBCA0V9VXX"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "timeBased": {
+        "daily": {
+          "hourOfDay": 0,
+          "minuteOfHour": 0,
+          "onlyWorkingDays": false,
+          "utcStartDateTime": "2030-01-01T00:00:00Z",
+          "utcEndDateTime": "2030-01-02T00:00:00Z"
+        },
+        "timezone": "UTC"
+      }
+    }
+  ]
+}

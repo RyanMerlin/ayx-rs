@@ -49,9 +49,29 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
         commands: &["one workspace admins"],
     },
     EndpointSpec {
+        method: "GET",
+        path: "/v4/workspaces/{id}/groups",
+        commands: &["one workspace groups"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/groups",
+        commands: &["one workspace groups-global"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/workspaces/{id}/invitationLink",
+        commands: &["one workspace invitation-link"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/workspaces/{workspaceId}/cloudConfigs",
+        commands: &["one workspace cloud-configs"],
+    },
+    EndpointSpec {
         method: "POST",
         path: "/v4/workspaces/{id}/people/batch",
-        commands: &["one workspace invite-users"],
+        commands: &["one workspace invite-users", "one workspace invite-list"],
     },
     EndpointSpec {
         method: "DELETE",
@@ -69,7 +89,7 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
         commands: &["one workspace unsuspend-users"],
     },
     EndpointSpec {
-        method: "POST",
+        method: "PATCH",
         path: "/v4/workspaces/{id}/transfer",
         commands: &["one workspace transfer"],
     },
@@ -79,8 +99,18 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
         commands: &["one role list-assignments"],
     },
     EndpointSpec {
-        method: "POST",
-        path: "/v4/authorization/roles/{id}/people/{subjectId}",
+        method: "GET",
+        path: "/v4/authorization/roles",
+        commands: &["one role list"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/v4/authorization/roles/{id}",
+        commands: &["one role detail"],
+    },
+    EndpointSpec {
+        method: "PUT",
+        path: "/v4/authorization/roles/{id}/people",
         commands: &["one role assign"],
     },
     EndpointSpec {
@@ -145,6 +175,11 @@ const PLANS_ENDPOINTS: &[EndpointSpec] = &[
 
 const SCHEDULING_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
+        method: "POST",
+        path: "/v4/schedules",
+        commands: &["one scheduling create"],
+    },
+    EndpointSpec {
         method: "GET",
         path: "/v4/schedules",
         commands: &["one scheduling list"],
@@ -155,6 +190,11 @@ const SCHEDULING_ENDPOINTS: &[EndpointSpec] = &[
         commands: &["one scheduling detail"],
     },
     EndpointSpec {
+        method: "PUT",
+        path: "/v4/schedules/{id}",
+        commands: &["one scheduling update"],
+    },
+    EndpointSpec {
         method: "POST",
         path: "/v4/schedules/{id}/enable",
         commands: &["one scheduling enable"],
@@ -163,6 +203,11 @@ const SCHEDULING_ENDPOINTS: &[EndpointSpec] = &[
         method: "POST",
         path: "/v4/schedules/{id}/disable",
         commands: &["one scheduling disable"],
+    },
+    EndpointSpec {
+        method: "DELETE",
+        path: "/v4/schedules/{id}",
+        commands: &["one scheduling delete"],
     },
     EndpointSpec {
         method: "GET",
@@ -884,6 +929,46 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
                 commands: &["one workspace list"],
             },
             EndpointSpec {
+                method: "POST",
+                path: "/v4/workspaces",
+                commands: &["one workspace create"],
+            },
+            EndpointSpec {
+                method: "DELETE",
+                path: "/v4/workspaces/{id}",
+                commands: &["one workspace delete"],
+            },
+            EndpointSpec {
+                method: "POST",
+                path: "/v4/workspaces/{id}/groups",
+                commands: &["one workspace create-group"],
+            },
+            EndpointSpec {
+                method: "DELETE",
+                path: "/v4/workspaces/{id}/groups/{groupId}",
+                commands: &["one workspace delete-group"],
+            },
+            EndpointSpec {
+                method: "PUT",
+                path: "/v4/workspaces/{id}/groups/{groupId}",
+                commands: &["one workspace update-group"],
+            },
+            EndpointSpec {
+                method: "PUT",
+                path: "/v4/workspaces/{id}/groups/{groupId}/roles",
+                commands: &["one workspace set-group-roles"],
+            },
+            EndpointSpec {
+                method: "POST",
+                path: "/v4/workspaces/{id}/groups/{groupId}/users",
+                commands: &["one workspace add-group-users"],
+            },
+            EndpointSpec {
+                method: "DELETE",
+                path: "/v4/workspaces/{id}/groups/{groupId}/users",
+                commands: &["one workspace remove-group-users"],
+            },
+            EndpointSpec {
                 method: "GET",
                 path: "/v4/workspaces/{id}/configuration",
                 commands: &[
@@ -931,9 +1016,44 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
                 path: "/v4/workspaces/{id}/delete-configuration",
                 commands: &["one workspace delete-configuration"],
             },
+            EndpointSpec {
+                method: "POST",
+                path: "/v4/workspaces/{id}/people",
+                commands: &["one workspace invite"],
+            },
+            EndpointSpec {
+                method: "PATCH",
+                path: "/v4/workspaces/{id}/people/batch",
+                commands: &["one workspace reinvite-users"],
+            },
+            EndpointSpec {
+                method: "PUT",
+                path: "/v4/workspaces/{id}/people/{personId}/suspended",
+                commands: &["one workspace suspend-user"],
+            },
+            EndpointSpec {
+                method: "POST",
+                path: "/v4/workspaces/{workspaceId}/cloudConfigs/{cloudProvider}",
+                commands: &["one workspace create-cloud-config"],
+            },
+            EndpointSpec {
+                method: "PATCH",
+                path: "/v4/workspaces/{workspaceId}/cloudConfigs/{cloudProvider}",
+                commands: &["one workspace update-cloud-config"],
+            },
+            EndpointSpec {
+                method: "PATCH",
+                path: "/v4/workspaces/{workspaceId}/people/{id}",
+                commands: &["one workspace patch-user"],
+            },
+            EndpointSpec {
+                method: "PUT",
+                path: "/v4/workspaces/{workspaceId}/people/{id}",
+                commands: &["one workspace update-user"],
+            },
         ],
         notes: &[
-            "Workspace listing, configuration, transfer, and v4 configuration-by-id endpoints are wired; other workspace families remain documented-only.",
+            "Workspace listing, configuration, transfer, group, invitation, cloud-config, role, and workspace-user endpoints are wired; remaining workspace families stay documented-only.",
         ],
     },
 ];

@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-`ayx one workspace` manages Alteryx One workspaces — listing them, reading and writing configuration, controlling membership, and transferring ownership. Mutating commands are dry-run by default; add `--apply` to commit.
+`ayx one workspace` manages Alteryx One workspaces — listing them, reading and writing configuration, controlling membership, and transferring ownership. Mutating commands are dry-run by default; add `--apply` to commit. Applied mutations prompt for confirmation; add `--yes` for non-interactive scripts.
 
 ## Workspaces are token-bound
 
@@ -22,8 +22,8 @@ The Alteryx One PAT you authenticated with determines your active workspace. The
 | `workspace configuration <id>` | Read configuration for a specific workspace |
 | `workspace configuration-v4 <id>` | Read v4 configuration for a specific workspace |
 | `workspace configuration-schema <id>` | Read the configuration schema for a specific workspace |
-| `workspace save-current-configuration --body <json>` | Write configuration to the current workspace |
-| `workspace save-configuration-v4 <id> --body <json>` | Write v4 configuration to a specific workspace |
+| `workspace save-current-configuration --body <file>` | Write configuration to the current workspace |
+| `workspace save-configuration-v4 <id> --body <file>` | Write v4 configuration to a specific workspace |
 | `workspace delete-current-configuration` | Delete configuration on the current workspace |
 | `workspace delete-configuration <id>` | Delete configuration on a specific workspace |
 | `workspace people` | List members of the active workspace |
@@ -34,7 +34,7 @@ The Alteryx One PAT you authenticated with determines your active workspace. The
 | `workspace suspend-users` | Suspend users in the active workspace |
 | `workspace unsuspend-users` | Unsuspend users in the active workspace |
 | `workspace transfer` | Transfer active workspace ownership |
-| `workspace transfer-assets --body <json>` | Transfer assets between workspaces |
+| `workspace transfer-assets --body <file>` | Transfer assets between workspaces |
 
 ## Listing workspaces
 
@@ -85,16 +85,16 @@ ayx one workspace configuration-v4 <id>
 These commands are mutating. Without `--apply` they return a dry-run envelope showing the request that would be sent.
 
 ```bash
-# Dry-run: preview the request
-ayx one workspace save-current-configuration --body '{"key":"value"}'
+# Dry-run: preview the request from a JSON file
+ayx one workspace save-current-configuration --body config.json
 
 # Commit: write to the current workspace
-ayx one workspace save-current-configuration --body '{"key":"value"}' --apply
+ayx one workspace save-current-configuration --body config.json --apply
 
 # Write to a specific workspace (v4 endpoint)
 ayx one workspace save-configuration-v4 \
   <id> \
-  --body '{"key":"value"}' \
+  --body config.json \
   --apply
 ```
 
@@ -168,14 +168,14 @@ ayx one workspace transfer
 ayx one workspace transfer --apply --yes
 
 # Transfer assets between workspaces
-ayx one workspace transfer-assets --body '<json>' --apply
+ayx one workspace transfer-assets --body transfer.json --apply --yes
 ```
 
-`transfer-assets` requires a JSON `--body` describing the transfer. Use `--profile <name>` to target a specific environment.
+`transfer-assets` requires a JSON file passed with `--body` describing the transfer. Use `--profile <name>` to target a specific environment.
 
 ### Workspace mismatch errors
 
-`invite-users`, `remove-user`, `suspend-users`, `unsuspend-users`, and `transfer` operate on the active workspace determined by the token, but accept an optional `--workspace-id` for confirmation. Passing a `--workspace-id` that does not match the active workspace will be rejected. Omit the flag and use `workspace switch` to change the active workspace instead. `transfer-assets` does not take a `--workspace-id` at all — it always operates on the current workspace.
+Path-scoped workspace commands resolve `/v4/workspaces/current` before dispatch. If `--workspace-id` is supplied, it must match the current numeric workspace ID; the current workspace GID must also match the profile context. This applies to group, invitation, suspension, transfer, cloud-config, and workspace-user commands. Omit the flag where supported and use `workspace switch` to change the active workspace instead. `transfer-assets` does not take a `--workspace-id` at all — it always operates on the current workspace.
 
 ## Switching workspaces
 
@@ -193,7 +193,7 @@ If you haven't authenticated for that workspace yet, the command errors and dire
 ```bash
 # Audit: list all workspaces as JSON and extract IDs
 ayx --output json one workspace list --all \
-  | jq -r '.data[].id'
+  | jq -r '.data.items[].id'
 
 # Bulk suspend users in the active workspace (CI/script)
 ayx one workspace suspend-users \

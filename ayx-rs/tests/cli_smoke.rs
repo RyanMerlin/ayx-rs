@@ -871,6 +871,26 @@ fn one_api_group_help_lists_spec_and_coverage() {
 }
 
 #[test]
+fn one_scheduling_lifecycle_help_lists_mutations() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "scheduling", "--help"])
+        .output()
+        .expect("ayx binary should run");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for command in [
+        "create", "list", "detail", "update", "enable", "disable", "delete", "count",
+    ] {
+        assert!(
+            stdout
+                .lines()
+                .any(|line| line.trim_start().starts_with(command)),
+            "missing scheduling command '{command}' in help:\n{stdout}"
+        );
+    }
+}
+
+#[test]
 fn coverage_from_spec_file_reports_missing() {
     let fixture = concat!(
         env!("CARGO_MANIFEST_DIR"),
