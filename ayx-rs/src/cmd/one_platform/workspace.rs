@@ -334,7 +334,7 @@ pub(crate) fn execute(
                 "workspace",
                 "workspace-suspend-users",
                 "POST",
-                "/iam/v1/workspaces/{id}/people/suspend",
+                "/v4/workspaces/{id}/people/suspend",
                 true,
                 &[("id", &ws_id)],
             )?
@@ -357,7 +357,7 @@ pub(crate) fn execute(
                 "workspace",
                 "workspace-unsuspend-users",
                 "POST",
-                "/iam/v1/workspaces/{id}/people/unsuspend",
+                "/v4/workspaces/{id}/people/unsuspend",
                 true,
                 &[("id", &ws_id)],
             )?

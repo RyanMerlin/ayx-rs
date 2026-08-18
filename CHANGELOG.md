@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- **`WorkspaceCredential` gains `sp_client_secret` / `sp_client_secret_ref`, so a profile holding several One workspaces can carry a distinct service-principal secret per workspace instead of sharing one profile-level value.** Resolution order: workspace-level dedicated field → profile-level dedicated field → shared `client_secret`. The fallback to the shared field is deliberate, not incidental — profiles written before this change carry only `client_secret`, and without the fallback they would stop authenticating on upgrade. As with the existing `*_ref` fields, `sp_client_secret_ref` may hold an inline secret when no scheme prefix is present, so callers must not print it blind.
+
+### Fixed
+
+- **Seventeen `one` endpoints pointed at base paths that exist in no API spec and returned live `404 RouteNotFoundException`.** They had been recorded as "tier-gated" — a tenant-entitlement gap the CLI correctly tolerated. That reading was wrong: the paths were simply incorrect. `GET /v4/open-api-spec` (172 live paths) documents the real routes, and they are what the Alteryx One web UI actually calls (confirmed against browser HAR capture). `/plans/v1/plans*` → `/v4/plans*` (10 rows), `/scheduling/v1/schedules*` → `/v4/schedules*` (5 rows), and the `/iam/v1/workspaces/{id}/people/{,un}suspend` pair → their `/v4/workspaces/...` equivalents (2 rows). One target had no direct equivalent: `GET /plans/v1/plans/{id}` (`one plans detail`) is merged onto the already-wired `GET /v4/plans/{id}/full` (`one plans full`), since the spec defines `/v4/plans/{id}` with `DELETE`/`PATCH` only. The "tier-gated surface" reading that had been recorded for these paths — and for `/billing/v1` alongside them — was a misdiagnosis, not tenant entitlement.
+
 ## 0.15.0 — 2026-08-13
 
 ### Added

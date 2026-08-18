@@ -60,12 +60,12 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
     },
     EndpointSpec {
         method: "POST",
-        path: "/iam/v1/workspaces/{id}/people/suspend",
+        path: "/v4/workspaces/{id}/people/suspend",
         commands: &["one workspace suspend-users"],
     },
     EndpointSpec {
         method: "POST",
-        path: "/iam/v1/workspaces/{id}/people/unsuspend",
+        path: "/v4/workspaces/{id}/people/unsuspend",
         commands: &["one workspace unsuspend-users"],
     },
     EndpointSpec {
@@ -93,52 +93,52 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
 const PLANS_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
-        path: "/plans/v1/plans",
+        path: "/v4/plans",
         commands: &["one plans list"],
     },
     EndpointSpec {
         method: "GET",
-        path: "/plans/v1/plans/{id}",
-        commands: &["one plans detail"],
+        path: "/v4/plans/{id}/full",
+        commands: &["one plans detail", "one plans full"],
     },
     EndpointSpec {
         method: "POST",
-        path: "/plans/v1/plans/{id}/run",
+        path: "/v4/plans/{id}/run",
         commands: &["one plans run"],
     },
     EndpointSpec {
         method: "GET",
-        path: "/plans/v1/plans/count",
+        path: "/v4/plans/count",
         commands: &["one plans count"],
     },
     EndpointSpec {
         method: "GET",
-        path: "/plans/v1/plans/{id}/runParameters",
+        path: "/v4/plans/{id}/runParameters",
         commands: &["one plans run-parameters"],
     },
     EndpointSpec {
         method: "GET",
-        path: "/plans/v1/plans/{id}/schedules",
+        path: "/v4/plans/{id}/schedules",
         commands: &["one plans schedules"],
     },
     EndpointSpec {
         method: "GET",
-        path: "/plans/v1/plans/{id}/package",
+        path: "/v4/plans/{id}/package",
         commands: &["one plans export"],
     },
     EndpointSpec {
         method: "POST",
-        path: "/plans/v1/plans/package",
+        path: "/v4/plans/package",
         commands: &["one plans import"],
     },
     EndpointSpec {
         method: "GET",
-        path: "/plans/v1/plans/{id}/permissions",
+        path: "/v4/plans/{id}/permissions",
         commands: &["one plans permissions"],
     },
     EndpointSpec {
         method: "DELETE",
-        path: "/plans/v1/plans/{id}/permissions/{subjectId}",
+        path: "/v4/plans/{id}/permissions/{subjectId}",
         commands: &["one plans permissions"],
     },
 ];
@@ -146,27 +146,27 @@ const PLANS_ENDPOINTS: &[EndpointSpec] = &[
 const SCHEDULING_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
-        path: "/scheduling/v1/schedules",
+        path: "/v4/schedules",
         commands: &["one scheduling list"],
     },
     EndpointSpec {
         method: "GET",
-        path: "/scheduling/v1/schedules/{id}",
+        path: "/v4/schedules/{id}",
         commands: &["one scheduling detail"],
     },
     EndpointSpec {
         method: "POST",
-        path: "/scheduling/v1/schedules/{id}/enable",
+        path: "/v4/schedules/{id}/enable",
         commands: &["one scheduling enable"],
     },
     EndpointSpec {
         method: "POST",
-        path: "/scheduling/v1/schedules/{id}/disable",
+        path: "/v4/schedules/{id}/disable",
         commands: &["one scheduling disable"],
     },
     EndpointSpec {
         method: "GET",
-        path: "/scheduling/v1/schedules/count",
+        path: "/v4/schedules/count",
         commands: &["one scheduling count"],
     },
 ];
@@ -194,11 +194,6 @@ const PLAN_ENDPOINTS: &[EndpointSpec] = &[
         method: "POST",
         path: "/v4/plans/{id}/permissions",
         commands: &["one plans share"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/plans/{id}/full",
-        commands: &["one plans full"],
     },
     EndpointSpec {
         method: "PATCH",
@@ -981,8 +976,8 @@ const SURFACES: &[SurfaceSpec] = &[
         endpoints: PLAN_ENDPOINTS,
         notes: &[
             "Only the /v4 plan endpoints the CLI actually dispatches are listed. Read paths \
-             (list/count/run/permissions/package/runParameters/schedules) go through the \
-             /plans/v1 service instead — see the `plans` surface.",
+             (list/count/run/permissions/package/runParameters/schedules) now use the \
+             spec-documented /v4 plan paths instead — see the `plans` surface.",
         ],
     },
     SurfaceSpec {
@@ -1170,6 +1165,8 @@ mod tests {
                 oauth_client_id: Some("client-123".to_string()),
                 client_secret: None,
                 client_secret_ref: None,
+                sp_client_secret: None,
+                sp_client_secret_ref: None,
                 token_endpoint_url: Some("https://example.invalid/token".to_string()),
                 access_token: Some("token".to_string()),
                 access_token_ref: None,

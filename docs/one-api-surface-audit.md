@@ -70,20 +70,21 @@ Connection create is broken in practice because the required body schema is undi
 
 ## Phase 4 — Dead Routes (Tier-Gated Surfaces)
 
-All of these return `RouteNotFoundException` on the test workspace. Validate against an enterprise workspace before deciding whether these are bugs in ayx-rs endpoint templates or genuinely tier-gated features.
+The billing rows still return `RouteNotFoundException` on the test workspace. The plans and scheduling rows were repointed to `/v4` in this change; re-probe those live before treating any remaining failure as a tier gate.
 
 - [ ] **Billing surface — `/billing/v1/`**  
   - `billing current-account` → 404: `/billing/v1/my/billing-accounts/current`  
   - `billing usage-export` → 404: `/billing/v1/usage/export`  
   Action: confirm if these endpoints exist on enterprise tier. If tier-gated, emit a clean error: "Billing API is not available on this workspace tier." If the URL pattern is wrong, fix the endpoint template.
 
-- [ ] **Plans surface — `/plans/v1/`**  
-  - `plans list/count/create/detail/run/...` → all 404: `/plans/v1/plans`  
-  Action: same as billing — verify endpoint pattern against enterprise or check API docs. The Plans surface is fully implemented in `ayx-rs` but dead against this workspace.
+- [x] **Plans surface — `/v4/plans`**  
+  - `plans list/count/run/permissions/package/runParameters/schedules` → repointed from `/plans/v1/*` to `/v4/plans`  
+  - `plans detail` and `plans full` now share `GET /v4/plans/{id}/full`
+  Action: re-probe live after the repoint; the earlier 404s were wrong-path bugs, not entitlement evidence.
 
-- [ ] **Scheduling surface — `/scheduling/v1/`**  
-  - `scheduling list/count/detail/enable/disable` → all 404: `/scheduling/v1/schedules`  
-  Action: same. The scheduling API may live under a different path or version for this tier.
+- [x] **Scheduling surface — `/v4/schedules`**  
+  - `scheduling list/detail/enable/disable/count` → repointed from `/scheduling/v1/*` to `/v4/schedules`
+  Action: re-probe live after the repoint; the earlier 404s were wrong-path bugs, not entitlement evidence.
 
 ---
 
