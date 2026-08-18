@@ -1980,7 +1980,7 @@ fn service_principal_credentials(
     let one = config.alteryx_one.as_ref()?;
     // Use the SP-specific client_id, NOT the user oauth_client_id.
     let client_id = one.resolved_sp_client_id()?.to_string();
-    let client_secret = one.resolved_client_secret()?.to_string();
+    let client_secret = one.resolved_sp_client_secret()?.to_string();
     // SP has its own regional token endpoint (pingauth-us1-4), separate from
     // the user flow endpoint.
     let token_endpoint_url = one.effective_sp_token_endpoint_url()?;
@@ -2385,6 +2385,8 @@ mongo:
             oauth_client_id: Some("client-id".to_string()),
             client_secret: Some("client-secret".to_string()),
             client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
             token_endpoint_url: Some(format!("{}/as", base_url)),
             access_token: Some("bearer-token".to_string()),
             access_token_ref: None,
@@ -2497,6 +2499,8 @@ mongo:
             oauth_client_id: Some("client-id".to_string()),
             client_secret: None,
             client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
             token_endpoint_url: Some(format!("{}/as", server.base_url())),
             access_token: None,
             access_token_ref: None,
@@ -2569,6 +2573,8 @@ mongo:
                 oauth_client_id: Some("workspace-client".to_string()),
                 client_secret: None,
                 client_secret_ref: None,
+                sp_client_secret: None,
+                sp_client_secret_ref: None,
                 token_endpoint_url: Some(format!("{}/workspace-token", server.base_url())),
                 sp_client_id: None,
                 workspace_gid: None,
@@ -2581,6 +2587,8 @@ mongo:
             oauth_client_id: Some("legacy-client".to_string()),
             client_secret: None,
             client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
             token_endpoint_url: Some(format!("{}/as", server.base_url())),
             access_token: Some("legacy-stale".to_string()),
             access_token_ref: None,
@@ -3061,6 +3069,8 @@ mongo:
             oauth_client_id: None,
             client_secret: Some("sp-secret".to_string()),
             client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
             token_endpoint_url: None,
             access_token: None,
             access_token_ref: None,

@@ -440,6 +440,10 @@ pub struct WorkspaceCredential {
     #[serde(default)]
     pub client_secret_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sp_client_secret: Option<String>,
+    #[serde(default)]
+    pub sp_client_secret_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_endpoint_url: Option<String>,
     /// Service-principal client ID — distinct from the user `oauth_client_id`.
     /// When set, this credential uses `client_credentials` grant with
@@ -467,6 +471,10 @@ pub struct AlteryxOneProfile {
     pub client_secret: Option<String>,
     #[serde(default)]
     pub client_secret_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sp_client_secret: Option<String>,
+    #[serde(default)]
+    pub sp_client_secret_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_endpoint_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -518,6 +526,8 @@ impl Default for AlteryxOneProfile {
             oauth_client_id: None,
             client_secret: None,
             client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
             token_endpoint_url: None,
             access_token: None,
             access_token_ref: None,
@@ -622,6 +632,18 @@ impl AlteryxOneProfile {
                     .as_deref()
                     .filter(|value| !value.trim().is_empty())
             })
+    }
+
+    pub fn resolved_sp_client_secret(&self) -> Option<&str> {
+        self.active_workspace_credential()
+            .and_then(|credential| credential.sp_client_secret.as_deref())
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                self.sp_client_secret
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .or_else(|| self.resolved_client_secret())
     }
 
     /// Service-principal client ID — workspace-first, then account-level.
@@ -1064,6 +1086,11 @@ impl Config {
             {
                 one.client_secret = resolve_secret_ref(reference)?;
             }
+            if one.sp_client_secret.is_none()
+                && let Some(reference) = one.sp_client_secret_ref.as_deref()
+            {
+                one.sp_client_secret = resolve_secret_ref(reference)?;
+            }
             for credential in one.workspace_credentials.values_mut() {
                 if credential.access_token.is_none()
                     && let Some(reference) = credential.access_token_ref.as_deref()
@@ -1084,6 +1111,11 @@ impl Config {
                     && let Some(reference) = credential.client_secret_ref.as_deref()
                 {
                     credential.client_secret = resolve_secret_ref(reference)?;
+                }
+                if credential.sp_client_secret.is_none()
+                    && let Some(reference) = credential.sp_client_secret_ref.as_deref()
+                {
+                    credential.sp_client_secret = resolve_secret_ref(reference)?;
                 }
             }
             one.canonicalize();
@@ -1560,7 +1592,8 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
     let refresh_token = env_value(env_values, "AYX_ONE_API_REFRESH_TOKEN");
     let client_secret = env_value(env_values, "AYX_ONE_CLIENT_SECRET");
     // SP creds: canonical names first, then the workspace-namespaced variants
-    // already present in the user's .env (AYX_ONE_ALTERYX_FDE_*).
+    // already present in the user's .env (AYX_ONE_ALTERYX_FDE_*). The SP
+    // client secret now has its own dedicated field.
     let sp_client_id = env_value(env_values, "AYX_ONE_SP_CLIENT_ID")
         .or_else(|| env_value(env_values, "AYX_ONE_ALTERYX_FDE_SP007_CLIENT_ID"));
     let sp_client_secret = env_value(env_values, "AYX_ONE_SP_CLIENT_SECRET")
@@ -1587,6 +1620,8 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
             oauth_client_id: None,
             client_secret: None,
             client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
             token_endpoint_url: None,
             access_token: None,
             access_token_ref: None,
@@ -1629,6 +1664,13 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
             one.client_secret = client_secret;
         }
         if one
+            .sp_client_secret
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            one.sp_client_secret = sp_client_secret;
+        }
+        if one
             .token_endpoint_url
             .as_ref()
             .is_none_or(|value| value.trim().is_empty())
@@ -1666,16 +1708,6 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
             .is_none_or(|value| value.trim().is_empty())
         {
             one.sp_client_id = sp_client_id;
-        }
-        // SP client secret reuses the shared client_secret field when no
-        // dedicated sp_client_secret is available.
-        if let Some(secret) = sp_client_secret
-            && one
-                .client_secret
-                .as_ref()
-                .is_none_or(|value| value.trim().is_empty())
-        {
-            one.client_secret = Some(secret);
         }
         if one
             .sp_token_endpoint_url
@@ -1759,6 +1791,18 @@ fn merge_one_profiles(
     }
     if current.client_secret_ref.is_none() {
         current.client_secret_ref = fallback.client_secret_ref.clone();
+    }
+    // Keep the SP client configuration coherent: inheriting the client_id
+    // without its matching secret produces a confusing auth failure.
+    if current
+        .sp_client_secret
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        current.sp_client_secret = fallback.sp_client_secret.clone();
+    }
+    if current.sp_client_secret_ref.is_none() {
+        current.sp_client_secret_ref = fallback.sp_client_secret_ref.clone();
     }
     if current
         .token_endpoint_url
@@ -2629,6 +2673,8 @@ mod tests {
                 oauth_client_id: None,
                 client_secret: None,
                 client_secret_ref: None,
+                sp_client_secret: None,
+                sp_client_secret_ref: None,
                 token_endpoint_url: None,
                 access_token: None,
                 access_token_ref: None,
@@ -2907,6 +2953,8 @@ mod tests {
             oauth_client_id: None,
             client_secret: None,
             client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
             token_endpoint_url: Some("https://pingauth.alteryxcloud.com/as".to_string()),
             access_token: None,
             access_token_ref: None,
@@ -2940,6 +2988,8 @@ mod tests {
             oauth_client_id: None,
             client_secret: None,
             client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
             token_endpoint_url: Some("https://pingauth.alteryxcloud.com/as".to_string()),
             access_token: None,
             access_token_ref: None,
@@ -2977,6 +3027,8 @@ mod tests {
                 oauth_client_id: Some("workspace-client".to_string()),
                 client_secret: None,
                 client_secret_ref: None,
+                sp_client_secret: None,
+                sp_client_secret_ref: None,
                 token_endpoint_url: Some("https://pingauth.alteryxcloud.com/as".to_string()),
                 sp_client_id: None,
                 workspace_gid: None,
@@ -2990,6 +3042,8 @@ mod tests {
             oauth_client_id: Some("legacy-client".to_string()),
             client_secret: None,
             client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
             token_endpoint_url: Some("https://legacy.example/as".to_string()),
             access_token: Some("legacy-access".to_string()),
             access_token_ref: None,
@@ -3032,6 +3086,8 @@ mod tests {
                 oauth_client_id: Some("single-client".to_string()),
                 client_secret: None,
                 client_secret_ref: None,
+                sp_client_secret: None,
+                sp_client_secret_ref: None,
                 token_endpoint_url: Some("https://tenant.example/as".to_string()),
                 sp_client_id: None,
                 workspace_gid: None,
@@ -3045,6 +3101,8 @@ mod tests {
             oauth_client_id: Some("legacy-client".to_string()),
             client_secret: None,
             client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
             token_endpoint_url: None,
             access_token: Some("legacy-access".to_string()),
             access_token_ref: None,
@@ -3087,6 +3145,8 @@ mod tests {
                 oauth_client_id: None,
                 client_secret: None,
                 client_secret_ref: None,
+                sp_client_secret: None,
+                sp_client_secret_ref: None,
                 token_endpoint_url: None,
                 sp_client_id: None,
                 workspace_gid: None,
@@ -3100,6 +3160,8 @@ mod tests {
             oauth_client_id: None,
             client_secret: None,
             client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
             token_endpoint_url: None,
             access_token: None,
             access_token_ref: None,
@@ -3118,6 +3180,59 @@ mod tests {
         assert_eq!(
             profile.resolved_workspace_password(),
             Some("workspace-password")
+        );
+    }
+
+    #[test]
+    fn resolved_sp_client_secret_prefers_workspace_credential_over_profile_level() {
+        let mut workspace_credentials = BTreeMap::new();
+        workspace_credentials.insert(
+            "ws-1".to_string(),
+            WorkspaceCredential {
+                access_token: None,
+                access_token_ref: None,
+                refresh_token: None,
+                refresh_token_ref: None,
+                workspace_password: None,
+                workspace_password_ref: None,
+                oauth_client_id: None,
+                client_secret: Some("user-client-secret".to_string()),
+                client_secret_ref: None,
+                sp_client_secret: Some("workspace-sp-secret".to_string()),
+                sp_client_secret_ref: None,
+                token_endpoint_url: None,
+                sp_client_id: None,
+                workspace_gid: None,
+                api_base_url: None,
+            },
+        );
+
+        let profile = AlteryxOneProfile {
+            account_email: "user@example.com".to_string(),
+            base_url: Some("https://us1.alteryxcloud.com".to_string()),
+            oauth_client_id: None,
+            client_secret: Some("legacy-client-secret".to_string()),
+            client_secret_ref: None,
+            sp_client_secret: Some("profile-sp-secret".to_string()),
+            sp_client_secret_ref: None,
+            token_endpoint_url: None,
+            access_token: None,
+            access_token_ref: None,
+            refresh_token: None,
+            refresh_token_ref: None,
+            workspace_password: None,
+            workspace_password_ref: None,
+            workspace_credentials,
+            expected_workspace_id: Some("ws-1".to_string()),
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
+        };
+
+        assert_eq!(
+            profile.resolved_sp_client_secret(),
+            Some("workspace-sp-secret")
         );
     }
 
@@ -3155,6 +3270,65 @@ mod tests {
     }
 
     #[test]
+    fn resolved_sp_client_secret_falls_back_to_shared_client_secret_for_compatibility() {
+        let profile = AlteryxOneProfile {
+            account_email: "user@example.com".to_string(),
+            base_url: Some("https://us1.alteryxcloud.com".to_string()),
+            oauth_client_id: None,
+            client_secret: Some("legacy-client-secret".to_string()),
+            client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
+            token_endpoint_url: None,
+            access_token: None,
+            access_token_ref: None,
+            refresh_token: None,
+            refresh_token_ref: None,
+            workspace_password: None,
+            workspace_password_ref: None,
+            workspace_credentials: Default::default(),
+            expected_workspace_id: None,
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
+        };
+
+        assert_eq!(
+            profile.resolved_sp_client_secret(),
+            Some("legacy-client-secret")
+        );
+    }
+
+    #[test]
+    fn resolved_sp_client_secret_prefers_dedicated_field_over_shared_client_secret() {
+        let profile = AlteryxOneProfile {
+            account_email: "user@example.com".to_string(),
+            base_url: Some("https://us1.alteryxcloud.com".to_string()),
+            oauth_client_id: None,
+            client_secret: Some("legacy-client-secret".to_string()),
+            client_secret_ref: None,
+            sp_client_secret: Some("sp-test-secret".to_string()),
+            sp_client_secret_ref: None,
+            token_endpoint_url: None,
+            access_token: None,
+            access_token_ref: None,
+            refresh_token: None,
+            refresh_token_ref: None,
+            workspace_password: None,
+            workspace_password_ref: None,
+            workspace_credentials: Default::default(),
+            expected_workspace_id: None,
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
+        };
+
+        assert_eq!(profile.resolved_sp_client_secret(), Some("sp-test-secret"));
+    }
+
+    #[test]
     fn workspace_password_ref_round_trips_in_workspace_credential_yaml() {
         let mut profile = base_config("roundtrip", "RoundTripDb");
         profile.alteryx_one.as_mut().unwrap().workspace_credentials = BTreeMap::from([(
@@ -3169,6 +3343,8 @@ mod tests {
                 oauth_client_id: None,
                 client_secret: None,
                 client_secret_ref: None,
+                sp_client_secret: None,
+                sp_client_secret_ref: None,
                 token_endpoint_url: None,
                 sp_client_id: None,
                 workspace_gid: None,
@@ -3187,6 +3363,48 @@ mod tests {
                 .get("ws-1")
                 .and_then(|credential| credential.workspace_password_ref.as_deref()),
             Some("keyring:test/workspace.password")
+        );
+    }
+
+    #[test]
+    fn workspace_sp_client_secret_ref_round_trips_through_yaml() {
+        let mut profile = base_config("roundtrip", "RoundtripDb");
+        let one = profile.alteryx_one.as_mut().unwrap();
+        one.workspace_credentials.insert(
+            "ws-rt".to_string(),
+            WorkspaceCredential {
+                access_token: None,
+                access_token_ref: None,
+                refresh_token: None,
+                refresh_token_ref: None,
+                workspace_password: None,
+                workspace_password_ref: None,
+                oauth_client_id: None,
+                client_secret: None,
+                client_secret_ref: None,
+                sp_client_secret: None,
+                sp_client_secret_ref: Some(
+                    "keyring:roundtrip/alteryx_one.workspace_credentials.ws-rt.sp_client_secret"
+                        .to_string(),
+                ),
+                token_endpoint_url: None,
+                sp_client_id: None,
+                workspace_gid: None,
+                api_base_url: None,
+            },
+        );
+
+        let yaml = serde_yaml::to_string(&profile).unwrap();
+        let round_tripped: Config = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(
+            round_tripped
+                .alteryx_one
+                .as_ref()
+                .unwrap()
+                .workspace_credentials
+                .get("ws-rt")
+                .and_then(|credential| credential.sp_client_secret_ref.as_deref()),
+            Some("keyring:roundtrip/alteryx_one.workspace_credentials.ws-rt.sp_client_secret")
         );
     }
 
