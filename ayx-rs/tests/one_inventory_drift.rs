@@ -108,14 +108,28 @@ const DYNAMIC_ENDPOINTS: &[(&str, &str, &str)] = &[
 ///
 /// Found when discovery below widened from a `one*.rs` filename convention to
 /// scanning every file by content: `telemetry permissions workflows` and
-/// `telemetry permissions summary` dispatch `GET
-/// /iam/v1/workspaces/{id}/people`, which no `one` command uses, so it was
-/// never in the inventory at all. Listed here — not silently added to the
-/// `one`-only inventory (would break its own contract) and not silently
-/// dropped from this gate either.
+/// `telemetry permissions summary` dispatch `GET /v4/workspaces/{id}/people`,
+/// which no `one` command uses, so it was never in the inventory at all.
+/// Listed here — not silently added to the `one`-only inventory (would break
+/// its own contract) and not silently dropped from this gate either.
+///
+/// This is the third time this exact bug class has bitten this repo: `one
+/// connections permissions` once shipped wired to a dead
+/// `/v4/connections/{id}/permissions` (the reason this file's discovery was
+/// widened from filename- to content-based scanning in the first place), and
+/// this endpoint itself was originally carved out pointing at a dead
+/// `/iam/v1/workspaces/{id}/people` — a live 404 `RouteNotFoundException`,
+/// found while auditing the same class of misdiagnosis that produced the
+/// `/plans/v1`/`/scheduling/v1` repoint. It was invisible to that audit
+/// specifically *because* being carved out here means being outside
+/// `inventory_endpoints_full()`, which is what every path-correctness gate in
+/// this repo (the endpoint matrix, `one api coverage`) is built from. The path
+/// below is now corrected to the real, spec-documented `/v4` route; the
+/// carve-out itself stays, because the endpoint is still legitimately
+/// non-`one`-surface.
 const NON_ONE_SURFACE_ENDPOINTS: &[(&str, &str)] = &[
     // `telemetry permissions workflows` / `telemetry permissions summary`.
-    ("GET", "/iam/v1/workspaces/{id}/people"),
+    ("GET", "/v4/workspaces/{id}/people"),
     // `ayx tui`'s legacy One browser (`tui/one_browser.rs`) fetches a workspace
     // by id. No `ayx one` command does: the `one workspace` tree exposes
     // `list`, `current`, and configuration leaves, but no `detail <id>`. Found

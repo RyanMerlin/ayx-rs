@@ -2538,19 +2538,6 @@ live_page_boundary_case!(
     ok = ["\"surface\": \"scheduling\"", "\"operation\": \"list\""]
 );
 
-live_case!(
-    one_billing_current_account_live,
-    args = ["--output", "json", "one", "billing", "current-account"],
-    ok = [
-        "\"surface\": \"billing\"",
-        "\"operation\": \"current-account\""
-    ],
-    fail = [
-        "\"error_code\": \"permission_denied\"",
-        "\"error_code\": \"not_found\""
-    ]
-);
-
 #[test]
 fn one_plans_detail_not_found_live() {
     if !live_smoke_enabled() {
@@ -2671,13 +2658,21 @@ fn one_connections_dry_run_shape_live() {
 /// `docs/one-endpoint-matrix.md`, so the matrix's live evidence has an automated
 /// tripwire instead of going stale silently between hand re-verification passes.
 ///
-/// Tolerant by design: a tenant without a Plans/Scheduling/Billing entitlement (like
-/// the one this doc's live sweep was built against, 2026-07-27) legitimately 404s on
-/// those services — see the doc's Methodology section — and a differently-scoped PAT
-/// can legitimately 403 on others (e.g. `person count` in that same session). This
-/// case only fails loud on a genuinely *unexpected* shape: neither success, nor one
-/// of the error codes this doc's live sweep already saw for these rows, nor an
-/// auth-unavailable signal. `plan` (no safe read-only row — every endpoint needs a
+/// Tolerant by design, but the `not_found` allowance here is a known-stale
+/// leftover, not a settled diagnosis: the 2026-07-27 sweep this doc was built
+/// against read `/plans/v1` and `/scheduling/v1` 404s as a Plans/Scheduling
+/// tenant-entitlement gap. That reading was wrong — those paths simply didn't
+/// exist; the spec-documented `/v4/plans` and `/v4/schedules` replacements do,
+/// and `billing` (which had no `/v4` replacement at all) was removed rather
+/// than kept as a permanently-failing command. The `plans` and `scheduling`
+/// rows below still need a fresh live re-probe against their repointed `/v4`
+/// paths; until that happens `not_found` stays in `known_tenant_gaps` for
+/// them, and it should tighten to success-or-`permission_denied` once they're
+/// re-verified. A differently-scoped PAT can legitimately 403 on others (e.g.
+/// `person count` in that same session). This case only fails loud on a
+/// genuinely *unexpected* shape: neither success, nor one of the error codes
+/// this doc's live sweep already saw for these rows, nor an auth-unavailable
+/// signal. `plan` (no safe read-only row — every endpoint needs a
 /// live plan id or mutates) and `webhookFlowTask` (no `list`; `detail`/`delete`/`test`
 /// all need an id this suite has no way to resolve without creating one) are excluded
 /// for the same reason they're `unverified` in the doc itself.
@@ -2745,11 +2740,6 @@ fn one_endpoint_matrix_spot_check_live() {
             "scheduling",
             &["--output", "json", "one", "scheduling", "count"],
             "\"surface\": \"scheduling\"",
-        ),
-        (
-            "billing",
-            &["--output", "json", "one", "billing", "current-account"],
-            "\"surface\": \"billing\"",
         ),
         (
             "apiAccessTokens",

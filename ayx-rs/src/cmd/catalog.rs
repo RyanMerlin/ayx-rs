@@ -786,7 +786,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         safety: "read-only",
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
-        notes: &["Surfaces workspace, plan, schedule, and billing discovery data."],
+        notes: &["Surfaces workspace, plan, and schedule discovery data."],
     },
     CatalogMetadata {
         path: "one/doctor/identity",
@@ -811,14 +811,6 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &["Wraps schedule list and count checks."],
-    },
-    CatalogMetadata {
-        path: "one/doctor/billing",
-        output: "one billing doctor envelope",
-        safety: "read-only",
-        mutating: false,
-        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
-        notes: &["Wraps billing account and usage export checks."],
     },
     CatalogMetadata {
         path: "one/api/status",
@@ -1708,22 +1700,6 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/schedules/count in the One API docs."],
-    },
-    CatalogMetadata {
-        path: "one/billing/current-account",
-        output: "one billing current-account envelope",
-        safety: "read-only",
-        mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /billing/v1/my/billing-accounts/current in managed-billing-v1.yaml."],
-    },
-    CatalogMetadata {
-        path: "one/billing/usage-export",
-        output: "one billing usage-export envelope",
-        safety: "read-only",
-        mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
-        notes: &["Maps to GET /billing/v1/usage/export in managed-billing-v1.yaml."],
     },
     CatalogMetadata {
         path: "one/workflows",

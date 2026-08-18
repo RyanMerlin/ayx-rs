@@ -7,7 +7,7 @@
 //!   per id and groups grantees by subject. Server falls back to a plan
 //!   envelope around `dcm_connections_list_envelope`.
 //! * **Workflows** — One has no per-flow ACL endpoint, so we surface the
-//!   workspace people roster via `/iam/v1/workspaces/{id}/people`. Server
+//!   workspace people roster via `/v4/workspaces/{id}/people`. Server
 //!   uses `v3/collections` (Gallery workflow-membership lives in the
 //!   collection ACLs).
 //! * **Collections** — Server-only.
@@ -208,7 +208,7 @@ fn workflows_one(
         config,
         "platform",
         "workspace-people-list",
-        "/iam/v1/workspaces/{id}/people",
+        "/v4/workspaces/{id}/people",
         &[("id", &workspace)],
         &params,
     )?;
@@ -281,7 +281,7 @@ fn summary_one(
                 config,
                 "platform",
                 "workspace-people-list",
-                "/iam/v1/workspaces/{id}/people",
+                "/v4/workspaces/{id}/people",
                 &[("id", &workspace)],
                 &params,
             )?;

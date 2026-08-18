@@ -2,7 +2,7 @@
 //!
 //! The largest single dispatch arm in the original main.rs — ~2000 LOC
 //! covering platform / workspace / role / person / token / api / auth /
-//! plans / scheduling / billing / flows / connections / connector
+//! plans / scheduling / flows / connections / connector
 //! metadata / job groups / output objects / webhook flow tasks / write
 //! settings / doctor.
 //!
@@ -116,7 +116,6 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             super::one_plans::execute(&runtime, cli.apply, cli.yes, command)?
         }
         OneCommand::Scheduling { command } => super::one_scheduling::execute(&runtime, command)?,
-        OneCommand::Billing { command } => super::one_billing::execute(&runtime, command)?,
         #[cfg(feature = "ui")]
         OneCommand::Ui { command } => super::one_ui::execute(&runtime, command)?,
     })

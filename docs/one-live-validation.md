@@ -41,7 +41,6 @@ Test the currently wired One families in the CLI and API layers:
 - webhook-flow-task
 - write-setting
 - scheduling
-- billing
 - doctor / inventory / status helpers
 
 ## Validation Criteria
@@ -193,7 +192,6 @@ ayx --output json one token
 ayx --output json one doctor discover
 ayx --output json one doctor plans
 ayx --output json one doctor scheduling
-ayx --output json one doctor billing
 ayx --output json one plans list
 ayx --output json one plans count
 ayx --output json one flows list
@@ -210,7 +208,6 @@ ayx --output json one job-groups detail <job_group_id>
 ayx --output json one output-objects list
 ayx --output json one write-settings list
 ayx --output json one scheduling list
-ayx --output json one billing current-account
 ayx --output json one api open-api-spec
 ayx --output json one api coverage
 ```
@@ -222,7 +219,7 @@ explicitly:
 ayx --output json one <cmd> | jq -c '{ok, code: (.data.page_envelopes[0].status_code // .data.status_code), n: (.data.items | length?)}'
 ```
 
-For `plans`/`scheduling`/`billing`, cross-check against `one doctor <surface>` rather than
+For `plans`/`scheduling`, cross-check against `one doctor <surface>` rather than
 trusting the `list` leaf alone. Also re-check whether the tenant still has zero
 flows/folders/wrangled-or-imported-datasets/output-objects/write-settings/API-access-tokens; this
 determines how many Phase 1 skips were legitimate.
