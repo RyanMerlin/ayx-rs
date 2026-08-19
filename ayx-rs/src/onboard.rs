@@ -455,7 +455,6 @@ fn secret_scope(scope: &str, field: &str) -> String {
 /// The `AYX_ALLOW_INLINE_SECRETS=1` env var also enables fallback for
 /// automation/headless scenarios.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // Forbid is reserved for non-interactive enterprise mode (future flag).
 pub(crate) enum InlineSecretPolicy {
     Forbid,
     Allow,
@@ -507,9 +506,17 @@ fn store(
     policy: InlineSecretPolicy,
     out: &mut SecretizeOutput,
 ) -> Result<String> {
-    let allow = matches!(policy, InlineSecretPolicy::Allow);
-    let (reference, was_inline) = store_secret_with_fallback(account, value, allow)
-        .map_err(|err| anyhow::anyhow!("{field}: {err}"))?;
+    let result = match policy {
+        InlineSecretPolicy::Forbid => {
+            // Do not call `store_secret_with_fallback` here: its global
+            // AYX_ALLOW_INLINE_SECRETS escape hatch is intentionally ignored
+            // for explicitly protected writes such as workspace passwords.
+            ayx_core::secrets::store_keyring_secret(account, value)
+                .map(|reference| (reference, false))
+        }
+        InlineSecretPolicy::Allow => store_secret_with_fallback(account, value, true),
+    };
+    let (reference, was_inline) = result.map_err(|err| anyhow::anyhow!("{field}: {err}"))?;
     if was_inline {
         out.inline_fields.push(field.to_string());
     }
@@ -586,6 +593,21 @@ pub(crate) fn secretize_config(
             out.refs
                 .insert("alteryx_one.refresh_token".to_string(), reference);
         }
+        if let Some(value) = one.workspace_password.take() {
+            let existing_ref = one.workspace_password_ref.clone();
+            let account = secret_scope(scope, "alteryx_one.workspace_password");
+            let reference = persist_secret_field(
+                existing_ref.as_deref(),
+                &account,
+                &value,
+                "alteryx_one.workspace_password",
+                policy,
+                &mut out,
+            )?;
+            one.workspace_password_ref = Some(reference.clone());
+            out.refs
+                .insert("alteryx_one.workspace_password".to_string(), reference);
+        }
         if let Some(value) = one.client_secret.take() {
             let existing_ref = one.client_secret_ref.clone();
             let account = secret_scope(scope, "alteryx_one.client_secret");
@@ -632,6 +654,23 @@ pub(crate) fn secretize_config(
                     &mut out,
                 )?;
                 credential.refresh_token_ref = Some(reference.clone());
+                out.refs.insert(field, reference);
+            }
+            if let Some(value) = credential.workspace_password.take() {
+                let existing_ref = credential.workspace_password_ref.clone();
+                let field = format!(
+                    "alteryx_one.workspace_credentials['{workspace_id}'].workspace_password"
+                );
+                let account = secret_scope(scope, &field);
+                let reference = persist_secret_field(
+                    existing_ref.as_deref(),
+                    &account,
+                    &value,
+                    &field,
+                    policy,
+                    &mut out,
+                )?;
+                credential.workspace_password_ref = Some(reference.clone());
                 out.refs.insert(field, reference);
             }
             if let Some(value) = credential.client_secret.take() {
@@ -1909,6 +1948,116 @@ alteryx_one:
         assert!(
             on_disk.contains("inline:fresh-ws-token") || on_disk.contains("keyring:"),
             "workspace token must be stored behind a secret ref:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn workspace_password_is_secretized_not_plaintext() {
+        // Workspace passwords must use the same OS-keyring indirection as
+        // tokens, never a bare YAML value (red-team High).
+        let _home = isolated_config_home();
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("workspace-password.yaml");
+        std::fs::write(
+            &path,
+            r#"profile_name: wspasswordtest
+alteryx_one:
+  account_email: test@example.com
+  base_url: https://us1.alteryxcloud.com
+  workspace_password: workspace-password-secret
+"#,
+        )
+        .unwrap();
+
+        let config = Config::load_from_path_with_environment(&path, None).unwrap();
+        write_config_with_policy(&path, &config, InlineSecretPolicy::Forbid).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+
+        assert!(
+            !on_disk.contains("workspace-password-secret"),
+            "workspace password must not be written as plaintext YAML:\n{on_disk}"
+        );
+        assert!(
+            on_disk.contains("workspace_password_ref: keyring:"),
+            "workspace password must be stored in the keyring behind a ref:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn forbid_never_uses_inline_override_for_workspace_password() {
+        // `--save-workspace-password` must remain fail-closed even when the
+        // general automation escape hatch is enabled (red-team Critical).
+        let _home = isolated_config_home();
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("workspace-password-forbid.yaml");
+        std::fs::write(
+            &path,
+            r#"profile_name: wspasswordforbid
+alteryx_one:
+  account_email: test@example.com
+  base_url: https://us1.alteryxcloud.com
+"#,
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("AYX_FORCE_INLINE_SECRETS", "1");
+            std::env::set_var("AYX_ALLOW_INLINE_SECRETS", "1");
+        }
+        let mut config = Config::load_from_path_with_environment(&path, None).unwrap();
+        config.alteryx_one.as_mut().unwrap().workspace_password =
+            Some("workspace-password-secret".to_string());
+        let result = write_config_with_policy(&path, &config, InlineSecretPolicy::Forbid);
+        unsafe {
+            std::env::remove_var("AYX_FORCE_INLINE_SECRETS");
+            std::env::remove_var("AYX_ALLOW_INLINE_SECRETS");
+        }
+
+        let err = result.expect_err("Forbid must fail when the keyring is unavailable");
+        assert!(
+            !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("workspace-password-secret"),
+            "password must not be written to YAML when Forbid fails"
+        );
+        assert!(err.to_string().contains("workspace_password"));
+    }
+
+    #[test]
+    fn workspace_password_is_saved_under_workspace_credential() {
+        let _home = isolated_config_home();
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("workspace-password-scoped.yaml");
+        std::fs::write(
+            &path,
+            r#"profile_name: wspasswordscoped
+alteryx_one:
+  account_email: test@example.com
+  base_url: https://us1.alteryxcloud.com
+  workspace_credentials:
+    '42':
+      access_token: workspace-access-token
+      workspace_password: workspace-password-secret
+"#,
+        )
+        .unwrap();
+
+        let config = Config::load_from_path_with_environment(&path, None).unwrap();
+        write_config_with_policy(&path, &config, InlineSecretPolicy::Forbid).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(!on_disk.contains("workspace-password-secret"));
+        assert!(on_disk.contains("workspace_password_ref: keyring:"));
+        assert!(!on_disk.contains(
+            "workspace_password_ref: keyring:wspasswordscoped/alteryx_one.workspace_password"
+        ));
+        let reloaded = Config::load_from_path_with_environment(&path, None).unwrap();
+        assert_eq!(
+            reloaded
+                .alteryx_one
+                .as_ref()
+                .and_then(|one| one.workspace_credentials.get("42"))
+                .and_then(|credential| credential.workspace_password.as_deref()),
+            Some("workspace-password-secret")
         );
     }
 

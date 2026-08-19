@@ -230,6 +230,18 @@ fn one_help_renders() {
 }
 
 #[test]
+fn one_login_help_mentions_workspace_password_storage() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "login", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--save-workspace-password"));
+}
+
+#[test]
 fn one_doctor_help_renders() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(["one", "doctor", "--help"])

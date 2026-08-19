@@ -311,7 +311,44 @@ pub fn email_otp_login<F>(
 where
     F: Fn() -> Result<String> + Send + 'static,
 {
-    email_otp_login_pure_http(base_url, email, workspace_gid, workspace_password, &get_otp)
+    let (result, _) = email_otp_login_pure_http(
+        base_url,
+        email,
+        workspace_gid,
+        workspace_password,
+        &get_otp,
+        false,
+    )?;
+    Ok(result)
+}
+
+/// Authenticate via email OTP and return a 30-day PAT plus the password that
+/// completed the workspace login.
+///
+/// The password-bearing variant is intentionally separate from
+/// [`email_otp_login`]. Callers must opt in at the API boundary before the
+/// plaintext password is returned to them for secure persistence.
+pub fn email_otp_login_with_password<F>(
+    base_url: &str,
+    email: &str,
+    workspace_gid: &str,
+    workspace_password: Option<String>,
+    get_otp: F,
+) -> Result<(OtpAuthResult, String)>
+where
+    F: Fn() -> Result<String> + Send + 'static,
+{
+    let (result, password) = email_otp_login_pure_http(
+        base_url,
+        email,
+        workspace_gid,
+        workspace_password,
+        &get_otp,
+        true,
+    )?;
+    let password = password
+        .ok_or_else(|| anyhow::anyhow!("password capture was not returned by the OTP flow"))?;
+    Ok((result, password))
 }
 
 /// Pure-HTTP email-OTP login — replicates the browser flow with reqwest only.
@@ -335,7 +372,8 @@ fn email_otp_login_pure_http<F>(
     workspace_gid: &str,
     workspace_password: Option<String>,
     get_otp: &F,
-) -> Result<OtpAuthResult>
+    capture_workspace_password: bool,
+) -> Result<(OtpAuthResult, Option<String>)>
 where
     F: Fn() -> Result<String>,
 {
@@ -383,7 +421,8 @@ where
     )?;
 
     // 4. Submit the workspace password, re-prompting on rejection.
-    workspace_login_with_reprompt(&client, base, email, workspace_password)?;
+    let workspace_password =
+        workspace_login_with_reprompt(&client, base, email, workspace_password)?;
 
     // 5. Resume the OIDC interaction; the BFF exchanges the code server-side and
     //    sets the local-auth-workspace cookie.
@@ -434,11 +473,15 @@ where
         .filter(|s| !s.is_empty())
         .map(str::to_string);
 
-    Ok(OtpAuthResult {
-        access_token,
-        workspace_gid: workspace_gid.to_string(),
-        token_expires_at,
-    })
+    let captured_workspace_password = capture_workspace_password.then_some(workspace_password);
+    Ok((
+        OtpAuthResult {
+            access_token,
+            workspace_gid: workspace_gid.to_string(),
+            token_expires_at,
+        },
+        captured_workspace_password,
+    ))
 }
 
 // ── Pure-HTTP flow helpers ──────────────────────────────────────────────────
@@ -538,7 +581,7 @@ fn workspace_login_with_reprompt(
     base: &str,
     email: &str,
     workspace_password: Option<String>,
-) -> Result<()> {
+) -> Result<String> {
     let mut attempt = 0u32;
     loop {
         attempt += 1;
@@ -550,7 +593,7 @@ fn workspace_login_with_reprompt(
             None => prompt_workspace_password()?,
         };
         match submit_workspace_password(client, base, email, &password) {
-            Ok(()) => return Ok(()),
+            Ok(()) => return Ok(password),
             Err(err) if from_fixed_source => {
                 return Err(err.context(
                     "a fixed workspace password was rejected — not retrying, since \

@@ -27,7 +27,7 @@ mod inventory;
 pub mod types;
 
 pub use coverage::{CoverageReport, MissingEndpoint, StaleEndpoint, coverage};
-pub use email_otp::{OtpAuthResult, email_otp_login};
+pub use email_otp::{OtpAuthResult, email_otp_login, email_otp_login_with_password};
 
 thread_local! {
     static ONE_APPLY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };

@@ -31,6 +31,7 @@ pub(crate) fn login(
     token_endpoint_arg: Option<String>,
     workspace_id: Option<String>,
     workspace_gid_arg: Option<String>,
+    save_workspace_password: bool,
 ) -> Result<Envelope> {
     use ayx_core::profile::{normalize_alteryx_one_token_endpoint, profile_storage_path};
     use ayx_one_api::{
@@ -40,19 +41,18 @@ pub(crate) fn login(
     use serde_json::json;
 
     let mut config = runtime.load_profile_lenient(profile.as_deref())?;
-    let one = config
-        .alteryx_one
-        .as_mut()
-        .context("no alteryx_one section in profile — run `ayx onboard` first or add alteryx_one.account_email to your config")?;
+    {
+        let one = config
+            .alteryx_one
+            .as_mut()
+            .context("no alteryx_one section in profile — run `ayx onboard` first or add alteryx_one.account_email to your config")?;
 
-    if let Some(id) = client_id {
-        one.oauth_client_id = Some(id);
-    }
-    if let Some(ep) = token_endpoint_arg {
-        one.token_endpoint_url = Some(normalize_alteryx_one_token_endpoint(&ep));
-    }
-    if let Some(gid) = workspace_gid_arg {
-        one.workspace_gid = Some(gid);
+        if let Some(id) = client_id {
+            one.oauth_client_id = Some(id);
+        }
+        if let Some(ep) = token_endpoint_arg {
+            one.token_endpoint_url = Some(normalize_alteryx_one_token_endpoint(&ep));
+        }
     }
 
     let http = reqwest::blocking::Client::new();
@@ -73,6 +73,62 @@ pub(crate) fn login(
         .as_ref()
         .and_then(|o| o.resolved_oauth_client_id())
         .map(str::to_string);
+
+    if save_workspace_password
+        && (browser || device || refresh_token_arg.is_some() || access_token_arg.is_some())
+    {
+        bail!("--save-workspace-password applies only to the default email-OTP login flow");
+    }
+
+    let one = config.alteryx_one.as_mut().unwrap();
+    if save_workspace_password
+        && let (Some(ws_id), Some(requested_gid)) =
+            (workspace_id.as_deref(), workspace_gid_arg.as_deref())
+        && let Some(existing_gid) = one
+            .workspace_credentials
+            .get(ws_id)
+            .and_then(|credential| credential.workspace_gid.as_deref())
+        && existing_gid != requested_gid
+    {
+        bail!(
+            "--workspace-gid '{}' does not match the selected workspace credential '{}' (which is bound to '{}')",
+            requested_gid,
+            ws_id,
+            existing_gid
+        );
+    }
+
+    // A workspace-scoped login must keep its numeric workspace credential and
+    // workspace GID together. Without this, `--workspace-id B` could still
+    // resolve the active profile GID for workspace A.
+    if let Some(gid) = workspace_gid_arg.as_deref() {
+        if let Some(ws_id) = workspace_id.as_deref() {
+            one.workspace_credentials
+                .entry(ws_id.to_string())
+                .or_default()
+                .workspace_gid = Some(gid.to_string());
+        } else {
+            one.workspace_gid = Some(gid.to_string());
+        }
+    }
+
+    let password_workspace_id = if save_workspace_password {
+        workspace_id.clone().or_else(|| {
+            config
+                .alteryx_one
+                .as_ref()
+                .and_then(|one| one.active_workspace_id().map(str::to_string))
+        })
+    } else {
+        None
+    };
+    if save_workspace_password && password_workspace_id.is_none() {
+        bail!(
+            "--save-workspace-password requires a workspace-scoped login — pass --workspace-id or configure an active workspace credential"
+        );
+    }
+
+    let mut workspace_password_to_save = None;
 
     let (final_access_token, final_refresh_token) = if let Some(rt) = refresh_token_arg {
         // --- bypass: exchange a refresh token the caller already has ---
@@ -222,17 +278,26 @@ pub(crate) fn login(
             .as_ref()
             .map(|o| o.account_email.clone())
             .unwrap_or_default();
-        let ws_gid = config
-            .alteryx_one
-            .as_ref()
-            .and_then(|o| o.resolved_workspace_gid())
-            .map(str::to_string)
-            .unwrap_or_default();
+        let ws_gid = if let Some(ws_id) = workspace_id.as_deref() {
+            config
+                .alteryx_one
+                .as_ref()
+                .and_then(|one| one.workspace_credentials.get(ws_id))
+                .and_then(|credential| credential.workspace_gid.as_deref())
+                .map(str::to_string)
+                .unwrap_or_default()
+        } else {
+            config
+                .alteryx_one
+                .as_ref()
+                .and_then(|o| o.resolved_workspace_gid())
+                .map(str::to_string)
+                .unwrap_or_default()
+        };
         let workspace_password = config
             .alteryx_one
             .as_ref()
-            .and_then(|o| o.resolved_workspace_password())
-            .map(str::to_string);
+            .and_then(|one| workspace_password_for_login(one, workspace_id.as_deref()));
 
         if ws_gid.is_empty() {
             anyhow::bail!(
@@ -244,21 +309,51 @@ pub(crate) fn login(
         eprintln!("Sending one-time passcode to {}...", email);
         eprintln!("(Check your inbox for a 6-digit code)");
 
-        let result =
-            ayx_one_api::email_otp_login(&base_url, &email, &ws_gid, workspace_password, || {
-                use std::io::Write as _;
-                eprint!("Enter the 6-digit passcode: ");
-                let _ = std::io::stderr().flush();
-                let mut line = String::new();
-                std::io::stdin()
-                    .read_line(&mut line)
-                    .map_err(|e| anyhow::anyhow!("failed to read OTP: {e}"))?;
-                Ok(line.trim().to_string())
-            })?;
+        let get_otp = || {
+            use std::io::Write as _;
+            eprint!("Enter the 6-digit passcode: ");
+            let _ = std::io::stderr().flush();
+            let mut line = String::new();
+            std::io::stdin()
+                .read_line(&mut line)
+                .map_err(|e| anyhow::anyhow!("failed to read OTP: {e}"))?;
+            Ok(line.trim().to_string())
+        };
+        let (result, captured_workspace_password) = if save_workspace_password {
+            let (result, password) = ayx_one_api::email_otp_login_with_password(
+                &base_url,
+                &email,
+                &ws_gid,
+                workspace_password,
+                get_otp,
+            )?;
+            (result, Some(password))
+        } else {
+            let result = ayx_one_api::email_otp_login(
+                &base_url,
+                &email,
+                &ws_gid,
+                workspace_password,
+                get_otp,
+            )?;
+            (result, None)
+        };
+
+        workspace_password_to_save = captured_workspace_password;
 
         // Sync workspace_gid into the profile in case it was resolved from
         // the active workspace credential rather than the top-level field.
         config.alteryx_one.as_mut().unwrap().workspace_gid = Some(result.workspace_gid.clone());
+        if let Some(ws_id) = password_workspace_id.as_deref() {
+            config
+                .alteryx_one
+                .as_mut()
+                .unwrap()
+                .workspace_credentials
+                .entry(ws_id.to_string())
+                .or_default()
+                .workspace_gid = Some(result.workspace_gid.clone());
+        }
 
         if let Some(ref expires) = result.token_expires_at {
             eprintln!("Token expires: {expires}");
@@ -322,8 +417,20 @@ pub(crate) fn login(
 
     // Store the tokens.
     let one = config.alteryx_one.as_mut().unwrap();
-    if let Some(ws_id) = workspace_id {
-        let cred = one.workspace_credentials.entry(ws_id).or_default();
+    if let Some(password) = workspace_password_to_save {
+        let ws_id = password_workspace_id
+            .as_deref()
+            .expect("workspace-scoped password validation should run before login");
+        one.workspace_credentials
+            .entry(ws_id.to_string())
+            .or_default()
+            .workspace_password = Some(password);
+    }
+    if let Some(ws_id) = workspace_id.as_deref() {
+        let cred = one
+            .workspace_credentials
+            .entry(ws_id.to_string())
+            .or_default();
         cred.access_token = Some(final_access_token.clone());
         if let Some(rt) = final_refresh_token.clone() {
             cred.refresh_token = Some(rt);
@@ -340,12 +447,16 @@ pub(crate) fn login(
     let profile_name = config.profile_name.clone();
 
     let path = profile_storage_path(&profile_name)?;
-    let secretize = crate::onboard::write_config_with_policy(
-        &path,
-        &config,
-        crate::onboard::InlineSecretPolicy::Allow,
-    )
-    .context("failed to save profile")?;
+    let secret_policy = if save_workspace_password {
+        // An explicitly requested workspace-password save must never fall back
+        // to plaintext YAML. Tokens retain the historical inline fallback when
+        // this flag is not used.
+        crate::onboard::InlineSecretPolicy::Forbid
+    } else {
+        crate::onboard::InlineSecretPolicy::Allow
+    };
+    let secretize = crate::onboard::write_config_with_policy(&path, &config, secret_policy)
+        .context("failed to save profile")?;
 
     if let Some(msg) = crate::onboard::inline_secret_warning(&secretize.inline_fields) {
         eprintln!("warning: {msg}");
@@ -379,22 +490,30 @@ pub(crate) fn logout(runtime: &RuntimeCtx<'_>, profile: Option<&str>) -> Result<
     let top_level_cleared = one.access_token.is_some()
         || one.access_token_ref.is_some()
         || one.refresh_token.is_some()
-        || one.refresh_token_ref.is_some();
+        || one.refresh_token_ref.is_some()
+        || one.workspace_password.is_some()
+        || one.workspace_password_ref.is_some();
     one.access_token = None;
     one.access_token_ref = None;
     one.refresh_token = None;
     one.refresh_token_ref = None;
+    one.workspace_password = None;
+    one.workspace_password_ref = None;
 
     let mut workspace_credentials_cleared = 0usize;
     for credential in one.workspace_credentials.values_mut() {
         let had_credential = credential.access_token.is_some()
             || credential.access_token_ref.is_some()
             || credential.refresh_token.is_some()
-            || credential.refresh_token_ref.is_some();
+            || credential.refresh_token_ref.is_some()
+            || credential.workspace_password.is_some()
+            || credential.workspace_password_ref.is_some();
         credential.access_token = None;
         credential.access_token_ref = None;
         credential.refresh_token = None;
         credential.refresh_token_ref = None;
+        credential.workspace_password = None;
+        credential.workspace_password_ref = None;
         if had_credential {
             workspace_credentials_cleared += 1;
         }
@@ -423,7 +542,7 @@ pub(crate) fn logout(runtime: &RuntimeCtx<'_>, profile: Option<&str>) -> Result<
             "workspace_credentials_cleared": workspace_credentials_cleared,
             "remote_revocation": "not attempted",
             "notes": [
-                "Cleared stored Alteryx One access/refresh credentials and credential refs from the profile",
+                "Cleared stored Alteryx One access/refresh credentials, workspace passwords, and credential refs from the profile",
                 "External secret-store entries referenced by the previous profile were not deleted",
             ],
             "inline_secret_fields": secretize.inline_fields,
@@ -440,4 +559,62 @@ fn open_browser(url: &str) {
     let _ = std::process::Command::new("cmd")
         .args(["/c", "start", url])
         .spawn();
+}
+
+/// Resolve the password for the workspace the login will actually target.
+///
+/// An explicit workspace ID is a hard boundary: do not fall back to the
+/// active credential or profile-level legacy password, because those may
+/// belong to a different workspace. With no explicit ID, retain the existing
+/// active-workspace/profile fallback for the default single-workspace flow.
+fn workspace_password_for_login(
+    one: &ayx_core::profile::AlteryxOneProfile,
+    workspace_id: Option<&str>,
+) -> Option<String> {
+    let password = if let Some(workspace_id) = workspace_id {
+        one.workspace_credentials
+            .get(workspace_id)
+            .and_then(|credential| credential.workspace_password.as_deref())
+    } else {
+        one.resolved_workspace_password()
+    }?;
+    (!password.trim().is_empty()).then(|| password.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::workspace_password_for_login;
+    use ayx_core::profile::{AlteryxOneProfile, WorkspaceCredential};
+
+    #[test]
+    fn explicit_workspace_password_does_not_fall_back_to_active_workspace() {
+        let mut one = AlteryxOneProfile {
+            workspace_password: Some("profile-password".to_string()),
+            expected_workspace_id: Some("workspace-a".to_string()),
+            ..AlteryxOneProfile::default()
+        };
+        one.workspace_credentials.insert(
+            "workspace-a".to_string(),
+            WorkspaceCredential {
+                workspace_password: Some("workspace-a-password".to_string()),
+                ..WorkspaceCredential::default()
+            },
+        );
+        one.workspace_credentials
+            .insert("workspace-b".to_string(), WorkspaceCredential::default());
+
+        assert_eq!(
+            workspace_password_for_login(&one, Some("workspace-b")),
+            None,
+            "workspace B must not inherit workspace A or profile-level password"
+        );
+        assert_eq!(
+            workspace_password_for_login(&one, Some("workspace-a")),
+            Some("workspace-a-password".to_string())
+        );
+        assert_eq!(
+            workspace_password_for_login(&one, None),
+            Some("workspace-a-password".to_string())
+        );
+    }
 }

@@ -45,6 +45,16 @@ ayx one login --workspace-id <id> --workspace-gid <gid>
 
 `--client-id` overrides the profile's `oauth_client_id` for the `--browser` / `--device` flows. See [Connecting](/connecting/) for the full sign-in walkthrough.
 
+### Saving the workspace password
+
+The default email-OTP login prompts for the workspace password when it is not already available. It does not save that password unless you explicitly opt in:
+
+```bash
+ayx one login --save-workspace-password
+```
+
+After a successful login, the password is stored under the selected workspace credential's keyring reference. On Windows, this uses Windows Credential Manager; it is not written into the profile YAML or an environment file. The flag applies only to the default email-OTP flow, requires `--workspace-id` or an already active workspace credential, and fails if the OS credential store is unavailable rather than storing the password in plaintext.
+
 ## Signing out
 
 ```bash

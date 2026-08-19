@@ -105,3 +105,86 @@ fn device_login_still_requires_oauth_client_id() {
         "the --device flow must still require oauth_client_id; output:\n{out}"
     );
 }
+
+#[test]
+fn logout_clears_saved_workspace_passwords() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let profiles = home.path().join("profiles");
+    fs::create_dir_all(&profiles).expect("profiles dir");
+    fs::write(
+        profiles.join("logout.yaml"),
+        "profile_name: logout\n\
+         alteryx_one:\n\
+        \x20 account_email: user@example.com\n\
+        \x20 base_url: https://us1.alteryxcloud.com\n\
+        \x20 workspace_password_ref: 'inline:top-secret'\n\
+        \x20 access_token_ref: 'inline:access-token'\n\
+        \x20 workspace_credentials:\n\
+        \x20   '42':\n\
+        \x20     workspace_password_ref: 'inline:workspace-secret'\n\
+        \x20     refresh_token_ref: 'inline:refresh-token'\n",
+    )
+    .expect("write profile");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "logout", "--profile", "logout"])
+        .env("AYX_CONFIG_HOME", home.path())
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .stdin(Stdio::null())
+        .output()
+        .expect("ayx binary should run");
+    assert!(
+        output.status.success(),
+        "logout should succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let on_disk = fs::read_to_string(profiles.join("logout.yaml")).expect("read profile");
+    assert!(
+        !on_disk.contains("workspace-secret")
+            && !on_disk.contains("top-secret")
+            && !on_disk.contains("workspace_password_ref: 'inline:"),
+        "logout must not retain workspace password values or live refs:\n{on_disk}"
+    );
+}
+
+#[test]
+fn saved_password_login_rejects_workspace_gid_mismatch() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let profiles = home.path().join("profiles");
+    fs::create_dir_all(&profiles).expect("profiles dir");
+    fs::write(
+        profiles.join("gate.yaml"),
+        "profile_name: gate\n\
+         alteryx_one:\n\
+        \x20 account_email: user@example.com\n\
+        \x20 base_url: https://us1.alteryxcloud.com\n\
+        \x20 workspace_credentials:\n\
+        \x20   ws-a:\n\
+        \x20     workspace_gid: gid-a\n\
+        \x20   ws-b:\n\
+        \x20     workspace_gid: gid-b\n",
+    )
+    .expect("write profile");
+
+    let (ok, out) = run_login(
+        &home,
+        &[
+            "--save-workspace-password",
+            "--workspace-id",
+            "ws-b",
+            "--workspace-gid",
+            "gid-a",
+        ],
+    );
+    assert!(
+        !ok,
+        "mismatched workspace selection must fail\noutput:\n{out}"
+    );
+    assert!(
+        out.contains("does not match the selected workspace credential 'ws-b'"),
+        "expected the password-save flow to reject a mismatched GID; output:\n{out}"
+    );
+}

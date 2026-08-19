@@ -1539,6 +1539,10 @@ pub(crate) enum OneCommand {
         /// Workspace ULID (gid) — stored as workspace_gid for SP scope.
         #[arg(long)]
         workspace_gid: Option<String>,
+        /// Save the workspace password used by email-OTP login in the OS keyring.
+        /// Applies only to the default email-OTP flow.
+        #[arg(long)]
+        save_workspace_password: bool,
     },
     /// Clear stored Alteryx One credentials from the active profile.
     Logout {

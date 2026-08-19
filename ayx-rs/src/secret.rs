@@ -12,10 +12,11 @@ use ayx_core::secrets::keyring_account;
 
 /// Secretizable fields that `secretize_config` may write for a given scope.
 /// Dynamic workspace-credential fields are derived at runtime from the profile
-/// YAML; these are the eight static ones.
+/// YAML; these are the nine static ones.
 const STATIC_FIELDS: &[&str] = &[
     "alteryx_one.access_token",
     "alteryx_one.refresh_token",
+    "alteryx_one.workspace_password",
     "alteryx_one.client_secret",
     "server.api.client_secret",
     "server.curator_api_secret",
@@ -69,7 +70,12 @@ fn legacy_accounts_for_mismatch(
         .map(|f| keyring_account(old_scope, f))
         .collect();
     for ws_id in workspace_ids {
-        for suffix in ["access_token", "refresh_token", "client_secret"] {
+        for suffix in [
+            "access_token",
+            "refresh_token",
+            "workspace_password",
+            "client_secret",
+        ] {
             let field = format!("alteryx_one.workspace_credentials['{ws_id}'].{suffix}");
             accounts.push(keyring_account(old_scope, &field));
         }
@@ -279,7 +285,7 @@ mod tests {
 
     #[test]
     fn static_fields_count() {
-        assert_eq!(STATIC_FIELDS.len(), 8);
+        assert_eq!(STATIC_FIELDS.len(), 9);
     }
 
     #[test]
@@ -316,8 +322,8 @@ mod tests {
     #[test]
     fn dynamic_workspace_fields_included() {
         let accounts = legacy_accounts_for_mismatch("old", "new", &["ws1"]);
-        // 8 static + 3 per workspace
-        assert_eq!(accounts.len(), STATIC_FIELDS.len() + 3);
+        // 9 static + 4 per workspace
+        assert_eq!(accounts.len(), STATIC_FIELDS.len() + 4);
         assert!(
             accounts
                 .iter()
@@ -467,7 +473,7 @@ mod tests {
             "alteryx_one:\n  workspace_credentials:\n    ws1: {}\n    ws2: {}\n",
         );
         let candidates = prune_candidates(tmp.path(), None).unwrap();
-        // 8 static + 3 fields × 2 workspaces = 14
-        assert_eq!(candidates.len(), STATIC_FIELDS.len() + 6);
+        // 9 static + 4 fields × 2 workspaces = 17
+        assert_eq!(candidates.len(), STATIC_FIELDS.len() + 8);
     }
 }
