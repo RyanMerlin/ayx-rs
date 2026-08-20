@@ -6,6 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
+use ayx_core::auth::CredentialBinding;
 use ayx_core::envelope::Envelope;
 use ayx_core::observability::{
     ApiEvent, record_api_event, redact_text, response_shape, transport_error_summary,
@@ -24,10 +25,15 @@ const ONE_API_BASE_URL: &str = "https://us1.alteryxcloud.com";
 mod coverage;
 pub mod email_otp;
 mod inventory;
+pub mod otp_compat;
+pub mod platform;
 pub mod types;
 
 pub use coverage::{CoverageReport, MissingEndpoint, StaleEndpoint, coverage};
 pub use email_otp::{OtpAuthResult, email_otp_login, email_otp_login_with_password};
+pub use otp_compat::{
+    LEGACY_OTP_COMPATIBILITY_VERSION, LegacyOtpAdapter, LegacyOtpCompatibilityContract,
+};
 
 thread_local! {
     static ONE_APPLY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -1814,6 +1820,8 @@ fn build_client() -> Result<Client> {
 fn resolve_one_access_token(config: &Config, client: &Client) -> Result<String> {
     use ayx_core::profile::AuthMode;
 
+    validate_active_credential_bindings(config)?;
+
     let auth_mode = config
         .alteryx_one
         .as_ref()
@@ -1926,6 +1934,7 @@ fn verify_workspace_identity(
 }
 
 pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<String> {
+    validate_active_credential_bindings(config)?;
     let one = config
         .alteryx_one
         .as_ref()
@@ -1992,6 +2001,152 @@ pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<Stri
         )
     })?;
     format_refresh_token_response(&token_json)
+}
+
+/// Return the namespace selected by the authentication rollout. A canary
+/// profile must never consume the ordinary keyring namespace, and vice versa.
+fn auth_keyring_namespace() -> Option<&'static str> {
+    if std::env::var("AYX_AUTH_LIVE_CANARY").ok().as_deref() == Some("1")
+        || ayx_core::auth::AuthRollout::from_environment() == ayx_core::auth::AuthRollout::Canary
+    {
+        Some("canary")
+    } else {
+        None
+    }
+}
+
+fn auth_binding_for_workspace(
+    config: &Config,
+    workspace_id: Option<&str>,
+) -> Result<CredentialBinding> {
+    let one = config
+        .alteryx_one
+        .as_ref()
+        .context("config missing alteryx_one section")?;
+    let base_url = one
+        .normalized_base_url()
+        .context("alteryx_one.base_url is required for credential binding")?;
+    let issuer = one
+        .effective_token_endpoint_url_for_workspace(workspace_id)
+        .unwrap_or_else(|| base_url.clone());
+    let region = url::Url::parse(&base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .and_then(|host| host.split('.').next().map(str::to_string))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+    let workspace_gid = workspace_id
+        .and_then(|id| one.workspace_credentials.get(id))
+        .and_then(|credential| credential.workspace_gid.clone())
+        .or_else(|| one.workspace_gid.clone());
+    CredentialBinding::new(
+        one.account_email.clone(),
+        issuer,
+        region,
+        base_url,
+        workspace_id.map(str::to_string),
+        workspace_gid,
+    )
+    .map_err(anyhow::Error::from)
+}
+
+fn bound_reference_matches(
+    reference: Option<&str>,
+    bindings: &[(&CredentialBinding, &str)],
+    field: &str,
+) -> Result<()> {
+    let Some(reference) = reference else {
+        return Ok(());
+    };
+    let Some(account) = reference.strip_prefix("keyring:") else {
+        // Inline, env, and legacy profile-scoped references remain readable.
+        return Ok(());
+    };
+    if !account.starts_with("v1/") {
+        return Ok(());
+    }
+    let namespace = auth_keyring_namespace();
+    let expected = bindings.iter().any(|(binding, expected_field)| {
+        *expected_field == field
+            && account
+                == ayx_core::secrets::bound_keyring_account_in_namespace(binding, namespace, field)
+    });
+    if expected {
+        Ok(())
+    } else {
+        bail!(
+            "credential binding mismatch for {field}; refusing to consume a credential bound to a different account, issuer, region, base URL, workspace, or rollout namespace"
+        )
+    }
+}
+
+/// Enforce binding at the point where a One credential can actually be used.
+/// Profile loading intentionally remains backward-compatible; this check is
+/// fail-closed for the active workspace before access/refresh/client-secret
+/// resolution can reach the network.
+fn validate_active_credential_bindings(config: &Config) -> Result<()> {
+    let Some(one) = config.alteryx_one.as_ref() else {
+        return Ok(());
+    };
+    let active_workspace_id = one.active_workspace_id();
+    let base_binding = auth_binding_for_workspace(config, None)?;
+    let active_binding = active_workspace_id
+        .map(|workspace_id| auth_binding_for_workspace(config, Some(workspace_id)))
+        .transpose()?;
+
+    let top_level_fields = [
+        ("alteryx_one.access_token", one.access_token_ref.as_deref()),
+        (
+            "alteryx_one.refresh_token",
+            one.refresh_token_ref.as_deref(),
+        ),
+        (
+            "alteryx_one.workspace_password",
+            one.workspace_password_ref.as_deref(),
+        ),
+        (
+            "alteryx_one.client_secret",
+            one.client_secret_ref.as_deref(),
+        ),
+        (
+            "alteryx_one.sp_client_secret",
+            one.sp_client_secret_ref.as_deref(),
+        ),
+    ];
+    for (field, reference) in top_level_fields {
+        let mut bindings = vec![(&base_binding, field)];
+        if let Some(binding) = active_binding.as_ref() {
+            bindings.push((binding, field));
+        }
+        bound_reference_matches(reference, &bindings, field)?;
+    }
+
+    if let Some(workspace_id) = active_workspace_id
+        && let Some(credential) = one.workspace_credentials.get(workspace_id)
+        && let Some(binding) = active_binding.as_ref()
+    {
+        let fields = [
+            ("access_token", credential.access_token_ref.as_deref()),
+            ("refresh_token", credential.refresh_token_ref.as_deref()),
+            (
+                "workspace_password",
+                credential.workspace_password_ref.as_deref(),
+            ),
+            ("client_secret", credential.client_secret_ref.as_deref()),
+            (
+                "sp_client_secret",
+                credential.sp_client_secret_ref.as_deref(),
+            ),
+        ];
+        for (short_field, reference) in fields {
+            let field =
+                format!("alteryx_one.workspace_credentials['{workspace_id}'].{short_field}");
+            bound_reference_matches(reference, &[(binding, field.as_str())], &field)?;
+        }
+    }
+    // Only the active workspace is checked above; inactive credentials cannot
+    // become an accidental fallback through this resolver.
+    Ok(())
 }
 
 pub fn client_credentials_one_access_token(
@@ -2453,6 +2608,7 @@ pub fn resolve_one_base_url(config: &Config) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ayx_core::auth::CredentialBinding;
     use ayx_core::profile::{AlteryxOneProfile, AuthMode, Config, WorkspaceCredential};
     use httpmock::prelude::*;
     use serde_yaml::from_str;
@@ -2494,6 +2650,48 @@ mongo:
             auth_mode: AuthMode::default(),
         });
         config
+    }
+
+    #[test]
+    fn token_consumption_rejects_a_bound_reference_for_another_identity() {
+        let mut config = one_profile("https://us1.example.test");
+        let wrong_binding = CredentialBinding::new(
+            "tester@example.com",
+            "https://pingauth.example.test/as/token",
+            "eu1",
+            "https://eu1.example.test",
+            None,
+            None,
+        )
+        .expect("test binding");
+        config
+            .alteryx_one
+            .as_mut()
+            .expect("One profile")
+            .access_token_ref = Some(format!(
+            "keyring:{}",
+            wrong_binding.keyring_account("alteryx_one.access_token")
+        ));
+
+        let error = resolve_one_access_token(&config, &Client::new())
+            .expect_err("a mismatched bound token must never reach the API client");
+        assert!(error.to_string().contains("credential binding mismatch"));
+    }
+
+    #[test]
+    fn token_consumption_accepts_a_matching_bound_reference() {
+        let mut config = one_profile("https://us1.example.test");
+        let binding = auth_binding_for_workspace(&config, None).expect("test binding");
+        config
+            .alteryx_one
+            .as_mut()
+            .expect("One profile")
+            .access_token_ref = Some(format!(
+            "keyring:{}",
+            binding.keyring_account("alteryx_one.access_token")
+        ));
+
+        validate_active_credential_bindings(&config).expect("matching binding should pass");
     }
 
     #[test]

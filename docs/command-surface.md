@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-08-18 20:27:47 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on 2026-08-19 13:58:14 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 377
+- Commands: 378
 - Capabilities: 6
 
 ## Commands
@@ -138,6 +138,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one api status | `one/api/status` | read-only | no | Summarize the Alteryx One API posture |
 | one auth | `one/auth` | unclassified |  | Summarize One API token posture for managed IAM |
 | one auth diagnose | `one/auth/diagnose` | read-only | no | Validate One API token reachability and workspace scope |
+| one auth protocol | `one/auth/protocol` | unclassified |  | Validate a versioned, secret-free agent authentication request |
 | one auth status | `one/auth/status` | read-only | no | Summarize One API token posture for managed IAM |
 | one connections | `one/connections` | unclassified |  | Alteryx One connections — list, create, and manage credentials |
 | one connections connector-metadata | `one/connections/connector-metadata` | unclassified |  | Inspect connector metadata — defaults, detail, publish info, and overrides |

@@ -6,8 +6,8 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::secrets::resolve_secret_ref;
-use crate::sensitive::write_sensitive_file;
+use crate::secrets::{recover_keyring_transaction, resolve_secret_ref};
+use crate::sensitive::{recover_sensitive_file, write_sensitive_file};
 
 // ---------------------------------------------------------------------------
 // Task 4: mixed-state secret conflict detection
@@ -909,6 +909,11 @@ impl Config {
         path: &Path,
     ) -> Result<(String, HashMap<String, String>, serde_yaml::Value), ProfileError> {
         let path_str = path.display().to_string();
+        recover_keyring_transaction(path)?;
+        recover_sensitive_file(path).map_err(|err| ProfileError::Read {
+            path: path_str.clone(),
+            source: std::io::Error::other(err.to_string()),
+        })?;
         let content = fs::read_to_string(path).map_err(|source| ProfileError::Read {
             path: path_str.clone(),
             source,

@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
+use ayx_core::auth::CredentialBinding;
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::profile::{
     AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded, MongoManaged, MongoMode,
@@ -15,8 +15,11 @@ use ayx_core::profile::{
     default_profile_storage_path, default_workspace_storage_path, detect_secret_conflict,
     load_ayx_state, normalize_alteryx_base_url, profile_storage_path, save_ayx_state,
 };
-use ayx_core::secrets::{keyring_account, resolve_secret_ref, store_secret_with_fallback};
-use ayx_core::sensitive::write_sensitive_file;
+use ayx_core::secrets::{
+    KeyringTransaction, bound_keyring_account_in_namespace, keyring_account,
+    recover_keyring_transaction_locked, resolve_secret_ref, store_secret_with_fallback,
+};
+use ayx_core::sensitive::{SensitiveFileLock, write_sensitive_file};
 use ayx_server::util::runtime_settings_summary;
 
 pub fn run_onboarding(
@@ -409,16 +412,67 @@ pub(crate) fn write_workspace_config(
     path: &Path,
     workspace: &WorkspaceConfig,
 ) -> Result<SecretizeOutput> {
+    let lock = SensitiveFileLock::acquire(path).map_err(anyhow::Error::from)?;
+    recover_keyring_transaction_locked(path, &lock).map_err(anyhow::Error::from)?;
+    let transaction = KeyringTransaction::begin(&lock);
     let mut secured = workspace.clone();
     let mut merged = SecretizeOutput::default();
     for (env_key, config) in secured.environments.iter_mut() {
         let scope = format!("{}.{env_key}", workspace.workspace_name);
-        let out = secretize_config(config, &scope, InlineSecretPolicy::Allow)?;
+        let out = match secretize_config_with_binding(
+            config,
+            &scope,
+            InlineSecretPolicy::Allow,
+            None,
+            None,
+            Some(&transaction),
+        ) {
+            Ok(out) => out,
+            Err(err) => {
+                let rollback = transaction.rollback_and_abort();
+                return Err(if let Err(rollback) = rollback {
+                    anyhow::anyhow!("{err}; {rollback}")
+                } else {
+                    err
+                });
+            }
+        };
         merged.refs.extend(out.refs);
         merged.inline_fields.extend(out.inline_fields);
+        merged.keyring_previous.extend(out.keyring_previous);
         merged.scopes_used.extend(out.scopes_used);
     }
-    serialize_workspace_to(path, &secured)?;
+    let canonical = match canonical_workspace_value(&secured) {
+        Ok(canonical) => canonical,
+        Err(err) => {
+            if let Err(rollback) = transaction.rollback_and_abort() {
+                return Err(anyhow::anyhow!("{err}; {rollback}"));
+            }
+            return Err(err.into());
+        }
+    };
+    let body = match serde_yaml::to_string(&canonical) {
+        Ok(body) => body,
+        Err(err) => {
+            if let Err(rollback) = transaction.rollback_and_abort() {
+                return Err(anyhow::anyhow!("{err}; {rollback}"));
+            }
+            return Err(err.into());
+        }
+    };
+    if let Err(err) = transaction.set_target_digest(body.as_bytes()) {
+        if let Err(rollback) = transaction.rollback_and_abort() {
+            return Err(anyhow::anyhow!("{err}; {rollback}"));
+        }
+        return Err(err.into());
+    }
+    if let Err(err) = lock.write(body.as_bytes()) {
+        if let Err(rollback) = transaction.rollback_and_abort() {
+            return Err(anyhow::anyhow!("{err}; {rollback}"));
+        }
+        return Err(err.into());
+    }
+    transaction.commit().map_err(anyhow::Error::from)?;
     Ok(merged)
 }
 
@@ -447,6 +501,17 @@ fn secret_scope(scope: &str, field: &str) -> String {
     keyring_account(scope, field)
 }
 
+fn secret_scope_for_binding(
+    scope: &str,
+    field: &str,
+    binding: Option<&CredentialBinding>,
+    namespace: Option<&str>,
+) -> String {
+    binding
+        .map(|binding| bound_keyring_account_in_namespace(binding, namespace, field))
+        .unwrap_or_else(|| secret_scope(scope, field))
+}
+
 /// Inline-secret fallback policy for `secretize_config`.
 ///
 /// `Forbid` (default) returns an error if the keyring is unavailable.
@@ -464,6 +529,10 @@ pub(crate) enum InlineSecretPolicy {
 pub(crate) struct SecretizeOutput {
     pub refs: BTreeMap<String, String>,
     pub inline_fields: Vec<String>,
+    /// Keyring entries changed during this transaction, with their prior
+    /// values. In-memory only; used to restore them when the profile file
+    /// cannot be committed.
+    pub keyring_previous: Vec<(String, Option<String>)>,
     /// The keyring scope string(s) the writer passed to `secretize_config`.
     ///
     /// Single-profile writes (`write_config_with_policy`) populate exactly one
@@ -494,6 +563,14 @@ impl std::fmt::Debug for SecretizeOutput {
         f.debug_struct("SecretizeOutput")
             .field("refs", &redacted)
             .field("inline_fields", &self.inline_fields)
+            .field(
+                "keyring_accounts",
+                &self
+                    .keyring_previous
+                    .iter()
+                    .map(|(account, _)| account)
+                    .collect::<Vec<_>>(),
+            )
             .field("scopes_used", &self.scopes_used)
             .finish()
     }
@@ -505,7 +582,15 @@ fn store(
     field: &str,
     policy: InlineSecretPolicy,
     out: &mut SecretizeOutput,
+    transaction: Option<&KeyringTransaction<'_>>,
 ) -> Result<String> {
+    let previous_keyring_value =
+        resolve_secret_ref(&format!("keyring:{account}")).map_err(anyhow::Error::from)?;
+    if let Some(transaction) = transaction {
+        transaction
+            .record_change(account, previous_keyring_value.clone())
+            .map_err(anyhow::Error::from)?;
+    }
     let result = match policy {
         InlineSecretPolicy::Forbid => {
             // Do not call `store_secret_with_fallback` here: its global
@@ -519,6 +604,9 @@ fn store(
     let (reference, was_inline) = result.map_err(|err| anyhow::anyhow!("{field}: {err}"))?;
     if was_inline {
         out.inline_fields.push(field.to_string());
+    } else if reference.starts_with("keyring:") {
+        out.keyring_previous
+            .push((account.to_string(), previous_keyring_value));
     }
     Ok(reference)
 }
@@ -540,6 +628,7 @@ fn persist_secret_field(
     field: &str,
     policy: InlineSecretPolicy,
     out: &mut SecretizeOutput,
+    transaction: Option<&KeyringTransaction<'_>>,
 ) -> Result<String> {
     if let Some(reference) = existing_ref
         && reference.starts_with("env:")
@@ -551,7 +640,7 @@ fn persist_secret_field(
     {
         return Ok(reference.to_string());
     }
-    store(account, value, field, policy, out)
+    store(account, value, field, policy, out, transaction)
 }
 
 pub(crate) fn secretize_config(
@@ -559,252 +648,353 @@ pub(crate) fn secretize_config(
     scope: &str,
     policy: InlineSecretPolicy,
 ) -> Result<SecretizeOutput> {
+    secretize_config_with_binding(config, scope, policy, None, None, None)
+}
+
+/// Secretize a profile using a binding-derived keyring namespace.
+///
+/// Existing callers keep the historical scope-only accounts for compatibility.
+/// New authentication writes pass the complete account/issuer/region/base URL
+/// and workspace binding here, preventing a secret from one workspace or
+/// region being selected for another.
+pub(crate) fn secretize_config_with_binding(
+    config: &mut Config,
+    scope: &str,
+    policy: InlineSecretPolicy,
+    binding: Option<&CredentialBinding>,
+    namespace: Option<&str>,
+    transaction: Option<&KeyringTransaction<'_>>,
+) -> Result<SecretizeOutput> {
     let mut out = SecretizeOutput::default();
-    out.scopes_used.push(scope.to_string());
+    let result: Result<()> = (|| {
+        out.scopes_used.push(scope.to_string());
 
-    if let Some(one) = config.alteryx_one.as_mut() {
-        if let Some(value) = one.access_token.take() {
-            let existing_ref = one.access_token_ref.clone();
-            let account = secret_scope(scope, "alteryx_one.access_token");
-            let reference = persist_secret_field(
-                existing_ref.as_deref(),
-                &account,
-                &value,
-                "alteryx_one.access_token",
-                policy,
-                &mut out,
-            )?;
-            one.access_token_ref = Some(reference.clone());
-            out.refs
-                .insert("alteryx_one.access_token".to_string(), reference);
-        }
-        if let Some(value) = one.refresh_token.take() {
-            let existing_ref = one.refresh_token_ref.clone();
-            let account = secret_scope(scope, "alteryx_one.refresh_token");
-            let reference = persist_secret_field(
-                existing_ref.as_deref(),
-                &account,
-                &value,
-                "alteryx_one.refresh_token",
-                policy,
-                &mut out,
-            )?;
-            one.refresh_token_ref = Some(reference.clone());
-            out.refs
-                .insert("alteryx_one.refresh_token".to_string(), reference);
-        }
-        if let Some(value) = one.workspace_password.take() {
-            let existing_ref = one.workspace_password_ref.clone();
-            let account = secret_scope(scope, "alteryx_one.workspace_password");
-            let reference = persist_secret_field(
-                existing_ref.as_deref(),
-                &account,
-                &value,
-                "alteryx_one.workspace_password",
-                policy,
-                &mut out,
-            )?;
-            one.workspace_password_ref = Some(reference.clone());
-            out.refs
-                .insert("alteryx_one.workspace_password".to_string(), reference);
-        }
-        if let Some(value) = one.client_secret.take() {
-            let existing_ref = one.client_secret_ref.clone();
-            let account = secret_scope(scope, "alteryx_one.client_secret");
-            let reference = persist_secret_field(
-                existing_ref.as_deref(),
-                &account,
-                &value,
-                "alteryx_one.client_secret",
-                policy,
-                &mut out,
-            )?;
-            one.client_secret_ref = Some(reference.clone());
-            out.refs
-                .insert("alteryx_one.client_secret".to_string(), reference);
-        }
-        for (workspace_id, credential) in one.workspace_credentials.iter_mut() {
-            if let Some(value) = credential.access_token.take() {
-                let existing_ref = credential.access_token_ref.clone();
-                let field =
-                    format!("alteryx_one.workspace_credentials['{workspace_id}'].access_token");
-                let account = secret_scope(scope, &field);
+        if let Some(one) = config.alteryx_one.as_mut() {
+            if let Some(value) = one.access_token.take() {
+                let existing_ref = one.access_token_ref.clone();
+                let account =
+                    secret_scope_for_binding(scope, "alteryx_one.access_token", binding, namespace);
                 let reference = persist_secret_field(
                     existing_ref.as_deref(),
                     &account,
                     &value,
-                    &field,
+                    "alteryx_one.access_token",
                     policy,
                     &mut out,
+                    transaction,
                 )?;
-                credential.access_token_ref = Some(reference.clone());
-                out.refs.insert(field, reference);
+                one.access_token_ref = Some(reference.clone());
+                out.refs
+                    .insert("alteryx_one.access_token".to_string(), reference);
             }
-            if let Some(value) = credential.refresh_token.take() {
-                let existing_ref = credential.refresh_token_ref.clone();
-                let field =
-                    format!("alteryx_one.workspace_credentials['{workspace_id}'].refresh_token");
-                let account = secret_scope(scope, &field);
-                let reference = persist_secret_field(
-                    existing_ref.as_deref(),
-                    &account,
-                    &value,
-                    &field,
-                    policy,
-                    &mut out,
-                )?;
-                credential.refresh_token_ref = Some(reference.clone());
-                out.refs.insert(field, reference);
-            }
-            if let Some(value) = credential.workspace_password.take() {
-                let existing_ref = credential.workspace_password_ref.clone();
-                let field = format!(
-                    "alteryx_one.workspace_credentials['{workspace_id}'].workspace_password"
+            if let Some(value) = one.refresh_token.take() {
+                let existing_ref = one.refresh_token_ref.clone();
+                let account = secret_scope_for_binding(
+                    scope,
+                    "alteryx_one.refresh_token",
+                    binding,
+                    namespace,
                 );
-                let account = secret_scope(scope, &field);
                 let reference = persist_secret_field(
                     existing_ref.as_deref(),
                     &account,
                     &value,
-                    &field,
+                    "alteryx_one.refresh_token",
                     policy,
                     &mut out,
+                    transaction,
                 )?;
-                credential.workspace_password_ref = Some(reference.clone());
-                out.refs.insert(field, reference);
+                one.refresh_token_ref = Some(reference.clone());
+                out.refs
+                    .insert("alteryx_one.refresh_token".to_string(), reference);
             }
-            if let Some(value) = credential.client_secret.take() {
-                let existing_ref = credential.client_secret_ref.clone();
-                let field =
-                    format!("alteryx_one.workspace_credentials['{workspace_id}'].client_secret");
-                let account = secret_scope(scope, &field);
+            if let Some(value) = one.workspace_password.take() {
+                let existing_ref = one.workspace_password_ref.clone();
+                let account = secret_scope_for_binding(
+                    scope,
+                    "alteryx_one.workspace_password",
+                    binding,
+                    namespace,
+                );
                 let reference = persist_secret_field(
                     existing_ref.as_deref(),
                     &account,
                     &value,
-                    &field,
+                    "alteryx_one.workspace_password",
                     policy,
                     &mut out,
+                    transaction,
                 )?;
-                credential.client_secret_ref = Some(reference.clone());
-                out.refs.insert(field, reference);
+                one.workspace_password_ref = Some(reference.clone());
+                out.refs
+                    .insert("alteryx_one.workspace_password".to_string(), reference);
+            }
+            if let Some(value) = one.client_secret.take() {
+                let existing_ref = one.client_secret_ref.clone();
+                let account = secret_scope_for_binding(
+                    scope,
+                    "alteryx_one.client_secret",
+                    binding,
+                    namespace,
+                );
+                let reference = persist_secret_field(
+                    existing_ref.as_deref(),
+                    &account,
+                    &value,
+                    "alteryx_one.client_secret",
+                    policy,
+                    &mut out,
+                    transaction,
+                )?;
+                one.client_secret_ref = Some(reference.clone());
+                out.refs
+                    .insert("alteryx_one.client_secret".to_string(), reference);
+            }
+            for (workspace_id, credential) in one.workspace_credentials.iter_mut() {
+                let workspace_binding = binding.map(|base| {
+                    let mut scoped = base.clone();
+                    scoped.workspace_id = Some(workspace_id.clone());
+                    scoped.workspace_gid = credential
+                        .workspace_gid
+                        .clone()
+                        .or_else(|| base.workspace_gid.clone());
+                    scoped
+                });
+                if let Some(value) = credential.access_token.take() {
+                    let existing_ref = credential.access_token_ref.clone();
+                    let field =
+                        format!("alteryx_one.workspace_credentials['{workspace_id}'].access_token");
+                    let account = secret_scope_for_binding(
+                        scope,
+                        &field,
+                        workspace_binding.as_ref(),
+                        namespace,
+                    );
+                    let reference = persist_secret_field(
+                        existing_ref.as_deref(),
+                        &account,
+                        &value,
+                        &field,
+                        policy,
+                        &mut out,
+                        transaction,
+                    )?;
+                    credential.access_token_ref = Some(reference.clone());
+                    out.refs.insert(field, reference);
+                }
+                if let Some(value) = credential.refresh_token.take() {
+                    let existing_ref = credential.refresh_token_ref.clone();
+                    let field = format!(
+                        "alteryx_one.workspace_credentials['{workspace_id}'].refresh_token"
+                    );
+                    let account = secret_scope_for_binding(
+                        scope,
+                        &field,
+                        workspace_binding.as_ref(),
+                        namespace,
+                    );
+                    let reference = persist_secret_field(
+                        existing_ref.as_deref(),
+                        &account,
+                        &value,
+                        &field,
+                        policy,
+                        &mut out,
+                        transaction,
+                    )?;
+                    credential.refresh_token_ref = Some(reference.clone());
+                    out.refs.insert(field, reference);
+                }
+                if let Some(value) = credential.workspace_password.take() {
+                    let existing_ref = credential.workspace_password_ref.clone();
+                    let field = format!(
+                        "alteryx_one.workspace_credentials['{workspace_id}'].workspace_password"
+                    );
+                    let account = secret_scope_for_binding(
+                        scope,
+                        &field,
+                        workspace_binding.as_ref(),
+                        namespace,
+                    );
+                    let reference = persist_secret_field(
+                        existing_ref.as_deref(),
+                        &account,
+                        &value,
+                        &field,
+                        policy,
+                        &mut out,
+                        transaction,
+                    )?;
+                    credential.workspace_password_ref = Some(reference.clone());
+                    out.refs.insert(field, reference);
+                }
+                if let Some(value) = credential.client_secret.take() {
+                    let existing_ref = credential.client_secret_ref.clone();
+                    let field = format!(
+                        "alteryx_one.workspace_credentials['{workspace_id}'].client_secret"
+                    );
+                    let account = secret_scope_for_binding(
+                        scope,
+                        &field,
+                        workspace_binding.as_ref(),
+                        namespace,
+                    );
+                    let reference = persist_secret_field(
+                        existing_ref.as_deref(),
+                        &account,
+                        &value,
+                        &field,
+                        policy,
+                        &mut out,
+                        transaction,
+                    )?;
+                    credential.client_secret_ref = Some(reference.clone());
+                    out.refs.insert(field, reference);
+                }
             }
         }
-    }
 
-    // Secretize the api/server views only when they are user-authored (not derived
-    // from server_api by with_server_api_overrides). A derived view carries the same
-    // logical secret as server_api and would create a duplicate or orphan keyring
-    // account if secretized independently.
-    if let Some(api) = config.api.as_mut()
-        && !api.is_derived()
-        && let Some(value) = api.auth.client_secret.take()
-    {
-        let existing_ref = api.auth.client_secret_ref.clone();
-        let account = secret_scope(scope, "server.api.client_secret");
-        let reference = persist_secret_field(
-            existing_ref.as_deref(),
-            &account,
-            &value,
-            "server.api.client_secret",
-            policy,
-            &mut out,
-        )?;
-        api.auth.client_secret_ref = Some(reference.clone());
-        out.refs
-            .insert("server.api.client_secret".to_string(), reference);
-    }
+        // Secretize the api/server views only when they are user-authored (not derived
+        // from server_api by with_server_api_overrides). A derived view carries the same
+        // logical secret as server_api and would create a duplicate or orphan keyring
+        // account if secretized independently.
+        if let Some(api) = config.api.as_mut()
+            && !api.is_derived()
+            && let Some(value) = api.auth.client_secret.take()
+        {
+            let existing_ref = api.auth.client_secret_ref.clone();
+            let account = secret_scope(scope, "server.api.client_secret");
+            let reference = persist_secret_field(
+                existing_ref.as_deref(),
+                &account,
+                &value,
+                "server.api.client_secret",
+                policy,
+                &mut out,
+                transaction,
+            )?;
+            api.auth.client_secret_ref = Some(reference.clone());
+            out.refs
+                .insert("server.api.client_secret".to_string(), reference);
+        }
 
-    if let Some(server_api) = config.server_api.as_mut()
-        && !server_api.client_secret.is_empty()
-    {
-        let value = std::mem::take(&mut server_api.client_secret);
-        let existing_ref = server_api.client_secret_ref.clone();
-        let account = secret_scope(scope, "server.api.client_secret");
-        let reference = persist_secret_field(
-            existing_ref.as_deref(),
-            &account,
-            &value,
-            "server.api.client_secret",
-            policy,
-            &mut out,
-        )?;
-        server_api.client_secret_ref = Some(reference.clone());
-        out.refs
-            .insert("server.api.client_secret".to_string(), reference);
-    }
+        if let Some(server_api) = config.server_api.as_mut()
+            && !server_api.client_secret.is_empty()
+        {
+            let value = std::mem::take(&mut server_api.client_secret);
+            let existing_ref = server_api.client_secret_ref.clone();
+            let account = secret_scope(scope, "server.api.client_secret");
+            let reference = persist_secret_field(
+                existing_ref.as_deref(),
+                &account,
+                &value,
+                "server.api.client_secret",
+                policy,
+                &mut out,
+                transaction,
+            )?;
+            server_api.client_secret_ref = Some(reference.clone());
+            out.refs
+                .insert("server.api.client_secret".to_string(), reference);
+        }
 
-    if let Some(server) = config.server.as_mut()
-        && !server.is_derived()
-        && !server.curator_api_secret.trim().is_empty()
-    {
-        let existing_ref = server.curator_api_secret_ref.clone();
-        let value = std::mem::take(&mut server.curator_api_secret);
-        let account = secret_scope(scope, "server.curator_api_secret");
-        let reference = persist_secret_field(
-            existing_ref.as_deref(),
-            &account,
-            &value,
-            "server.curator_api_secret",
-            policy,
-            &mut out,
-        )?;
-        server.curator_api_secret_ref = Some(reference.clone());
-        out.refs
-            .insert("server.curator_api_secret".to_string(), reference);
-    }
+        if let Some(server) = config.server.as_mut()
+            && !server.is_derived()
+            && !server.curator_api_secret.trim().is_empty()
+        {
+            let existing_ref = server.curator_api_secret_ref.clone();
+            let value = std::mem::take(&mut server.curator_api_secret);
+            let account = secret_scope(scope, "server.curator_api_secret");
+            let reference = persist_secret_field(
+                existing_ref.as_deref(),
+                &account,
+                &value,
+                "server.curator_api_secret",
+                policy,
+                &mut out,
+                transaction,
+            )?;
+            server.curator_api_secret_ref = Some(reference.clone());
+            out.refs
+                .insert("server.curator_api_secret".to_string(), reference);
+        }
 
-    if let Some(mongo) = config.mongo.managed.as_mut()
-        && let Some(value) = mongo.password.take()
-    {
-        let existing_ref = mongo.password_ref.clone();
-        let account = secret_scope(scope, "server.storage.mongo.managed.password");
-        let reference = persist_secret_field(
-            existing_ref.as_deref(),
-            &account,
-            &value,
-            "server.storage.mongo.managed.password",
-            policy,
-            &mut out,
-        )?;
-        mongo.password_ref = Some(reference.clone());
-        out.refs.insert(
-            "server.storage.mongo.managed.password".to_string(),
-            reference,
-        );
-    }
+        if let Some(mongo) = config.mongo.managed.as_mut()
+            && let Some(value) = mongo.password.take()
+        {
+            let existing_ref = mongo.password_ref.clone();
+            let account = secret_scope(scope, "server.storage.mongo.managed.password");
+            let reference = persist_secret_field(
+                existing_ref.as_deref(),
+                &account,
+                &value,
+                "server.storage.mongo.managed.password",
+                policy,
+                &mut out,
+                transaction,
+            )?;
+            mongo.password_ref = Some(reference.clone());
+            out.refs.insert(
+                "server.storage.mongo.managed.password".to_string(),
+                reference,
+            );
+        }
 
-    if let Some(sql) = config.sqlserver.as_mut() {
-        for (label, conn) in [
-            (
-                "server.storage.sqlserver.controller.password",
-                sql.controller.as_mut(),
-            ),
-            (
-                "server.storage.sqlserver.server_ui.password",
-                sql.server_ui.as_mut(),
-            ),
-        ] {
-            if let Some(conn) = conn
-                && let Some(value) = conn.password.take()
-            {
-                let existing_ref = conn.password_ref.clone();
-                let account = secret_scope(scope, label);
-                let reference = persist_secret_field(
-                    existing_ref.as_deref(),
-                    &account,
-                    &value,
-                    label,
-                    policy,
-                    &mut out,
-                )?;
-                conn.password_ref = Some(reference.clone());
-                out.refs.insert(label.to_string(), reference);
+        if let Some(sql) = config.sqlserver.as_mut() {
+            for (label, conn) in [
+                (
+                    "server.storage.sqlserver.controller.password",
+                    sql.controller.as_mut(),
+                ),
+                (
+                    "server.storage.sqlserver.server_ui.password",
+                    sql.server_ui.as_mut(),
+                ),
+            ] {
+                if let Some(conn) = conn
+                    && let Some(value) = conn.password.take()
+                {
+                    let existing_ref = conn.password_ref.clone();
+                    let account = secret_scope(scope, label);
+                    let reference = persist_secret_field(
+                        existing_ref.as_deref(),
+                        &account,
+                        &value,
+                        label,
+                        policy,
+                        &mut out,
+                        transaction,
+                    )?;
+                    conn.password_ref = Some(reference.clone());
+                    out.refs.insert(label.to_string(), reference);
+                }
             }
         }
-    }
 
+        Ok(())
+    })();
+    if let Err(err) = result {
+        if let Err(rollback) = rollback_keyring_accounts(&out) {
+            return Err(anyhow::anyhow!("{err}; {rollback}"));
+        }
+        return Err(err);
+    }
     Ok(out)
+}
+
+fn rollback_keyring_accounts(out: &SecretizeOutput) -> Result<()> {
+    for (account, previous) in out.keyring_previous.iter().rev() {
+        let result = match previous {
+            Some(secret) => ayx_core::secrets::store_keyring_secret(account, secret).map(|_| ()),
+            None => ayx_core::secrets::delete_keyring_secret(account),
+        };
+        if let Err(err) = result {
+            return Err(anyhow::anyhow!(
+                "failed to roll back credential-store entry: {err}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn default_config() -> Config {
@@ -1231,14 +1421,26 @@ pub(crate) fn write_config_with_policy(
     config: &Config,
     policy: InlineSecretPolicy,
 ) -> Result<SecretizeOutput> {
+    write_config_with_binding(path, config, policy, None)
+}
+
+/// Write a profile using a binding-aware secret namespace. This is the write
+/// boundary used by the new authentication orchestrator; the unbound wrapper
+/// above remains for legacy profile fields and migration compatibility.
+pub(crate) fn write_config_with_binding(
+    path: &Path,
+    config: &Config,
+    policy: InlineSecretPolicy,
+    binding: Option<&CredentialBinding>,
+) -> Result<SecretizeOutput> {
+    let lock = SensitiveFileLock::acquire(path).map_err(anyhow::Error::from)?;
+    recover_keyring_transaction_locked(path, &lock).map_err(anyhow::Error::from)?;
+    let transaction = KeyringTransaction::begin(&lock);
     // Hard-error when multiple secret representations carry different resolved
     // values.  This is a write-time guard: it prevents silently persisting a
     // mixed-state config that would be ambiguous to reload.
     detect_secret_conflict(config).map_err(anyhow::Error::from)?;
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     // Use the on-disk file stem as the stable scope identity so that a
     // profile_name rename does not silently orphan keyring secrets.
     let file_stem = path
@@ -1246,10 +1448,262 @@ pub(crate) fn write_config_with_policy(
         .and_then(|s| s.to_str())
         .unwrap_or(&config.profile_name);
     let mut export = config.clone();
-    let out = secretize_config(&mut export, file_stem, policy)?;
-    let body = serde_yaml::to_string(&canonical_profile_value(&export)?)?;
-    write_restricted(path, body.as_bytes())?;
+    let out = match secretize_config_with_binding(
+        &mut export,
+        file_stem,
+        policy,
+        binding,
+        auth_keyring_namespace(),
+        Some(&transaction),
+    ) {
+        Ok(out) => out,
+        Err(err) => {
+            if let Err(rollback) = transaction.rollback_and_abort() {
+                return Err(anyhow::anyhow!("{err}; {rollback}"));
+            }
+            return Err(err);
+        }
+    };
+    let canonical = match canonical_profile_value(&export) {
+        Ok(value) => value,
+        Err(err) => {
+            if let Err(rollback) = rollback_keyring_accounts(&out) {
+                return Err(anyhow::anyhow!("{err}; {rollback}"));
+            }
+            let _ = transaction.abort();
+            return Err(err.into());
+        }
+    };
+    let body = match serde_yaml::to_string(&canonical) {
+        Ok(body) => body,
+        Err(err) => {
+            if let Err(rollback) = rollback_keyring_accounts(&out) {
+                return Err(anyhow::anyhow!("{err}; {rollback}"));
+            }
+            let _ = transaction.abort();
+            return Err(err.into());
+        }
+    };
+    if let Err(err) = transaction.set_target_digest(body.as_bytes()) {
+        if let Err(rollback) = rollback_keyring_accounts(&out) {
+            return Err(anyhow::anyhow!("{err}; {rollback}"));
+        }
+        let _ = transaction.abort();
+        return Err(anyhow::Error::from(err));
+    }
+    if let Err(err) = lock.write(body.as_bytes()) {
+        if let Err(rollback) = rollback_keyring_accounts(&out) {
+            return Err(anyhow::anyhow!("{err}; {rollback}"));
+        }
+        let _ = transaction.abort();
+        return Err(err.into());
+    }
+    transaction.commit().map_err(anyhow::Error::from)?;
     Ok(out)
+}
+
+/// Migrate inline authentication secrets into the OS store when it is
+/// available. Reads remain backward-compatible, and the profile is only
+/// replaced after all secret writes and the atomic file write succeed.
+pub(crate) fn migrate_inline_auth_secrets(path: &Path) -> Result<SecretizeOutput> {
+    let config = Config::load_from_path_lenient(path).map_err(anyhow::Error::from)?;
+    let fields = ayx_core::auth::inline_secret_fields(&config);
+    if fields.is_empty() {
+        return Ok(SecretizeOutput::default());
+    }
+    let binding = binding_for_auth_config(&config, None)?;
+    write_config_with_binding(path, &config, InlineSecretPolicy::Forbid, Some(&binding))
+}
+
+/// Build the same binding used by authentication writes and doctor migration.
+/// Keeping this at the profile-write boundary prevents migration from falling
+/// back to the old unbound `profile/field` keyring namespace.
+pub(crate) fn binding_for_auth_config(
+    config: &Config,
+    workspace_id: Option<&str>,
+) -> Result<CredentialBinding> {
+    let one = config
+        .alteryx_one
+        .as_ref()
+        .context("config missing alteryx_one section")?;
+    let base_url = one
+        .normalized_base_url()
+        .context("alteryx_one.base_url is required for credential binding")?;
+    let issuer = one
+        .effective_token_endpoint_url_for_workspace(workspace_id)
+        .unwrap_or_else(|| base_url.clone());
+    let region = url::Url::parse(&base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .and_then(|host| host.split('.').next().map(str::to_string))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+    let workspace_gid = workspace_id
+        .and_then(|id| one.workspace_credentials.get(id))
+        .and_then(|credential| credential.workspace_gid.clone())
+        .or_else(|| one.workspace_gid.clone());
+    CredentialBinding::new(
+        one.account_email.clone(),
+        issuer,
+        region,
+        base_url,
+        workspace_id.map(str::to_string),
+        workspace_gid,
+    )
+    .map_err(anyhow::Error::from)
+}
+
+/// Live canaries must not share deterministic keyring accounts with ordinary
+/// credentials. The namespace is deliberately process/environment-selected so
+/// the normal legacy and wizard accounts remain backward-compatible.
+pub(crate) fn auth_keyring_namespace() -> Option<&'static str> {
+    if std::env::var("AYX_AUTH_LIVE_CANARY").ok().as_deref() == Some("1")
+        || ayx_core::auth::AuthRollout::from_environment() == ayx_core::auth::AuthRollout::Canary
+    {
+        Some("canary")
+    } else {
+        None
+    }
+}
+
+/// Reject a new-format keyring reference when its binding does not match the
+/// identity being authenticated. Legacy `keyring:<profile>/<field>` refs are
+/// intentionally still readable for backward compatibility; only the bound
+/// namespace is fail-closed here.
+pub(crate) fn validate_auth_credential_bindings(
+    config: &Config,
+    binding: &CredentialBinding,
+) -> Result<()> {
+    let Some(one) = config.alteryx_one.as_ref() else {
+        return Ok(());
+    };
+    let mut top_level_bindings = vec![binding.clone()];
+    if let Some(workspace_id) = one.active_workspace_id()
+        && binding.workspace_id.as_deref() != Some(workspace_id)
+        && let Some(credential) = one.workspace_credentials.get(workspace_id)
+    {
+        let mut active_binding = binding_for_auth_config(config, Some(workspace_id))?;
+        active_binding.workspace_gid = credential
+            .workspace_gid
+            .clone()
+            .or_else(|| binding.workspace_gid.clone());
+        top_level_bindings.push(active_binding);
+    }
+    if binding.workspace_id.is_some() {
+        let mut profile_binding = binding.clone();
+        profile_binding.workspace_id = None;
+        profile_binding.workspace_gid = one.workspace_gid.clone();
+        top_level_bindings.push(profile_binding);
+    }
+
+    for (field, reference) in [
+        ("alteryx_one.access_token", one.access_token_ref.as_deref()),
+        (
+            "alteryx_one.refresh_token",
+            one.refresh_token_ref.as_deref(),
+        ),
+        (
+            "alteryx_one.workspace_password",
+            one.workspace_password_ref.as_deref(),
+        ),
+        (
+            "alteryx_one.client_secret",
+            one.client_secret_ref.as_deref(),
+        ),
+        (
+            "alteryx_one.sp_client_secret",
+            one.sp_client_secret_ref.as_deref(),
+        ),
+    ] {
+        validate_bound_reference_any(
+            reference,
+            &top_level_bindings,
+            auth_keyring_namespace(),
+            field,
+        )?;
+    }
+    // A default login may omit `--workspace-id` while profile resolution still
+    // selects its single/expected workspace credential. Validate that active
+    // credential too; otherwise a mismatched bound workspace password could be
+    // consumed through the compatibility fallback path.
+    let workspace_id = binding
+        .workspace_id
+        .as_deref()
+        .or_else(|| one.active_workspace_id());
+    if let Some(workspace_id) = workspace_id
+        && let Some(credential) = one.workspace_credentials.get(workspace_id)
+    {
+        let mut workspace_binding = binding.clone();
+        workspace_binding.workspace_gid = credential
+            .workspace_gid
+            .clone()
+            .or_else(|| binding.workspace_gid.clone());
+        for (field, reference) in [
+            (
+                format!("alteryx_one.workspace_credentials['{workspace_id}'].access_token"),
+                credential.access_token_ref.as_deref(),
+            ),
+            (
+                format!("alteryx_one.workspace_credentials['{workspace_id}'].refresh_token"),
+                credential.refresh_token_ref.as_deref(),
+            ),
+            (
+                format!("alteryx_one.workspace_credentials['{workspace_id}'].workspace_password"),
+                credential.workspace_password_ref.as_deref(),
+            ),
+            (
+                format!("alteryx_one.workspace_credentials['{workspace_id}'].client_secret"),
+                credential.client_secret_ref.as_deref(),
+            ),
+            (
+                format!("alteryx_one.workspace_credentials['{workspace_id}'].sp_client_secret"),
+                credential.sp_client_secret_ref.as_deref(),
+            ),
+        ] {
+            validate_bound_reference(
+                reference,
+                &workspace_binding,
+                auth_keyring_namespace(),
+                &field,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_bound_reference(
+    reference: Option<&str>,
+    binding: &CredentialBinding,
+    namespace: Option<&str>,
+    field: &str,
+) -> Result<()> {
+    validate_bound_reference_any(reference, std::slice::from_ref(binding), namespace, field)
+}
+
+fn validate_bound_reference_any(
+    reference: Option<&str>,
+    bindings: &[CredentialBinding],
+    namespace: Option<&str>,
+    field: &str,
+) -> Result<()> {
+    let Some(reference) = reference else {
+        return Ok(());
+    };
+    if reference.starts_with("keyring:v1/") {
+        let matches = bindings.iter().any(|binding| {
+            let expected = format!(
+                "keyring:{}",
+                bound_keyring_account_in_namespace(binding, namespace, field)
+            );
+            reference == expected
+        });
+        if !matches {
+            anyhow::bail!(
+                "credential binding mismatch for {field}; reauthenticate for this account, issuer, region, base URL, and workspace"
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Returns a warning string if any secrets were stored inline (keyring unavailable), else None.
@@ -2971,6 +3425,82 @@ server_api:
         assert!(
             debug_output.contains("env:AYX_REFRESH_TOKEN"),
             "env refs (var names, not values) must not be redacted; got: {debug_output}"
+        );
+    }
+
+    #[test]
+    fn binding_aware_auth_write_namespaces_credentials_without_leaking_values() {
+        let temp = isolated_config_home();
+        let path = temp.path().join("bound-auth.yaml");
+        let mut config = base_config();
+        config.alteryx_one = Some(ayx_core::profile::AlteryxOneProfile {
+            account_email: "person@example.com".to_string(),
+            base_url: Some("https://us1.alteryxcloud.com".to_string()),
+            workspace_gid: Some(SAMPLE_GID.to_string()),
+            access_token: Some("bound-access-secret".to_string()),
+            ..Default::default()
+        });
+        let binding = ayx_core::auth::CredentialBinding::new(
+            "person@example.com",
+            "https://pingauth.alteryxcloud.com/as/token",
+            "us1",
+            "https://us1.alteryxcloud.com",
+            None,
+            Some(SAMPLE_GID.to_string()),
+        )
+        .unwrap();
+
+        let output =
+            write_config_with_binding(&path, &config, InlineSecretPolicy::Forbid, Some(&binding))
+                .unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(!on_disk.contains("bound-access-secret"));
+        assert!(
+            output
+                .refs
+                .get("alteryx_one.access_token")
+                .is_some_and(|reference| reference.starts_with("keyring:v1/"))
+        );
+        assert_eq!(
+            Config::load_from_path_with_environment(&path, None)
+                .unwrap()
+                .alteryx_one
+                .unwrap()
+                .access_token
+                .as_deref(),
+            Some("bound-access-secret")
+        );
+    }
+
+    #[test]
+    fn failed_profile_commit_restores_previous_keyring_state() {
+        let temp = isolated_config_home();
+        let path = temp.path().join("commit-failure");
+        std::fs::create_dir_all(&path).unwrap();
+        let mut config = base_config();
+        config.alteryx_one = Some(ayx_core::profile::AlteryxOneProfile {
+            account_email: "person@example.com".to_string(),
+            base_url: Some("https://us1.alteryxcloud.com".to_string()),
+            access_token: Some("transaction-secret".to_string()),
+            ..Default::default()
+        });
+        let binding = ayx_core::auth::CredentialBinding::new(
+            "person@example.com",
+            "https://issuer.example",
+            "us1",
+            "https://us1.example",
+            None,
+            None,
+        )
+        .unwrap();
+        let account = binding.keyring_account("alteryx_one.access_token");
+        let result =
+            write_config_with_binding(&path, &config, InlineSecretPolicy::Forbid, Some(&binding));
+        assert!(result.is_err());
+        assert_eq!(
+            ayx_core::secrets::resolve_secret_ref(&format!("keyring:{account}")).unwrap(),
+            None,
+            "keyring write must roll back when profile commit fails"
         );
     }
 }

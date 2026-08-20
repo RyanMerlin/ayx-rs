@@ -25,15 +25,15 @@ const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
 /// Calls where a retry COULD duplicate a side effect (sendPasscode,
 /// apiAccessTokens mint) use a narrower retry predicate instead of a
 /// separate constant — see `is_pre_send_failure`.
-const TRANSIENT_RETRY_ATTEMPTS: u32 = 3;
+pub(crate) const TRANSIENT_RETRY_ATTEMPTS: u32 = 3;
 /// Local re-prompt attempts against a single passcodeReferenceId before
 /// falling back to sending a fresh passcode.
-const OTP_ATTEMPTS_PER_REFERENCE: u32 = 3;
+pub(crate) const OTP_ATTEMPTS_PER_REFERENCE: u32 = 3;
 /// Total passcode emails sent per login() call before giving up entirely.
-const MAX_OTP_SENDS: u32 = 2;
+pub(crate) const MAX_OTP_SENDS: u32 = 2;
 /// Workspace-password re-prompt attempts before bailing (interactive path
 /// only — see workspace_login_with_reprompt).
-const WORKSPACE_PASSWORD_ATTEMPTS: u32 = 3;
+pub(crate) const WORKSPACE_PASSWORD_ATTEMPTS: u32 = 3;
 
 /// Retries `attempt_once` up to `max_attempts` times. `should_retry_err`
 /// decides whether a returned error is worth retrying; `should_retry_ok`
@@ -785,12 +785,309 @@ fn cookie_value_from_jar(jar: &Jar, url: &url::Url, name: &str) -> Option<String
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::{Arc, Mutex, mpsc};
+    use std::thread::JoinHandle;
+    use std::time::Duration;
+
     use super::OtpAction;
+    use super::email_otp_login_pure_http;
     use super::retry_transient;
     use super::should_retry_workspace_password;
+    use super::{
+        MAX_OTP_SENDS, OTP_ATTEMPTS_PER_REFERENCE, validate_passcode, workspace_login_with_reprompt,
+    };
     use super::{extract_interaction_id, host_allowed, is_valid_interaction_id, next_otp_action};
     use super::{prompt_workspace_password, workspace_password_from_env};
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    use httpmock::prelude::*;
+    use reqwest::blocking::Client;
     use serial_test::serial;
+
+    #[derive(Debug, Clone)]
+    struct RecordedRequest {
+        method: String,
+        target: String,
+        body: String,
+    }
+
+    struct RecordingServer {
+        base_url: String,
+        requests: Arc<Mutex<Vec<RecordedRequest>>>,
+        stop: Option<mpsc::Sender<()>>,
+        thread: Option<JoinHandle<()>>,
+    }
+
+    impl RecordingServer {
+        fn start() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind recorder");
+            listener
+                .set_nonblocking(true)
+                .expect("set recorder nonblocking");
+            let address = listener.local_addr().expect("recorder address");
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let recorded = Arc::clone(&requests);
+            let (stop, stop_rx) = mpsc::channel();
+            let thread = std::thread::spawn(move || {
+                loop {
+                    if stop_rx.try_recv().is_ok() {
+                        break;
+                    }
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            let request = read_recorded_request(&mut stream)
+                                .expect("recorder should parse HTTP request");
+                            let response = response_for_request(&request);
+                            recorded.lock().expect("recorder lock").push(request);
+                            write_recorded_response(&mut stream, response)
+                                .expect("recorder response should write");
+                        }
+                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        Err(err) => panic!("recorder accept failed: {err}"),
+                    }
+                }
+            });
+            Self {
+                base_url: format!("http://{address}"),
+                requests,
+                stop: Some(stop),
+                thread: Some(thread),
+            }
+        }
+
+        fn requests(&self) -> Vec<RecordedRequest> {
+            self.requests.lock().expect("recorder lock").clone()
+        }
+    }
+
+    impl Drop for RecordingServer {
+        fn drop(&mut self) {
+            let _ = self.stop.take().expect("recorder stop sender").send(());
+            if let Some(thread) = self.thread.take() {
+                thread.join().expect("recorder thread");
+            }
+        }
+    }
+
+    /// Small stateful server used to characterize the legacy transport's
+    /// actual 4xx and retry behavior. Unlike a helper that returns a fixed
+    /// response, this records the request sequence and changes status only
+    /// after the configured number of failures.
+    struct OtpSequenceServer {
+        base_url: String,
+        requests: Arc<Mutex<Vec<RecordedRequest>>>,
+        stop: Option<mpsc::Sender<()>>,
+        thread: Option<JoinHandle<()>>,
+    }
+
+    impl OtpSequenceServer {
+        fn start(failure_count: usize, failure_status: u16) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind OTP sequence server");
+            listener
+                .set_nonblocking(true)
+                .expect("set OTP sequence server nonblocking");
+            let address = listener.local_addr().expect("OTP sequence server address");
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let recorded = Arc::clone(&requests);
+            let (stop, stop_rx) = mpsc::channel();
+            let thread = std::thread::spawn(move || {
+                let mut failures_left = failure_count;
+                let mut send_count = 0usize;
+                loop {
+                    if stop_rx.try_recv().is_ok() {
+                        break;
+                    }
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            let request = read_recorded_request(&mut stream)
+                                .expect("OTP sequence server should parse request");
+                            let path = request.target.split('?').next().unwrap_or_default();
+                            let response = match (request.method.as_str(), path) {
+                                ("POST", "/v4/auth/sendPasscode") => {
+                                    send_count += 1;
+                                    (
+                                        200,
+                                        vec![("Content-Type", "application/json".to_string())],
+                                        format!(
+                                            r#"{{"passcodeReferenceId":"reference-{send_count}"}}"#
+                                        ),
+                                    )
+                                }
+                                ("POST", "/v4/auth/validatePasscode") if failures_left > 0 => {
+                                    failures_left -= 1;
+                                    (
+                                        failure_status,
+                                        vec![("Content-Type", "application/json".to_string())],
+                                        r#"{"error":"invalid passcode"}"#.to_string(),
+                                    )
+                                }
+                                ("POST", "/v4/auth/validatePasscode") => {
+                                    (200, vec![], String::new())
+                                }
+                                ("POST", "/session") => (
+                                    failure_status,
+                                    vec![],
+                                    "workspace password rejected".to_string(),
+                                ),
+                                _ => (500, vec![], "unexpected request".to_string()),
+                            };
+                            recorded.lock().expect("OTP sequence lock").push(request);
+                            write_recorded_response(&mut stream, response)
+                                .expect("OTP sequence response should write");
+                        }
+                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        Err(err) => panic!("OTP sequence accept failed: {err}"),
+                    }
+                }
+            });
+            Self {
+                base_url: format!("http://{address}"),
+                requests,
+                stop: Some(stop),
+                thread: Some(thread),
+            }
+        }
+
+        fn requests(&self) -> Vec<RecordedRequest> {
+            self.requests.lock().expect("OTP sequence lock").clone()
+        }
+    }
+
+    impl Drop for OtpSequenceServer {
+        fn drop(&mut self) {
+            let _ = self.stop.take().expect("OTP sequence stop sender").send(());
+            if let Some(thread) = self.thread.take() {
+                thread.join().expect("OTP sequence thread");
+            }
+        }
+    }
+
+    fn read_recorded_request(stream: &mut TcpStream) -> std::io::Result<RecordedRequest> {
+        stream.set_nonblocking(false)?;
+        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+        let mut bytes = Vec::new();
+        let header_end;
+        loop {
+            let mut chunk = [0u8; 4096];
+            let count = stream.read(&mut chunk)?;
+            if count == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "request ended before headers",
+                ));
+            }
+            bytes.extend_from_slice(&chunk[..count]);
+            if let Some(end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                header_end = end + 4;
+                break;
+            }
+        }
+        let headers = String::from_utf8_lossy(&bytes[..header_end]).into_owned();
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("Content-Length:")
+                    .or_else(|| line.strip_prefix("content-length:"))
+            })
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        while bytes.len() < header_end + content_length {
+            let mut chunk = [0u8; 4096];
+            let count = stream.read(&mut chunk)?;
+            if count == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "request ended before body",
+                ));
+            }
+            bytes.extend_from_slice(&chunk[..count]);
+        }
+        let request_line = headers.lines().next().unwrap_or_default();
+        let mut parts = request_line.split_whitespace();
+        let method = parts.next().unwrap_or_default().to_string();
+        let target = parts.next().unwrap_or_default().to_string();
+        let body =
+            String::from_utf8_lossy(&bytes[header_end..header_end + content_length]).into_owned();
+        Ok(RecordedRequest {
+            method,
+            target,
+            body,
+        })
+    }
+
+    fn response_for_request(
+        request: &RecordedRequest,
+    ) -> (u16, Vec<(&'static str, String)>, String) {
+        let path = request.target.split('?').next().unwrap_or_default();
+        match (request.method.as_str(), path) {
+            ("GET", "/v4/platformAuth/session") => (200, vec![], String::new()),
+            ("POST", "/v4/auth/sendPasscode") => (
+                200,
+                vec![("Content-Type", "application/json".to_string())],
+                r#"{"passcodeReferenceId":"reference-1"}"#.to_string(),
+            ),
+            ("POST", "/v4/auth/validatePasscode") => (
+                200,
+                vec![("Set-Cookie", "x-csrf-token=csrf-secret; Path=/".to_string())],
+                String::new(),
+            ),
+            ("GET", "/v4/auth/accounts") => (
+                200,
+                vec![("Content-Type", "application/json".to_string())],
+                r#"[{"workspaces":[{"gid":"gid-1","name":"workspace"}]}]"#.to_string(),
+            ),
+            ("GET", "/") => (
+                302,
+                vec![(
+                    "Location",
+                    "/authorize?interaction_id=interaction-123".to_string(),
+                )],
+                String::new(),
+            ),
+            ("GET", "/authorize") => (200, vec![], String::new()),
+            ("POST", "/session") => (200, vec![], String::new()),
+            ("GET", "/token/interaction-123/resume") => {
+                let cookie = URL_SAFE_NO_PAD.encode(br#"{"accessToken":"bearer-secret"}"#);
+                (
+                    200,
+                    vec![(
+                        "Set-Cookie",
+                        format!("local-auth-workspace={cookie}; Path=/"),
+                    )],
+                    String::new(),
+                )
+            }
+            ("POST", "/v4/apiAccessTokens") => (
+                200,
+                vec![("Content-Type", "application/json".to_string())],
+                r#"{"tokenValue":"pat-secret","tokenInfo":{"expiredAt":"2030-01-01T00:00:00Z"}}"#
+                    .to_string(),
+            ),
+            _ => (500, vec![], "unexpected request".to_string()),
+        }
+    }
+
+    fn write_recorded_response(
+        stream: &mut TcpStream,
+        (status, headers, body): (u16, Vec<(&'static str, String)>, String),
+    ) -> std::io::Result<()> {
+        write!(
+            stream,
+            "HTTP/1.1 {status} OK\r\nConnection: close\r\nContent-Length: {}\r\n",
+            body.len()
+        )?;
+        for (name, value) in headers {
+            write!(stream, "{name}: {value}\r\n")?;
+        }
+        write!(stream, "\r\n{body}")?;
+        stream.flush()
+    }
 
     #[test]
     fn next_otp_action_reprompts_when_attempts_remain() {
@@ -886,6 +1183,130 @@ mod tests {
         );
         assert_eq!(result, Ok(200));
         assert_eq!(calls, 2);
+    }
+
+    #[test]
+    #[serial]
+    fn otp_transport_reprompts_and_resends_after_real_4xx_rejections() {
+        let server = OtpSequenceServer::start(3, 401);
+        let client = Client::builder().build().expect("test client");
+        let codes = Mutex::new(VecDeque::from([
+            "bad-1".to_string(),
+            "bad-2".to_string(),
+            "bad-3".to_string(),
+            "good".to_string(),
+        ]));
+        let result = super::otp_login_with_reprompt(
+            &client,
+            &server.base_url,
+            "person@example.com",
+            &|| {
+                Ok(codes
+                    .lock()
+                    .expect("OTP code lock")
+                    .pop_front()
+                    .expect("OTP code for every attempt"))
+            },
+        );
+        assert!(
+            result.is_ok(),
+            "the second reference should be accepted: {result:?}"
+        );
+        let requests = server.requests();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.target.starts_with("/v4/auth/sendPasscode"))
+                .count(),
+            2
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.target.starts_with("/v4/auth/validatePasscode"))
+                .count(),
+            4
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn otp_transport_exhausts_real_4xx_rejections_at_the_contract_budget() {
+        let server = OtpSequenceServer::start(
+            OTP_ATTEMPTS_PER_REFERENCE as usize * MAX_OTP_SENDS as usize,
+            401,
+        );
+        let client = Client::builder().build().expect("test client");
+        let result = super::otp_login_with_reprompt(
+            &client,
+            &server.base_url,
+            "person@example.com",
+            &|| Ok("wrong".to_string()),
+        );
+        let error = result.expect_err("the OTP budget must terminate the flow");
+        assert!(
+            error
+                .to_string()
+                .contains("passcode rejected 3 times across 2 passcode(s) sent")
+        );
+        let requests = server.requests();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.target.starts_with("/v4/auth/sendPasscode"))
+                .count(),
+            MAX_OTP_SENDS as usize
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.target.starts_with("/v4/auth/validatePasscode"))
+                .count(),
+            (OTP_ATTEMPTS_PER_REFERENCE * MAX_OTP_SENDS) as usize
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn otp_transport_retries_transient_http_status_then_accepts() {
+        let server = OtpSequenceServer::start(2, 503);
+        let client = Client::builder().build().expect("test client");
+        validate_passcode(
+            &client,
+            &server.base_url,
+            "person@example.com",
+            "reference-1",
+            "123456",
+        )
+        .expect("transient status should be retried");
+        let requests = server.requests();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.target.starts_with("/v4/auth/validatePasscode"))
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn workspace_password_transport_maps_fixed_source_4xx_to_terminal_error() {
+        let server = OtpSequenceServer::start(1, 401);
+        let client = Client::builder().build().expect("test client");
+        let error = workspace_login_with_reprompt(
+            &client,
+            &server.base_url,
+            "person@example.com",
+            Some("fixed-password".to_string()),
+        )
+        .expect_err("a fixed password rejection must be terminal");
+        assert!(
+            error
+                .to_string()
+                .contains("fixed workspace password was rejected")
+        );
+        assert_eq!(server.requests().len(), 1);
     }
 
     /// A `reqwest::dns::Resolve` that always fails resolution, synchronously
@@ -1231,5 +1652,164 @@ mod tests {
             msg.contains("AYX_ONE_WS_PASSWORD"),
             "error should point at AYX_ONE_WS_PASSWORD as the alternative, got: {msg}"
         );
+    }
+
+    /// Full local-server characterization of the protected legacy sequence.
+    /// This test calls the existing pure-HTTP transport directly; it does not
+    /// reimplement the flow or route through the new orchestration layer.
+    #[test]
+    #[serial]
+    fn legacy_otp_flow_preserves_endpoint_sequence_and_cookie_completion() {
+        let server = MockServer::start();
+        let warmup = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v4/platformAuth/session")
+                .query_param("email", "person@example.com")
+                .query_param("includeInvited", "accounts,workspaces");
+            then.status(200);
+        });
+        let send = server.mock(|when, then| {
+            when.method(POST)
+                .path("/v4/auth/sendPasscode")
+                .header("content-type", "application/json")
+                .body_includes("person@example.com");
+            then.status(200)
+                .json_body(serde_json::json!({"passcodeReferenceId": "reference-1"}));
+        });
+        let validate = server.mock(|when, then| {
+            when.method(POST)
+                .path("/v4/auth/validatePasscode")
+                .header("content-type", "application/json")
+                .body_includes("123456")
+                .body_includes("reference-1");
+            then.status(200)
+                .header("set-cookie", "x-csrf-token=csrf-secret; Path=/");
+        });
+        let accounts = server.mock(|when, then| {
+            when.method(GET)
+                .path("/v4/auth/accounts")
+                .query_param("includeInvited", "workspaces,accounts")
+                .header("x-alteryx-auth-email", "person@example.com");
+            then.status(200).json_body(serde_json::json!([
+                {"workspaces": [{"gid": "gid-1", "name": "workspace"}]}
+            ]));
+        });
+        let entry = server.mock(|when, then| {
+            when.method(GET)
+                .path("/")
+                .query_param("workspace", "workspace")
+                .query_param("workspaceGid", "gid-1");
+            then.status(302)
+                .header("location", "/authorize?interaction_id=interaction-123");
+        });
+        let authorize = server.mock(|when, then| {
+            when.method(GET)
+                .path("/authorize")
+                .query_param("interaction_id", "interaction-123")
+                .header_includes("accept", "text/html");
+            then.status(200);
+        });
+        let session = server.mock(|when, then| {
+            when.method(POST)
+                .path("/session")
+                .header_includes("content-type", "application/x-www-form-urlencoded")
+                .body_includes("email=person%40example.com")
+                .body_includes("password=workspace-secret");
+            then.status(200);
+        });
+        let cookie = URL_SAFE_NO_PAD.encode(br#"{"accessToken":"bearer-secret"}"#);
+        let resume = server.mock(|when, then| {
+            when.method(GET).path("/token/interaction-123/resume");
+            then.status(200).header(
+                "set-cookie",
+                format!("local-auth-workspace={cookie}; Path=/"),
+            );
+        });
+        let pat = server.mock(|when, then| {
+            when.method(POST)
+                .path("/v4/apiAccessTokens")
+                .header("x-csrf-token", "csrf-secret")
+                .header("x-alteryx-workspace-gid", "gid-1")
+                .header("authorization", "Bearer bearer-secret");
+            then.status(200).json_body(serde_json::json!({
+                "tokenValue": "pat-secret",
+                "tokenInfo": {"expiredAt": "2030-01-01T00:00:00Z"}
+            }));
+        });
+
+        let (result, password) = email_otp_login_pure_http(
+            &server.base_url(),
+            "person@example.com",
+            "gid-1",
+            Some("workspace-secret".to_string()),
+            &|| Ok("123456".to_string()),
+            true,
+        )
+        .expect("the characterized legacy flow should complete");
+
+        assert_eq!(result.access_token, "pat-secret");
+        assert_eq!(password.as_deref(), Some("workspace-secret"));
+        warmup.assert_calls(1);
+        send.assert_calls(1);
+        validate.assert_calls(1);
+        accounts.assert_calls(1);
+        entry.assert_calls(1);
+        authorize.assert_calls(1);
+        session.assert_calls(1);
+        resume.assert_calls(1);
+        pat.assert_calls(1);
+    }
+
+    #[test]
+    #[serial]
+    fn legacy_otp_flow_records_the_protected_request_order() {
+        let server = RecordingServer::start();
+        let (result, password) = email_otp_login_pure_http(
+            &server.base_url,
+            "person@example.com",
+            "gid-1",
+            Some("workspace-secret".to_string()),
+            &|| Ok("123456".to_string()),
+            true,
+        )
+        .expect("the characterized legacy flow should complete");
+
+        assert_eq!(result.access_token, "pat-secret");
+        assert_eq!(password.as_deref(), Some("workspace-secret"));
+        let requests = server.requests();
+        let sequence: Vec<(&str, &str)> = requests
+            .iter()
+            .map(|request| {
+                (
+                    request.method.as_str(),
+                    request.target.split('?').next().unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            sequence,
+            vec![
+                ("GET", "/v4/platformAuth/session"),
+                ("POST", "/v4/auth/sendPasscode"),
+                ("POST", "/v4/auth/validatePasscode"),
+                ("GET", "/v4/auth/accounts"),
+                ("GET", "/"),
+                ("GET", "/authorize"),
+                ("POST", "/session"),
+                ("GET", "/token/interaction-123/resume"),
+                ("POST", "/v4/apiAccessTokens"),
+            ]
+        );
+        assert!(requests[0].target.contains("email=person%40example.com"));
+        assert!(
+            requests[0]
+                .target
+                .contains("includeInvited=accounts%2Cworkspaces")
+        );
+        assert!(requests[1].body.contains("person@example.com"));
+        assert!(requests[2].body.contains("123456"));
+        assert!(requests[2].body.contains("reference-1"));
+        assert!(requests[6].body.contains("email=person%40example.com"));
+        assert!(requests[6].body.contains("password=workspace-secret"));
     }
 }

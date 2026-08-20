@@ -205,6 +205,22 @@ fn access_token_claim_summary(access_token: Option<&str>) -> Option<Value> {
     Some(Value::Object(summary))
 }
 
+fn auth_token_health(access_token: Option<&str>) -> &'static str {
+    let expires_at = access_token
+        .and_then(decode_token_claims)
+        .and_then(|claims| claims.get("exp").and_then(Value::as_i64));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or_default();
+    match ayx_core::auth::credential_health(expires_at, now) {
+        ayx_core::auth::CredentialHealth::Fresh => "fresh",
+        ayx_core::auth::CredentialHealth::Stale => "stale",
+        ayx_core::auth::CredentialHealth::UnknownExpiry => "unknown_expiry",
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "ayx",
@@ -568,6 +584,55 @@ fn parse_param_kv(s: &str) -> Result<(String, String), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_profile_loader_rejects_mismatched_bound_one_refs_but_reads_legacy_refs() {
+        let mut config: Config = serde_yaml::from_str(
+            r#"
+profile_name: binding-test
+mongo:
+  mode: embedded
+  databases:
+    gallery_name: AlteryxGallery
+    service_name: AlteryxService
+  embedded: {}
+"#,
+        )
+        .expect("minimal config should parse");
+        let wrong = ayx_core::auth::CredentialBinding::new(
+            "tester@example.com",
+            "https://other.example.test/as/token",
+            "other",
+            "https://other.example.test",
+            None,
+            None,
+        )
+        .expect("wrong binding should still be structurally valid");
+        let one = ayx_core::profile::AlteryxOneProfile {
+            account_email: "tester@example.com".to_string(),
+            base_url: Some("https://us1.example.test".to_string()),
+            token_endpoint_url: Some("https://us1.example.test/as/token".to_string()),
+            access_token: Some("resolved-token".to_string()),
+            access_token_ref: Some(format!(
+                "keyring:{}",
+                wrong.keyring_account("alteryx_one.access_token")
+            )),
+            ..Default::default()
+        };
+        config.alteryx_one = Some(one);
+
+        let error = validate_loaded_auth_bindings(&config)
+            .expect_err("generic profile loading must fail closed on a mismatched bound ref");
+        assert!(error.to_string().contains("credential binding mismatch"));
+
+        config
+            .alteryx_one
+            .as_mut()
+            .expect("One profile")
+            .access_token_ref = Some("keyring:binding-test/alteryx_one.access_token".to_string());
+        validate_loaded_auth_bindings(&config)
+            .expect("legacy profile-scoped refs remain readable for compatibility");
+    }
 
     /// `ayx-server-api` embeds the code it already computed as
     /// `error_code=<code>`; the dispatcher must read that rather than scanning
@@ -1543,6 +1608,10 @@ pub(crate) enum OneCommand {
         /// Applies only to the default email-OTP flow.
         #[arg(long)]
         save_workspace_password: bool,
+        /// Credential persistence for the authentication wizard: secure,
+        /// plaintext (explicit fallback), or session.
+        #[arg(long, value_name = "POLICY", value_parser = ["secure", "plaintext", "session"])]
+        secret_policy: Option<String>,
     },
     /// Clear stored Alteryx One credentials from the active profile.
     Logout {
@@ -2158,6 +2227,12 @@ pub(crate) enum OneAuthCommand {
     Diagnose {
         #[arg(long)]
         profile: Option<String>,
+    },
+    /// Validate a versioned, secret-free agent authentication request.
+    Protocol {
+        /// JSON request file, or `-` to read JSON from stdin.
+        #[arg(long, value_name = "FILE")]
+        request: std::path::PathBuf,
     },
 }
 
@@ -3407,6 +3482,9 @@ pub(crate) enum OneDoctorCommand {
     Auth {
         #[arg(long)]
         profile: Option<String>,
+        /// Migrate inline authentication secrets into the secure store.
+        #[arg(long)]
+        migrate: bool,
     },
     /// Run the One discovery doctor workflow.
     Discover {
@@ -4528,7 +4606,7 @@ fn profile_current_envelope() -> Result<Envelope> {
 
 fn profile_show_envelope(name: Option<&str>) -> Result<Envelope> {
     let resolution = resolve_runtime_profile(name)?;
-    let config = Config::load_runtime_profile_with_environment(name, None)?;
+    let config = load_profile_with_env(name, None)?;
     Ok(Envelope::ok_with_data(
         "profile loaded",
         json!({
@@ -4771,7 +4849,7 @@ pub(crate) fn doctor_config_envelope_from_path(profile: &Path, fix: bool) -> Res
 }
 
 fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
-    let config = Config::load_runtime_profile_with_environment(profile, environment)?;
+    let config = load_profile_with_env(profile, environment)?;
     let one = config.alteryx_one.as_ref();
     let server = config.server.as_ref();
     let one_configured = one.is_some();
@@ -4802,6 +4880,11 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
             "profile": config.profile_name,
             "status": status,
             "summary": summary,
+            "inline_secret_fields": ayx_core::auth::inline_secret_fields(&config),
+            "migration": {
+                "available": !ayx_core::auth::inline_secret_fields(&config).is_empty(),
+                "hint": "run `ayx one doctor auth --migrate` when secure storage is available"
+            },
             "one": {
                 "configured": one_configured,
                 "access_token_present": one_access_token_present,
@@ -4834,6 +4917,7 @@ pub(crate) fn doctor_auth_envelope_from_path(
     environment: Option<&str>,
 ) -> Result<Envelope> {
     let config = Config::load_from_path_with_environment(profile, environment)?;
+    validate_loaded_auth_bindings(&config)?;
     let one = config.alteryx_one.as_ref();
     let server = config.server.as_ref();
     let one_configured = one.is_some();
@@ -4864,6 +4948,11 @@ pub(crate) fn doctor_auth_envelope_from_path(
             "profile": config.profile_name,
             "status": status,
             "summary": summary,
+            "inline_secret_fields": ayx_core::auth::inline_secret_fields(&config),
+            "migration": {
+                "available": !ayx_core::auth::inline_secret_fields(&config).is_empty(),
+                "hint": "run `ayx one doctor auth --migrate` when secure storage is available"
+            },
             "one": {
                 "configured": one_configured,
                 "access_token_present": one_access_token_present,
@@ -4892,7 +4981,7 @@ pub(crate) fn doctor_auth_envelope_from_path(
 }
 
 fn doctor_network_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
-    let config = Config::load_runtime_profile_with_environment(profile, environment)?;
+    let config = load_profile_with_env(profile, environment)?;
     let one_base_url = config
         .alteryx_one
         .as_ref()
@@ -4926,7 +5015,7 @@ fn doctor_network_envelope(profile: Option<&str>, environment: Option<&str>) -> 
 }
 
 fn doctor_one_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
-    let config = Config::load_runtime_profile_with_environment(profile, environment)?;
+    let config = load_profile_with_env(profile, environment)?;
     if config.alteryx_one.is_none() {
         return Ok(Envelope::ok_with_data(
             "one auth diagnose",
@@ -5265,6 +5354,7 @@ pub(crate) fn one_platform_auth_status_envelope(config: &Config) -> Result<Envel
                 "missing"
             },
             "access_token_claims": access_token_claim_summary(access_token),
+            "credential_health": auth_token_health(access_token),
             "validation_target": "/v4/apiAccessTokens",
             "workspace_probe": workspace_probe.as_ref().map(|probe| {
                 sanitize_live_probe_for_user(
@@ -5336,6 +5426,7 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                     "access_token_present": true,
                     "refresh_token_present": has_refresh_token,
                     "access_token_claims": access_token_claim_summary(access_token),
+                    "credential_health": auth_token_health(access_token),
                     "diagnosis": "token present but workspace probe failed",
                     "workspace_probe_error": err.to_string(),
                     "recommendations": [
@@ -5364,6 +5455,7 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                 "access_token_present": true,
                 "refresh_token_present": has_refresh_token,
                 "access_token_claims": access_token_claim_summary(access_token),
+                "credential_health": auth_token_health(access_token),
                 "diagnosis": "token present but workspace probe was not executed",
                 "workspace_probe": null,
                 "recommendations": [
@@ -5386,6 +5478,7 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
             "access_token_present": true,
             "refresh_token_present": has_refresh_token,
             "access_token_claims": access_token_claim_summary(access_token),
+            "credential_health": auth_token_health(access_token),
             "diagnosis": "token present and workspace probe executed",
             "workspace_probe": sanitize_live_probe_for_user(
                 &probe.data,
@@ -5579,17 +5672,30 @@ impl<'a> From<&'a PathBuf> for ProfileInput<'a> {
 
 /// Canonical profile loader used by runtime-facing commands and the smaller
 /// set of explicit path-based editor flows.
+fn validate_loaded_auth_bindings(config: &Config) -> Result<()> {
+    if config.alteryx_one.is_none() {
+        return Ok(());
+    }
+    let workspace_id = config
+        .alteryx_one
+        .as_ref()
+        .and_then(|one| one.active_workspace_id());
+    let binding = onboard::binding_for_auth_config(config, workspace_id)?;
+    onboard::validate_auth_credential_bindings(config, &binding)
+}
+
 pub(crate) fn load_profile_with_env<'a, P>(profile: P, environment: Option<&str>) -> Result<Config>
 where
     P: Into<ProfileInput<'a>>,
 {
-    match profile.into() {
-        ProfileInput::Runtime(name) => Ok(Config::load_runtime_profile_with_environment(
-            name,
-            environment,
-        )?),
-        ProfileInput::Path(path) => Ok(Config::load_from_path_with_environment(path, environment)?),
-    }
+    let config = match profile.into() {
+        ProfileInput::Runtime(name) => {
+            Config::load_runtime_profile_with_environment(name, environment)?
+        }
+        ProfileInput::Path(path) => Config::load_from_path_with_environment(path, environment)?,
+    };
+    validate_loaded_auth_bindings(&config)?;
+    Ok(config)
 }
 
 /// Lenient profile loader for runtime-facing and editor flows that should
@@ -5602,16 +5708,16 @@ pub(crate) fn load_profile_with_env_lenient<'a, P>(
 where
     P: Into<ProfileInput<'a>>,
 {
-    match profile.into() {
-        ProfileInput::Runtime(name) => Ok(Config::load_runtime_profile_with_environment_lenient(
-            name,
-            environment,
-        )?),
-        ProfileInput::Path(path) => Ok(Config::load_from_path_with_environment_lenient(
-            path,
-            environment,
-        )?),
-    }
+    let config = match profile.into() {
+        ProfileInput::Runtime(name) => {
+            Config::load_runtime_profile_with_environment_lenient(name, environment)?
+        }
+        ProfileInput::Path(path) => {
+            Config::load_from_path_with_environment_lenient(path, environment)?
+        }
+    };
+    validate_loaded_auth_bindings(&config)?;
+    Ok(config)
 }
 
 /// Render an envelope in the requested output format. `output` is constrained

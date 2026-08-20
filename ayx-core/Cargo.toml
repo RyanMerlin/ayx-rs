@@ -28,6 +28,7 @@ keyring-core.workspace = true
 # ayx-one-api (PKCE/OAuth state generation) -- reused here rather than
 # pulling in a new crate (e.g. `uuid`) for the same primitive need.
 getrandom = "0.4"
+sha2.workspace = true
 
 # keyring 4.x split the platform credential stores into separate crates that
 # are registered with keyring-core at runtime. Pick one store per OS:
@@ -42,3 +43,11 @@ apple-native-keyring-store = { version = "1", features = ["keychain"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-native-keyring-store = "1"
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+] }

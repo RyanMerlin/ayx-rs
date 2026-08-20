@@ -7,10 +7,9 @@ use thiserror::Error;
 /// Shared helper for owner-only local artifacts such as profiles, workspaces,
 /// state, audit payloads, and observability logs.
 ///
-/// On Unix, directories are tightened to `0o700` and files to `0o600`.
-/// On Windows we rely on the platform's default ACL behavior and keep the
-/// contract documented as best-effort unless a future Windows-native ACL layer
-/// is introduced.
+/// On Unix, directories are tightened to `0o700` and files to `0o600`. On
+/// Windows, the target and its containing sensitive directory receive a
+/// protected DACL granting access only to the current user.
 #[derive(Debug, Error)]
 pub enum SensitiveIoError {
     #[error("failed to create sensitive directory '{path}': {source}")]
@@ -40,11 +39,33 @@ pub enum SensitiveIoError {
 }
 
 pub fn ensure_sensitive_dir(path: &Path) -> Result<(), SensitiveIoError> {
+    let existed = path.exists();
     fs::create_dir_all(path).map_err(|source| SensitiveIoError::CreateDir {
         path: path.display().to_string(),
         source,
     })?;
-    tighten_dir_permissions(path);
+    // Unix permissions are idempotent and must be re-applied even when the
+    // caller supplied an already-existing temporary/config directory. Windows
+    // uses a protected DACL; replacing an inherited ACL on a caller-owned
+    // existing parent can make unrelated cleanup/fixture paths inaccessible,
+    // so the Windows path tightens only directories created for this artifact.
+    #[cfg(unix)]
+    let should_tighten = true;
+    #[cfg(not(unix))]
+    let should_tighten = !existed;
+    if should_tighten && let Err(source) = tighten_dir_permissions(path) {
+        // A caller may intentionally place a sensitive file under a shared
+        // existing directory such as `/tmp`. The file itself is still
+        // created owner-only; failure to chmod a directory we do not own must
+        // not make profile reads fail. Newly-created directories still fail
+        // closed if tightening cannot complete.
+        if !existed || source.kind() != std::io::ErrorKind::PermissionDenied {
+            return Err(SensitiveIoError::CreateDir {
+                path: path.display().to_string(),
+                source,
+            });
+        }
+    }
     Ok(())
 }
 
@@ -91,54 +112,36 @@ fn write_err_and_cleanup_tmp(
 /// dedicated, never-renamed lock path avoids that hazard entirely -- the
 /// same pattern git, cargo, and rustup use for their own lock files.
 pub fn write_sensitive_file(path: &Path, contents: &[u8]) -> Result<(), SensitiveIoError> {
+    let lock = SensitiveFileLock::acquire(path)?;
+    lock.write(contents)
+}
+
+fn write_atomic_contents(path: &Path, contents: &[u8]) -> Result<(), SensitiveIoError> {
     if let Some(parent) = path.parent() {
         ensure_sensitive_dir(parent)?;
     }
 
-    let lock_path = sibling_with_suffix(path, ".lock");
-    #[cfg(unix)]
-    let lock_file = {
-        use std::os::unix::fs::OpenOptionsExt;
-        OpenOptions::new()
-            .create(true)
-            .write(true)
-            // The lock file's contents are never read or written -- only its
-            // existence and lockability matter -- so an existing lock file
-            // is reused as-is rather than truncated on every call.
-            .truncate(false)
-            .mode(0o600)
-            .open(&lock_path)
-            .map_err(|source| SensitiveIoError::Lock {
-                path: lock_path.display().to_string(),
-                source,
-            })?
-    };
-    #[cfg(not(unix))]
-    let lock_file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .map_err(|source| SensitiveIoError::Lock {
-            path: lock_path.display().to_string(),
-            source,
-        })?;
-    // `std::fs::File::lock()` (stable since Rust 1.89; this workspace has no
-    // MSRV pin holding it below that) is a blocking, cross-platform
-    // exclusive advisory lock -- flock(2) on Unix, LockFileEx on Windows.
-    lock_file.lock().map_err(|source| SensitiveIoError::Lock {
-        path: lock_path.display().to_string(),
-        source,
-    })?;
-
     let tmp_path = sibling_with_suffix(path, ".tmp");
+    // A crash can leave a stale temp file behind. Remove it while the stable
+    // target lock is held, then use `create_new` below so a concurrent or
+    // malicious replacement cannot turn the write into a symlink-following
+    // overwrite of another file.
+    match fs::remove_file(&tmp_path) {
+        Ok(()) => {}
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(SensitiveIoError::Write {
+                path: path.display().to_string(),
+                source,
+            });
+        }
+    }
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         let mut tmp_file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .write(true)
             .mode(0o600)
             .open(&tmp_path)
@@ -153,6 +156,9 @@ pub fn write_sensitive_file(path: &Path, contents: &[u8]) -> Result<(), Sensitiv
         // before the rename makes it visible at `path`.
         tmp_file
             .sync_all()
+            .map_err(|source| write_err_and_cleanup_tmp(&tmp_path, path, source))?;
+        drop(tmp_file);
+        tighten_file_permissions(&tmp_path)
             .map_err(|source| write_err_and_cleanup_tmp(&tmp_path, path, source))?;
         fs::rename(&tmp_path, path)
             .map_err(|source| write_err_and_cleanup_tmp(&tmp_path, path, source))?;
@@ -172,9 +178,15 @@ pub fn write_sensitive_file(path: &Path, contents: &[u8]) -> Result<(), Sensitiv
     }
     #[cfg(not(unix))]
     {
+        #[cfg(windows)]
+        let mut tmp_file =
+            open_sensitive_temp_file(&tmp_path).map_err(|source| SensitiveIoError::Write {
+                path: path.display().to_string(),
+                source,
+            })?;
+        #[cfg(not(windows))]
         let mut tmp_file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .write(true)
             .open(&tmp_path)
             .map_err(|source| SensitiveIoError::Write {
@@ -187,15 +199,135 @@ pub fn write_sensitive_file(path: &Path, contents: &[u8]) -> Result<(), Sensitiv
         tmp_file
             .sync_all()
             .map_err(|source| write_err_and_cleanup_tmp(&tmp_path, path, source))?;
+        // Windows keeps rename/delete sharing decisions on the open handle;
+        // close the creation-time protected handle before applying the final
+        // ACL and promoting the temp file.
+        drop(tmp_file);
+        tighten_file_permissions(&tmp_path)
+            .map_err(|source| write_err_and_cleanup_tmp(&tmp_path, path, source))?;
         fs::rename(&tmp_path, path)
             .map_err(|source| write_err_and_cleanup_tmp(&tmp_path, path, source))?;
     }
 
-    // Release the lock only after the rename (and, on Unix, the
-    // parent-directory fsync) above has completed -- dropping the handle
-    // closes the fd, which releases the OS-level advisory lock.
-    drop(lock_file);
     Ok(())
+}
+
+/// Recover the readable state after a process crash during an atomic write.
+///
+/// A completed write is already visible at `path`; an unfinished sibling
+/// `path.tmp` is never promoted because it has not passed the rename boundary.
+/// Removing that stale temporary file makes recovery deterministic and avoids
+/// leaving credential bytes at a predictable path. The next write recreates a
+/// fresh temp file under the normal lock.
+pub fn recover_sensitive_file(path: &Path) -> Result<(), SensitiveIoError> {
+    let _lock = SensitiveFileLock::acquire(path)?;
+    let tmp_path = sibling_with_suffix(path, ".tmp");
+    match fs::remove_file(&tmp_path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(SensitiveIoError::Write {
+            path: tmp_path.display().to_string(),
+            source,
+        }),
+    }
+}
+
+/// A stable lock held across an entire sensitive-artifact transaction.
+/// Atomic replacement changes the target inode, so the lock intentionally
+/// lives beside the target and is never renamed.
+pub struct SensitiveFileLock {
+    path: PathBuf,
+    lock_file: std::fs::File,
+}
+
+impl SensitiveFileLock {
+    pub fn acquire(path: &Path) -> Result<Self, SensitiveIoError> {
+        if let Some(parent) = path.parent() {
+            ensure_sensitive_dir(parent)?;
+        }
+        let lock_path = sibling_with_suffix(path, ".lock");
+        #[cfg(unix)]
+        let lock_file = {
+            use std::os::unix::fs::OpenOptionsExt;
+            OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(false)
+                .mode(0o600)
+                .open(&lock_path)
+                .map_err(|source| SensitiveIoError::Lock {
+                    path: lock_path.display().to_string(),
+                    source,
+                })?
+        };
+        #[cfg(not(unix))]
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|source| SensitiveIoError::Lock {
+                path: lock_path.display().to_string(),
+                source,
+            })?;
+        lock_file.lock().map_err(|source| SensitiveIoError::Lock {
+            path: lock_path.display().to_string(),
+            source,
+        })?;
+        tighten_file_permissions(&lock_path).map_err(|source| SensitiveIoError::Lock {
+            path: lock_path.display().to_string(),
+            source,
+        })?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            lock_file,
+        })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn write(&self, contents: &[u8]) -> Result<(), SensitiveIoError> {
+        let _lock_guard = &self.lock_file;
+        write_atomic_contents(&self.path, contents)
+    }
+
+    pub fn write_sibling(&self, suffix: &str, contents: &[u8]) -> Result<(), SensitiveIoError> {
+        write_atomic_contents(&sibling_with_suffix(&self.path, suffix), contents)
+    }
+
+    pub fn read_sibling(&self, suffix: &str) -> Result<Option<Vec<u8>>, SensitiveIoError> {
+        let path = sibling_with_suffix(&self.path, suffix);
+        match fs::read(&path) {
+            Ok(contents) => Ok(Some(contents)),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(SensitiveIoError::Write {
+                path: path.display().to_string(),
+                source,
+            }),
+        }
+    }
+
+    pub fn remove_sibling(&self, suffix: &str) -> Result<(), SensitiveIoError> {
+        let path = sibling_with_suffix(&self.path, suffix);
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(SensitiveIoError::Write {
+                path: path.display().to_string(),
+                source,
+            }),
+        }
+    }
+}
+
+impl std::fmt::Debug for SensitiveFileLock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SensitiveFileLock")
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
 }
 
 pub fn append_sensitive_file(path: &Path, contents: &[u8]) -> Result<(), SensitiveIoError> {
@@ -241,18 +373,246 @@ pub fn append_sensitive_file(path: &Path, contents: &[u8]) -> Result<(), Sensiti
             .map_err(|source| SensitiveIoError::Append {
                 path: path.display().to_string(),
                 source,
-            })
+            })?;
+        tighten_file_permissions(path).map_err(|source| SensitiveIoError::Append {
+            path: path.display().to_string(),
+            source,
+        })
     }
 }
 
-fn tighten_dir_permissions(path: &Path) {
+fn tighten_dir_permissions(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+        Ok(())
     }
-    #[cfg(not(unix))]
-    let _ = path;
+    #[cfg(windows)]
+    {
+        tighten_windows_acl(path)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+fn tighten_file_permissions(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+    }
+    #[cfg(windows)]
+    {
+        tighten_windows_acl(path)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn open_sensitive_temp_file(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::FromRawHandle;
+    use std::ptr::{null, null_mut};
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, GENERIC_WRITE, INVALID_HANDLE_VALUE, LocalFree,
+    };
+    use windows_sys::Win32::Security::Authorization::{
+        BuildTrusteeWithSidW, EXPLICIT_ACCESS_W, GRANT_ACCESS, SetEntriesInAclW, TRUSTEE_IS_SID,
+        TRUSTEE_IS_USER, TRUSTEE_W,
+    };
+    use windows_sys::Win32::Security::{
+        GetTokenInformation, InitializeSecurityDescriptor, NO_INHERITANCE, SECURITY_ATTRIBUTES,
+        SECURITY_DESCRIPTOR, SetSecurityDescriptorDacl, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{
+        CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE,
+    };
+    use windows_sys::Win32::System::SystemServices::SECURITY_DESCRIPTOR_REVISION;
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let mut token = null_mut();
+    let mut acl = null_mut();
+    let result = unsafe {
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            let mut size = 0u32;
+            let _ = GetTokenInformation(token, TokenUser, null_mut(), 0, &mut size);
+            if size == 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                let mut buffer = vec![0u8; size as usize];
+                if GetTokenInformation(
+                    token,
+                    TokenUser,
+                    buffer.as_mut_ptr().cast(),
+                    size,
+                    &mut size,
+                ) == 0
+                {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    let token_user = buffer.as_ptr().cast::<TOKEN_USER>();
+                    let mut trustee = TRUSTEE_W::default();
+                    BuildTrusteeWithSidW(&mut trustee, (*token_user).User.Sid);
+                    trustee.TrusteeForm = TRUSTEE_IS_SID;
+                    trustee.TrusteeType = TRUSTEE_IS_USER;
+                    let access = EXPLICIT_ACCESS_W {
+                        grfAccessPermissions: GENERIC_WRITE,
+                        grfAccessMode: GRANT_ACCESS,
+                        grfInheritance: NO_INHERITANCE,
+                        Trustee: trustee,
+                    };
+                    let acl_status = SetEntriesInAclW(1, &access, null(), &mut acl);
+                    if acl_status != 0 {
+                        Err(std::io::Error::from_raw_os_error(acl_status as i32))
+                    } else {
+                        let mut descriptor = SECURITY_DESCRIPTOR::default();
+                        let descriptor_initialized = InitializeSecurityDescriptor(
+                            std::ptr::from_mut(&mut descriptor).cast(),
+                            SECURITY_DESCRIPTOR_REVISION,
+                        ) != 0;
+                        let descriptor_ready = descriptor_initialized
+                            && SetSecurityDescriptorDacl(
+                                std::ptr::from_mut(&mut descriptor).cast(),
+                                1,
+                                acl,
+                                0,
+                            ) != 0;
+                        if !descriptor_ready {
+                            Err(std::io::Error::last_os_error())
+                        } else {
+                            let security_attributes = SECURITY_ATTRIBUTES {
+                                nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+                                lpSecurityDescriptor: std::ptr::from_mut(&mut descriptor).cast(),
+                                bInheritHandle: 0,
+                            };
+                            let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+                            wide.push(0);
+                            let handle = CreateFileW(
+                                wide.as_ptr(),
+                                GENERIC_WRITE,
+                                FILE_SHARE_NONE,
+                                &security_attributes,
+                                CREATE_NEW,
+                                FILE_ATTRIBUTE_NORMAL,
+                                null_mut(),
+                            );
+                            if handle == INVALID_HANDLE_VALUE {
+                                Err(std::io::Error::last_os_error())
+                            } else {
+                                // SAFETY: CreateFileW returned an owned handle;
+                                // File takes responsibility for closing it.
+                                Ok(std::fs::File::from_raw_handle(handle))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    if !acl.is_null() {
+        unsafe {
+            let _ = LocalFree(acl.cast());
+        }
+    }
+    if !token.is_null() {
+        unsafe {
+            let _ = CloseHandle(token);
+        }
+    }
+    result
+}
+
+#[cfg(windows)]
+fn tighten_windows_acl(path: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::{null, null_mut};
+    use windows_sys::Win32::Foundation::{CloseHandle, LocalFree};
+    use windows_sys::Win32::Security::Authorization::{
+        BuildTrusteeWithSidW, EXPLICIT_ACCESS_W, GRANT_ACCESS, SE_FILE_OBJECT, SetEntriesInAclW,
+        SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
+    };
+    use windows_sys::Win32::Security::{
+        DACL_SECURITY_INFORMATION, GetTokenInformation, NO_INHERITANCE,
+        PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    };
+    use windows_sys::Win32::Storage::FileSystem::FILE_ALL_ACCESS as FILE_ALL_ACCESS_FS;
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let mut token = null_mut();
+    let result = unsafe {
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            let mut size = 0u32;
+            let _ = GetTokenInformation(token, TokenUser, null_mut(), 0, &mut size);
+            if size == 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                let mut buffer = vec![0u8; size as usize];
+                if GetTokenInformation(
+                    token,
+                    TokenUser,
+                    buffer.as_mut_ptr().cast(),
+                    size,
+                    &mut size,
+                ) == 0
+                {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    let token_user = buffer.as_ptr().cast::<TOKEN_USER>();
+                    let mut trustee = TRUSTEE_W::default();
+                    BuildTrusteeWithSidW(&mut trustee, (*token_user).User.Sid);
+                    trustee.TrusteeForm = TRUSTEE_IS_SID;
+                    trustee.TrusteeType = TRUSTEE_IS_USER;
+                    let access = EXPLICIT_ACCESS_W {
+                        grfAccessPermissions: FILE_ALL_ACCESS_FS,
+                        grfAccessMode: GRANT_ACCESS,
+                        grfInheritance: NO_INHERITANCE,
+                        Trustee: trustee,
+                    };
+                    let mut acl = null_mut();
+                    let acl_status = SetEntriesInAclW(1, &access, null(), &mut acl);
+                    if acl_status != 0 {
+                        Err(std::io::Error::from_raw_os_error(acl_status as i32))
+                    } else {
+                        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+                        wide.push(0);
+                        let status = SetNamedSecurityInfoW(
+                            wide.as_ptr(),
+                            SE_FILE_OBJECT,
+                            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                            null_mut(),
+                            null_mut(),
+                            acl,
+                            null_mut(),
+                        );
+                        let _ = LocalFree(acl.cast());
+                        if status != 0 {
+                            Err(std::io::Error::from_raw_os_error(status as i32))
+                        } else {
+                            Ok(())
+                        }
+                    }
+                }
+            }
+        }
+    };
+    if !token.is_null() {
+        unsafe {
+            let _ = CloseHandle(token);
+        }
+    }
+    result
 }
 
 #[cfg(test)]
@@ -306,6 +666,20 @@ mod tests {
 
         let text = fs::read_to_string(&path).expect("read target");
         assert_eq!(text, "fresh-content");
+    }
+
+    #[test]
+    fn recovery_removes_crash_left_tmp_without_touching_committed_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("profile.yaml");
+        write_sensitive_file(&path, b"committed").expect("write");
+        let stale_tmp = dir.path().join("profile.yaml.tmp");
+        fs::write(&stale_tmp, b"partial-secret-write").expect("seed stale tmp");
+
+        recover_sensitive_file(&path).expect("recover");
+
+        assert_eq!(fs::read_to_string(&path).expect("read target"), "committed");
+        assert!(!stale_tmp.exists());
     }
 
     /// Builds a self-describing record whose total length varies by
