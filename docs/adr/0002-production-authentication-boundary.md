@@ -19,10 +19,11 @@ credential identity binding, persistence policy, and the JSON agent protocol in
 `ayx-core::auth`. Native Credential Manager, Keychain, and Secret Service
 backends implement the platform-neutral secure-storage interface.
 
-The new wizard/canary path is opt-in through `AYX_AUTH_ROLLOUT=canary` (or the
-unprefixed `AUTH_ROLLOUT=canary` compatibility alias) or `wizard`; the default
-remains legacy until characterization/live-canary and Terra release checks
-pass. New writes use a binding fingerprint that includes
+The Wizard path is the v0.16.0 default after characterization, live-canary,
+and Terra release checks pass. `AYX_AUTH_ROLLOUT=canary` (or the unprefixed
+`AUTH_ROLLOUT=canary` compatibility alias) remains an isolated validation
+namespace, while `AYX_AUTH_ROLLOUT=legacy` (or `otp`) is the explicit rollback
+setting. New writes use a binding fingerprint that includes
 account, issuer, region, base URL, workspace id, and workspace gid. Reads keep
 supporting legacy inline and unbound keyring references. A secure-store failure
 can be resolved by an interactive, owner-only plaintext fallback (Enter means

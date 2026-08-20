@@ -305,7 +305,7 @@ It also exercises edge coverage for representative families:
 
 ## Live Coverage Baseline
 
-Current measurement of `ayx one api coverage` against the live `GET /v4/open-api-spec`, taken 2026-08-18 against the authenticated local-dev workspace.
+Current measurement of `ayx one api coverage` against the live `GET /v4/open-api-spec`, taken 2026-08-20 against an authenticated disposable validation workspace.
 
 For comparison, the previous baseline was 43.8% coverage (2026-07-30). The current source also
 normalizes both `{param}` and `:param` path-template styles, removing two false missing rows and
@@ -315,13 +315,13 @@ instead of the spec body and reported `spec_operations: 0` with an empty `missin
 
 | metric | value |
 |---|---|
-| `coverage_pct` | **62.6%** |
-| `spec_operations` | 235 |
+| `coverage_pct` | **63.1%** |
+| `spec_operations` | 233 |
 | `covered` | 147 |
-| `missing` (spec documents it, CLI does not wire it) | **88** |
+| `missing` (spec documents it, CLI does not wire it) | **86** |
 | `stale` (inventory wires it, spec does not describe it) | 16 |
 | `outside_spec_namespace` (sibling services, not comparable) | 7 |
-| `inventory_total` / `inventory_operations` | 172 / 163 |
+| `inventory_total` / `inventory_operations` | 172 / 172 |
 
 Missing operations concentrate in a few resources:
 
@@ -338,7 +338,7 @@ Missing operations concentrate in a few resources:
 
 **`stale` does not mean broken.** It means the published spec does not describe an endpoint the CLI wires. Several entries on that list are live-verified working: `one connections dry-run` reaches `POST /v4/connections/dryRun` and returns body validation, `one person count` reaches `GET /v4/people/count` but is intentionally retired with HTTP 410 `gone`, and `GET /v4/workflows` is live while absent from the published spec. Treat `stale` as "the spec is incomplete here", and only investigate a row after confirming the route is genuinely dead.
 
-**`--check` currently exits 1.** It gates on `missing > 0`, and `missing` is 88. Wiring `ayx one api coverage --check` into CI — which `docs/one-roadmap.md` recommends — would red the build immediately. That is an honest signal rather than a bug, but it needs a decision first: either gate on a coverage threshold instead of `missing == 0`, or scope the gate to a resource allowlist expected to be complete. Do not wire it as-is.
+**`--check` currently exits 1.** It gates on `missing > 0`, and `missing` is 86. Wiring `ayx one api coverage --check` into CI — which `docs/one-roadmap.md` recommends — would red the build immediately. That is an honest signal rather than a bug, but it needs a decision first: either gate on a coverage threshold instead of `missing == 0`, or scope the gate to a resource allowlist expected to be complete. Do not wire it as-is.
 
 ## Next Backend Wiring Pass
 

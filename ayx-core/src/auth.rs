@@ -636,15 +636,16 @@ pub trait UserInteraction {
     fn notice(&mut self, message: &str);
 }
 
-/// Internal rollout values.  The legacy adapter remains the default until a
-/// release explicitly opts into the canary or wizard path.
+/// Rollout values for the versioned authentication orchestration boundary.
+/// Wizard is the supported default; the legacy adapter remains available as
+/// an explicit rollback path, and canary is reserved for isolated validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthRollout {
     #[default]
+    Wizard,
     Legacy,
     Canary,
-    Wizard,
 }
 
 /// Report inline secret fields without reading or returning their values.
@@ -1073,8 +1074,16 @@ mod tests {
     }
 
     #[test]
-    fn rollout_defaults_to_legacy_for_safe_rollback() {
-        assert_eq!(AuthRollout::default(), AuthRollout::Legacy);
+    fn rollout_defaults_to_wizard() {
+        assert_eq!(AuthRollout::default(), AuthRollout::Wizard);
+    }
+
+    #[test]
+    fn legacy_rollout_remains_an_explicit_rollback() {
+        assert_eq!(AuthRollout::parse("legacy"), Some(AuthRollout::Legacy));
+        assert_eq!(AuthRollout::parse("otp"), Some(AuthRollout::Legacy));
+        assert_eq!(AuthRollout::parse("wizard"), Some(AuthRollout::Wizard));
+        assert_eq!(AuthRollout::parse("canary"), Some(AuthRollout::Canary));
     }
 
     #[test]

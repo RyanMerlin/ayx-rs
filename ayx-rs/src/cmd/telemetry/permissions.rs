@@ -459,8 +459,8 @@ mod tests {
     #[test]
     fn resource_id_accepts_the_numeric_ids_the_one_api_actually_returns() {
         assert_eq!(
-            resource_id(&json!({ "id": 44865 })),
-            Some("44865".to_string()),
+            resource_id(&json!({ "id": 40001 })),
+            Some("40001".to_string()),
             "connections, flows, folders, job groups, output objects and write \
              settings all return numeric ids"
         );

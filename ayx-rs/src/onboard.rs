@@ -2082,7 +2082,7 @@ mod tests {
     fn empty_and_junk_yield_nothing() {
         assert_eq!(parse_workspace_url("   "), ParsedWorkspaceUrl::default());
         // A 26-char token containing a Crockford-excluded letter (I) is not a gid.
-        let junk = "01KMGF85WTTEJZ397MW1RBD9ZI";
+        let junk = "01AAAAAAAAAAAAAAAAAAAAAAAI";
         assert!(junk.contains('I') && junk.len() == 26);
         assert_eq!(parse_workspace_url(junk), ParsedWorkspaceUrl::default());
     }

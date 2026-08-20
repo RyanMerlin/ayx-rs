@@ -2815,12 +2815,12 @@ mongo:
 
     #[test]
     fn workspace_context_is_derived_from_jwt_scope_claim() {
-        let payload = URL_SAFE_NO_PAD.encode(r#"{"scope":"w:01KMGF85WTTEJWZ397MW1RBD9ZB"}"#);
+        let payload = URL_SAFE_NO_PAD.encode(r#"{"scope":"w:01AAAAAAAAAAAAAAAAAAAAAAAA"}"#);
         let token = format!("eyJhbGciOiJub25lIn0.{}.", payload);
 
         assert_eq!(
             workspace_context_from_token(Some(&token)),
-            Some("w:01KMGF85WTTEJWZ397MW1RBD9ZB".to_string())
+            Some("w:01AAAAAAAAAAAAAAAAAAAAAAAA".to_string())
         );
     }
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+<!-- Keep unreleased changes above the next versioned section. -->
+
+## 0.16.0 — 2026-08-20
+
 ### Added
 
 - **`WorkspaceCredential` gains `sp_client_secret` / `sp_client_secret_ref`, so a profile holding several One workspaces can carry a distinct service-principal secret per workspace instead of sharing one profile-level value.** Resolution order: workspace-level dedicated field → profile-level dedicated field → shared `client_secret`. The fallback to the shared field is deliberate, not incidental — profiles written before this change carry only `client_secret`, and without the fallback they would stop authenticating on upgrade. As with the existing `*_ref` fields, `sp_client_secret_ref` may hold an inline secret when no scheme prefix is present, so callers must not print it blind.
@@ -16,7 +20,7 @@
 
 ### Fixed
 
-- **Authentication now has a versioned, rollback-safe orchestration boundary.** The legacy email-OTP transport is pinned by a compatibility contract and remains the emergency adapter, while the shared state machine supplies bounded OTP/password recovery, stale-credential classification, and platform-neutral HTTP, secure-store, browser/device, clock, and interaction seams. New wizard/canary writes bind credentials to account, issuer, region, base URL, workspace id, and workspace gid; secure stores remain preferred, with an explicit interactive plaintext fallback or session-only choice. `one doctor auth --migrate` reports inline secrets and can migrate them when secure storage is available. The versioned `one auth protocol` command validates agent requests without returning secrets, and the default rollout remains legacy until a canary gate is enabled with `AYX_AUTH_ROLLOUT`.
+- **Authentication now has a versioned, rollback-safe orchestration boundary.** The legacy email-OTP transport is pinned by a compatibility contract and remains the explicit emergency adapter, while the shared state machine supplies bounded OTP/password recovery, stale-credential classification, and platform-neutral HTTP, secure-store, browser/device, clock, and interaction seams. New wizard/canary writes bind credentials to account, issuer, region, base URL, workspace id, and workspace gid; secure stores remain preferred, with an explicit interactive plaintext fallback or session-only choice. `one doctor auth --migrate` reports inline secrets and can migrate them when secure storage is available. The versioned `one auth protocol` command validates agent requests without returning secrets, and the Wizard rollout is now the default. Set `AYX_AUTH_ROLLOUT=legacy` for the documented rollback path; `canary` remains isolated for validation.
 
 - **`ayx one datasets list` never worked.** `GET /v4/datasetLibrary` declares the query parameter `datasetsFilter` as `required: true`, and the CLI never sent it, so every call failed with `400 ApiValidationFailed`. Adds `--datasets-filter`, defaulting to `all` so the bare command works, accepting the spec's enum (`all`/`imported`/`reference`/`recipe`) as either a single value or a list. The parallel `/v4/datasetLibrary/count` declares the same parameter `required: false`, so it stays optional there and is omitted rather than silently defaulted.
 

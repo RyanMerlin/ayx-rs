@@ -75,7 +75,10 @@ The current smoke harness lives in `ayx-rs/tests/one_live_smoke.rs` and already:
 - short-circuits cleanly when auth acquisition is unavailable
 - validates the most important read paths across the One surface
 - reports the surface and operation names in the envelope assertions
-- contains 75 live tests as of this repo state (73 passed and 2 were blocked by the expired `live` profile token in the latest run)
+- contains 75 generated live tests as of this repo state. The v0.16.0
+  release-candidate validation used a fresh Wizard login and a release-binary
+  read sweep; tests requiring a live token remain explicitly gated by
+  `AYX_ONE_LIVE_SMOKE`.
 
 ## Methodology traps
 
@@ -125,7 +128,7 @@ pre-approved commands below.
 ```bash
 cd /path/to/ayx-rs
 git status --porcelain && git log --oneline -1
-which ayx && ayx --version                       # must be ~/.local/bin/ayx, 0.15.0
+which ayx && ayx --version                       # must be ~/.local/bin/ayx, 0.16.0
 cargo nextest run --workspace -E 'not binary(one_live_smoke)'
 cargo nextest run -p ayx-rs -E 'binary(one_inventory_drift)'
 cargo test -p ayx-rs --test one_endpoint_matrix_doc
@@ -152,7 +155,7 @@ Phase 1 and Phase 2 test different artifacts (coverage, not a gap, as long as it
 
 - `one_connections_dry_run_shape_live` — documented pre-existing failure.
 
-The current entitled `local-dev` probe returned HTTP 200 for `one plans count`, so its live-smoke
+The current entitled disposable validation probe returned HTTP 200 for `one plans count`, so its live-smoke
 allowlist is intentionally narrow: only `permission_denied` remains an accepted backend result.
 Unexpected `not_found` or transport failures are findings, not expected noise.
 
@@ -244,7 +247,7 @@ An Express HTML 404 or JSON `RouteNotFoundException` means the route genuinely d
 A clean JSON `NotFoundError`/`400`/`403` means the route exists and rejected the fake id — delete
 is possible but unwired in the CLI. Record the result in the workflow-family notes in the matrix.
 
-## Phase 3 — Targeted 0.15.0 regression pass (~15 min)
+## Phase 3 — Targeted 0.16.0 regression pass (~15 min)
 
 One check per CHANGELOG-flagged fix, honestly scoped to what is live-testable with `.env`'s
 `AYX_ONE_*` credentials. The Server-API error-code fix is Server-side and should be recorded as
@@ -384,19 +387,19 @@ unless a real share is separately requested.)
 
 ### 5c. Completed Phase 1 — groups, schedules, connection permissions, and plans
 
-This phase was executed against workspace `91946` / GID `01KMGF85WTTEJZ397MW1RBD9ZB` on
-2026-08-18 using the authenticated `local-dev` profile. Every mutation was dry-run reviewed first.
+This phase was executed against a disposable validation workspace on
+2026-08-20 using an authenticated isolated profile. Every mutation was dry-run reviewed first.
 
-- Created group `ayx-rs-codex-group-canary-20260818`, added Javier (`4477`) and Suresh (`203464`),
+- Created a disposable validation group, added two disposable users,
   verified both memberships, removed both, and deleted the group. The workspace returned to its
   original single-group baseline.
 - Added and live-verified schedule lifecycle commands for `POST /v4/schedules`,
-  `PUT /v4/schedules/{id}`, and `DELETE /v4/schedules/{id}`. Created schedule `39631` for
-  workflow `01M00M9CRWSANK79MBCA0V9VXX`, renamed it, disabled it, deleted it, and verified the
+  `PUT /v4/schedules/{id}`, and `DELETE /v4/schedules/{id}`. Created a disposable schedule,
+  renamed it, disabled it, deleted it, and verified the
   schedule list returned to the original one-schedule baseline. The list endpoint reflected the
   deletion immediately; the detail endpoint remained eventually consistent and served the deleted
   record afterward.
-- Shared connection `44865` (`land-lease-intel-bq`) with both people as viewers, verified access,
+- Shared a disposable connection with both people as viewers, verified access,
   revoked both shares, and verified the original permission list. Connection credentials and
   configuration were not changed. The request builder was corrected to omit empty subject buckets
   because the live API rejects an empty `group` array when sharing with people.

@@ -1050,12 +1050,12 @@ mod tests {
 
     #[test]
     fn explicit_workspace_path_id_must_match_current_numeric_id() {
-        let error = validate_workspace_path_id(Some("91947"), "91946".to_string())
+        let error = validate_workspace_path_id(Some("90002"), "90001".to_string())
             .expect_err("a different workspace path must be rejected");
-        assert!(error.to_string().contains("91946"));
+        assert!(error.to_string().contains("90001"));
         assert_eq!(
-            validate_workspace_path_id(Some("91946"), "91946".to_string()).unwrap(),
-            "91946"
+            validate_workspace_path_id(Some("90001"), "90001".to_string()).unwrap(),
+            "90001"
         );
     }
 

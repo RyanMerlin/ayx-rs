@@ -12,6 +12,9 @@ param(
     [Parameter(Mandatory = $true)]
     [uri]$BaseUrl,
 
+    [ValidateSet("canary", "wizard")]
+    [string]$Rollout = "canary",
+
     [ValidateSet("session", "secure")]
     [string]$SecretPolicy = "session",
 
@@ -25,11 +28,17 @@ if (-not (Test-Path -LiteralPath $ConfigHome -PathType Container)) {
 }
 
 # The canary namespace prevents binding-derived keyring accounts from colliding
-# with ordinary legacy credentials. Session-only is the default so an operator
-# can prove the real OTP/PAT exchange without persisting a credential.
+# with ordinary credentials. Wizard uses the normal profile namespace so this
+# invocation also exercises the production-default persistence path. Session-
+# only is the default so an operator can prove the real OTP/PAT exchange
+# without persisting a credential.
 $env:AYX_CONFIG_HOME = (Resolve-Path -LiteralPath $ConfigHome).Path
-$env:AYX_AUTH_LIVE_CANARY = "1"
-$env:AYX_AUTH_ROLLOUT = "canary"
+$env:AYX_AUTH_ROLLOUT = $Rollout
+if ($Rollout -eq "canary") {
+    $env:AYX_AUTH_LIVE_CANARY = "1"
+} else {
+    Remove-Item Env:AYX_AUTH_LIVE_CANARY -ErrorAction SilentlyContinue
+}
 
 if ($BaseUrl.Scheme -ne "https" -or [string]::IsNullOrWhiteSpace($BaseUrl.Host)) {
     throw "BaseUrl must be an HTTPS Alteryx One regional URL"

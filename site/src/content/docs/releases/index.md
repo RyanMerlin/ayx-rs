@@ -7,6 +7,21 @@ sidebar:
 
 Release notes for each tagged version of `ayx`. For current behavior, use the live docs above; for a specific binary, read the notes for that version.
 
+## v0.16.0
+
+**Wizard authentication is now the default.** `ayx one login` uses the
+binding-aware orchestration and secure persistence path by default; set
+`AYX_AUTH_ROLLOUT=legacy` for the explicit rollback adapter, or use the
+isolated `canary` rollout for validation. Regional One hosts remain explicit,
+and the release documents session-only and consent-based plaintext fallback
+options for constrained environments.
+
+**The Alteryx One surface remains honestly measured.** The current live
+baseline is 63.1% of comparable OpenAPI operations, with remaining gaps
+documented as roadmap work. Corrected routes, dataset filters, workflow
+pagination, mutation dry-run protection, and error classification are included
+from the v0.15.0 development cycle.
+
 ## v0.15.0
 
 **`ayx one workflows` adds a real CLI surface for Alteryx One cloud-native canvas workflows.** The ULID-keyed `/svc-workflow` family now supports list, count, assets, detail, dependencies, engines, tools, copy, and share; it is distinct from the integer-id-keyed Designer Cloud `one flows` family. Detail and count identify their client-side synthesis, share documents its recovered request shape, and arbitrary workflow authoring remains out of scope.

@@ -644,30 +644,30 @@ mod share_tests {
     #[test]
     fn share_body_moves_the_id_into_the_body_and_omits_empty_subject_buckets() {
         let body = build_connection_share_body(
-            "44865",
+            "40001",
             ConnectionSharePolicy::Editor,
-            &["113168".to_string()],
+            &["70001".to_string()],
             &[],
         )
         .expect("valid share");
 
-        assert_eq!(body["connectionId"], "44865");
+        assert_eq!(body["connectionId"], "40001");
         assert_eq!(body["policy"], "EDITOR");
-        assert_eq!(body["subjects"]["person"], json!(["113168"]));
+        assert_eq!(body["subjects"]["person"], json!(["70001"]));
         assert!(body["subjects"].get("group").is_none());
     }
 
     #[test]
     fn share_body_includes_both_non_empty_subject_buckets() {
         let body = build_connection_share_body(
-            "44865",
+            "40001",
             ConnectionSharePolicy::Viewer,
-            &["113168".to_string()],
+            &["70001".to_string()],
             &["900".to_string()],
         )
         .expect("valid share");
 
-        assert_eq!(body["subjects"]["person"], json!(["113168"]));
+        assert_eq!(body["subjects"]["person"], json!(["70001"]));
         assert_eq!(body["subjects"]["group"], json!(["900"]));
     }
 
@@ -695,17 +695,17 @@ mod share_tests {
     #[test]
     fn raw_share_body_injects_missing_connection_id() {
         let body = validate_connection_share_body(
-            "44865",
-            json!({"policy": "VIEWER", "subjects": {"person": ["4477"]}}),
+            "40001",
+            json!({"policy": "VIEWER", "subjects": {"person": ["70001"]}}),
         )
         .expect("missing id should be bound");
-        assert_eq!(body["connectionId"], "44865");
+        assert_eq!(body["connectionId"], "40001");
     }
 
     #[test]
     fn raw_share_body_rejects_conflicting_connection_id() {
         let err = validate_connection_share_body(
-            "44865",
+            "40001",
             json!({"connectionId": "99999", "policy": "VIEWER"}),
         )
         .expect_err("conflicting id must be rejected");
@@ -714,10 +714,10 @@ mod share_tests {
 
     #[test]
     fn unshare_query_percent_encodes_every_value() {
-        let q = build_connection_unshare_query("44865", "113168", ShareSubjectType::Person);
+        let q = build_connection_unshare_query("40001", "70001", ShareSubjectType::Person);
         assert_eq!(
             q,
-            "/v4/connections/share?connectionId=44865&subjectId=113168&subjectType=person"
+            "/v4/connections/share?connectionId=40001&subjectId=70001&subjectType=person"
         );
 
         // An id containing & or = must not be able to forge extra parameters.
@@ -733,13 +733,13 @@ mod share_tests {
         let subjects = json!({
             "people": [
                 { "subjectId": 646, "id": 646, "policyTag": "connection_author" },
-                { "subjectId": 113168, "id": 113168, "policyTag": "connection_author" }
+                { "subjectId": 70001, "id": 70001, "policyTag": "connection_author" }
             ],
             "groups": [ { "id": 900, "name": "analysts" } ]
         });
 
-        let person = find_shared_subject(&subjects, "113168").expect("person found");
-        assert_eq!(person["subjectId"], 113168);
+        let person = find_shared_subject(&subjects, "70001").expect("person found");
+        assert_eq!(person["subjectId"], 70001);
         assert_eq!(person["subjectBucket"], "people");
 
         let group = find_shared_subject(&subjects, "900").expect("group found");

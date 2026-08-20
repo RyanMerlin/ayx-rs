@@ -1,8 +1,8 @@
 # Production authentication handoff
 
-Status: hardened implementation complete; `AUTH_ROLLOUT=legacy` remains the
-default. The legacy email-OTP adapter is still present and is the emergency
-rollback path.
+Status: hardened implementation complete; the Wizard orchestration is the
+default rollout for v0.16.0. The legacy email-OTP adapter remains present as
+the explicit emergency rollback path.
 
 ## What is included
 
@@ -51,30 +51,33 @@ pwsh -File .\scripts\live-auth-canary.ps1 `
   -ConfigHome C:\temp\ayx-auth-canary `
   -Profile disposable-canary `
   -WorkspaceGid <disposable-workspace-gid> `
-  -BaseUrl https://<region>.alteryxcloud.com
+  -BaseUrl https://<region>.alteryxcloud.com `
+  -Rollout canary
 ```
 
 `BaseUrl` is required because the regional host is part of the credential
 binding; it must match the workspace's actual Alteryx One region and is not
-assumed to be `us1`. The script uses an isolated config home, `AYX_AUTH_ROLLOUT=canary`, the
-`canary` keyring namespace, and session-only persistence by default. It never
-accepts a password as a command-line argument and scans output for secret
-fields before emitting it. Record only the exit status, expiry metadata, and
-redacted output; do not attach OTPs, passwords, tokens, or the isolated
-profile contents.
+assumed to be `us1`. The default `canary` run uses an isolated config home,
+`AYX_AUTH_ROLLOUT=canary`, the `canary` keyring namespace, and session-only
+persistence. To validate the production-default Wizard path, use a separate
+isolated config home and `-Rollout wizard`; that run uses the normal keyring
+namespace and should use `-SecretPolicy secure` when the host supports it. The
+script never accepts a password as a command-line argument and scans output
+for secret fields before emitting it. Record only the exit status, expiry
+metadata, and redacted output; do not attach OTPs, passwords, tokens, or the
+isolated profile contents.
 
 ## Rollout and rollback
 
-1. Keep the default on `AUTH_ROLLOUT=legacy` while the live canary and an
-   internal/canary soak are completed.
-2. Enable the new path for a controlled cohort only after live OTP success,
-   no legacy-contract drift, clean secret-output checks, and acceptable
-   recovery/telemetry results.
-3. If a regression appears, set rollout back to legacy. Do not delete the
-   legacy adapter during this release.
-4. Decommission legacy in a separate release after the canary and soak evidence
-   show that rollback is no longer needed, with a final live OTP contract test
-   and an explicit removal approval.
+1. The v0.16.0 default is Wizard after the isolated live login, full One
+   surface sweep, and release checks are green.
+2. If a regression appears, set `AYX_AUTH_ROLLOUT=legacy` and retry. Do not
+   delete the legacy adapter during this release.
+3. Keep `canary` reserved for isolated validation; it must not share ordinary
+   profile or keyring state.
+4. Decommission legacy in a separate release after a later canary, internal
+   soak, telemetry review, final live OTP contract test, and explicit rollback
+   approval.
 
 ## Useful checks
 
@@ -85,5 +88,6 @@ cargo nextest run --workspace --locked
 wsl.exe -d Ubuntu -- bash -lc 'cd /mnt/c/code/ayx-rs && cargo nextest run --workspace --locked --filter-expr "not test(concurrent_writes_never_tear_the_file)"'
 ```
 
-The working tree was committed after these checks. Do not push or change the
-rollout default without the live-canary evidence and a fresh review.
+The working tree should be clean after the release checks. Do not remove the
+legacy adapter or publish a follow-up that changes the rollout policy without
+fresh live evidence and review.
