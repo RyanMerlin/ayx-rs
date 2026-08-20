@@ -65,6 +65,7 @@ pub(crate) fn login(
     refresh_token_arg: Option<String>,
     access_token_arg: Option<String>,
     token_endpoint_arg: Option<String>,
+    base_url_arg: Option<String>,
     workspace_id: Option<String>,
     workspace_gid_arg: Option<String>,
     save_workspace_password: bool,
@@ -91,6 +92,12 @@ pub(crate) fn login(
         }
         if let Some(ep) = token_endpoint_arg {
             one.token_endpoint_url = Some(normalize_alteryx_one_token_endpoint(&ep));
+        }
+        if let Some(base_url) = base_url_arg {
+            one.base_url = Some(
+                ayx_core::profile::normalize_alteryx_one_base_url(&base_url)
+                    .context("invalid --base-url; expected an HTTPS Alteryx One regional URL")?,
+            );
         }
     }
 

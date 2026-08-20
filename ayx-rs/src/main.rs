@@ -1598,6 +1598,9 @@ pub(crate) enum OneCommand {
         /// Token endpoint URL (defaults to the profile's configured endpoint).
         #[arg(long)]
         token_endpoint: Option<String>,
+        /// Regional Alteryx One API base URL for this login (overrides the profile value).
+        #[arg(long)]
+        base_url: Option<String>,
         /// Workspace id to bind these credentials to (key in workspace_credentials).
         #[arg(long)]
         workspace_id: Option<String>,

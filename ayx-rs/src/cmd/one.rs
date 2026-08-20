@@ -29,7 +29,7 @@ pub(crate) fn run_otp_login(
 ) -> Result<Envelope> {
     let runtime = crate::cmd::RuntimeCtx::new(environment);
     super::one_platform::auth::login(
-        &runtime, profile, None, false, false, None, None, None, None, None, false, None,
+        &runtime, profile, None, false, false, None, None, None, None, None, None, false, None,
     )
 }
 
@@ -55,6 +55,7 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             refresh_token,
             access_token,
             token_endpoint,
+            base_url,
             workspace_id,
             workspace_gid,
             save_workspace_password,
@@ -68,6 +69,7 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             refresh_token,
             access_token,
             token_endpoint,
+            base_url,
             workspace_id,
             workspace_gid,
             save_workspace_password,

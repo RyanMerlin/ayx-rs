@@ -9,6 +9,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$WorkspaceGid,
 
+    [Parameter(Mandatory = $true)]
+    [uri]$BaseUrl,
+
     [ValidateSet("session", "secure")]
     [string]$SecretPolicy = "session",
 
@@ -28,11 +31,17 @@ $env:AYX_CONFIG_HOME = (Resolve-Path -LiteralPath $ConfigHome).Path
 $env:AYX_AUTH_LIVE_CANARY = "1"
 $env:AYX_AUTH_ROLLOUT = "canary"
 
+if ($BaseUrl.Scheme -ne "https" -or [string]::IsNullOrWhiteSpace($BaseUrl.Host)) {
+    throw "BaseUrl must be an HTTPS Alteryx One regional URL"
+}
+$normalizedBaseUrl = $BaseUrl.GetLeftPart([System.UriPartial]::Authority).TrimEnd('/')
+
 $arguments = @(
     "run", "-q", "-p", "ayx-rs", "--",
     "--output", "json", "one", "login",
     "--profile", $Profile,
     "--workspace-gid", $WorkspaceGid,
+    "--base-url", $normalizedBaseUrl,
     "--secret-policy", $SecretPolicy
 )
 if ($SaveWorkspacePassword) {

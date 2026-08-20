@@ -50,10 +50,13 @@ real OTP access before changing rollout:
 pwsh -File .\scripts\live-auth-canary.ps1 `
   -ConfigHome C:\temp\ayx-auth-canary `
   -Profile disposable-canary `
-  -WorkspaceGid <disposable-workspace-gid>
+  -WorkspaceGid <disposable-workspace-gid> `
+  -BaseUrl https://<region>.alteryxcloud.com
 ```
 
-The script uses an isolated config home, `AYX_AUTH_ROLLOUT=canary`, the
+`BaseUrl` is required because the regional host is part of the credential
+binding; it must match the workspace's actual Alteryx One region and is not
+assumed to be `us1`. The script uses an isolated config home, `AYX_AUTH_ROLLOUT=canary`, the
 `canary` keyring namespace, and session-only persistence by default. It never
 accepts a password as a command-line argument and scans output for secret
 fields before emitting it. Record only the exit status, expiry metadata, and
