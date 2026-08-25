@@ -6,6 +6,7 @@
 //! duplicating (and accidentally changing) the HTTP implementation.
 
 use anyhow::Result;
+use ayx_core::auth::{AuthFailureKind, OperationOutcome, WizardAction, WizardEngine, WizardStep};
 use serde::{Deserialize, Serialize};
 
 use crate::email_otp::{OtpAuthResult, email_otp_login, email_otp_login_with_password};
@@ -151,6 +152,115 @@ impl LegacyOtpCompatibilityContract {
 /// than reimplementing any request, cookie, redirect, or error behavior.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LegacyOtpAdapter;
+
+/// Experimental v0.17 stepwise adapter. Legacy remains independently
+/// implemented for rollback; this adapter is enabled only by the explicit
+/// Wizard rollout after its differential tests pass.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WizardOtpAdapter;
+
+impl WizardOtpAdapter {
+    pub fn login<F>(
+        &self,
+        base_url: &str,
+        email: &str,
+        workspace_gid: &str,
+        workspace_password: Option<String>,
+        get_otp: F,
+    ) -> Result<OtpAuthResult>
+    where
+        F: Fn() -> Result<String>,
+    {
+        let mut engine = WizardEngine::default();
+        let mut session = crate::WizardOtpSession::new(base_url, email, workspace_gid)?;
+        expect(engine.start()?, WizardStep::SendOtp)?;
+        let reference = match session.send_otp() {
+            Ok(reference) => reference,
+            Err(err) => {
+                return Err(err.context(
+                    "Wizard OTP send may have committed; retry through AYX_AUTH_ROLLOUT=legacy",
+                ));
+            }
+        };
+        if engine.record(OperationOutcome::Accepted)? != WizardAction::PromptOtp {
+            anyhow::bail!("Wizard did not prompt for OTP after send")
+        }
+        loop {
+            let otp = get_otp()?;
+            expect(engine.submit_otp()?, WizardStep::ValidateOtp)?;
+            match session.validate_otp(&reference, &otp) {
+                Ok(()) => break,
+                Err(_) => match engine.record(OperationOutcome::Rejected {
+                    kind: AuthFailureKind::InvalidOtp,
+                })? {
+                    WizardAction::PromptOtp => continue,
+                    WizardAction::Invoke {
+                        step: WizardStep::SendOtp,
+                    } => {
+                        anyhow::bail!(
+                            "Wizard OTP reference exhausted; restart through AYX_AUTH_ROLLOUT=legacy"
+                        )
+                    }
+                    action => anyhow::bail!(
+                        "Wizard OTP validation stopped at {action:?}; retry through AYX_AUTH_ROLLOUT=legacy"
+                    ),
+                },
+            }
+        }
+        expect(
+            engine.record(OperationOutcome::Accepted)?,
+            WizardStep::ResolveWorkspace,
+        )?;
+        session.resolve_workspace()?;
+        let action = engine.record(OperationOutcome::Accepted)?;
+        if action != WizardAction::PromptWorkspacePassword {
+            anyhow::bail!("Wizard workspace transition drifted: {action:?}");
+        }
+        let password =
+            match workspace_password.or_else(|| std::env::var("AYX_ONE_WS_PASSWORD").ok()) {
+                Some(value) if !value.trim().is_empty() => value,
+                _ => {
+                    eprint!("Workspace password: ");
+                    rpassword::read_password()?
+                }
+            };
+        expect(
+            engine.submit_workspace_password()?,
+            WizardStep::SubmitWorkspacePassword,
+        )?;
+        session.submit_workspace_password(&password)?;
+        expect(
+            engine.record(OperationOutcome::Accepted)?,
+            WizardStep::ResumeOidc,
+        )?;
+        session.resume_oidc()?;
+        expect(
+            engine.record(OperationOutcome::Accepted)?,
+            WizardStep::MintPat,
+        )?;
+        let result = match session.mint_pat() {
+            Ok(result) => result,
+            Err(err) => {
+                return Err(err.context(
+                    "Wizard PAT mint may have committed; retry through AYX_AUTH_ROLLOUT=legacy",
+                ));
+            }
+        };
+        expect(
+            engine.record(OperationOutcome::Accepted)?,
+            WizardStep::Persist,
+        )?;
+        let _ = engine.record(OperationOutcome::Accepted)?;
+        Ok(result)
+    }
+}
+
+fn expect(action: WizardAction, step: WizardStep) -> Result<()> {
+    match action {
+        WizardAction::Invoke { step: actual } if actual == step => Ok(()),
+        other => anyhow::bail!("Wizard transition drifted: expected {step:?}, got {other:?}"),
+    }
+}
 
 impl LegacyOtpAdapter {
     pub fn contract() -> LegacyOtpCompatibilityContract {

@@ -49,6 +49,7 @@ pub use email_otp::{
 };
 pub use otp_compat::{
     LEGACY_OTP_COMPATIBILITY_VERSION, LegacyOtpAdapter, LegacyOtpCompatibilityContract,
+    WizardOtpAdapter,
 };
 
 thread_local! {

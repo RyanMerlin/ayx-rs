@@ -341,6 +341,15 @@ pub(crate) fn login(
                 get_otp,
             )?;
             (result, Some(password))
+        } else if rollout.uses_new_orchestration() {
+            let result = ayx_one_api::WizardOtpAdapter.login(
+                &base_url,
+                &email,
+                &ws_gid,
+                workspace_password,
+                get_otp,
+            )?;
+            (result, None)
         } else {
             let result = ayx_one_api::LegacyOtpAdapter.login(
                 &base_url,
