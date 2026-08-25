@@ -4,6 +4,17 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+### Changed
+
+- Wizard is now the default email-OTP authentication flow for the internal
+  v0.17 release. `ayx one login --auth-flow legacy` and
+  `AYX_AUTH_ROLLOUT=legacy` remain explicit rollback paths; ambiguous OTP/PAT
+  outcomes are never silently retried or switched to Legacy.
+- Wizard now supports the bounded workspace-password retry and saved-password
+  persistence path used by the Legacy flow. Native Windows and WSL2/Linux
+  internal release checks package platform-specific artifacts; Apple validation
+  remains deferred.
+
 ## 0.16.1 — 2026-08-25
 
 ### Fixed

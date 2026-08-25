@@ -1,8 +1,11 @@
 # Production authentication handoff
 
-Status: hardened implementation complete; the Wizard orchestration is the
-default rollout for v0.16.0. The legacy email-OTP adapter remains present as
-the explicit emergency rollback path.
+Status: v0.17 internal-release implementation complete; automated Windows and
+WSL2 gates are green, while the disposable-tenant live authentication gate
+remains required before broad internal distribution. The Wizard
+orchestration is the default rollout for `ayx one login`. The legacy email-OTP
+adapter remains present as the explicit rollback path through
+`--auth-flow legacy` or `AYX_AUTH_ROLLOUT=legacy`.
 
 ## What is included
 
@@ -23,19 +26,18 @@ the explicit emergency rollback path.
   unbound `keyring:<profile>/<field>` references remain readable.
 - A typed OTP compatibility contract and transport-level characterization,
   rejection-budget, transient-retry, password-mapping, and live-canary checks.
+- Wizard now supports the bounded workspace-password retry and saved-password
+  persistence path; it does not silently switch to Legacy after an operation
+  may have committed.
 
 ## Verification completed
 
 | Environment | Result |
 | --- | --- |
-| Windows full nextest | 904 passed, 22 skipped; includes the slow concurrent sensitive-file test |
-| Windows clippy | Passed with `-D warnings` |
-| Windows formatting | Passed |
-| WSL2/Ubuntu nextest | 904 passed, 23 skipped; the Windows stress test is excluded because it is platform-specific |
-| WSL2/Ubuntu clippy | Passed with `-D warnings` |
-| WSL2/Ubuntu formatting | Passed |
-| macOS target check | `ayx-core` all-targets check passed for `x86_64-apple-darwin` |
-| Terra hostile review | Final GO; no release-blocking findings |
+| Native Windows | Required: `scripts/internal-release-check.ps1`, installed ZIP smoke, secure Credential Manager and live default/Wizard/Legacy gates |
+| WSL2 Ubuntu | Required: `scripts/internal-release-check.sh`, installed tarball smoke, Secret Service/session behavior, and live default/Wizard/Legacy gates |
+| Apple/macOS | Deferred for this internal release |
+| Terra hostile review | Completed; no release-blocking findings in the RC baseline |
 
 The complete `ayx-one-api` macOS cross-target check still requires an Apple
 SDK/compiler on macOS or CI; the Windows host cannot provide `cc` for that
@@ -59,20 +61,24 @@ pwsh -File .\scripts\live-auth-canary.ps1 `
 binding; it must match the workspace's actual Alteryx One region and is not
 assumed to be `us1`. The default `canary` run uses an isolated config home,
 `AYX_AUTH_ROLLOUT=canary`, the `canary` keyring namespace, and session-only
-persistence. To validate the v0.16.1 release-default compatibility lane, use
-a separate isolated config home and `-Rollout legacy`; that run uses the normal
-keyring namespace and should use `-SecretPolicy secure` only when persistence
-is specifically under test. The script never accepts a password as a
-command-line argument and scans output for secret fields before emitting it.
+persistence. To validate the default Wizard lane, use `-UseDefaultWizard` with
+a separate isolated config home. To validate the explicit rollback lane, use
+`-Rollout legacy`; to validate the named Wizard lane, use `-Rollout wizard`.
+The script can run source-built code or an installed binary through
+`-BinaryPath`. Wizard and Legacy use the normal keyring namespace and should
+use `-SecretPolicy secure` only when persistence is specifically under test.
+The script never accepts a password as a command-line argument and scans
+output for secret fields before emitting it.
 Record only the exit status, expiry metadata, and redacted output; do not
 attach OTPs, passwords, tokens, or the isolated profile contents.
 
 ## Rollout and rollback
 
-1. The v0.16.1 default and rollback lane are Legacy after the isolated live
-   login, full One surface sweep, and release checks are green.
-2. If a regression appears, keep `AYX_AUTH_ROLLOUT=legacy`; do not delete the
-   legacy adapter during this release.
+1. The v0.17 internal default is Wizard after the isolated live login, full
+   Windows/WSL2 installed-artifact sweep, and release checks are green.
+2. If a regression appears, use `ayx one login --auth-flow legacy` or
+   `AYX_AUTH_ROLLOUT=legacy`; do not delete the legacy adapter during this
+   release.
 3. Keep `canary` reserved for isolated validation; it must not share ordinary
    profile or keyring state.
 4. Decommission legacy in a separate release after a later canary, internal
@@ -82,10 +88,12 @@ attach OTPs, passwords, tokens, or the isolated profile contents.
 ## Useful checks
 
 ```powershell
-cargo fmt --all -- --check
+cargo fmt --all --check
+cargo run -q -p xtask -- refresh-command-surface --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo nextest run --workspace --locked
-wsl.exe -d Ubuntu -- bash -lc 'cd /mnt/c/code/ayx-rs && cargo nextest run --workspace --locked --filter-expr "not test(concurrent_writes_never_tear_the_file)"'
+powershell -NoProfile -File .\scripts\internal-release-check.ps1
+wsl.exe -d Ubuntu -- bash -lc 'cd /path/to/ayx-rs && ./scripts/internal-release-check.sh'
 ```
 
 The working tree should be clean after the release checks. Do not remove the

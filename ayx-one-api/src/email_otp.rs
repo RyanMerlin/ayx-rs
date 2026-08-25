@@ -230,6 +230,26 @@ impl WizardOtpSession {
         submit_workspace_password(&self.client, &self.base, &self.email, password)
     }
 
+    /// Submits the workspace password using the same bounded interactive
+    /// retry policy as the Legacy flow. Fixed sources fail fast; an
+    /// interactively entered password may be re-prompted after rejection.
+    pub fn submit_workspace_password_with_reprompt<F>(
+        &self,
+        workspace_password: Option<String>,
+        prompt: F,
+    ) -> Result<String>
+    where
+        F: Fn() -> Result<String>,
+    {
+        workspace_login_with_prompt(
+            &self.client,
+            &self.base,
+            &self.email,
+            workspace_password,
+            prompt,
+        )
+    }
+
     pub fn resume_oidc(&self) -> Result<()> {
         let interaction_id = self
             .interaction_id
@@ -714,7 +734,7 @@ fn workspace_password_from_env() -> Option<String> {
 }
 
 /// Prompt on the terminal for the workspace password (masked, no echo).
-fn prompt_workspace_password() -> Result<String> {
+pub(crate) fn prompt_workspace_password() -> Result<String> {
     eprint!("Workspace password: ");
     std::io::stderr().flush().ok();
     let pw = rpassword::read_password().context(
@@ -747,6 +767,25 @@ fn workspace_login_with_reprompt(
     email: &str,
     workspace_password: Option<String>,
 ) -> Result<String> {
+    workspace_login_with_prompt(
+        client,
+        base,
+        email,
+        workspace_password,
+        prompt_workspace_password,
+    )
+}
+
+fn workspace_login_with_prompt<F>(
+    client: &Client,
+    base: &str,
+    email: &str,
+    workspace_password: Option<String>,
+    prompt: F,
+) -> Result<String>
+where
+    F: Fn() -> Result<String>,
+{
     let mut attempt = 0u32;
     loop {
         attempt += 1;
@@ -755,7 +794,7 @@ fn workspace_login_with_reprompt(
         let from_fixed_source = password_source.is_some();
         let password = match password_source {
             Some(pw) => pw,
-            None => prompt_workspace_password()?,
+            None => prompt()?,
         };
         match submit_workspace_password(client, base, email, &password) {
             Ok(()) => return Ok(password),
@@ -1020,6 +1059,19 @@ mod tests {
         }
 
         fn start_with_otp_rejections_and_status(failure_count: usize, failure_status: u16) -> Self {
+            Self::start_with_failures(failure_count, failure_status, 0, 401)
+        }
+
+        fn start_with_password_rejections(failure_count: usize, failure_status: u16) -> Self {
+            Self::start_with_failures(0, 401, failure_count, failure_status)
+        }
+
+        fn start_with_failures(
+            otp_failure_count: usize,
+            otp_failure_status: u16,
+            password_failure_count: usize,
+            password_failure_status: u16,
+        ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").expect("bind recorder");
             listener
                 .set_nonblocking(true)
@@ -1031,7 +1083,8 @@ mod tests {
             let recorded_responses = Arc::clone(&responses);
             let (stop, stop_rx) = mpsc::channel();
             let thread = std::thread::spawn(move || {
-                let mut failures_left = failure_count;
+                let mut otp_failures_left = otp_failure_count;
+                let mut password_failures_left = password_failure_count;
                 loop {
                     if stop_rx.try_recv().is_ok() {
                         break;
@@ -1042,13 +1095,23 @@ mod tests {
                                 .expect("recorder should parse HTTP request");
                             let response = if request.method == "POST"
                                 && request.target.starts_with("/v4/auth/validatePasscode")
-                                && failures_left > 0
+                                && otp_failures_left > 0
                             {
-                                failures_left -= 1;
+                                otp_failures_left -= 1;
                                 (
-                                    failure_status,
+                                    otp_failure_status,
                                     vec![("Content-Type", "application/json".to_string())],
                                     r#"{"error":"invalid passcode"}"#.to_string(),
+                                )
+                            } else if request.method == "POST"
+                                && request.target.starts_with("/session")
+                                && password_failures_left > 0
+                            {
+                                password_failures_left -= 1;
+                                (
+                                    password_failure_status,
+                                    vec![("Content-Type", "text/plain".to_string())],
+                                    "workspace password rejected".to_string(),
                                 )
                             } else {
                                 response_for_request(&request)
@@ -1571,6 +1634,38 @@ mod tests {
                 .contains("fixed workspace password was rejected")
         );
         assert_eq!(server.requests().len(), 1);
+    }
+
+    #[test]
+    #[serial]
+    fn wizard_workspace_password_reprompts_after_interactive_rejection() {
+        let server = RecordingServer::start_with_password_rejections(2, 401);
+        let session = crate::WizardOtpSession::new(&server.base_url, "person@example.com", "gid-1")
+            .expect("Wizard session should initialize");
+        let passwords = Mutex::new(VecDeque::from([
+            "wrong-1".to_string(),
+            "wrong-2".to_string(),
+            "correct".to_string(),
+        ]));
+        let result = session
+            .submit_workspace_password_with_reprompt(None, || {
+                Ok(passwords
+                    .lock()
+                    .expect("password lock")
+                    .pop_front()
+                    .expect("password for every attempt"))
+            })
+            .expect("the third interactive password should succeed");
+        assert_eq!(result, "correct");
+        assert_eq!(
+            server
+                .requests()
+                .iter()
+                .filter(|request| request.target.starts_with("/session"))
+                .count(),
+            3,
+            "Wizard should retain Legacy's three-attempt interactive budget"
+        );
     }
 
     /// A `reqwest::dns::Resolve` that always fails resolution, synchronously

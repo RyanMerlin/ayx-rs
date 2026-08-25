@@ -1281,6 +1281,12 @@ fn offer_login_now(config: &Config, saved_path: &Path, environment: Option<&str>
         one.account_email
     );
     println!("and you'll be asked for your workspace password.");
+    println!(
+        "Authentication flow: Wizard by default (use `ayx one login --auth-flow legacy` for rollback)."
+    );
+    println!(
+        "Credentials use the operating-system secure store by default; use `--secret-policy session` on a temporary or constrained host."
+    );
     if !prompt_yes_no("Log in now", false)? {
         println!("Skipped. Connect any time with `{NEXT_STEP}`.");
         return Ok(json!({ "offered": true, "ran": false }));
@@ -1288,7 +1294,9 @@ fn offer_login_now(config: &Config, saved_path: &Path, environment: Option<&str>
 
     match crate::cmd::one::run_otp_login(environment, Some(config.profile_name.clone())) {
         Ok(_) => {
-            println!("\nConnected. Verify any time with: ayx one workspace current");
+            println!("\nConnected. Verify any time with:");
+            println!("  ayx one auth status");
+            println!("  ayx one workspace current");
             Ok(json!({ "offered": true, "ran": true, "ok": true }))
         }
         Err(err) => {
@@ -1477,6 +1485,19 @@ pub(crate) fn write_config_with_binding(
     policy: InlineSecretPolicy,
     binding: Option<&CredentialBinding>,
 ) -> Result<SecretizeOutput> {
+    write_config_with_binding_for_rollout(path, config, policy, binding, None)
+}
+
+/// Binding-aware profile write with an already-resolved rollout. Authentication
+/// CLI flags must take precedence over deployment environment when selecting a
+/// canary namespace; callers outside login retain environment-based behavior.
+pub(crate) fn write_config_with_binding_for_rollout(
+    path: &Path,
+    config: &Config,
+    policy: InlineSecretPolicy,
+    binding: Option<&CredentialBinding>,
+    rollout: Option<ayx_core::auth::AuthRollout>,
+) -> Result<SecretizeOutput> {
     let lock = SensitiveFileLock::acquire(path).map_err(anyhow::Error::from)?;
     recover_keyring_transaction_locked(path, &lock).map_err(anyhow::Error::from)?;
     let transaction = KeyringTransaction::begin(&lock);
@@ -1497,7 +1518,7 @@ pub(crate) fn write_config_with_binding(
         file_stem,
         policy,
         binding,
-        auth_keyring_namespace()?,
+        auth_keyring_namespace(rollout)?,
         Some(&transaction),
     ) {
         Ok(out) => out,
@@ -1600,14 +1621,17 @@ pub(crate) fn binding_for_auth_config(
 /// Live canaries must not share deterministic keyring accounts with ordinary
 /// credentials. The namespace is deliberately process/environment-selected so
 /// the normal legacy and wizard accounts remain backward-compatible.
-pub(crate) fn auth_keyring_namespace() -> Result<Option<&'static str>> {
-    if std::env::var("AYX_AUTH_LIVE_CANARY").ok().as_deref() == Some("1")
-        || ayx_core::auth::AuthRollout::from_environment()? == ayx_core::auth::AuthRollout::Canary
-    {
-        Ok(Some("canary"))
-    } else {
-        Ok(None)
-    }
+pub(crate) fn auth_keyring_namespace(
+    rollout: Option<ayx_core::auth::AuthRollout>,
+) -> Result<Option<&'static str>> {
+    let selected_rollout = match rollout {
+        Some(rollout) => rollout,
+        None => ayx_core::auth::AuthRollout::from_environment()?,
+    };
+    let canary = matches!(selected_rollout, ayx_core::auth::AuthRollout::Canary)
+        || (rollout.is_none()
+            && std::env::var("AYX_AUTH_LIVE_CANARY").ok().as_deref() == Some("1"));
+    if canary { Ok(Some("canary")) } else { Ok(None) }
 }
 
 /// Reject a new-format keyring reference when its binding does not match the
@@ -1617,6 +1641,14 @@ pub(crate) fn auth_keyring_namespace() -> Result<Option<&'static str>> {
 pub(crate) fn validate_auth_credential_bindings(
     config: &Config,
     binding: &CredentialBinding,
+) -> Result<()> {
+    validate_auth_credential_bindings_for_rollout(config, binding, None)
+}
+
+pub(crate) fn validate_auth_credential_bindings_for_rollout(
+    config: &Config,
+    binding: &CredentialBinding,
+    rollout: Option<ayx_core::auth::AuthRollout>,
 ) -> Result<()> {
     let Some(one) = config.alteryx_one.as_ref() else {
         return Ok(());
@@ -1662,7 +1694,7 @@ pub(crate) fn validate_auth_credential_bindings(
         validate_bound_reference_any(
             reference,
             &top_level_bindings,
-            auth_keyring_namespace()?,
+            auth_keyring_namespace(rollout)?,
             field,
         )?;
     }
@@ -1707,7 +1739,7 @@ pub(crate) fn validate_auth_credential_bindings(
             validate_bound_reference(
                 reference,
                 &workspace_binding,
-                auth_keyring_namespace()?,
+                auth_keyring_namespace(rollout)?,
                 &field,
             )?;
         }

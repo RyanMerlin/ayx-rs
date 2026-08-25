@@ -69,6 +69,7 @@ pub(crate) fn login(
     base_url_arg: Option<String>,
     workspace_id: Option<String>,
     workspace_gid_arg: Option<String>,
+    auth_flow_arg: Option<String>,
     save_workspace_password: bool,
     secret_policy_arg: Option<String>,
 ) -> Result<Envelope> {
@@ -82,8 +83,11 @@ pub(crate) fn login(
 
     // Parse rollout before reading credentials or starting the OTP transport.
     // A typo must not be discovered after an irreversible OTP/PAT side effect.
-    let rollout = AuthRollout::from_environment().map_err(|err| anyhow::anyhow!(err))?;
-    let mut config = runtime.load_profile_lenient(profile.as_deref())?;
+    let rollout = match auth_flow_arg.as_deref() {
+        Some(value) => AuthRollout::parse(value).map_err(|err| anyhow::anyhow!(err))?,
+        None => AuthRollout::from_environment().map_err(|err| anyhow::anyhow!(err))?,
+    };
+    let mut config = runtime.load_profile_lenient_for_auth(profile.as_deref())?;
     let mut auth_machine = None;
     {
         let one = config
@@ -186,7 +190,11 @@ pub(crate) fn login(
     // write-boundary validation remains necessary because this command may add
     // fresh tokens and persist them under a new binding.
     let existing_binding = auth_credential_binding(&config, workspace_id.as_deref())?;
-    crate::onboard::validate_auth_credential_bindings(&config, &existing_binding)?;
+    crate::onboard::validate_auth_credential_bindings_for_rollout(
+        &config,
+        &existing_binding,
+        Some(rollout),
+    )?;
 
     let mut workspace_password_to_save = None;
 
@@ -332,7 +340,27 @@ pub(crate) fn login(
                 .map_err(|e| anyhow::anyhow!("failed to read OTP: {e}"))?;
             Ok(line.trim().to_string())
         };
-        let (result, captured_workspace_password) = if save_workspace_password {
+        let (result, captured_workspace_password) = if rollout.uses_new_orchestration() {
+            if save_workspace_password {
+                let (result, password) = ayx_one_api::WizardOtpAdapter.login_with_password(
+                    &base_url,
+                    &email,
+                    &ws_gid,
+                    workspace_password,
+                    get_otp,
+                )?;
+                (result, Some(password))
+            } else {
+                let result = ayx_one_api::WizardOtpAdapter.login(
+                    &base_url,
+                    &email,
+                    &ws_gid,
+                    workspace_password,
+                    get_otp,
+                )?;
+                (result, None)
+            }
+        } else if save_workspace_password {
             let (result, password) = ayx_one_api::LegacyOtpAdapter.login_with_password(
                 &base_url,
                 &email,
@@ -341,15 +369,6 @@ pub(crate) fn login(
                 get_otp,
             )?;
             (result, Some(password))
-        } else if rollout.uses_new_orchestration() {
-            let result = ayx_one_api::WizardOtpAdapter.login(
-                &base_url,
-                &email,
-                &ws_gid,
-                workspace_password,
-                get_otp,
-            )?;
-            (result, None)
         } else {
             let result = ayx_one_api::LegacyOtpAdapter.login(
                 &base_url,
@@ -538,19 +557,25 @@ pub(crate) fn login(
         // unless the interactive fallback below receives explicit consent.
         crate::onboard::InlineSecretPolicy::Forbid
     };
-    let secretize_result =
-        crate::onboard::write_config_with_binding(&path, &config, secret_policy, Some(&binding));
+    let secretize_result = crate::onboard::write_config_with_binding_for_rollout(
+        &path,
+        &config,
+        secret_policy,
+        Some(&binding),
+        Some(rollout),
+    );
     let secretize = match secretize_result {
         Ok(output) => output,
         Err(_err)
             if persistence_policy == SecretPersistencePolicy::Secure
                 && interactive_secret_fallback()? =>
         {
-            let output = crate::onboard::write_config_with_binding(
+            let output = crate::onboard::write_config_with_binding_for_rollout(
                 &path,
                 &config,
                 crate::onboard::InlineSecretPolicy::Allow,
                 Some(&binding),
+                Some(rollout),
             )?;
             let _ = ayx_core::auth::save_persistence_policy(
                 &path,

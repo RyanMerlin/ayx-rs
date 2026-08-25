@@ -49,6 +49,12 @@ ayx onboard
 
 `ayx onboard` is the fastest path to a working setup: it reuses existing values on later runs, masks stored secrets in its summary, and auto-discovers embedded Server settings when `RuntimeSettings.xml` is available.  For automation or agents, add `--non-interactive` to validate an existing profile without prompting.  If you'd rather hand-edit YAML or wire up multiple environments, see [Configuration](#configuration) below.
 
+For Alteryx One email-OTP login, `ayx one login` uses the Wizard flow by
+default. If an internal rollout needs the compatibility path, use
+`ayx one login --auth-flow legacy` or set `AYX_AUTH_ROLLOUT=legacy`. The Wizard
+does not silently retry an ambiguous OTP or PAT operation through Legacy;
+preserve the profile and choose the rollback explicitly.
+
 3. Run a first quick query:
 
 ```bash

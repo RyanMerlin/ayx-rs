@@ -1564,9 +1564,10 @@ pub(crate) enum ToolsWorkspaceCommand {
 pub(crate) enum OneCommand {
     /// Authenticate with Alteryx One and store credentials.
     ///
-    /// Default (no flags): email OTP flow — sends a one-time passcode to your
-    /// account email address, then completes the Alteryx One OIDC workspace
-    /// handshake via a pure-HTTP reqwest flow (no browser or Python required).
+    /// Default (no flags): Wizard email OTP flow — sends a one-time passcode
+    /// to your account email address, then completes the Alteryx One OIDC
+    /// workspace handshake via a pure-HTTP reqwest flow (no browser or Python
+    /// required). Use --auth-flow legacy for the compatibility rollback lane.
     ///
     /// With --device: device-code flow — prints a short URL and code; open
     /// the URL on any device, enter the code, and the CLI stores your tokens
@@ -1607,8 +1608,11 @@ pub(crate) enum OneCommand {
         /// Workspace ULID (gid) — stored as workspace_gid for SP scope.
         #[arg(long)]
         workspace_gid: Option<String>,
+        /// Authentication flow for email-OTP login: wizard (default) or legacy.
+        /// The canary flow remains available through AYX_AUTH_ROLLOUT=canary.
+        #[arg(long, value_name = "FLOW", value_parser = ["wizard", "legacy"])]
+        auth_flow: Option<String>,
         /// Save the workspace password used by email-OTP login in the OS keyring.
-        /// Applies only to the default email-OTP flow.
         #[arg(long)]
         save_workspace_password: bool,
         /// Credential persistence for the authentication wizard: secure,
@@ -5721,6 +5725,25 @@ where
     };
     validate_loaded_auth_bindings(&config)?;
     Ok(config)
+}
+
+pub(crate) fn load_profile_with_env_lenient_unvalidated<'a, P>(
+    profile: P,
+    environment: Option<&str>,
+) -> Result<Config>
+where
+    P: Into<ProfileInput<'a>>,
+{
+    match profile.into() {
+        ProfileInput::Runtime(name) => {
+            Config::load_runtime_profile_with_environment_lenient(name, environment)
+                .map_err(anyhow::Error::from)
+        }
+        ProfileInput::Path(path) => {
+            Config::load_from_path_with_environment_lenient(path, environment)
+                .map_err(anyhow::Error::from)
+        }
+    }
 }
 
 /// Render an envelope in the requested output format. `output` is constrained

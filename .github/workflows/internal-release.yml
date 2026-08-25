@@ -1,0 +1,55 @@
+name: Internal Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  windows:
+    name: Windows internal artifact
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install cargo-nextest
+        shell: pwsh
+        run: cargo install --locked cargo-nextest
+      - name: Install cargo-audit
+        shell: pwsh
+        run: cargo install --locked cargo-audit
+      - name: Run Windows release gate and package artifact
+        shell: pwsh
+        run: ./scripts/internal-release-check.ps1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ayx-x86_64-pc-windows-msvc-internal
+          path: dist/internal/ayx-x86_64-pc-windows-msvc-internal.zip
+
+  wsl2-linux:
+    name: Linux internal artifact (WSL2-compatible)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install cargo-nextest
+        shell: bash
+        run: cargo install --locked cargo-nextest
+      - name: Install cargo-audit
+        shell: bash
+        run: cargo install --locked cargo-audit
+      - name: Run Linux release gate and package artifact
+        shell: bash
+        env:
+          # GitHub-hosted Linux is not WSL2. The local script enforces WSL2;
+          # CI uses this override only to validate the identical Linux gate and
+          # archive packaging. Native WSL2 signoff remains a release prerequisite.
+          AYX_INTERNAL_RELEASE_ALLOW_NON_WSL2: "1"
+        run: ./scripts/internal-release-check.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ayx-x86_64-unknown-linux-gnu-internal
+          path: dist/internal/ayx-x86_64-unknown-linux-gnu-internal.tar.gz

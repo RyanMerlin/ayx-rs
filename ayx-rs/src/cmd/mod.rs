@@ -63,4 +63,16 @@ impl<'a> RuntimeCtx<'a> {
     {
         crate::load_profile_with_env_lenient(profile, self.environment)
     }
+
+    /// Login resolves its rollout before validating bound keyring references,
+    /// so a CLI flow override can take precedence over rollout environment.
+    pub(crate) fn load_profile_lenient_for_auth<P>(
+        &self,
+        profile: P,
+    ) -> Result<ayx_core::profile::Config>
+    where
+        P: Into<crate::ProfileInput<'a>>,
+    {
+        crate::load_profile_with_env_lenient_unvalidated(profile, self.environment)
+    }
 }

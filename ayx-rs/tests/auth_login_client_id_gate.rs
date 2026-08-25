@@ -84,6 +84,22 @@ fn invalid_rollout_fails_before_workspace_resolution_or_otp_send() {
 }
 
 #[test]
+fn explicit_legacy_auth_flow_overrides_environment_rollout() {
+    let home = config_home_without_client_id();
+    let (ok, out) =
+        run_login_with_rollout(&home, &["--auth-flow", "legacy"], Some("not-a-rollout"));
+    assert!(!ok, "login should fail (no workspace_gid)\noutput:\n{out}");
+    assert!(
+        out.contains("workspace_gid is required"),
+        "the explicit legacy flow should reach normal login validation; output:\n{out}"
+    );
+    assert!(
+        !out.contains("invalid authentication rollout 'not-a-rollout'"),
+        "the CLI flow override must take precedence over the environment; output:\n{out}"
+    );
+}
+
+#[test]
 fn default_otp_login_does_not_require_oauth_client_id() {
     let home = config_home_without_client_id();
     let (ok, out) = run_login(&home, &[]);

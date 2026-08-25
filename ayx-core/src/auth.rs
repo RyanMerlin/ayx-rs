@@ -867,14 +867,14 @@ pub trait UserInteraction {
 }
 
 /// Rollout values for the versioned authentication orchestration boundary.
-/// v0.16.1 keeps the complete legacy adapter as the default and rollback
-/// lane. Wizard remains an explicitly selected, pre-release implementation.
+/// v0.17 makes Wizard the default orchestration lane. The complete Legacy
+/// adapter remains independently selectable as the explicit rollback lane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthRollout {
     #[default]
-    Legacy,
     Wizard,
+    Legacy,
     Canary,
 }
 
@@ -1342,8 +1342,8 @@ mod tests {
     }
 
     #[test]
-    fn rollout_defaults_to_legacy() {
-        assert_eq!(AuthRollout::default(), AuthRollout::Legacy);
+    fn rollout_defaults_to_wizard() {
+        assert_eq!(AuthRollout::default(), AuthRollout::Wizard);
     }
 
     #[test]

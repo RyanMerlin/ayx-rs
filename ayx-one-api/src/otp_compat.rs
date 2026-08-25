@@ -155,9 +155,8 @@ impl LegacyOtpCompatibilityContract {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LegacyOtpAdapter;
 
-/// Experimental v0.17 stepwise adapter. Legacy remains independently
-/// implemented for rollback; this adapter is enabled only by the explicit
-/// Wizard rollout after its differential tests pass.
+/// v0.17 stepwise adapter. Legacy remains independently implemented for the
+/// explicit rollback lane; Wizard is the normal email-OTP flow.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WizardOtpAdapter;
 
@@ -170,6 +169,37 @@ impl WizardOtpAdapter {
         workspace_password: Option<String>,
         get_otp: F,
     ) -> Result<OtpAuthResult>
+    where
+        F: Fn() -> Result<String>,
+    {
+        self.login_inner(base_url, email, workspace_gid, workspace_password, get_otp)
+            .map(|(result, _password)| result)
+    }
+
+    pub fn login_with_password<F>(
+        &self,
+        base_url: &str,
+        email: &str,
+        workspace_gid: &str,
+        workspace_password: Option<String>,
+        get_otp: F,
+    ) -> Result<(OtpAuthResult, String)>
+    where
+        F: Fn() -> Result<String>,
+    {
+        let (result, password) =
+            self.login_inner(base_url, email, workspace_gid, workspace_password, get_otp)?;
+        Ok((result, password))
+    }
+
+    fn login_inner<F>(
+        &self,
+        base_url: &str,
+        email: &str,
+        workspace_gid: &str,
+        workspace_password: Option<String>,
+        get_otp: F,
+    ) -> Result<(OtpAuthResult, String)>
     where
         F: Fn() -> Result<String>,
     {
@@ -229,19 +259,14 @@ impl WizardOtpAdapter {
         if action != WizardAction::PromptWorkspacePassword {
             anyhow::bail!("Wizard workspace transition drifted: {action:?}");
         }
-        let password =
-            match workspace_password.or_else(|| std::env::var("AYX_ONE_WS_PASSWORD").ok()) {
-                Some(value) if !value.trim().is_empty() => value,
-                _ => {
-                    eprint!("Workspace password: ");
-                    rpassword::read_password()?
-                }
-            };
         expect(
             engine.submit_workspace_password()?,
             WizardStep::SubmitWorkspacePassword,
         )?;
-        session.submit_workspace_password(&password)?;
+        let password = session.submit_workspace_password_with_reprompt(
+            workspace_password,
+            crate::email_otp::prompt_workspace_password,
+        )?;
         expect(
             engine.record(OperationOutcome::Accepted)?,
             WizardStep::ResumeOidc,
@@ -265,7 +290,7 @@ impl WizardOtpAdapter {
             WizardStep::Persist,
         )?;
         let _ = engine.record(OperationOutcome::Accepted)?;
-        Ok(result)
+        Ok((result, password))
     }
 }
 

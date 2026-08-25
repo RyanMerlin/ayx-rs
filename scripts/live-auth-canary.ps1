@@ -12,8 +12,12 @@ param(
     [Parameter(Mandatory = $true)]
     [uri]$BaseUrl,
 
-    [ValidateSet("legacy", "canary")]
+    [ValidateSet("legacy", "wizard", "canary")]
     [string]$Rollout = "canary",
+
+    [switch]$UseDefaultWizard,
+
+    [string]$BinaryPath,
 
     [ValidateSet("session", "secure")]
     [string]$SecretPolicy = "session",
@@ -29,12 +33,17 @@ if (-not (Test-Path -LiteralPath $ConfigHome -PathType Container)) {
 
 # The canary namespace prevents binding-derived keyring accounts from colliding
 # with ordinary credentials. Session-only is the default so an operator can
-# prove the real OTP/PAT exchange without persisting a credential. `legacy`
-# selects the complete compatibility-pinned OTP lane; `canary` additionally
-# isolates any keyring writes under the canary namespace.
+# prove the real OTP/PAT exchange without persisting a credential. The default
+# lane is Wizard; `legacy` selects the compatibility-pinned OTP lane, while
+# `canary` additionally isolates any keyring writes under the canary namespace.
 $env:AYX_CONFIG_HOME = (Resolve-Path -LiteralPath $ConfigHome).Path
-$env:AYX_AUTH_ROLLOUT = $Rollout
-if ($Rollout -eq "canary") {
+if ($UseDefaultWizard) {
+    Remove-Item Env:AYX_AUTH_ROLLOUT -ErrorAction SilentlyContinue
+    Remove-Item Env:AUTH_ROLLOUT -ErrorAction SilentlyContinue
+} else {
+    $env:AYX_AUTH_ROLLOUT = $Rollout
+}
+if (-not $UseDefaultWizard -and $Rollout -eq "canary") {
     $env:AYX_AUTH_LIVE_CANARY = "1"
 } else {
     Remove-Item Env:AYX_AUTH_LIVE_CANARY -ErrorAction SilentlyContinue
@@ -46,7 +55,6 @@ if ($BaseUrl.Scheme -ne "https" -or [string]::IsNullOrWhiteSpace($BaseUrl.Host))
 $normalizedBaseUrl = $BaseUrl.GetLeftPart([System.UriPartial]::Authority).TrimEnd('/')
 
 $arguments = @(
-    "run", "-q", "-p", "ayx-rs", "--",
     "--output", "json", "one", "login",
     "--profile", $Profile,
     "--workspace-gid", $WorkspaceGid,
@@ -59,7 +67,17 @@ if ($SaveWorkspacePassword) {
 
 Write-Host "Starting isolated live authentication canary for profile '$Profile'."
 Write-Host "OTP and any password prompts remain interactive; no secret is accepted as a script argument."
-$output = (& cargo @arguments 2>&1 | Out-String)
+if ($UseDefaultWizard) {
+    Write-Host "Rollout: default Wizard (AYX_AUTH_ROLLOUT unset)"
+} else {
+    Write-Host "Rollout: $Rollout"
+}
+if ([string]::IsNullOrWhiteSpace($BinaryPath)) {
+    $output = (& cargo run -q -p ayx-rs -- @arguments 2>&1 | Out-String)
+} else {
+    $resolvedBinary = (Resolve-Path -LiteralPath $BinaryPath).Path
+    $output = (& $resolvedBinary @arguments 2>&1 | Out-String)
+}
 $exitCode = $LASTEXITCODE
 
 if ($exitCode -ne 0) {
