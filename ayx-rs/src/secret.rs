@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn static_fields_count() {
-        assert_eq!(STATIC_FIELDS.len(), 9);
+        assert_eq!(STATIC_FIELDS.len(), 5);
     }
 
     #[test]
@@ -306,8 +306,11 @@ mod tests {
     #[test]
     fn candidates_when_scopes_differ() {
         let accounts = legacy_accounts_for_mismatch("old_name", "my-profile", &[]);
-        // static fields only, no workspace creds
-        assert_eq!(accounts.len(), STATIC_FIELDS.len());
+        // Five One fields plus five non-One static fields.
+        assert_eq!(
+            accounts.len(),
+            OneSecretSlot::ALL.len() + STATIC_FIELDS.len()
+        );
         assert!(
             accounts
                 .iter()
@@ -318,8 +321,11 @@ mod tests {
     #[test]
     fn dynamic_workspace_fields_included() {
         let accounts = legacy_accounts_for_mismatch("old", "new", &["ws1"]);
-        // 9 static + 4 per workspace
-        assert_eq!(accounts.len(), STATIC_FIELDS.len() + 4);
+        // One fields + non-One static fields + one set of workspace fields.
+        assert_eq!(
+            accounts.len(),
+            OneSecretSlot::ALL.len() + STATIC_FIELDS.len() + OneSecretSlot::ALL.len()
+        );
         assert!(
             accounts
                 .iter()
@@ -413,7 +419,10 @@ mod tests {
             .iter()
             .filter(|c| c.status == CandidateStatus::WouldDelete)
             .collect();
-        assert_eq!(would_delete.len(), STATIC_FIELDS.len());
+        assert_eq!(
+            would_delete.len(),
+            OneSecretSlot::ALL.len() + STATIC_FIELDS.len()
+        );
         assert!(
             would_delete
                 .iter()
@@ -469,7 +478,10 @@ mod tests {
             "alteryx_one:\n  workspace_credentials:\n    ws1: {}\n    ws2: {}\n",
         );
         let candidates = prune_candidates(tmp.path(), None).unwrap();
-        // 9 static + 4 fields × 2 workspaces = 17
-        assert_eq!(candidates.len(), STATIC_FIELDS.len() + 8);
+        // One fields + non-One static fields + one field set per workspace.
+        assert_eq!(
+            candidates.len(),
+            OneSecretSlot::ALL.len() + STATIC_FIELDS.len() + OneSecretSlot::ALL.len() * 2
+        );
     }
 }

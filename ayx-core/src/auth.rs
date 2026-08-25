@@ -1356,6 +1356,15 @@ mod tests {
     }
 
     #[test]
+    fn rollout_dispatch_keeps_legacy_independent_from_explicit_new_lanes() {
+        assert!(!AuthRollout::Legacy.uses_new_orchestration());
+        assert!(AuthRollout::Wizard.uses_new_orchestration());
+        assert!(AuthRollout::Canary.uses_new_orchestration());
+        assert_eq!(AuthRollout::parse("default"), Ok(AuthRollout::Wizard));
+        assert_eq!(AuthRollout::parse("internal"), Ok(AuthRollout::Canary));
+    }
+
+    #[test]
     fn wizard_never_retries_an_uncertain_otp_send_or_pat_mint() {
         let mut wizard = WizardEngine::default();
         assert_eq!(

@@ -44,21 +44,43 @@ fn config_home_without_client_id() -> TempDir {
 /// the default OTP path can never block waiting for a passcode — it must bail
 /// at the `workspace_gid` check first.
 fn run_login(home: &TempDir, extra: &[&str]) -> (bool, String) {
+    run_login_with_rollout(home, extra, None)
+}
+
+fn run_login_with_rollout(home: &TempDir, extra: &[&str], rollout: Option<&str>) -> (bool, String) {
     let mut args = vec!["one", "login", "--profile", "gate"];
     args.extend_from_slice(extra);
-    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ayx"));
+    command
         .args(&args)
         // AYX_CONFIG_HOME is checked first by config resolution; also pin HOME /
         // XDG so nothing falls back to the host's real profile store.
         .env("AYX_CONFIG_HOME", home.path())
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
-        .stdin(Stdio::null())
-        .output()
-        .expect("ayx binary should run");
+        .stdin(Stdio::null());
+    if let Some(rollout) = rollout {
+        command.env("AYX_AUTH_ROLLOUT", rollout);
+    }
+    let output = command.output().expect("ayx binary should run");
     let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
     combined.push_str(&String::from_utf8_lossy(&output.stderr));
     (output.status.success(), combined)
+}
+
+#[test]
+fn invalid_rollout_fails_before_workspace_resolution_or_otp_send() {
+    let home = config_home_without_client_id();
+    let (ok, out) = run_login_with_rollout(&home, &[], Some("not-a-rollout"));
+    assert!(!ok, "invalid rollout must fail\noutput:\n{out}");
+    assert!(
+        out.contains("invalid authentication rollout 'not-a-rollout'"),
+        "the invalid rollout should be reported directly; output:\n{out}"
+    );
+    assert!(
+        !out.contains("workspace_gid is required") && !out.contains("Sending one-time passcode"),
+        "rollout validation must precede OTP-flow setup; output:\n{out}"
+    );
 }
 
 #[test]
