@@ -178,7 +178,8 @@ impl WizardOtpAdapter {
             Ok(reference) => reference,
             Err(err) => {
                 return Err(err.context(
-                    "Wizard OTP send may have committed; retry through AYX_AUTH_ROLLOUT=legacy",
+                    "Wizard OTP-send outcome is unknown; do not retry automatically. \
+                     Inspect/reconcile the attempted login before retrying.",
                 ));
             }
         };
@@ -242,7 +243,8 @@ impl WizardOtpAdapter {
             Ok(result) => result,
             Err(err) => {
                 return Err(err.context(
-                    "Wizard PAT mint may have committed; retry through AYX_AUTH_ROLLOUT=legacy",
+                    "Wizard PAT-mint outcome is unknown; do not retry automatically. \
+                     Inspect/reconcile the recent PAT inventory before retrying.",
                 ));
             }
         };

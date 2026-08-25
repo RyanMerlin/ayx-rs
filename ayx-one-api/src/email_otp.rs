@@ -218,8 +218,11 @@ impl WizardOtpSession {
     /// timeout after request dispatch from creating an unobserved second PAT.
     pub fn mint_pat(&self) -> Result<OtpAuthResult> {
         let base_url = reqwest::Url::parse(&self.base).context("base_url is not a valid URL")?;
-        let bearer = cookie_value_from_jar(&self.jar, &base_url, "local-auth-workspace")
-            .context("local-auth-workspace cookie was not set — authentication did not complete")?;
+        let local_auth_workspace =
+            cookie_value_from_jar(&self.jar, &base_url, "local-auth-workspace").context(
+                "local-auth-workspace cookie was not set — authentication did not complete",
+            )?;
+        let bearer = decode_local_auth_workspace(&local_auth_workspace)?;
         let csrf = cookie_value_from_jar(&self.jar, &base_url, "x-csrf-token").unwrap_or_default();
         let payload = serde_json::json!({ "name": "ayx-rs-cli", "lifetimeSeconds": 2_592_000 });
         let pat: Value = retry_transient(
@@ -950,6 +953,7 @@ mod tests {
         method: String,
         target: String,
         body: String,
+        authorization: Option<String>,
     }
 
     struct RecordingServer {
@@ -1157,6 +1161,12 @@ mod tests {
             method,
             target,
             body,
+            authorization: headers.lines().find_map(|line| {
+                line.split_once(':').and_then(|(name, value)| {
+                    name.eq_ignore_ascii_case("authorization")
+                        .then(|| value.trim().to_string())
+                })
+            }),
         })
     }
 
@@ -1950,5 +1960,61 @@ mod tests {
         assert!(requests[2].body.contains("reference-1"));
         assert!(requests[6].body.contains("email=person%40example.com"));
         assert!(requests[6].body.contains("password=workspace-secret"));
+    }
+
+    /// The Wizard is a separate orchestration lane, but must preserve the
+    /// exact observable HTTP sequence established by the frozen Legacy lane.
+    #[test]
+    #[serial]
+    fn wizard_otp_flow_preserves_legacy_http_sequence() {
+        let server = RecordingServer::start();
+        let result = crate::WizardOtpAdapter
+            .login(
+                &server.base_url,
+                "person@example.com",
+                "gid-1",
+                Some("workspace-secret".to_string()),
+                || Ok("123456".to_string()),
+            )
+            .expect("the Wizard adapter should complete the characterized flow");
+
+        assert_eq!(result.access_token, "pat-secret");
+        assert_eq!(
+            result.token_expires_at.as_deref(),
+            Some("2030-01-01T00:00:00Z")
+        );
+        let requests = server.requests();
+        let sequence: Vec<(&str, &str)> = requests
+            .iter()
+            .map(|request| {
+                (
+                    request.method.as_str(),
+                    request.target.split('?').next().unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            sequence,
+            vec![
+                ("GET", "/v4/platformAuth/session"),
+                ("POST", "/v4/auth/sendPasscode"),
+                ("POST", "/v4/auth/validatePasscode"),
+                ("GET", "/v4/auth/accounts"),
+                ("GET", "/"),
+                ("GET", "/authorize"),
+                ("POST", "/session"),
+                ("GET", "/token/interaction-123/resume"),
+                ("POST", "/v4/apiAccessTokens"),
+            ]
+        );
+        assert!(requests[0].target.contains("email=person%40example.com"));
+        assert!(requests[1].body.contains("person@example.com"));
+        assert!(requests[2].body.contains("reference-1"));
+        assert!(requests[6].body.contains("password=workspace-secret"));
+        assert_eq!(
+            requests[8].authorization.as_deref(),
+            Some("Bearer bearer-secret"),
+            "Wizard must use the decoded access token, not the opaque cookie"
+        );
     }
 }
