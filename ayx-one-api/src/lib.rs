@@ -44,7 +44,9 @@ pub mod platform;
 pub mod types;
 
 pub use coverage::{CoverageReport, MissingEndpoint, StaleEndpoint, coverage};
-pub use email_otp::{OtpAuthResult, email_otp_login, email_otp_login_with_password};
+pub use email_otp::{
+    OtpAuthResult, WizardOtpSession, email_otp_login, email_otp_login_with_password,
+};
 pub use otp_compat::{
     LEGACY_OTP_COMPATIBILITY_VERSION, LegacyOtpAdapter, LegacyOtpCompatibilityContract,
 };

@@ -127,6 +127,134 @@ pub struct OtpAuthResult {
     pub token_expires_at: Option<String>,
 }
 
+/// Stepwise view of the characterized OTP HTTP session for the Wizard RC.
+///
+/// This type intentionally owns the cookie jar and never exposes it, tokens,
+/// OTPs, or workspace passwords through `Debug`/serialization. Legacy keeps
+/// its independent, frozen entry point; both lanes call the same low-level
+/// request helpers and redirect follower.
+pub struct WizardOtpSession {
+    base: String,
+    email: String,
+    workspace_gid: String,
+    client: Client,
+    jar: Arc<Jar>,
+    interaction_id: Option<String>,
+}
+
+impl WizardOtpSession {
+    pub fn new(base_url: &str, email: &str, workspace_gid: &str) -> Result<Self> {
+        let endpoint = crate::trusted_one_endpoint(base_url)
+            .context("Wizard OTP endpoint failed Alteryx One trust validation")?;
+        let base = endpoint.as_str().trim_end_matches('/').to_string();
+        let jar = Arc::new(Jar::default());
+        let client = Client::builder()
+            .cookie_provider(jar.clone())
+            .redirect(Policy::none())
+            .user_agent(BROWSER_UA)
+            .timeout(Duration::from_secs(30))
+            .build()
+            .context("failed to build HTTP client for Wizard auth")?;
+        if let Ok(warm_url) = reqwest::Url::parse_with_params(
+            &format!("{base}/v4/platformAuth/session"),
+            &[("email", email), ("includeInvited", "accounts,workspaces")],
+        ) {
+            let _ = client.get(warm_url).send();
+        }
+        Ok(Self {
+            base,
+            email: email.to_string(),
+            workspace_gid: workspace_gid.to_string(),
+            client,
+            jar,
+            interaction_id: None,
+        })
+    }
+
+    pub fn send_otp(&self) -> Result<String> {
+        send_passcode(&self.client, &self.base, &self.email)
+    }
+
+    pub fn validate_otp(&self, reference_id: &str, otp: &str) -> Result<()> {
+        validate_passcode(&self.client, &self.base, &self.email, reference_id, otp)
+    }
+
+    /// Resolves the workspace and drives the characterized redirect chain up
+    /// to the password interaction, retaining its opaque interaction id.
+    pub fn resolve_workspace(&mut self) -> Result<()> {
+        let workspace_name =
+            resolve_workspace_name(&self.client, &self.base, &self.email, &self.workspace_gid)?;
+        let enter = reqwest::Url::parse_with_params(
+            &format!("{}/", self.base),
+            &[
+                ("workspace", workspace_name.as_str()),
+                ("workspaceGid", self.workspace_gid.as_str()),
+            ],
+        )
+        .context("failed to build workspace-entry URL")?;
+        let visited = follow_redirects(&self.client, enter, 25)?;
+        self.interaction_id = Some(extract_interaction_id(&visited).context(
+            "could not find the OIDC interaction id in the redirect chain — the auth flow may have changed",
+        )?);
+        Ok(())
+    }
+
+    pub fn submit_workspace_password(&self, password: &str) -> Result<()> {
+        submit_workspace_password(&self.client, &self.base, &self.email, password)
+    }
+
+    pub fn resume_oidc(&self) -> Result<()> {
+        let interaction_id = self
+            .interaction_id
+            .as_deref()
+            .context("workspace must be resolved before resuming OIDC")?;
+        let resume = reqwest::Url::parse(&format!("{}/token/{interaction_id}/resume", self.base))
+            .context("failed to build resume URL")?;
+        follow_redirects(&self.client, resume, 25)?;
+        Ok(())
+    }
+
+    /// Mints the PAT once. The shared pre-send-only retry policy prevents a
+    /// timeout after request dispatch from creating an unobserved second PAT.
+    pub fn mint_pat(&self) -> Result<OtpAuthResult> {
+        let base_url = reqwest::Url::parse(&self.base).context("base_url is not a valid URL")?;
+        let bearer = cookie_value_from_jar(&self.jar, &base_url, "local-auth-workspace")
+            .context("local-auth-workspace cookie was not set — authentication did not complete")?;
+        let csrf = cookie_value_from_jar(&self.jar, &base_url, "x-csrf-token").unwrap_or_default();
+        let payload = serde_json::json!({ "name": "ayx-rs-cli", "lifetimeSeconds": 2_592_000 });
+        let pat: Value = retry_transient(
+            TRANSIENT_RETRY_ATTEMPTS,
+            is_pre_send_failure,
+            |_: &Response| false,
+            || {
+                self.client
+                    .post(format!("{}/v4/apiAccessTokens", self.base))
+                    .header("x-csrf-token", csrf.as_str())
+                    .header("x-alteryx-workspace-gid", self.workspace_gid.as_str())
+                    .bearer_auth(&bearer)
+                    .json(&payload)
+                    .send()
+            },
+        )
+        .context("apiAccessTokens request failed")?
+        .error_for_status()
+        .context("apiAccessTokens returned an error status")?
+        .json()
+        .context("apiAccessTokens response was not JSON")?;
+        Ok(OtpAuthResult {
+            access_token: pat["tokenValue"]
+                .as_str()
+                .context("PAT response missing tokenValue")?
+                .to_string(),
+            workspace_gid: self.workspace_gid.clone(),
+            token_expires_at: pat["tokenInfo"]["expiredAt"]
+                .as_str()
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+        })
+    }
+}
+
 /// `POST /v4/auth/sendPasscode`. Retries only on a pre-send failure — see
 /// `is_pre_send_failure` — because a retry after the request reached the
 /// server risks sending a second passcode email for the same login attempt.
