@@ -17,6 +17,7 @@ use thiserror::Error;
 use crate::sensitive::write_sensitive_file;
 
 pub const AUTH_STATE_MACHINE_VERSION: u16 = 1;
+pub const WIZARD_ENGINE_VERSION: u16 = 1;
 pub const AGENT_AUTH_PROTOCOL_VERSION: u16 = 1;
 pub const DEFAULT_OTP_ATTEMPTS_PER_REFERENCE: u32 = 3;
 pub const DEFAULT_OTP_SENDS: u32 = 2;
@@ -302,6 +303,235 @@ impl AuthStateMachine {
         self.state.failure = Some(kind);
         self.state.phase = AuthPhase::Failed;
         Ok(self.state.clone())
+    }
+}
+
+/// An individually auditable unit of the interactive Wizard transport.
+///
+/// The distinction between operations with and without external side effects
+/// is intentionally explicit: retrying an uncertain OTP send or PAT mint can
+/// create a second email or orphaned token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WizardStep {
+    SendOtp,
+    ValidateOtp,
+    ResolveWorkspace,
+    SubmitWorkspacePassword,
+    ResumeOidc,
+    MintPat,
+    Persist,
+}
+
+impl WizardStep {
+    pub const fn has_external_side_effect(self) -> bool {
+        matches!(self, Self::SendOtp | Self::MintPat | Self::Persist)
+    }
+}
+
+/// The only outcomes an I/O adapter may report to the Wizard.  In particular,
+/// a timeout after write is never collapsed into a retryable error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+pub enum OperationOutcome {
+    DefinitelyNotSent,
+    MayHaveCommitted,
+    Rejected { kind: AuthFailureKind },
+    Accepted,
+}
+
+/// What the caller is permitted to do next.  `FallbackToLegacy` means no
+/// Wizard retry is authorized; a new, complete Legacy login is the only
+/// compatibility recovery lane after uncertain side effects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "action")]
+pub enum WizardAction {
+    Invoke { step: WizardStep },
+    PromptOtp,
+    PromptWorkspacePassword,
+    Complete,
+    FallbackToLegacy { step: WizardStep },
+    Fail { kind: AuthFailureKind },
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum WizardTransitionError {
+    #[error("wizard has no operation awaiting an outcome")]
+    NoPendingStep,
+    #[error("wizard engine version {0} is unsupported")]
+    UnsupportedVersion(u16),
+    #[error(transparent)]
+    State(#[from] AuthTransitionError),
+}
+
+/// Typed, I/O-free coordinator for the v0.17 Wizard lane.
+///
+/// It deliberately does not own HTTP or secret values.  The first RC uses it
+/// to verify operation ordering against the proven Legacy transport before it
+/// is allowed to become a default rollout.
+#[derive(Debug, Clone)]
+pub struct WizardEngine {
+    version: u16,
+    state: AuthStateMachine,
+    pending: Option<WizardStep>,
+}
+
+impl Default for WizardEngine {
+    fn default() -> Self {
+        Self::new(AuthBudgets::default())
+    }
+}
+
+impl WizardEngine {
+    pub fn new(budgets: AuthBudgets) -> Self {
+        Self {
+            version: WIZARD_ENGINE_VERSION,
+            state: AuthStateMachine::new(budgets),
+            pending: None,
+        }
+    }
+
+    pub fn state(&self) -> &AuthState {
+        self.state.state()
+    }
+
+    pub fn pending(&self) -> Option<WizardStep> {
+        self.pending
+    }
+
+    pub fn start(&mut self) -> Result<WizardAction, WizardTransitionError> {
+        self.ensure_version()?;
+        self.state.apply(AuthEvent::Begin)?;
+        Ok(self.invoke(WizardStep::SendOtp))
+    }
+
+    /// Marks a newly supplied OTP as ready for the adapter. The value itself
+    /// never enters the engine or its serializable state.
+    pub fn submit_otp(&mut self) -> Result<WizardAction, WizardTransitionError> {
+        self.ensure_version()?;
+        if self.state.state().phase != AuthPhase::AwaitingOtp || self.pending.is_some() {
+            return Err(WizardTransitionError::NoPendingStep);
+        }
+        Ok(self.invoke(WizardStep::ValidateOtp))
+    }
+
+    /// Marks a newly supplied workspace password as ready for the adapter.
+    /// As with OTPs, secret bytes remain in the caller-owned input channel.
+    pub fn submit_workspace_password(&mut self) -> Result<WizardAction, WizardTransitionError> {
+        self.ensure_version()?;
+        if self.state.state().phase != AuthPhase::AwaitingWorkspacePassword
+            || self.pending.is_some()
+        {
+            return Err(WizardTransitionError::NoPendingStep);
+        }
+        Ok(self.invoke(WizardStep::SubmitWorkspacePassword))
+    }
+
+    pub fn record(
+        &mut self,
+        outcome: OperationOutcome,
+    ) -> Result<WizardAction, WizardTransitionError> {
+        self.ensure_version()?;
+        let step = self
+            .pending
+            .take()
+            .ok_or(WizardTransitionError::NoPendingStep)?;
+
+        match outcome {
+            // Retrying is only safe when the adapter knows no request was
+            // sent. This is allowed for every step, including side effects.
+            OperationOutcome::DefinitelyNotSent => Ok(self.invoke(step)),
+            // Do not mint a second PAT or send another OTP after an ambiguous
+            // transport result. Non-mutating uncertainty is also terminated
+            // here so a human can choose the independently characterized lane.
+            OperationOutcome::MayHaveCommitted => Ok(WizardAction::FallbackToLegacy { step }),
+            OperationOutcome::Rejected { kind } => self.rejected(step, kind),
+            OperationOutcome::Accepted => self.accepted(step),
+        }
+    }
+
+    fn accepted(&mut self, step: WizardStep) -> Result<WizardAction, WizardTransitionError> {
+        match step {
+            WizardStep::SendOtp => {
+                self.state.apply(AuthEvent::OtpSent)?;
+                self.pending = None;
+                Ok(WizardAction::PromptOtp)
+            }
+            WizardStep::ValidateOtp => {
+                self.state.apply(AuthEvent::OtpAccepted)?;
+                Ok(self.invoke(WizardStep::ResolveWorkspace))
+            }
+            WizardStep::ResolveWorkspace => {
+                self.state.apply(AuthEvent::WorkspaceResolved)?;
+                self.pending = None;
+                Ok(WizardAction::PromptWorkspacePassword)
+            }
+            WizardStep::SubmitWorkspacePassword => {
+                self.state.apply(AuthEvent::WorkspacePasswordAccepted)?;
+                Ok(self.invoke(WizardStep::ResumeOidc))
+            }
+            WizardStep::ResumeOidc => Ok(self.invoke(WizardStep::MintPat)),
+            WizardStep::MintPat => {
+                self.state.apply(AuthEvent::TokenExchanged)?;
+                Ok(self.invoke(WizardStep::Persist))
+            }
+            WizardStep::Persist => {
+                self.state.apply(AuthEvent::PersistStarted)?;
+                self.state.apply(AuthEvent::PersistSucceeded)?;
+                Ok(WizardAction::Complete)
+            }
+        }
+    }
+
+    fn rejected(
+        &mut self,
+        step: WizardStep,
+        kind: AuthFailureKind,
+    ) -> Result<WizardAction, WizardTransitionError> {
+        match step {
+            WizardStep::ValidateOtp
+                if matches!(
+                    kind,
+                    AuthFailureKind::InvalidOtp | AuthFailureKind::ExpiredOtp
+                ) =>
+            {
+                self.state.apply(AuthEvent::OtpRejected {
+                    reference_expired: kind == AuthFailureKind::ExpiredOtp,
+                })?;
+                match self.state.state().phase {
+                    AuthPhase::AwaitingOtp => Ok(WizardAction::PromptOtp),
+                    AuthPhase::SendingOtp => Ok(self.invoke(WizardStep::SendOtp)),
+                    _ => Ok(WizardAction::Fail { kind }),
+                }
+            }
+            WizardStep::SubmitWorkspacePassword
+                if kind == AuthFailureKind::InvalidWorkspacePassword =>
+            {
+                self.state.apply(AuthEvent::WorkspacePasswordRejected)?;
+                if self.state.state().phase == AuthPhase::AwaitingWorkspacePassword {
+                    Ok(WizardAction::PromptWorkspacePassword)
+                } else {
+                    Ok(WizardAction::Fail { kind })
+                }
+            }
+            _ => {
+                self.state.apply(AuthEvent::TerminalFailure(kind))?;
+                Ok(WizardAction::Fail { kind })
+            }
+        }
+    }
+
+    fn invoke(&mut self, step: WizardStep) -> WizardAction {
+        self.pending = Some(step);
+        WizardAction::Invoke { step }
+    }
+
+    fn ensure_version(&self) -> Result<(), WizardTransitionError> {
+        if self.version == WIZARD_ENGINE_VERSION {
+            Ok(())
+        } else {
+            Err(WizardTransitionError::UnsupportedVersion(self.version))
+        }
     }
 }
 
@@ -1123,6 +1353,61 @@ mod tests {
         assert_eq!(AuthRollout::parse("wizard"), Ok(AuthRollout::Wizard));
         assert_eq!(AuthRollout::parse("canary"), Ok(AuthRollout::Canary));
         assert!(AuthRollout::parse("oops").is_err());
+    }
+
+    #[test]
+    fn wizard_never_retries_an_uncertain_otp_send_or_pat_mint() {
+        let mut wizard = WizardEngine::default();
+        assert_eq!(
+            wizard.start().unwrap(),
+            WizardAction::Invoke {
+                step: WizardStep::SendOtp
+            }
+        );
+        assert_eq!(
+            wizard.record(OperationOutcome::MayHaveCommitted).unwrap(),
+            WizardAction::FallbackToLegacy {
+                step: WizardStep::SendOtp
+            }
+        );
+
+        let mut wizard = WizardEngine::default();
+        wizard.start().unwrap();
+        assert_eq!(
+            wizard.record(OperationOutcome::Accepted).unwrap(),
+            WizardAction::PromptOtp
+        );
+        wizard.submit_otp().unwrap();
+        wizard.record(OperationOutcome::Accepted).unwrap();
+        wizard.record(OperationOutcome::Accepted).unwrap();
+        wizard.submit_workspace_password().unwrap();
+        wizard.record(OperationOutcome::Accepted).unwrap();
+        wizard.record(OperationOutcome::Accepted).unwrap();
+        assert_eq!(wizard.pending(), Some(WizardStep::MintPat));
+        assert_eq!(
+            wizard.record(OperationOutcome::MayHaveCommitted).unwrap(),
+            WizardAction::FallbackToLegacy {
+                step: WizardStep::MintPat
+            }
+        );
+    }
+
+    #[test]
+    fn wizard_reprompts_a_rejected_otp_without_resending_until_budget_exhausts() {
+        let mut wizard = WizardEngine::default();
+        wizard.start().unwrap();
+        wizard.record(OperationOutcome::Accepted).unwrap();
+        wizard.submit_otp().unwrap();
+        assert_eq!(
+            wizard
+                .record(OperationOutcome::Rejected {
+                    kind: AuthFailureKind::InvalidOtp
+                })
+                .unwrap(),
+            WizardAction::PromptOtp
+        );
+        assert_eq!(wizard.state().otp_sends, 1);
+        assert_eq!(wizard.state().otp_attempts, 1);
     }
 
     #[test]
