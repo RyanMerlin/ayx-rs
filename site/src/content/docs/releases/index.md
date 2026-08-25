@@ -7,6 +7,12 @@ sidebar:
 
 Release notes for each tagged version of `ayx`. For current behavior, use the live docs above; for a specific binary, read the notes for that version.
 
+## v0.16.1
+
+**Legacy email OTP is the v0.16.1 default and rollback lane.** `AYX_AUTH_ROLLOUT=legacy` selects the complete compatibility-pinned flow; invalid rollout values fail instead of silently selecting another implementation. `wizard` and `canary` remain pre-release lanes and are not claimed as executable release-default orchestration.
+
+**Authentication hosts are now validated before use.** Production auth requires HTTPS Alteryx regional/Ping hosts and rejects URL credentials, query strings, fragments, and unsafe redirect schemes. Browser callbacks are bounded and CSRF-validated.
+
 ## v0.16.0
 
 **Wizard authentication is now the default.** `ayx one login` uses the

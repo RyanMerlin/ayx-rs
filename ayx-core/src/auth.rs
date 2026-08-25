@@ -637,15 +637,54 @@ pub trait UserInteraction {
 }
 
 /// Rollout values for the versioned authentication orchestration boundary.
-/// Wizard is the supported default; the legacy adapter remains available as
-/// an explicit rollback path, and canary is reserved for isolated validation.
+/// v0.16.1 keeps the complete legacy adapter as the default and rollback
+/// lane. Wizard remains an explicitly selected, pre-release implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthRollout {
     #[default]
-    Wizard,
     Legacy,
+    Wizard,
     Canary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("invalid authentication rollout '{value}'; use legacy, wizard, or canary")]
+pub struct AuthRolloutError {
+    value: String,
+}
+
+/// The authoritative One-profile secret slots.  Callers that inspect or
+/// persist credentials use these names rather than maintaining divergent
+/// token/password/client-secret lists.  Workspace fields use the same suffix
+/// with their workspace path prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OneSecretSlot {
+    AccessToken,
+    RefreshToken,
+    WorkspacePassword,
+    ClientSecret,
+    ServicePrincipalClientSecret,
+}
+
+impl OneSecretSlot {
+    pub const ALL: [Self; 5] = [
+        Self::AccessToken,
+        Self::RefreshToken,
+        Self::WorkspacePassword,
+        Self::ClientSecret,
+        Self::ServicePrincipalClientSecret,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::AccessToken => "access_token",
+            Self::RefreshToken => "refresh_token",
+            Self::WorkspacePassword => "workspace_password",
+            Self::ClientSecret => "client_secret",
+            Self::ServicePrincipalClientSecret => "sp_client_secret",
+        }
+    }
 }
 
 /// Report inline secret fields without reading or returning their values.
@@ -654,60 +693,21 @@ pub enum AuthRollout {
 pub fn inline_secret_fields(config: &crate::profile::Config) -> Vec<String> {
     let mut fields = Vec::new();
     if let Some(one) = config.alteryx_one.as_ref() {
-        for (field, value, reference) in [
-            (
-                "alteryx_one.access_token",
-                &one.access_token,
-                &one.access_token_ref,
-            ),
-            (
-                "alteryx_one.refresh_token",
-                &one.refresh_token,
-                &one.refresh_token_ref,
-            ),
-            (
-                "alteryx_one.workspace_password",
-                &one.workspace_password,
-                &one.workspace_password_ref,
-            ),
-            (
-                "alteryx_one.client_secret",
-                &one.client_secret,
-                &one.client_secret_ref,
-            ),
-        ] {
+        for slot in OneSecretSlot::ALL {
+            let (value, reference) = top_level_secret_slot(one, slot);
             if value.as_ref().is_some_and(|value| !value.trim().is_empty()) && reference.is_none() {
-                fields.push(field.to_string());
+                fields.push(format!("alteryx_one.{}", slot.name()));
             }
         }
         for (workspace_id, credential) in &one.workspace_credentials {
-            for (field, value, reference) in [
-                (
-                    "access_token",
-                    &credential.access_token,
-                    &credential.access_token_ref,
-                ),
-                (
-                    "refresh_token",
-                    &credential.refresh_token,
-                    &credential.refresh_token_ref,
-                ),
-                (
-                    "workspace_password",
-                    &credential.workspace_password,
-                    &credential.workspace_password_ref,
-                ),
-                (
-                    "client_secret",
-                    &credential.client_secret,
-                    &credential.client_secret_ref,
-                ),
-            ] {
+            for slot in OneSecretSlot::ALL {
+                let (value, reference) = workspace_secret_slot(credential, slot);
                 if value.as_ref().is_some_and(|value| !value.trim().is_empty())
                     && reference.is_none()
                 {
                     fields.push(format!(
-                        "alteryx_one.workspace_credentials['{workspace_id}'].{field}"
+                        "alteryx_one.workspace_credentials['{workspace_id}'].{}",
+                        slot.name()
                     ));
                 }
             }
@@ -716,22 +716,60 @@ pub fn inline_secret_fields(config: &crate::profile::Config) -> Vec<String> {
     fields
 }
 
+fn top_level_secret_slot(
+    one: &crate::profile::AlteryxOneProfile,
+    slot: OneSecretSlot,
+) -> (&Option<String>, &Option<String>) {
+    match slot {
+        OneSecretSlot::AccessToken => (&one.access_token, &one.access_token_ref),
+        OneSecretSlot::RefreshToken => (&one.refresh_token, &one.refresh_token_ref),
+        OneSecretSlot::WorkspacePassword => (&one.workspace_password, &one.workspace_password_ref),
+        OneSecretSlot::ClientSecret => (&one.client_secret, &one.client_secret_ref),
+        OneSecretSlot::ServicePrincipalClientSecret => {
+            (&one.sp_client_secret, &one.sp_client_secret_ref)
+        }
+    }
+}
+
+fn workspace_secret_slot(
+    credential: &crate::profile::WorkspaceCredential,
+    slot: OneSecretSlot,
+) -> (&Option<String>, &Option<String>) {
+    match slot {
+        OneSecretSlot::AccessToken => (&credential.access_token, &credential.access_token_ref),
+        OneSecretSlot::RefreshToken => (&credential.refresh_token, &credential.refresh_token_ref),
+        OneSecretSlot::WorkspacePassword => (
+            &credential.workspace_password,
+            &credential.workspace_password_ref,
+        ),
+        OneSecretSlot::ClientSecret => (&credential.client_secret, &credential.client_secret_ref),
+        OneSecretSlot::ServicePrincipalClientSecret => (
+            &credential.sp_client_secret,
+            &credential.sp_client_secret_ref,
+        ),
+    }
+}
+
 impl AuthRollout {
-    pub fn parse(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Result<Self, AuthRolloutError> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "legacy" | "otp" => Some(Self::Legacy),
-            "canary" | "internal" => Some(Self::Canary),
-            "wizard" | "default" => Some(Self::Wizard),
-            _ => None,
+            "legacy" | "otp" => Ok(Self::Legacy),
+            "canary" | "internal" => Ok(Self::Canary),
+            "wizard" | "default" => Ok(Self::Wizard),
+            _ => Err(AuthRolloutError {
+                value: value.trim().to_string(),
+            }),
         }
     }
 
-    pub fn from_environment() -> Self {
-        std::env::var("AYX_AUTH_ROLLOUT")
-            .or_else(|_| std::env::var("AUTH_ROLLOUT"))
-            .ok()
-            .and_then(|value| Self::parse(&value))
-            .unwrap_or_default()
+    /// Reads the rollout selector without silently changing lanes.  An invalid
+    /// deployment setting is an operational error, not permission to enable a
+    /// newer authentication implementation.
+    pub fn from_environment() -> Result<Self, AuthRolloutError> {
+        match std::env::var("AYX_AUTH_ROLLOUT").or_else(|_| std::env::var("AUTH_ROLLOUT")) {
+            Ok(value) => Self::parse(&value),
+            Err(_) => Ok(Self::default()),
+        }
     }
 
     pub fn uses_new_orchestration(self) -> bool {
@@ -1074,16 +1112,17 @@ mod tests {
     }
 
     #[test]
-    fn rollout_defaults_to_wizard() {
-        assert_eq!(AuthRollout::default(), AuthRollout::Wizard);
+    fn rollout_defaults_to_legacy() {
+        assert_eq!(AuthRollout::default(), AuthRollout::Legacy);
     }
 
     #[test]
     fn legacy_rollout_remains_an_explicit_rollback() {
-        assert_eq!(AuthRollout::parse("legacy"), Some(AuthRollout::Legacy));
-        assert_eq!(AuthRollout::parse("otp"), Some(AuthRollout::Legacy));
-        assert_eq!(AuthRollout::parse("wizard"), Some(AuthRollout::Wizard));
-        assert_eq!(AuthRollout::parse("canary"), Some(AuthRollout::Canary));
+        assert_eq!(AuthRollout::parse("legacy"), Ok(AuthRollout::Legacy));
+        assert_eq!(AuthRollout::parse("otp"), Ok(AuthRollout::Legacy));
+        assert_eq!(AuthRollout::parse("wizard"), Ok(AuthRollout::Wizard));
+        assert_eq!(AuthRollout::parse("canary"), Ok(AuthRollout::Canary));
+        assert!(AuthRollout::parse("oops").is_err());
     }
 
     #[test]

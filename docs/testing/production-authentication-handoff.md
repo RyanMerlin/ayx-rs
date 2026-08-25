@@ -59,20 +59,20 @@ pwsh -File .\scripts\live-auth-canary.ps1 `
 binding; it must match the workspace's actual Alteryx One region and is not
 assumed to be `us1`. The default `canary` run uses an isolated config home,
 `AYX_AUTH_ROLLOUT=canary`, the `canary` keyring namespace, and session-only
-persistence. To validate the production-default Wizard path, use a separate
-isolated config home and `-Rollout wizard`; that run uses the normal keyring
-namespace and should use `-SecretPolicy secure` when the host supports it. The
-script never accepts a password as a command-line argument and scans output
-for secret fields before emitting it. Record only the exit status, expiry
-metadata, and redacted output; do not attach OTPs, passwords, tokens, or the
-isolated profile contents.
+persistence. To validate the v0.16.1 release-default compatibility lane, use
+a separate isolated config home and `-Rollout legacy`; that run uses the normal
+keyring namespace and should use `-SecretPolicy secure` only when persistence
+is specifically under test. The script never accepts a password as a
+command-line argument and scans output for secret fields before emitting it.
+Record only the exit status, expiry metadata, and redacted output; do not
+attach OTPs, passwords, tokens, or the isolated profile contents.
 
 ## Rollout and rollback
 
-1. The v0.16.0 default is Wizard after the isolated live login, full One
-   surface sweep, and release checks are green.
-2. If a regression appears, set `AYX_AUTH_ROLLOUT=legacy` and retry. Do not
-   delete the legacy adapter during this release.
+1. The v0.16.1 default and rollback lane are Legacy after the isolated live
+   login, full One surface sweep, and release checks are green.
+2. If a regression appears, keep `AYX_AUTH_ROLLOUT=legacy`; do not delete the
+   legacy adapter during this release.
 3. Keep `canary` reserved for isolated validation; it must not share ordinary
    profile or keyring state.
 4. Decommission legacy in a separate release after a later canary, internal

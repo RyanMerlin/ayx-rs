@@ -335,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-core"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "apple-native-keyring-store",
  "chrono",
@@ -347,6 +347,7 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.19",
+ "url",
  "windows-native-keyring-store",
  "windows-sys 0.61.2",
  "zbus-secret-service-keyring-store",
@@ -354,7 +355,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-one"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -364,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-one-api"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -384,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-registry"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -399,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-rs"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -433,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-server"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -455,7 +456,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-server-api"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -468,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-workflow"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "lzf",
@@ -4833,7 +4834,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyhow",
  "chrono",

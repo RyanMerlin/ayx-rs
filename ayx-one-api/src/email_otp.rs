@@ -377,7 +377,9 @@ fn email_otp_login_pure_http<F>(
 where
     F: Fn() -> Result<String>,
 {
-    let base = base_url.trim_end_matches('/');
+    let endpoint = crate::trusted_one_endpoint(base_url)
+        .context("OTP endpoint failed Alteryx One trust validation")?;
+    let base = endpoint.as_str().trim_end_matches('/');
     let jar = Arc::new(Jar::default());
     let client = Client::builder()
         .cookie_provider(jar.clone())
@@ -686,6 +688,15 @@ fn follow_redirects(client: &Client, start: reqwest::Url, max_hops: usize) -> Re
         let next = current
             .join(location)
             .with_context(|| format!("invalid redirect Location: {location}"))?;
+        let local_test_redirect = cfg!(test)
+            && next.scheme() == "http"
+            && matches!(next.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
+        if next.scheme() != "https" && !local_test_redirect {
+            bail!(
+                "refusing to follow auth redirect with non-HTTPS scheme '{}'",
+                next.scheme()
+            );
+        }
         // Validate the redirect target before following it.
         let next_host = next.host_str().unwrap_or("");
         if !host_allowed(next_host, &base_host) {

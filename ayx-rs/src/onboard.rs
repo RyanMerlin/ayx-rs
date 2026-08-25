@@ -750,6 +750,27 @@ pub(crate) fn secretize_config_with_binding(
                 out.refs
                     .insert("alteryx_one.client_secret".to_string(), reference);
             }
+            if let Some(value) = one.sp_client_secret.take() {
+                let existing_ref = one.sp_client_secret_ref.clone();
+                let account = secret_scope_for_binding(
+                    scope,
+                    "alteryx_one.sp_client_secret",
+                    binding,
+                    namespace,
+                );
+                let reference = persist_secret_field(
+                    existing_ref.as_deref(),
+                    &account,
+                    &value,
+                    "alteryx_one.sp_client_secret",
+                    policy,
+                    &mut out,
+                    transaction,
+                )?;
+                one.sp_client_secret_ref = Some(reference.clone());
+                out.refs
+                    .insert("alteryx_one.sp_client_secret".to_string(), reference);
+            }
             for (workspace_id, credential) in one.workspace_credentials.iter_mut() {
                 let workspace_binding = binding.map(|base| {
                     let mut scoped = base.clone();
@@ -849,6 +870,29 @@ pub(crate) fn secretize_config_with_binding(
                         transaction,
                     )?;
                     credential.client_secret_ref = Some(reference.clone());
+                    out.refs.insert(field, reference);
+                }
+                if let Some(value) = credential.sp_client_secret.take() {
+                    let existing_ref = credential.sp_client_secret_ref.clone();
+                    let field = format!(
+                        "alteryx_one.workspace_credentials['{workspace_id}'].sp_client_secret"
+                    );
+                    let account = secret_scope_for_binding(
+                        scope,
+                        &field,
+                        workspace_binding.as_ref(),
+                        namespace,
+                    );
+                    let reference = persist_secret_field(
+                        existing_ref.as_deref(),
+                        &account,
+                        &value,
+                        &field,
+                        policy,
+                        &mut out,
+                        transaction,
+                    )?;
+                    credential.sp_client_secret_ref = Some(reference.clone());
                     out.refs.insert(field, reference);
                 }
             }
@@ -1453,7 +1497,7 @@ pub(crate) fn write_config_with_binding(
         file_stem,
         policy,
         binding,
-        auth_keyring_namespace(),
+        auth_keyring_namespace()?,
         Some(&transaction),
     ) {
         Ok(out) => out,
@@ -1556,13 +1600,13 @@ pub(crate) fn binding_for_auth_config(
 /// Live canaries must not share deterministic keyring accounts with ordinary
 /// credentials. The namespace is deliberately process/environment-selected so
 /// the normal legacy and wizard accounts remain backward-compatible.
-pub(crate) fn auth_keyring_namespace() -> Option<&'static str> {
+pub(crate) fn auth_keyring_namespace() -> Result<Option<&'static str>> {
     if std::env::var("AYX_AUTH_LIVE_CANARY").ok().as_deref() == Some("1")
-        || ayx_core::auth::AuthRollout::from_environment() == ayx_core::auth::AuthRollout::Canary
+        || ayx_core::auth::AuthRollout::from_environment()? == ayx_core::auth::AuthRollout::Canary
     {
-        Some("canary")
+        Ok(Some("canary"))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -1618,7 +1662,7 @@ pub(crate) fn validate_auth_credential_bindings(
         validate_bound_reference_any(
             reference,
             &top_level_bindings,
-            auth_keyring_namespace(),
+            auth_keyring_namespace()?,
             field,
         )?;
     }
@@ -1663,7 +1707,7 @@ pub(crate) fn validate_auth_credential_bindings(
             validate_bound_reference(
                 reference,
                 &workspace_binding,
-                auth_keyring_namespace(),
+                auth_keyring_namespace()?,
                 &field,
             )?;
         }

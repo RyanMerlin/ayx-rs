@@ -4,6 +4,15 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.16.1 — 2026-08-25
+
+### Fixed
+
+- Authentication endpoints now use a validated HTTPS Alteryx One boundary. URLs with credentials, query strings, fragments, non-Alteryx hosts, or insecure schemes are rejected before authentication traffic is sent. Browser callbacks use bounded, decoded request parsing with CSRF validation and safe browser launching.
+- `AYX_AUTH_ROLLOUT` now fails closed when invalid. The default and rollback lane are the complete, compatibility-pinned `legacy` email-OTP flow; `wizard` and `canary` remain explicitly selected pre-release lanes. Shared profile loading and credential persistence are common infrastructure, so rollback does not discard existing profile state.
+- Service-principal secret slots are included in inline-secret inventory, migration, keyring secretization, and legacy keyring cleanup for both profile-level and workspace credentials.
+- Release publication now requires a pinned CycloneDX generator and a validated, uniquely named SBOM for every workspace package. Each SBOM is a signed release asset and is included in checksums and provenance.
+
 ## 0.16.0 — 2026-08-20
 
 ### Added

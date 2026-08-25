@@ -8,16 +8,13 @@
 use std::{collections::HashSet, fs, path::Path};
 
 use anyhow::Result;
-use ayx_core::secrets::keyring_account;
+use ayx_core::{auth::OneSecretSlot, secrets::keyring_account};
 
 /// Secretizable fields that `secretize_config` may write for a given scope.
 /// Dynamic workspace-credential fields are derived at runtime from the profile
-/// YAML; these are the nine static ones.
+/// YAML; the One slots come from `OneSecretSlot`, leaving these five
+/// non-One static fields.
 const STATIC_FIELDS: &[&str] = &[
-    "alteryx_one.access_token",
-    "alteryx_one.refresh_token",
-    "alteryx_one.workspace_password",
-    "alteryx_one.client_secret",
     "server.api.client_secret",
     "server.curator_api_secret",
     "server.storage.mongo.managed.password",
@@ -65,18 +62,17 @@ fn legacy_accounts_for_mismatch(
     if keyring_account(old_scope, "") == keyring_account(new_scope, "") {
         return vec![];
     }
-    let mut accounts: Vec<String> = STATIC_FIELDS
+    let mut accounts: Vec<String> = OneSecretSlot::ALL
         .iter()
-        .map(|f| keyring_account(old_scope, f))
+        .map(|slot| keyring_account(old_scope, &format!("alteryx_one.{}", slot.name())))
         .collect();
+    accounts.extend(STATIC_FIELDS.iter().map(|f| keyring_account(old_scope, f)));
     for ws_id in workspace_ids {
-        for suffix in [
-            "access_token",
-            "refresh_token",
-            "workspace_password",
-            "client_secret",
-        ] {
-            let field = format!("alteryx_one.workspace_credentials['{ws_id}'].{suffix}");
+        for slot in OneSecretSlot::ALL {
+            let field = format!(
+                "alteryx_one.workspace_credentials['{ws_id}'].{}",
+                slot.name()
+            );
             accounts.push(keyring_account(old_scope, &field));
         }
     }

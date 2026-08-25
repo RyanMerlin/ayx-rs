@@ -29,6 +29,7 @@ keyring-core.workspace = true
 # pulling in a new crate (e.g. `uuid`) for the same primitive need.
 getrandom = "0.4"
 sha2.workspace = true
+url.workspace = true
 
 # keyring 4.x split the platform credential stores into separate crates that
 # are registered with keyring-core at runtime. Pick one store per OS:

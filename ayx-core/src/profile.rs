@@ -242,7 +242,7 @@ pub struct RuntimeProfileResolution {
     pub active_profile: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Config {
     pub profile_name: String,
     #[serde(default = "default_mongo_profile")]
@@ -419,7 +419,7 @@ pub enum AuthMode {
     ServicePrincipal,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 pub struct WorkspaceCredential {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access_token: Option<String>,
@@ -460,7 +460,7 @@ pub struct WorkspaceCredential {
     pub api_base_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct AlteryxOneProfile {
     pub account_email: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -542,6 +542,64 @@ impl Default for AlteryxOneProfile {
             workspace_gid: None,
             auth_mode: AuthMode::User,
         }
+    }
+}
+
+/// Profile debugging must be safe to include in an error report.  In
+/// particular, `inline:` references contain the secret value, so neither the
+/// values nor their references may be delegated to derived `Debug` output.
+impl std::fmt::Debug for WorkspaceCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkspaceCredential")
+            .field("has_access_token", &self.access_token.is_some())
+            .field("has_refresh_token", &self.refresh_token.is_some())
+            .field("has_workspace_password", &self.workspace_password.is_some())
+            .field("oauth_client_id", &self.oauth_client_id)
+            .field("has_client_secret", &self.client_secret.is_some())
+            .field("has_sp_client_secret", &self.sp_client_secret.is_some())
+            .field("token_endpoint_url", &self.token_endpoint_url)
+            .field("sp_client_id", &self.sp_client_id)
+            .field("workspace_gid", &self.workspace_gid)
+            .field("api_base_url", &self.api_base_url)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for AlteryxOneProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AlteryxOneProfile")
+            .field("account_email", &self.account_email)
+            .field("base_url", &self.base_url)
+            .field("oauth_client_id", &self.oauth_client_id)
+            .field("has_client_secret", &self.client_secret.is_some())
+            .field("has_sp_client_secret", &self.sp_client_secret.is_some())
+            .field("token_endpoint_url", &self.token_endpoint_url)
+            .field("has_access_token", &self.access_token.is_some())
+            .field("has_refresh_token", &self.refresh_token.is_some())
+            .field("has_workspace_password", &self.workspace_password.is_some())
+            .field("workspace_credentials", &self.workspace_credentials)
+            .field("expected_workspace_id", &self.expected_workspace_id)
+            .field("sp_client_id", &self.sp_client_id)
+            .field("sp_token_endpoint_url", &self.sp_token_endpoint_url)
+            .field("workspace_gid", &self.workspace_gid)
+            .field("auth_mode", &self.auth_mode)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("profile_name", &self.profile_name)
+            .field("mongo_mode", &self.mongo.mode)
+            .field("alteryx_one", &self.alteryx_one)
+            .field("has_observability", &self.observability.is_some())
+            .field("has_server_api", &self.server_api.is_some())
+            .field("has_api", &self.api.is_some())
+            .field("has_server", &self.server.is_some())
+            .field("has_sqlserver", &self.sqlserver.is_some())
+            .field("has_upgrade", &self.upgrade.is_some())
+            .finish()
     }
 }
 
@@ -3331,6 +3389,27 @@ mod tests {
         };
 
         assert_eq!(profile.resolved_sp_client_secret(), Some("sp-test-secret"));
+    }
+
+    #[test]
+    fn debug_output_never_contains_one_secret_values_or_inline_refs() {
+        let profile = AlteryxOneProfile {
+            account_email: "person@example.com".to_string(),
+            access_token: Some("sentinel-access-token".to_string()),
+            access_token_ref: Some("inline:sentinel-access-ref".to_string()),
+            sp_client_secret: Some("sentinel-sp-secret".to_string()),
+            sp_client_secret_ref: Some("inline:sentinel-sp-ref".to_string()),
+            ..Default::default()
+        };
+        let rendered = format!("{profile:?}");
+        for secret in [
+            "sentinel-access-token",
+            "sentinel-access-ref",
+            "sentinel-sp-secret",
+            "sentinel-sp-ref",
+        ] {
+            assert!(!rendered.contains(secret), "debug output leaked {secret}");
+        }
     }
 
     #[test]

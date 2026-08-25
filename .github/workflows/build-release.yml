@@ -244,15 +244,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install cargo-cyclonedx
-        run: cargo install --locked cargo-cyclonedx
+        run: cargo install --locked cargo-cyclonedx --version 0.5.7
       - name: Generate SBOM (CycloneDX)
         run: |
           set -euo pipefail
           mkdir -p sbom
-          cargo cyclonedx --format json --override-filename ayx -a
-          # cargo-cyclonedx v0.5.x writes one ayx.json per crate directory.
-          find . -maxdepth 2 -path './target' -prune -o -name 'ayx.json' -type f -exec cp {} sbom/ \;
-          test -n "$(find sbom -maxdepth 1 -type f -name '*.json' -print -quit)"
+          cargo metadata --format-version 1 --no-deps > metadata.json
+          jq -r '.packages[] | [.name, .manifest_path] | @tsv' metadata.json | while IFS=$'\t' read -r package manifest; do
+            filename="${package}.cdx.json"
+            cargo cyclonedx --manifest-path "$manifest" --format json --override-filename "$filename"
+            source="$(dirname "$manifest")/$filename"
+            test -f "$source"
+            cp "$source" "sbom/$filename"
+          done
+          expected="$(jq -r '.packages[].name' metadata.json | sort -u)"
+          actual="$(find sbom -maxdepth 1 -type f -name '*.cdx.json' -printf '%f\n' | sed 's/\.cdx\.json$//' | sort -u)"
+          test "$expected" = "$actual"
+          test "$(printf '%s\n' "$actual" | sed '/^$/d' | wc -l)" -gt 0
           ls -la sbom/
       - uses: actions/upload-artifact@v7
         with:
@@ -265,10 +273,7 @@ jobs:
       - build-linux
       - build-macos
       - build-windows
-    # `sbom` is not in `needs` so a billing block or transient sbom failure
-    # doesn't prevent the binaries + checksums + cosign bundles from being
-    # published. The download-artifact step below tolerates a missing sbom
-    # artifact (the bundling block guards on `-d`).
+      - sbom
     runs-on: ubuntu-latest
     # OIDC token for sigstore keyless signing + GH artifact attestations.
     # Both rely on workflow identity (no long-lived secrets / keys).
@@ -293,10 +298,10 @@ jobs:
             dist/ayx-x86_64-pc-windows-msvc/ayx-x86_64-pc-windows-msvc.zip; do
             cp "$f" release/
           done
-          # Bundle the SBOM(s).
-          if [ -d dist/ayx-sbom ]; then
-            tar -czf release/ayx-sbom.tar.gz -C dist/ayx-sbom .
-          fi
+          # Every package SBOM is a first-class signed release asset.
+          test -d dist/ayx-sbom
+          find dist/ayx-sbom -maxdepth 1 -type f -name '*.cdx.json' -exec cp {} release/ \;
+          test -n "$(find release -maxdepth 1 -type f -name '*.cdx.json' -print -quit)"
           # Generate SHA256SUMS over every release file.
           cd release
           sha256sum -- * > SHA256SUMS
@@ -316,7 +321,7 @@ jobs:
         run: |
           set -euo pipefail
           cd release
-          for f in ayx-*.zip ayx-*.tar.gz SHA256SUMS; do
+          for f in ayx-*.zip ayx-*.tar.gz *.cdx.json SHA256SUMS; do
             [ -f "$f" ] || continue
             echo "signing $f"
             cosign sign-blob --yes \
@@ -338,7 +343,7 @@ jobs:
             release/ayx-x86_64-apple-darwin.tar.gz
             release/ayx-aarch64-apple-darwin.tar.gz
             release/ayx-x86_64-pc-windows-msvc.zip
-            release/ayx-sbom.tar.gz
+            release/*.cdx.json
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3
         with:
@@ -351,7 +356,7 @@ jobs:
             release/ayx-aarch64-apple-darwin.tar.gz.sigstore
             release/ayx-x86_64-pc-windows-msvc.zip
             release/ayx-x86_64-pc-windows-msvc.zip.sigstore
-            release/ayx-sbom.tar.gz
-            release/ayx-sbom.tar.gz.sigstore
+            release/*.cdx.json
+            release/*.cdx.json.sigstore
             release/SHA256SUMS
             release/SHA256SUMS.sigstore

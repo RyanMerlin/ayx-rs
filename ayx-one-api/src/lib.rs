@@ -11,6 +11,7 @@ use ayx_core::envelope::Envelope;
 use ayx_core::observability::{
     ApiEvent, record_api_event, redact_text, response_shape, transport_error_summary,
 };
+use ayx_core::one_endpoint::OneEndpoint;
 use ayx_core::profile::Config;
 use ayx_core::sensitive::write_sensitive_file;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -21,6 +22,19 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER};
 use serde_json::{Value, json};
 use url::form_urlencoded::Serializer;
 const ONE_API_BASE_URL: &str = "https://us1.alteryxcloud.com";
+
+/// Parses a production authentication endpoint.  Unit tests that exercise the
+/// HTTP transport use explicit loopback fixtures; that exception is compiled
+/// only for this crate's own test binary and is never available to consumers.
+pub(crate) fn trusted_one_endpoint(value: &str) -> Result<OneEndpoint> {
+    #[cfg(test)]
+    {
+        if let Ok(endpoint) = OneEndpoint::for_test_localhost(value) {
+            return Ok(endpoint);
+        }
+    }
+    OneEndpoint::parse(value).map_err(anyhow::Error::from)
+}
 
 mod coverage;
 pub mod email_otp;
@@ -1953,6 +1967,8 @@ pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<Stri
                 "alteryx_one.base_url or token_endpoint_url is required to refresh access tokens"
             )
         })?;
+    let token_endpoint = trusted_one_endpoint(&token_endpoint_url)
+        .context("refresh token endpoint failed Alteryx One trust validation")?;
     let workspace_context = workspace_context_header_value(config);
     if let Some(ref workspace_context) = workspace_context {
         trace_one(format!(
@@ -1962,7 +1978,7 @@ pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<Stri
     }
 
     let mut request = client
-        .post(&token_endpoint_url)
+        .post(token_endpoint.as_str())
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded");
     if let Some(ref workspace_context) = workspace_context {
         request = request.header("x-trifacta-person-workspace-id", workspace_context.as_str());
@@ -1974,7 +1990,7 @@ pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<Stri
             ("refresh_token", refresh_token),
         ])
         .send()
-        .with_context(|| format!("refresh token request to '{}' failed", token_endpoint_url))?;
+        .with_context(|| format!("refresh token request to '{}' failed", token_endpoint))?;
     let status = response.status();
     trace_one(format!(
         "refresh token request to {} returned {}",
@@ -2007,7 +2023,10 @@ pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<Stri
 /// profile must never consume the ordinary keyring namespace, and vice versa.
 fn auth_keyring_namespace() -> Option<&'static str> {
     if std::env::var("AYX_AUTH_LIVE_CANARY").ok().as_deref() == Some("1")
-        || ayx_core::auth::AuthRollout::from_environment() == ayx_core::auth::AuthRollout::Canary
+        || matches!(
+            ayx_core::auth::AuthRollout::from_environment(),
+            Ok(ayx_core::auth::AuthRollout::Canary)
+        )
     {
         Some("canary")
     } else {
@@ -2156,6 +2175,8 @@ pub fn client_credentials_one_access_token(
     workspace_gid: Option<&str>,
     client: &Client,
 ) -> Result<String> {
+    let token_endpoint = trusted_one_endpoint(token_endpoint_url)
+        .context("service-principal token endpoint failed Alteryx One trust validation")?;
     // Ping Identity requires client_secret_post (creds in the form body).
     // Basic auth returns 401 "Unsupported authentication method".
     // scope=w:<gid> is required; without it the token carries only "sp:auth"
@@ -2171,7 +2192,7 @@ pub fn client_credentials_one_access_token(
         params.push(("scope", scope_value.as_str()));
     }
     let response = client
-        .post(token_endpoint_url)
+        .post(token_endpoint.as_str())
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
         .form(&params)
         .send()
