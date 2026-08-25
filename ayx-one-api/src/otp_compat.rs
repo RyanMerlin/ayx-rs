@@ -9,7 +9,9 @@ use anyhow::Result;
 use ayx_core::auth::{AuthFailureKind, OperationOutcome, WizardAction, WizardEngine, WizardStep};
 use serde::{Deserialize, Serialize};
 
-use crate::email_otp::{OtpAuthResult, email_otp_login, email_otp_login_with_password};
+use crate::email_otp::{
+    OtpAuthResult, OtpValidationRejected, email_otp_login, email_otp_login_with_password,
+};
 
 pub const LEGACY_OTP_COMPATIBILITY_VERSION: u16 = 1;
 
@@ -191,21 +193,31 @@ impl WizardOtpAdapter {
             expect(engine.submit_otp()?, WizardStep::ValidateOtp)?;
             match session.validate_otp(&reference, &otp) {
                 Ok(()) => break,
-                Err(_) => match engine.record(OperationOutcome::Rejected {
-                    kind: AuthFailureKind::InvalidOtp,
-                })? {
-                    WizardAction::PromptOtp => continue,
-                    WizardAction::Invoke {
-                        step: WizardStep::SendOtp,
-                    } => {
-                        anyhow::bail!(
-                            "Wizard OTP reference exhausted; restart through AYX_AUTH_ROLLOUT=legacy"
-                        )
+                Err(err) if err.downcast_ref::<OtpValidationRejected>().is_some() => {
+                    match engine.record(OperationOutcome::Rejected {
+                        kind: AuthFailureKind::InvalidOtp,
+                    })? {
+                        WizardAction::PromptOtp => continue,
+                        WizardAction::Invoke {
+                            step: WizardStep::SendOtp,
+                        } => {
+                            anyhow::bail!(
+                                "Wizard OTP reference exhausted; restart through AYX_AUTH_ROLLOUT=legacy"
+                            )
+                        }
+                        action => anyhow::bail!(
+                            "Wizard OTP validation stopped at {action:?}; retry through AYX_AUTH_ROLLOUT=legacy"
+                        ),
                     }
-                    action => anyhow::bail!(
-                        "Wizard OTP validation stopped at {action:?}; retry through AYX_AUTH_ROLLOUT=legacy"
-                    ),
-                },
+                }
+                Err(err) => {
+                    let action = engine.record(OperationOutcome::Rejected {
+                        kind: AuthFailureKind::TransientTransport,
+                    })?;
+                    anyhow::bail!(
+                        "Wizard OTP validation could not be classified; action={action:?}: {err:#}"
+                    );
+                }
             }
         }
         expect(

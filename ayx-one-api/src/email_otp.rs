@@ -16,6 +16,33 @@ use reqwest::cookie::{CookieStore as _, Jar};
 use reqwest::redirect::Policy;
 use serde_json::Value;
 
+#[derive(Debug)]
+pub(crate) struct OtpValidationRejected {
+    status: reqwest::StatusCode,
+    detail: String,
+}
+
+impl std::fmt::Display for OtpValidationRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "validatePasscode failed: HTTP {}: {}",
+            self.status, self.detail
+        )
+    }
+}
+
+impl std::error::Error for OtpValidationRejected {}
+
+fn is_otp_rejection_status(status: reqwest::StatusCode) -> bool {
+    matches!(
+        status,
+        reqwest::StatusCode::BAD_REQUEST
+            | reqwest::StatusCode::UNAUTHORIZED
+            | reqwest::StatusCode::UNPROCESSABLE_ENTITY
+    )
+}
+
 const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
     (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 
@@ -315,10 +342,15 @@ fn validate_passcode(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().unwrap_or_default();
-        bail!(
-            "validatePasscode failed: HTTP {status}: {}",
-            redact_text(&body.chars().take(200).collect::<String>())
-        );
+        let detail = redact_text(&body.chars().take(200).collect::<String>());
+        // Only statuses documented/used for a rejected code are an
+        // invalid/expired OTP. Rate limits, request timeouts, endpoint drift,
+        // server failures, and malformed responses must not silently consume
+        // another OTP prompt.
+        if is_otp_rejection_status(status) {
+            return Err(anyhow::Error::new(OtpValidationRejected { status, detail }));
+        }
+        bail!("validatePasscode failed: HTTP {status}: {detail}");
     }
     Ok(())
 }
@@ -930,7 +962,11 @@ mod tests {
     use std::collections::VecDeque;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
-    use std::sync::{Arc, Mutex, mpsc};
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    };
     use std::thread::JoinHandle;
     use std::time::Duration;
 
@@ -941,30 +977,49 @@ mod tests {
     use super::{
         MAX_OTP_SENDS, OTP_ATTEMPTS_PER_REFERENCE, validate_passcode, workspace_login_with_reprompt,
     };
-    use super::{extract_interaction_id, host_allowed, is_valid_interaction_id, next_otp_action};
+    use super::{
+        extract_interaction_id, host_allowed, is_otp_rejection_status, is_valid_interaction_id,
+        next_otp_action,
+    };
     use super::{prompt_workspace_password, workspace_password_from_env};
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use httpmock::prelude::*;
     use reqwest::blocking::Client;
     use serial_test::serial;
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     struct RecordedRequest {
         method: String,
         target: String,
         body: String,
+        headers: Vec<(String, String)>,
         authorization: Option<String>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct RecordedResponse {
+        status: u16,
+        headers: Vec<(String, String)>,
     }
 
     struct RecordingServer {
         base_url: String,
         requests: Arc<Mutex<Vec<RecordedRequest>>>,
+        responses: Arc<Mutex<Vec<RecordedResponse>>>,
         stop: Option<mpsc::Sender<()>>,
         thread: Option<JoinHandle<()>>,
     }
 
     impl RecordingServer {
         fn start() -> Self {
+            Self::start_with_otp_rejections_and_status(0, 401)
+        }
+
+        fn start_with_otp_rejections(failure_count: usize) -> Self {
+            Self::start_with_otp_rejections_and_status(failure_count, 401)
+        }
+
+        fn start_with_otp_rejections_and_status(failure_count: usize, failure_status: u16) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").expect("bind recorder");
             listener
                 .set_nonblocking(true)
@@ -972,8 +1027,11 @@ mod tests {
             let address = listener.local_addr().expect("recorder address");
             let requests = Arc::new(Mutex::new(Vec::new()));
             let recorded = Arc::clone(&requests);
+            let responses = Arc::new(Mutex::new(Vec::new()));
+            let recorded_responses = Arc::clone(&responses);
             let (stop, stop_rx) = mpsc::channel();
             let thread = std::thread::spawn(move || {
+                let mut failures_left = failure_count;
                 loop {
                     if stop_rx.try_recv().is_ok() {
                         break;
@@ -982,7 +1040,30 @@ mod tests {
                         Ok((mut stream, _)) => {
                             let request = read_recorded_request(&mut stream)
                                 .expect("recorder should parse HTTP request");
-                            let response = response_for_request(&request);
+                            let response = if request.method == "POST"
+                                && request.target.starts_with("/v4/auth/validatePasscode")
+                                && failures_left > 0
+                            {
+                                failures_left -= 1;
+                                (
+                                    failure_status,
+                                    vec![("Content-Type", "application/json".to_string())],
+                                    r#"{"error":"invalid passcode"}"#.to_string(),
+                                )
+                            } else {
+                                response_for_request(&request)
+                            };
+                            recorded_responses
+                                .lock()
+                                .expect("recorder response lock")
+                                .push(RecordedResponse {
+                                    status: response.0,
+                                    headers: response
+                                        .1
+                                        .iter()
+                                        .map(|(name, value)| (name.to_string(), value.clone()))
+                                        .collect(),
+                                });
                             recorded.lock().expect("recorder lock").push(request);
                             write_recorded_response(&mut stream, response)
                                 .expect("recorder response should write");
@@ -997,6 +1078,7 @@ mod tests {
             Self {
                 base_url: format!("http://{address}"),
                 requests,
+                responses,
                 stop: Some(stop),
                 thread: Some(thread),
             }
@@ -1004,6 +1086,13 @@ mod tests {
 
         fn requests(&self) -> Vec<RecordedRequest> {
             self.requests.lock().expect("recorder lock").clone()
+        }
+
+        fn responses(&self) -> Vec<RecordedResponse> {
+            self.responses
+                .lock()
+                .expect("recorder response lock")
+                .clone()
         }
     }
 
@@ -1157,16 +1246,22 @@ mod tests {
         let target = parts.next().unwrap_or_default().to_string();
         let body =
             String::from_utf8_lossy(&bytes[header_end..header_end + content_length]).into_owned();
+        let parsed_headers: Vec<(String, String)> = headers
+            .lines()
+            .skip(1)
+            .filter_map(|line| {
+                line.split_once(':')
+                    .map(|(name, value)| (name.to_ascii_lowercase(), value.trim().to_string()))
+            })
+            .collect();
         Ok(RecordedRequest {
             method,
             target,
             body,
-            authorization: headers.lines().find_map(|line| {
-                line.split_once(':').and_then(|(name, value)| {
-                    name.eq_ignore_ascii_case("authorization")
-                        .then(|| value.trim().to_string())
-                })
-            }),
+            authorization: parsed_headers
+                .iter()
+                .find_map(|(name, value)| (name == "authorization").then(|| value.clone())),
+            headers: parsed_headers,
         })
     }
 
@@ -1316,6 +1411,26 @@ mod tests {
         );
         assert_eq!(result, Err("terminal"));
         assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn otp_validation_status_classification_is_narrow() {
+        for status in [
+            reqwest::StatusCode::BAD_REQUEST,
+            reqwest::StatusCode::UNAUTHORIZED,
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+        ] {
+            assert!(is_otp_rejection_status(status));
+        }
+        for status in [
+            reqwest::StatusCode::NOT_FOUND,
+            reqwest::StatusCode::FORBIDDEN,
+            reqwest::StatusCode::REQUEST_TIMEOUT,
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+        ] {
+            assert!(!is_otp_rejection_status(status));
+        }
     }
 
     #[test]
@@ -2015,6 +2130,198 @@ mod tests {
             requests[8].authorization.as_deref(),
             Some("Bearer bearer-secret"),
             "Wizard must use the decoded access token, not the opaque cookie"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn wizard_and_legacy_match_the_full_local_wire_fixture() {
+        fn normalized_request(
+            request: &RecordedRequest,
+        ) -> (String, String, String, Vec<(String, String)>) {
+            let mut headers = request
+                .headers
+                .iter()
+                .filter(|(name, _)| name != "host")
+                .map(|(name, value)| {
+                    if name == "cookie" {
+                        let mut cookies: Vec<_> = value
+                            .split(';')
+                            .map(str::trim)
+                            .map(str::to_string)
+                            .collect();
+                        cookies.sort();
+                        (name.clone(), cookies.join("; "))
+                    } else {
+                        (name.clone(), value.clone())
+                    }
+                })
+                .collect::<Vec<_>>();
+            headers.sort();
+            (
+                request.method.clone(),
+                request.target.clone(),
+                request.body.clone(),
+                headers,
+            )
+        }
+
+        fn run(wizard: bool) -> (Vec<RecordedRequest>, Vec<RecordedResponse>) {
+            let server = RecordingServer::start();
+            if wizard {
+                crate::WizardOtpAdapter
+                    .login(
+                        &server.base_url,
+                        "person@example.com",
+                        "gid-1",
+                        Some("workspace-secret".to_string()),
+                        || Ok("123456".to_string()),
+                    )
+                    .expect("Wizard fixture should complete");
+            } else {
+                crate::LegacyOtpAdapter
+                    .login(
+                        &server.base_url,
+                        "person@example.com",
+                        "gid-1",
+                        Some("workspace-secret".to_string()),
+                        || Ok("123456".to_string()),
+                    )
+                    .expect("Legacy fixture should complete");
+            }
+            (server.requests(), server.responses())
+        }
+
+        let (legacy_requests, legacy_responses) = run(false);
+        let (wizard_requests, wizard_responses) = run(true);
+        assert_eq!(
+            wizard_requests
+                .iter()
+                .map(normalized_request)
+                .collect::<Vec<_>>(),
+            legacy_requests
+                .iter()
+                .map(normalized_request)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(wizard_responses, legacy_responses);
+        assert_eq!(wizard_requests.len(), 9, "no hidden retries or requests");
+        assert_eq!(
+            wizard_requests
+                .iter()
+                .filter(|request| request.target.starts_with("/v4/auth/sendPasscode"))
+                .count(),
+            1,
+            "OTP send side effect must occur once"
+        );
+        assert_eq!(
+            wizard_requests
+                .iter()
+                .filter(|request| request.target.starts_with("/v4/apiAccessTokens"))
+                .count(),
+            1,
+            "PAT mint side effect must occur once"
+        );
+        assert_eq!(
+            wizard_responses[4].status, 302,
+            "workspace redirect is manual"
+        );
+        assert!(
+            wizard_requests[3]
+                .headers
+                .iter()
+                .any(|(name, value)| name == "cookie" && value.contains("x-csrf-token")),
+            "the CSRF cookie must survive the OTP response"
+        );
+        assert!(
+            wizard_requests[8]
+                .headers
+                .iter()
+                .any(|(name, value)| name == "cookie" && value.contains("local-auth-workspace")),
+            "the opaque workspace cookie must survive the OIDC redirect"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn wizard_does_not_reprompt_after_a_server_or_transport_validation_error() {
+        let server = RecordingServer::start_with_otp_rejections_and_status(100, 500);
+        let prompts = Arc::new(AtomicUsize::new(0));
+        let prompt_count = Arc::clone(&prompts);
+        let error = match crate::WizardOtpAdapter.login(
+            &server.base_url,
+            "person@example.com",
+            "gid-1",
+            Some("workspace-secret".to_string()),
+            move || {
+                prompt_count.fetch_add(1, Ordering::SeqCst);
+                Ok("123456".to_string())
+            },
+        ) {
+            Ok(_) => panic!("a persistent validation 5xx must stop the Wizard"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("Wizard OTP validation could not be classified")
+        );
+        assert_eq!(prompts.load(Ordering::SeqCst), 1);
+        let requests = server.requests();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.target.starts_with("/v4/auth/validatePasscode"))
+                .count(),
+            3,
+            "the low-level transient retry budget remains three"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn failed_wizard_attempt_can_restart_through_legacy() {
+        let server = RecordingServer::start_with_otp_rejections(3);
+        let wizard_error = match crate::WizardOtpAdapter.login(
+            &server.base_url,
+            "person@example.com",
+            "gid-1",
+            Some("workspace-secret".to_string()),
+            || Ok("wrong".to_string()),
+        ) {
+            Ok(_) => panic!("Wizard must stop after the reference rejection budget"),
+            Err(error) => error,
+        };
+        assert!(
+            wizard_error
+                .to_string()
+                .contains("restart through AYX_AUTH_ROLLOUT=legacy")
+        );
+
+        let result = crate::LegacyOtpAdapter
+            .login(
+                &server.base_url,
+                "person@example.com",
+                "gid-1",
+                Some("workspace-secret".to_string()),
+                || Ok("123456".to_string()),
+            )
+            .expect("Legacy restart should complete against the same profile/session fixture");
+        assert_eq!(result.access_token, "pat-secret");
+        let requests = server.requests();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.target.starts_with("/v4/auth/sendPasscode"))
+                .count(),
+            2
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.target.starts_with("/v4/auth/validatePasscode"))
+                .count(),
+            4
         );
     }
 }
