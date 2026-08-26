@@ -251,9 +251,12 @@ jobs:
           mkdir -p sbom
           cargo metadata --format-version 1 --no-deps > metadata.json
           jq -r '.packages[] | [.name, .manifest_path] | @tsv' metadata.json | while IFS=$'\t' read -r package manifest; do
-            filename="${package}.cdx.json"
+            # cargo-cyclonedx appends .json to --override-filename. Keep the
+            # extension out of the override so the emitted file is exactly
+            # ${package}.cdx.json, matching the release asset contract below.
+            filename="${package}.cdx"
             cargo cyclonedx --manifest-path "$manifest" --format json --override-filename "$filename"
-            source="$(dirname "$manifest")/$filename"
+            source="$(dirname "$manifest")/${filename}.json"
             test -f "$source"
             cp "$source" "sbom/$filename"
           done
