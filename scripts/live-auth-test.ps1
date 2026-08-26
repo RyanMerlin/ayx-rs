@@ -90,8 +90,16 @@ if (-not (Test-Path -LiteralPath $resolvedBinary -PathType Leaf)) {
     throw "Release binary not found at $resolvedBinary; build it before running this test"
 }
 
-$output = (& $resolvedBinary @arguments 2>&1 | Out-String)
-$exitCode = $LASTEXITCODE
+$capturePath = Join-Path ([System.IO.Path]::GetTempPath()) ("ayx-live-auth-" + [guid]::NewGuid().ToString() + ".log")
+try {
+    # Tee output live so OTP/password prompts remain visible while retaining a
+    # copy for the post-run secret scan.
+    & $resolvedBinary @arguments 2>&1 | Tee-Object -FilePath $capturePath
+    $exitCode = $LASTEXITCODE
+    $output = Get-Content -LiteralPath $capturePath -Raw
+} finally {
+    Remove-Item -LiteralPath $capturePath -Force -ErrorAction SilentlyContinue
+}
 if ($exitCode -ne 0) {
     throw "live authentication failed with exit code $exitCode"
 }
