@@ -17,18 +17,23 @@ adapter remains present as the explicit rollback path through
   URL, workspace ID, and workspace GID.
 - Windows Credential Manager, macOS Keychain, and Linux/FreeBSD Secret Service
   adapters through the native keyring abstraction.
-- Explicit secure/session/plaintext persistence policy. Plaintext fallback is
-  consent-based, owner-restricted, and warned once per profile policy.
+- Explicit secure/plaintext persistence for the standalone CLI. Plaintext
+  fallback is affirmative-consent-based, owner-restricted, and remembered per
+  profile; an explicit secure choice resets a prior plaintext choice.
 - Transactional profile/keyring writes with a v2 journal. Recovery restores all
   pre-images, persists a `rollback_restored` phase, and retries partial backup
   cleanup safely after a crash or transient keyring failure.
 - Central profile-loader and token-consumption binding enforcement. Legacy
   unbound `keyring:<profile>/<field>` references remain readable.
+- Logout clears profile credentials and transactionally deletes local keyring
+  entries only when no other profile references them; it intentionally does
+  not attempt remote PAT revocation.
 - A typed OTP compatibility contract and transport-level characterization,
   rejection-budget, transient-retry, and password-mapping checks.
-- Wizard now supports the bounded workspace-password retry and saved-password
-  persistence path; it does not silently switch to Legacy after an operation
-  may have committed.
+- Wizard now supports the bounded workspace-password retry and a clear
+  secure-keyring save decision after the first successful interactive login
+  (defaulting to save; `n` declines). It does not silently switch to Legacy
+  after an operation may have committed.
 
 ## Verification completed
 
@@ -50,15 +55,24 @@ configured account/workspace. If that profile is missing, the test harness
 asks for the minimum profile values before continuing:
 
 ```powershell
-pwsh -File .\scripts\live-auth-test.ps1 -Rollout default
+powershell -NoProfile -File .\scripts\live-auth-test.ps1 -Rollout default
 ```
 
 The default run tests the enabled Wizard lane and then uses the persisted
 `local-dev` credentials for read-only API checks. Use `-Rollout legacy` only
 when explicitly exercising the rollback path.
-The script uses the normal profile and keyring namespace and never accepts a
-password as a command-line argument. Record only exit status, expiry metadata,
-and redacted output.
+The script uses the normal profile and keyring namespace, attaches the login
+process directly to the console, and never accepts a password as a
+command-line argument. Record only the exit status and non-sensitive API
+check results.
+
+For a normal human login, no auth flags are required. `--profile` takes
+precedence, then `AYX_PROFILE`, then the active profile pointer, then
+`default`; Wizard and secure persistence are the defaults. On the first
+interactive login Wizard offers to save the workspace password securely with
+`[Y/n]` (Enter saves it). A later login reuses that keyring value; `n` keeps
+the password session-only, while `--save-workspace-password` is the explicit
+automation shorthand.
 
 ## Rollout and rollback
 

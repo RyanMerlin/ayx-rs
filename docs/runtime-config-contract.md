@@ -3,7 +3,7 @@
 Runtime config is central-only.
 
 - Runtime commands resolve configuration from `AYX_CONFIG_HOME`, not from cwd-local files.
-- Runtime selection order is `--profile <name>`, then `AYX_PROFILE=<name>`, then the active profile in central state.
+- Runtime selection order is `--profile <name>`, then `AYX_PROFILE=<name>`, then the active profile in central state, then the central `default` profile.
 - Runtime `--profile` and `AYX_PROFILE` accept central profile names only. Filesystem paths are invalid.
 - `config.yaml`, `environments.yaml`, and `workspace.yaml` are onboarding and migration inputs, not runtime selectors.
 - `ayx profile migrate --profile <path>` is the supported bridge from legacy files into the central store.

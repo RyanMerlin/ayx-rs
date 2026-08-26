@@ -73,8 +73,8 @@ evidence):
   equivalent at all (removed, not repointed). The correct follow-up is to **re-probe** the
   repointed `/v4/plans` and `/v4/schedules` rows live and then *tighten* the live-smoke allowlist
   once real evidence exists, not widen it further on the old diagnosis.
-- **Teach `one_flows_folders_list_page_boundary_live` to accept the genuine empty-result shape.** `GET /v4/folders?limit=1` returned 200 with `response: {"data": []}` for the zero-folder tenant.
-- **Make `one_job_groups_inspection_live_real_object` tolerate data-dependent inputs behavior.** A real non-JDBC job group correctly returned `400 DataServiceInvalidRequest` for its inputs sub-call, but the test currently treats that valid outcome as a failure.
+- ~~**Teach `one_flows_folders_list_page_boundary_live` to accept the genuine empty-result shape.**~~ Delivered: the live gate now asserts the genuine bounded request shape for `GET /v4/folders?limit=1`, which returns raw `{ "data": [] }` rather than a normalized pagination envelope.
+- ~~**Make `one_job_groups_inspection_live_real_object` tolerate data-dependent inputs behavior.**~~ Delivered: the live gate accepts only the documented non-JDBC `400 DataServiceInvalidRequest` for `inputs`, while retaining hard failures for every other error.
 - **Implement `--output table` separately or document the alias deliberately.** The live UX pass confirmed that it is currently byte-identical to `--output text`.
 - **Add workflow-aware entries to `render_object_array`'s `PREFERRED` column list.** The generic picker exposes `contentChecksum`, a truncated hash, ahead of more useful workflow fields in the default demo table.
 - ~~**Warn when `ayx one workflows list --all` under-delivers against the server total.**~~

@@ -55,6 +55,16 @@ default. If an internal rollout needs the compatibility path, use
 does not silently retry an ambiguous OTP or PAT operation through Legacy;
 preserve the profile and choose the rollback explicitly.
 
+Login defaults are designed for the normal interactive case: the profile is
+selected by `--profile`, then `AYX_PROFILE`, then the active profile pointer,
+then `default`; the authentication rollout is Wizard; and credential
+persistence is secure. After the first successful interactive login, Wizard
+asks whether to save the workspace password in the operating-system keyring;
+the default is **Yes** (`[Y/n]`). Press Enter to save it, or answer `n` to
+decline. Later `ayx one login` runs reuse that securely stored password for the
+selected profile. Use `--save-workspace-password` only as an optional
+non-interactive shorthand.
+
 3. Run a first quick query:
 
 ```bash

@@ -148,6 +148,20 @@ set -a && source .env && set +a
 AYX_ONE_LIVE_SMOKE=1 cargo nextest run -p ayx-rs -E 'binary(one_live_smoke)'
 ```
 
+For an interactive workstation validation, do not copy a keyring-backed token
+into `.env`. Instead, explicitly opt in to the already-authenticated central
+profile (for example `local-dev`):
+
+```powershell
+$env:AYX_ONE_LIVE_SMOKE = '1'
+$env:AYX_ONE_LIVE_PROFILE = 'local-dev'
+cargo nextest run -p ayx-rs -E 'binary(one_live_smoke)' --locked
+Remove-Item Env:AYX_ONE_LIVE_PROFILE
+```
+
+Without `AYX_ONE_LIVE_PROFILE`, the suite retains its CI behavior and builds a
+temporary `live` profile from the repository `.env` values.
+
 Note: this spawns a **debug** build via `CARGO_BIN_EXE_ayx`, not the release binary on PATH —
 Phase 1 and Phase 2 test different artifacts (coverage, not a gap, as long as it's stated).
 
@@ -408,3 +422,41 @@ This phase was executed against a disposable validation workspace on
 
 No workflow execution, plan execution, connection update/delete, invitations, role changes, or
 other deferred API families were run in this phase.
+
+### Canonical reversible CRUD gate
+
+The disposable group and plan fixtures provide the minimum write-validation
+protocol for a release candidate. Run this only against the named disposable
+validation workspace, after recording the baseline counts; do not substitute
+production assets or omit cleanup:
+
+```powershell
+$group = 'ayx-rs/tests/fixtures/one-group-canary.json'
+$groupUpdate = 'ayx-rs/tests/fixtures/one-group-canary-update.json'
+$plan = 'ayx-rs/tests/fixtures/one-plan-canary.json'
+$planUpdate = 'ayx-rs/tests/fixtures/one-plan-canary-update.json'
+
+ayx --output json one workspace current                         # capture <WORKSPACE_ID>
+ayx --output json one workspace groups <WORKSPACE_ID>
+ayx --output json one plans list
+ayx --output json one workspace create-group <WORKSPACE_ID> --body $group # dry-run
+ayx --output json one plans create --body $plan                      # dry-run
+# Apply create, capture each returned id, then update and verify each object:
+ayx --output json one workspace create-group <WORKSPACE_ID> --body $group --apply --yes
+ayx --output json one workspace update-group <WORKSPACE_ID> <GROUP_ID> --body $groupUpdate --apply --yes
+ayx --output json one workspace groups <WORKSPACE_ID>                # assert updated group
+ayx --output json one plans create --body $plan --apply --yes
+ayx --output json one plans update <PLAN_ID> --body $planUpdate --apply --yes
+ayx --output json one plans detail <PLAN_ID>
+# Always delete in a finally block, verify not_found/detail behavior, and re-list:
+ayx --output json one plans delete <PLAN_ID> --apply --yes
+ayx --output json one workspace delete-group <WORKSPACE_ID> <GROUP_ID> --apply --yes
+ayx --output json one plans list
+ayx --output json one workspace groups <WORKSPACE_ID>
+```
+
+The gate passes only when create, update, detail, and delete all succeed and
+the final group/plan listings match the recorded baselines. If cleanup fails,
+stop the release and remove only the captured canary IDs manually; never use a
+name-based bulk delete. The checked-in fixture names must be unique before the
+run, and every mutation must have a reviewed dry-run envelope first.

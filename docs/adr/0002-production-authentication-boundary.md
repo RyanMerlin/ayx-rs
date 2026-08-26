@@ -24,8 +24,10 @@ pass. `AYX_AUTH_ROLLOUT=legacy` (or `otp`) is the explicit rollback setting.
 New writes use a binding fingerprint that includes
 account, issuer, region, base URL, workspace id, and workspace gid. Reads keep
 supporting legacy inline and unbound keyring references. A secure-store failure
-can be resolved by an interactive, owner-only plaintext fallback (Enter means
-yes) or session-only storage; agents must specify their persistence policy.
+can be resolved by an interactive, owner-only plaintext fallback only after an
+affirmative answer. The standalone CLI rejects session-only persistence because
+it has no process-spanning session; future agent execution must specify its
+persistence policy.
 
 Profile writes use the existing lock plus atomic rename, remove crash-left temp
 files on recovery, and roll back keyring entries if serialization or the file
