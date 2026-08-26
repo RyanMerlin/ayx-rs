@@ -2022,26 +2022,6 @@ pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<Stri
     format_refresh_token_response(&token_json)
 }
 
-/// Return the namespace selected by the authentication rollout. A canary
-/// profile must never consume the ordinary keyring namespace, and vice versa.
-/// Invalid rollout configuration is an operational error, not permission to
-/// fall back to the ordinary namespace.
-fn auth_keyring_namespace(
-    profile_rollout: Option<ayx_core::auth::AuthRollout>,
-) -> Result<Option<&'static str>> {
-    let explicit_rollout =
-        std::env::var("AYX_AUTH_ROLLOUT").is_ok() || std::env::var("AUTH_ROLLOUT").is_ok();
-    let rollout =
-        ayx_core::auth::AuthRollout::from_environment().map_err(|err| anyhow::anyhow!(err))?;
-    if explicit_rollout {
-        return Ok((rollout == ayx_core::auth::AuthRollout::Canary).then_some("canary"));
-    }
-    if let Some(rollout) = profile_rollout {
-        return Ok((rollout == ayx_core::auth::AuthRollout::Canary).then_some("canary"));
-    }
-    Ok((std::env::var("AYX_AUTH_LIVE_CANARY").ok().as_deref() == Some("1")).then_some("canary"))
-}
-
 fn auth_binding_for_workspace(
     config: &Config,
     workspace_id: Option<&str>,
@@ -2081,7 +2061,6 @@ fn bound_reference_matches(
     reference: Option<&str>,
     bindings: &[(&CredentialBinding, &str)],
     field: &str,
-    namespace: Option<&str>,
 ) -> Result<()> {
     let Some(reference) = reference else {
         return Ok(());
@@ -2095,14 +2074,13 @@ fn bound_reference_matches(
     }
     let expected = bindings.iter().any(|(binding, expected_field)| {
         *expected_field == field
-            && account
-                == ayx_core::secrets::bound_keyring_account_in_namespace(binding, namespace, field)
+            && account == ayx_core::secrets::bound_keyring_account(binding, field)
     });
     if expected {
         Ok(())
     } else {
         bail!(
-            "credential binding mismatch for {field}; refusing to consume a credential bound to a different account, issuer, region, base URL, workspace, or rollout namespace"
+            "credential binding mismatch for {field}; refusing to consume a credential bound to a different account, issuer, region, base URL, workspace, or workspace GID"
         )
     }
 }
@@ -2115,7 +2093,6 @@ fn validate_active_credential_bindings(config: &Config) -> Result<()> {
     let Some(one) = config.alteryx_one.as_ref() else {
         return Ok(());
     };
-    let namespace = auth_keyring_namespace(one.auth_rollout)?;
     let active_workspace_id = one.active_workspace_id();
     let base_binding = auth_binding_for_workspace(config, None)?;
     let active_binding = active_workspace_id
@@ -2146,7 +2123,7 @@ fn validate_active_credential_bindings(config: &Config) -> Result<()> {
         if let Some(binding) = active_binding.as_ref() {
             bindings.push((binding, field));
         }
-        bound_reference_matches(reference, &bindings, field, namespace)?;
+        bound_reference_matches(reference, &bindings, field)?;
     }
 
     if let Some(workspace_id) = active_workspace_id
@@ -2169,7 +2146,7 @@ fn validate_active_credential_bindings(config: &Config) -> Result<()> {
         for (short_field, reference) in fields {
             let field =
                 format!("alteryx_one.workspace_credentials['{workspace_id}'].{short_field}");
-            bound_reference_matches(reference, &[(binding, field.as_str())], &field, namespace)?;
+            bound_reference_matches(reference, &[(binding, field.as_str())], &field)?;
         }
     }
     // Only the active workspace is checked above; inactive credentials cannot

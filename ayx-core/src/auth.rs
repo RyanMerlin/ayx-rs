@@ -875,11 +875,10 @@ pub enum AuthRollout {
     #[default]
     Wizard,
     Legacy,
-    Canary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("invalid authentication rollout '{value}'; use legacy, wizard, or canary")]
+#[error("invalid authentication rollout '{value}'; use legacy or wizard")]
 pub struct AuthRolloutError {
     value: String,
 }
@@ -984,7 +983,6 @@ impl AuthRollout {
     pub fn parse(value: &str) -> Result<Self, AuthRolloutError> {
         match value.trim().to_ascii_lowercase().as_str() {
             "legacy" | "otp" => Ok(Self::Legacy),
-            "canary" | "internal" => Ok(Self::Canary),
             "wizard" | "default" => Ok(Self::Wizard),
             _ => Err(AuthRolloutError {
                 value: value.trim().to_string(),
@@ -1003,7 +1001,7 @@ impl AuthRollout {
     }
 
     pub fn uses_new_orchestration(self) -> bool {
-        matches!(self, Self::Canary | Self::Wizard)
+        matches!(self, Self::Wizard)
     }
 }
 
@@ -1209,10 +1207,6 @@ mod tests {
             a.keyring_account("access_token"),
             b.keyring_account("access_token")
         );
-        assert_ne!(
-            a.keyring_account_in_namespace(Some("canary"), "access_token"),
-            a.keyring_account("access_token")
-        );
     }
 
     #[test]
@@ -1351,7 +1345,6 @@ mod tests {
         assert_eq!(AuthRollout::parse("legacy"), Ok(AuthRollout::Legacy));
         assert_eq!(AuthRollout::parse("otp"), Ok(AuthRollout::Legacy));
         assert_eq!(AuthRollout::parse("wizard"), Ok(AuthRollout::Wizard));
-        assert_eq!(AuthRollout::parse("canary"), Ok(AuthRollout::Canary));
         assert!(AuthRollout::parse("oops").is_err());
     }
 
@@ -1359,9 +1352,7 @@ mod tests {
     fn rollout_dispatch_keeps_legacy_independent_from_explicit_new_lanes() {
         assert!(!AuthRollout::Legacy.uses_new_orchestration());
         assert!(AuthRollout::Wizard.uses_new_orchestration());
-        assert!(AuthRollout::Canary.uses_new_orchestration());
         assert_eq!(AuthRollout::parse("default"), Ok(AuthRollout::Wizard));
-        assert_eq!(AuthRollout::parse("internal"), Ok(AuthRollout::Canary));
     }
 
     #[test]

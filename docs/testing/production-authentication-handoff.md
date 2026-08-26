@@ -53,8 +53,9 @@ asks for the minimum profile values before continuing:
 pwsh -File .\scripts\live-auth-test.ps1 -Rollout default
 ```
 
-The default run tests the enabled Wizard lane. Repeat with `-Rollout wizard`
-and `-Rollout legacy` to test the named Wizard path and explicit rollback.
+The default run tests the enabled Wizard lane and then uses the persisted
+`local-dev` credentials for read-only API checks. Use `-Rollout legacy` only
+when explicitly exercising the rollback path.
 The script uses the normal profile and keyring namespace and never accepts a
 password as a command-line argument. Record only exit status, expiry metadata,
 and redacted output.

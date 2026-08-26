@@ -1490,8 +1490,8 @@ pub(crate) fn write_config_with_binding(
 }
 
 /// Binding-aware profile write with an already-resolved rollout. Authentication
-/// CLI flags must take precedence over deployment environment when selecting a
-/// canary namespace; callers outside login retain environment-based behavior.
+/// CLI flags must take precedence over deployment environment when selecting
+/// the authentication rollout.
 pub(crate) fn write_config_with_binding_for_rollout(
     path: &Path,
     config: &Config,
@@ -1619,20 +1619,14 @@ pub(crate) fn binding_for_auth_config(
     .map_err(anyhow::Error::from)
 }
 
-/// Live canaries must not share deterministic keyring accounts with ordinary
-/// credentials. The namespace is deliberately process/environment-selected so
-/// the normal legacy and wizard accounts remain backward-compatible.
+/// Authentication credentials use the normal profile/keyring namespace.
 pub(crate) fn auth_keyring_namespace(
     rollout: Option<ayx_core::auth::AuthRollout>,
 ) -> Result<Option<&'static str>> {
-    let selected_rollout = match rollout {
-        Some(rollout) => rollout,
-        None => ayx_core::auth::AuthRollout::from_environment()?,
-    };
-    let canary = matches!(selected_rollout, ayx_core::auth::AuthRollout::Canary)
-        || (rollout.is_none()
-            && std::env::var("AYX_AUTH_LIVE_CANARY").ok().as_deref() == Some("1"));
-    if canary { Ok(Some("canary")) } else { Ok(None) }
+    if rollout.is_none() {
+        let _ = ayx_core::auth::AuthRollout::from_environment()?;
+    }
+    Ok(None)
 }
 
 /// Reject a new-format keyring reference when its binding does not match the

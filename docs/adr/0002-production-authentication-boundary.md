@@ -19,11 +19,9 @@ credential identity binding, persistence policy, and the JSON agent protocol in
 `ayx-core::auth`. Native Credential Manager, Keychain, and Secret Service
 backends implement the platform-neutral secure-storage interface.
 
-The Wizard path is the v0.16.0 default after characterization, live-canary,
-and Terra release checks pass. `AYX_AUTH_ROLLOUT=canary` (or the unprefixed
-`AUTH_ROLLOUT=canary` compatibility alias) remains an isolated validation
-namespace, while `AYX_AUTH_ROLLOUT=legacy` (or `otp`) is the explicit rollback
-setting. New writes use a binding fingerprint that includes
+The Wizard path is the default after characterization and Terra release checks
+pass. `AYX_AUTH_ROLLOUT=legacy` (or `otp`) is the explicit rollback setting.
+New writes use a binding fingerprint that includes
 account, issuer, region, base URL, workspace id, and workspace gid. Reads keep
 supporting legacy inline and unbound keyring references. A secure-store failure
 can be resolved by an interactive, owner-only plaintext fallback (Enter means
@@ -37,7 +35,7 @@ explicit migration.
 ## Consequences
 
 The transport contract is stable and can be rolled back independently. The
-orchestrator is testable without a live tenant, but the final release still
-requires legacy characterization, live canary, concurrency, keyring-failure,
-secret-leakage, and Terra review evidence. The policy sidecar is metadata only;
-it never stores credentials.
+orchestrator is testable without live traffic, but the final release still
+requires Wizard login/persistence/API-surface evidence, concurrency,
+keyring-failure, secret-leakage, and Terra review evidence. The policy sidecar
+is metadata only; it never stores credentials.

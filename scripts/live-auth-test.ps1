@@ -3,9 +3,6 @@ param(
     [ValidateSet("default", "wizard", "legacy")]
     [string]$Rollout = "default",
 
-    [ValidateSet("session", "secure")]
-    [string]$SecretPolicy = "secure",
-
     [switch]$SaveWorkspacePassword,
 
     [string]$BinaryPath
@@ -68,7 +65,7 @@ $arguments = @(
     "--profile", $profileName,
     "--workspace-gid", $workspaceGid,
     "--base-url", $baseUrl,
-    "--secret-policy", $SecretPolicy
+    "--secret-policy", "secure"
 )
 if ($Rollout -ne "default") {
     $arguments += @("--auth-flow", $Rollout)
@@ -78,7 +75,7 @@ if ($SaveWorkspacePassword) {
 }
 
 Write-Host "Starting live authentication for existing profile '$profileName'."
-Write-Host "Rollout: $Rollout; persistence: $SecretPolicy"
+Write-Host "Rollout: $Rollout; persistence: secure"
 Write-Host "OTP and password prompts are interactive and are never accepted as script arguments."
 
 $resolvedBinary = if ($BinaryPath) {
@@ -112,4 +109,36 @@ if ($output -match '(?i)"(?:access_token|refresh_token|tokenValue|passcode|passw
 
 $safeOutput = $output -replace '(?i)("?(?:access_token|refresh_token|tokenValue|passcode|password)"?\s*[:=]\s*)("[^"]*"|[^,\s}]+)', '$1<redacted>'
 Write-Output $safeOutput
-Write-Host "Live authentication completed for existing profile '$profileName'."
+
+function Invoke-ReadOnlyApiCheck {
+    param(
+        [string]$Label,
+        [string[]]$CommandArguments
+    )
+    $apiCapturePath = Join-Path ([System.IO.Path]::GetTempPath()) ("ayx-live-api-" + [guid]::NewGuid().ToString() + ".log")
+    try {
+        & $resolvedBinary @CommandArguments 2>&1 | Tee-Object -FilePath $apiCapturePath
+        $apiExitCode = $LASTEXITCODE
+        $apiOutput = Get-Content -LiteralPath $apiCapturePath -Raw
+    } finally {
+        Remove-Item -LiteralPath $apiCapturePath -Force -ErrorAction SilentlyContinue
+    }
+    if ($apiExitCode -ne 0) {
+        throw "$Label failed with exit code $apiExitCode"
+    }
+    if ($apiOutput -match '(?i)"(?:access_token|refresh_token|tokenValue|passcode|password)"\s*:') {
+        throw "$Label output appears to contain secret material; do not attach this output"
+    }
+    Write-Host "$Label passed"
+}
+
+Invoke-ReadOnlyApiCheck "one auth status" @(
+    "--output", "json", "one", "auth", "status", "--profile", $profileName
+)
+Invoke-ReadOnlyApiCheck "one workspace current" @(
+    "--output", "json", "one", "workspace", "current", "--profile", $profileName
+)
+Invoke-ReadOnlyApiCheck "one workspace list" @(
+    "--output", "json", "one", "workspace", "list", "--profile", $profileName, "--limit", "10"
+)
+Write-Host "Live authentication and API-surface checks completed for existing profile '$profileName'."
