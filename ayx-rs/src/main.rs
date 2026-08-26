@@ -1611,12 +1611,12 @@ pub(crate) enum OneCommand {
         /// Authentication flow for email-OTP login: wizard (default) or legacy.
         #[arg(long, value_name = "FLOW", value_parser = ["wizard", "legacy"])]
         auth_flow: Option<String>,
-        /// Save the workspace password used by email-OTP login in the OS keyring.
+        /// Save the workspace password without the interactive secure-save prompt.
         #[arg(long)]
         save_workspace_password: bool,
-        /// Credential persistence for the authentication wizard: secure,
-        /// plaintext (explicit fallback), or session.
-        #[arg(long, value_name = "POLICY", value_parser = ["secure", "plaintext", "session"])]
+        /// Credential persistence: secure (default) or plaintext (explicit fallback).
+        /// Session-only credentials are not usable by this standalone command.
+        #[arg(long, value_name = "POLICY", value_parser = ["secure", "plaintext"])]
         secret_policy: Option<String>,
     },
     /// Clear stored Alteryx One credentials from the active profile.

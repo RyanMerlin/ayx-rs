@@ -86,6 +86,21 @@ fn invalid_rollout_fails_before_workspace_resolution_or_otp_send() {
 }
 
 #[test]
+fn standalone_login_rejects_unusable_session_only_persistence() {
+    let home = config_home_without_client_id();
+    let (ok, out) = run_login(&home, &["--secret-policy", "session"]);
+    assert!(!ok, "session-only persistence must fail\noutput:\n{out}");
+    assert!(
+        out.contains("invalid value 'session'") || out.contains("session is not supported"),
+        "the standalone CLI must explain that a one-shot login cannot retain a usable session; output:\n{out}"
+    );
+    assert!(
+        !out.contains("Sending one-time passcode"),
+        "session-only rejection must happen before any OTP side effect; output:\n{out}"
+    );
+}
+
+#[test]
 fn explicit_legacy_auth_flow_overrides_environment_rollout() {
     let home = config_home_without_client_id();
     let (ok, out) =

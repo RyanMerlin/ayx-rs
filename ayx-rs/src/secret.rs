@@ -122,6 +122,37 @@ fn collect_all_keyring_refs(profiles_dir: &Path) -> Result<HashSet<String>> {
     Ok(refs)
 }
 
+/// Return candidates that no profile other than `excluded_profile` references.
+///
+/// Authentication keyring accounts are binding-derived and may deliberately be
+/// shared by profiles for the same identity and workspace. Logout uses this
+/// check before deletion so it cannot break another profile. Unlike the
+/// best-effort reporting scan used by `prune`, unreadable profiles are an error:
+/// failing closed is the only safe choice before deleting a credential.
+pub fn unreferenced_keyring_accounts_excluding_profile(
+    profiles_dir: &Path,
+    excluded_profile: &Path,
+    candidates: &HashSet<String>,
+) -> Result<HashSet<String>> {
+    let mut live_refs = HashSet::new();
+    for entry in fs::read_dir(profiles_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path == excluded_profile
+            || path.extension().and_then(|extension| extension.to_str()) != Some("yaml")
+        {
+            continue;
+        }
+        let text = fs::read_to_string(&path)?;
+        live_refs.extend(keyring_refs_from_text(&text));
+    }
+    Ok(candidates
+        .iter()
+        .filter(|account| !live_refs.contains(*account))
+        .cloned()
+        .collect())
+}
+
 /// Extract workspace credential keys from a parsed YAML value.
 /// Returns an empty vec when the field is absent or has an unexpected shape.
 fn workspace_ids_from_value(value: &serde_yaml::Value) -> Vec<String> {
@@ -282,6 +313,38 @@ mod tests {
     #[test]
     fn static_fields_count() {
         assert_eq!(STATIC_FIELDS.len(), 5);
+    }
+
+    #[test]
+    fn logout_cleanup_keeps_accounts_referenced_by_another_profile() {
+        let tmp = make_config_home();
+        let profiles = tmp.path().join("profiles");
+        let logout_profile = profiles.join("logout.yaml");
+        let shared = "v1/shared-binding/access_token";
+        let orphan = "v1/orphan-binding/access_token";
+        fs::write(
+            &logout_profile,
+            format!(
+                "profile_name: logout\nalteryx_one:\n  access_token_ref: keyring:{shared}\n  refresh_token_ref: keyring:{orphan}\n"
+            ),
+        )
+        .expect("write logout profile");
+        fs::write(
+            profiles.join("other.yaml"),
+            format!("profile_name: other\nalteryx_one:\n  access_token_ref: keyring:{shared}\n"),
+        )
+        .expect("write other profile");
+        let candidates = HashSet::from([shared.to_string(), orphan.to_string()]);
+
+        let deletable = unreferenced_keyring_accounts_excluding_profile(
+            &profiles,
+            &logout_profile,
+            &candidates,
+        )
+        .expect("scan profiles");
+
+        assert!(!deletable.contains(shared));
+        assert!(deletable.contains(orphan));
     }
 
     #[test]

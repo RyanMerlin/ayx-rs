@@ -1,3 +1,5 @@
+use std::collections::{BTreeSet, HashSet};
+
 use anyhow::{Context, Result, bail};
 use ayx_core::envelope::{Envelope, ErrorCode};
 
@@ -88,20 +90,39 @@ pub(crate) fn login(
             let selected = AuthRollout::parse(value).map_err(|err| anyhow::anyhow!(err))?;
             if let Ok(environment_value) =
                 std::env::var("AYX_AUTH_ROLLOUT").or_else(|_| std::env::var("AUTH_ROLLOUT"))
+                && let Ok(environment_rollout) = AuthRollout::parse(&environment_value)
+                && environment_rollout != selected
             {
-                if let Ok(environment_rollout) = AuthRollout::parse(&environment_value) {
-                    if environment_rollout != selected {
-                        anyhow::bail!(
-                            "--auth-flow {selected:?} conflicts with AYX_AUTH_ROLLOUT={environment_value}; unset the environment override or choose the same lane"
-                        );
-                    }
-                }
+                anyhow::bail!(
+                    "--auth-flow {selected:?} conflicts with AYX_AUTH_ROLLOUT={environment_value}; unset the environment override or choose the same lane"
+                );
             }
             selected
         }
         None => AuthRollout::from_environment().map_err(|err| anyhow::anyhow!(err))?,
     };
     let mut config = runtime.load_profile_lenient_for_auth(profile.as_deref())?;
+    let profile_name = config.profile_name.clone();
+    let path = profile_storage_path(&profile_name)?;
+    let requested_policy = secret_policy_arg
+        .as_deref()
+        .map(|value| {
+            SecretPersistencePolicy::parse(value)
+                .ok_or_else(|| anyhow::anyhow!("invalid --secret-policy"))
+        })
+        .transpose()
+        .map_err(|_| {
+            anyhow::anyhow!("invalid --secret-policy; use secure, plaintext, or session")
+        })?;
+    let remembered_policy = ayx_core::auth::load_persistence_policy(&path);
+    let persistence_policy = requested_policy
+        .or(remembered_policy)
+        .unwrap_or(SecretPersistencePolicy::Secure);
+    if persistence_policy == SecretPersistencePolicy::SessionOnly {
+        bail!(
+            "--secret-policy session is not supported by the standalone `ayx one login` command: the process exits after login and cannot retain a usable session; use secure or plaintext explicitly"
+        );
+    }
     let mut auth_machine = None;
     {
         let one = config
@@ -183,21 +204,12 @@ pub(crate) fn login(
         }
     }
 
-    let password_workspace_id = if save_workspace_password {
-        workspace_id.clone().or_else(|| {
-            config
-                .alteryx_one
-                .as_ref()
-                .and_then(|one| one.active_workspace_id().map(str::to_string))
-        })
-    } else {
-        None
-    };
-    if save_workspace_password && password_workspace_id.is_none() {
-        bail!(
-            "--save-workspace-password requires a workspace-scoped login — pass --workspace-id or configure an active workspace credential"
-        );
-    }
+    let password_workspace_id = workspace_id.clone().or_else(|| {
+        config
+            .alteryx_one
+            .as_ref()
+            .and_then(|one| one.active_workspace_id().map(str::to_string))
+    });
 
     // Validate any existing bound credential before the login flow can consume
     // a stored refresh token, client secret, or workspace password. The later
@@ -211,6 +223,7 @@ pub(crate) fn login(
     )?;
 
     let mut workspace_password_to_save = None;
+    let mut token_expires_at = None;
 
     let (final_access_token, final_refresh_token) = if let Some(rt) = refresh_token_arg {
         // --- bypass: exchange a refresh token the caller already has ---
@@ -333,6 +346,16 @@ pub(crate) fn login(
             .alteryx_one
             .as_ref()
             .and_then(|one| workspace_password_for_login(one, workspace_id.as_deref()));
+        // Password saving is a user decision, not a command-line memorization
+        // exercise. If we had to prompt for it, offer one clear secure-save
+        // decision after a successful login. The explicit flag remains useful
+        // for scripted interactive runs and skips that second confirmation.
+        let offer_workspace_password_save = should_offer_workspace_password_save(
+            save_workspace_password,
+            workspace_password.is_some(),
+            workspace_password_is_supplied_by_environment(),
+        );
+        let capture_workspace_password = save_workspace_password || offer_workspace_password_save;
 
         if ws_gid.is_empty() {
             anyhow::bail!(
@@ -341,6 +364,7 @@ pub(crate) fn login(
             );
         }
 
+        ensure_visible_line_input()?;
         eprintln!("Sending one-time passcode to {}...", email);
         eprintln!("(Check your inbox for a 6-digit code)");
 
@@ -355,7 +379,7 @@ pub(crate) fn login(
             Ok(line.trim().to_string())
         };
         let (result, captured_workspace_password) = if rollout.uses_new_orchestration() {
-            if save_workspace_password {
+            if capture_workspace_password {
                 let (result, password) = ayx_one_api::WizardOtpAdapter.login_with_password(
                     &base_url,
                     &email,
@@ -374,7 +398,7 @@ pub(crate) fn login(
                 )?;
                 (result, None)
             }
-        } else if save_workspace_password {
+        } else if capture_workspace_password {
             let (result, password) = ayx_one_api::LegacyOtpAdapter.login_with_password(
                 &base_url,
                 &email,
@@ -394,7 +418,12 @@ pub(crate) fn login(
             (result, None)
         };
 
-        workspace_password_to_save = captured_workspace_password;
+        if let Some(password) = captured_workspace_password
+            && (save_workspace_password
+                || (offer_workspace_password_save && interactive_workspace_password_save()?))
+        {
+            workspace_password_to_save = Some(password);
+        }
 
         // Sync workspace_gid into the profile in case it was resolved from
         // the active workspace credential rather than the top-level field.
@@ -410,10 +439,6 @@ pub(crate) fn login(
                 .workspace_gid = Some(result.workspace_gid.clone());
         }
 
-        if let Some(ref expires) = result.token_expires_at {
-            eprintln!("Token expires: {expires}");
-        }
-
         for event in [
             ayx_core::auth::AuthEvent::OtpAccepted,
             ayx_core::auth::AuthEvent::WorkspaceResolved,
@@ -423,6 +448,7 @@ pub(crate) fn login(
             machine.apply(event).map_err(|err| anyhow::anyhow!(err))?;
         }
         auth_machine = Some(machine);
+        token_expires_at = result.token_expires_at;
 
         (result.access_token, None)
     } else {
@@ -485,13 +511,18 @@ pub(crate) fn login(
     // Store the tokens.
     let one = config.alteryx_one.as_mut().unwrap();
     if let Some(password) = workspace_password_to_save {
-        let ws_id = password_workspace_id
-            .as_deref()
-            .expect("workspace-scoped password validation should run before login");
-        one.workspace_credentials
-            .entry(ws_id.to_string())
-            .or_default()
-            .workspace_password = Some(password);
+        if let Some(ws_id) = password_workspace_id.as_deref() {
+            one.workspace_credentials
+                .entry(ws_id.to_string())
+                .or_default()
+                .workspace_password = Some(password);
+        } else {
+            // A profile with only a workspace GID has no numeric workspace key
+            // to scope a nested credential. The top-level secret remains bound
+            // to that GID at the keyring write boundary, so it is safe to reuse
+            // for this single-profile login on the next invocation.
+            one.workspace_password = Some(password);
+        }
     }
     if let Some(ws_id) = workspace_id.as_deref() {
         let cred = one
@@ -511,49 +542,10 @@ pub(crate) fn login(
 
     let email = one.account_email.clone();
     let endpoint = one.normalized_base_url().unwrap_or_default();
-    let profile_name = config.profile_name.clone();
-
-    let path = profile_storage_path(&profile_name)?;
-    let remembered_policy = ayx_core::auth::load_persistence_policy(&path);
-    let requested_policy = secret_policy_arg
-        .as_deref()
-        .map(|value| {
-            SecretPersistencePolicy::parse(value)
-                .ok_or_else(|| anyhow::anyhow!("invalid --secret-policy"))
-        })
-        .transpose()
-        .map_err(|_| {
-            anyhow::anyhow!("invalid --secret-policy; use secure, plaintext, or session")
-        })?;
-    let persistence_policy = requested_policy
-        .or(remembered_policy)
-        .unwrap_or(SecretPersistencePolicy::Secure);
-
     if let Some(machine) = auth_machine.as_mut() {
         machine
             .apply(ayx_core::auth::AuthEvent::PersistStarted)
             .map_err(|err| anyhow::anyhow!(err))?;
-    }
-
-    if persistence_policy == SecretPersistencePolicy::SessionOnly {
-        if let Some(machine) = auth_machine.as_mut() {
-            machine
-                .apply(ayx_core::auth::AuthEvent::PersistSucceeded)
-                .map_err(|err| anyhow::anyhow!(err))?;
-        }
-        return Ok(Envelope::ok_with_data(
-            "credentials kept for this session",
-            json!({
-                "action": "auth.login",
-                "status": "ok",
-                "profile": profile_name,
-                "persistence": "session_only",
-                "token_length": final_access_token.len(),
-                "has_refresh_token": final_refresh_token.is_some(),
-                "rollout": format!("{rollout:?}").to_ascii_lowercase(),
-                "auth_state": auth_machine.as_ref().map(|machine| machine.state()),
-            }),
-        ));
     }
 
     let binding = auth_credential_binding(&config, workspace_id.as_deref())?;
@@ -585,6 +577,7 @@ pub(crate) fn login(
         Some(&binding),
         Some(rollout),
     );
+    let mut effective_persistence_policy = persistence_policy;
     let secretize = match secretize_result {
         Ok(output) => output,
         Err(_err)
@@ -602,6 +595,7 @@ pub(crate) fn login(
                 &path,
                 SecretPersistencePolicy::PlaintextFallback,
             );
+            effective_persistence_policy = SecretPersistencePolicy::PlaintextFallback;
             eprintln!("warning: secure credential storage was unavailable; using the profile-file fallback by explicit consent");
             output
         }
@@ -612,15 +606,12 @@ pub(crate) fn login(
         }
     };
 
-    if requested_policy == Some(SecretPersistencePolicy::PlaintextFallback)
-        && remembered_policy != Some(SecretPersistencePolicy::PlaintextFallback)
-        && let Err(err) = ayx_core::auth::save_persistence_policy(
-            &path,
-            SecretPersistencePolicy::PlaintextFallback,
-        )
+    if persistence_policy_to_remember(requested_policy, effective_persistence_policy).is_some()
+        && let Err(err) =
+            ayx_core::auth::save_persistence_policy(&path, effective_persistence_policy)
     {
         eprintln!(
-            "warning: credentials were stored, but the plaintext-fallback choice could not be remembered: {err}"
+            "warning: credentials were stored, but the selected credential-storage policy could not be remembered: {err}"
         );
     }
     if let Some(msg) = crate::onboard::inline_secret_warning(&secretize.inline_fields)
@@ -633,6 +624,16 @@ pub(crate) fn login(
             .apply(ayx_core::auth::AuthEvent::PersistSucceeded)
             .map_err(|err| anyhow::anyhow!(err))?;
     }
+    // A confirmation must mean the complete login transaction succeeded: remote
+    // authentication, state validation, and durable credential persistence.
+    // Resolve workspace display metadata only after that point. The lookup is
+    // bounded and best-effort, so it cannot turn a successful login into a
+    // hang or a failure.
+    let authenticated_workspace = lookup_authenticated_workspace(&endpoint, &final_access_token);
+    eprintln!("\nAuthentication Successful!\n");
+    if let Some(expires) = token_expires_at {
+        eprintln!("Token expires: {expires}");
+    }
     eprintln!("Credentials stored in profile '{profile_name}'.");
     Ok(Envelope::ok_with_data(
         "credentials stored",
@@ -642,10 +643,12 @@ pub(crate) fn login(
             "profile": profile_name,
             "account_email": email,
             "endpoint": endpoint,
+            "workspace_id": authenticated_workspace.as_ref().and_then(|workspace| workspace.id.as_deref()),
+            "workspace_name": authenticated_workspace.as_ref().and_then(|workspace| workspace.name.as_deref()),
             "token_length": final_access_token.len(),
             "has_refresh_token": final_refresh_token.is_some(),
             "inline_secret_fields": secretize.inline_fields,
-            "persistence": format!("{persistence_policy:?}").to_ascii_lowercase(),
+            "persistence": format!("{effective_persistence_policy:?}").to_ascii_lowercase(),
             "rollout": format!("{rollout:?}").to_ascii_lowercase(),
             "auth_state": auth_machine.as_ref().map(|machine| machine.state()),
         }),
@@ -661,6 +664,7 @@ pub(crate) fn logout(runtime: &RuntimeCtx<'_>, profile: Option<&str>) -> Result<
         .alteryx_one
         .as_mut()
         .context("no alteryx_one section in profile")?;
+    let keyring_accounts = credential_keyring_accounts(one);
 
     let top_level_cleared = one.access_token.is_some()
         || one.access_token_ref.is_some()
@@ -696,7 +700,18 @@ pub(crate) fn logout(runtime: &RuntimeCtx<'_>, profile: Option<&str>) -> Result<
 
     let profile_name = config.profile_name.clone();
     let path = profile_storage_path(&profile_name)?;
-    let secretize = crate::onboard::write_config_with_policy(
+    let profiles_dir = path
+        .parent()
+        .context("profile storage path has no profiles directory")?;
+    let cleanup_accounts: BTreeSet<String> =
+        crate::secret::unreferenced_keyring_accounts_excluding_profile(
+            profiles_dir,
+            &path,
+            &keyring_accounts,
+        )?
+        .into_iter()
+        .collect();
+    let secretize = crate::onboard::write_config_with_policy_and_delete_keyring_accounts(
         &path,
         &config,
         // Logout must never re-persist unrelated resolved secrets inline just
@@ -704,6 +719,7 @@ pub(crate) fn logout(runtime: &RuntimeCtx<'_>, profile: Option<&str>) -> Result<
         // secure store is unavailable; an explicit login/fallback decision is
         // the only place allowed to change persistence policy.
         crate::onboard::InlineSecretPolicy::Forbid,
+        &cleanup_accounts,
     )
     .context("failed to save profile")?;
 
@@ -719,14 +735,128 @@ pub(crate) fn logout(runtime: &RuntimeCtx<'_>, profile: Option<&str>) -> Result<
             "profile": profile_name,
             "top_level_credentials_cleared": top_level_cleared,
             "workspace_credentials_cleared": workspace_credentials_cleared,
+            "local_keyring_entries_deleted": cleanup_accounts.len(),
+            "local_keyring_entries_retained": keyring_accounts.len() - cleanup_accounts.len(),
             "remote_revocation": "not attempted",
             "notes": [
                 "Cleared stored Alteryx One access/refresh credentials, workspace passwords, and credential refs from the profile",
-                "External secret-store entries referenced by the previous profile were not deleted",
+                "Deleted local keyring entries that no other profile references; shared entries were retained",
+                "Remote token revocation was not attempted",
             ],
             "inline_secret_fields": secretize.inline_fields,
         }),
     ))
+}
+
+/// Windows console state is shared by child processes. An interrupted masked
+/// password prompt can leave it in raw/no-echo mode, so restore ordinary line
+/// input before any visible confirmation or OTP response.
+fn ensure_visible_line_input() -> Result<()> {
+    #[cfg(windows)]
+    {
+        crossterm::terminal::disable_raw_mode()
+            .context("failed to restore visible console input for the OTP prompt")?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuthenticatedWorkspace {
+    id: Option<String>,
+    name: Option<String>,
+}
+
+/// The OTP flow identifies a workspace by GID, while the platform's current
+/// workspace endpoint provides the numeric ID and operator-facing name. This
+/// is best-effort confirmation only: a successful login must not become a
+/// failure because a subsequent informational read is unavailable.
+fn lookup_authenticated_workspace(
+    base_url: &str,
+    access_token: &str,
+) -> Option<AuthenticatedWorkspace> {
+    let endpoint = format!("{}/v4/workspaces/current", base_url.trim_end_matches('/'));
+    let http = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()?;
+    let response = http.get(endpoint).bearer_auth(access_token).send().ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let value: serde_json::Value = response.json().ok()?;
+    Some(authenticated_workspace_from_value(&value))
+}
+
+fn authenticated_workspace_from_value(value: &serde_json::Value) -> AuthenticatedWorkspace {
+    let id = value
+        .get("id")
+        .or_else(|| value.get("workspaceId"))
+        .or_else(|| value.get("workspace_id"))
+        .and_then(|id| {
+            id.as_i64()
+                .map(|id| id.to_string())
+                .or_else(|| id.as_u64().map(|id| id.to_string()))
+                .or_else(|| id.as_str().map(str::to_string))
+        });
+    let name = ["displayName", "name"]
+        .into_iter()
+        .filter_map(|field| value.get(field).and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(str::to_string);
+    AuthenticatedWorkspace { id, name }
+}
+
+fn workspace_password_is_supplied_by_environment() -> bool {
+    std::env::var("AYX_ONE_WS_PASSWORD")
+        .ok()
+        .is_some_and(|password| !password.is_empty())
+}
+
+fn should_offer_workspace_password_save(
+    explicit_save: bool,
+    has_stored_password: bool,
+    has_environment_password: bool,
+) -> bool {
+    !explicit_save && !has_stored_password && !has_environment_password
+}
+
+/// Ask only after the password has been accepted by the remote workspace.
+/// Secure keyring storage is the ergonomic default; decline explicitly when a
+/// user does not want the password remembered on this machine.
+fn interactive_workspace_password_save() -> Result<bool> {
+    use std::io::Write as _;
+
+    ensure_visible_line_input()?;
+    eprint!("Save this workspace password securely for future logins? [Y/n] ");
+    std::io::stderr().flush().ok();
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .context("failed to read workspace-password storage choice")?;
+    Ok(accepts_workspace_password_save(&answer))
+}
+
+fn accepts_workspace_password_save(answer: &str) -> bool {
+    !matches!(answer.trim().to_ascii_lowercase().as_str(), "n" | "no")
+}
+
+fn credential_keyring_accounts(one: &ayx_core::profile::AlteryxOneProfile) -> HashSet<String> {
+    let mut accounts = HashSet::new();
+    let mut add = |reference: Option<&str>| {
+        if let Some(account) = reference.and_then(|reference| reference.strip_prefix("keyring:")) {
+            accounts.insert(account.to_string());
+        }
+    };
+    add(one.access_token_ref.as_deref());
+    add(one.refresh_token_ref.as_deref());
+    add(one.workspace_password_ref.as_deref());
+    for credential in one.workspace_credentials.values() {
+        add(credential.access_token_ref.as_deref());
+        add(credential.refresh_token_ref.as_deref());
+        add(credential.workspace_password_ref.as_deref());
+    }
+    accounts
 }
 
 enum BrowserCallback {
@@ -872,14 +1002,35 @@ fn interactive_secret_fallback() -> Result<bool> {
     eprintln!(
         "The operating-system credential store is unavailable. The profile-file fallback is protected with owner-only permissions, but its credential is plaintext on disk."
     );
-    eprint!("Store credentials in the profile file? [Y/n] ");
+    eprint!("Store credentials in the profile file? [y/N] ");
     std::io::stderr().flush().ok();
     let mut answer = String::new();
     std::io::stdin()
         .read_line(&mut answer)
         .context("failed to read credential-storage choice")?;
-    Ok(answer.trim().is_empty()
-        || matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
+    Ok(accepts_plaintext_fallback(&answer))
+}
+
+/// A plaintext fallback changes the credential-at-rest security boundary, so
+/// empty input must fail closed. Keep the parser separate from terminal I/O so
+/// the consent contract is directly regression-tested.
+fn accepts_plaintext_fallback(answer: &str) -> bool {
+    accepts_affirmative_answer(answer)
+}
+
+fn accepts_affirmative_answer(answer: &str) -> bool {
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+/// An explicit policy is a user decision and must replace a previously
+/// remembered choice. An interactive secure-store failure is the one implicit
+/// case that is remembered, and only after affirmative plaintext consent.
+fn persistence_policy_to_remember(
+    requested: Option<ayx_core::auth::SecretPersistencePolicy>,
+    effective: ayx_core::auth::SecretPersistencePolicy,
+) -> Option<ayx_core::auth::SecretPersistencePolicy> {
+    (requested.is_some() || effective == ayx_core::auth::SecretPersistencePolicy::PlaintextFallback)
+        .then_some(effective)
 }
 
 fn auth_credential_binding(
@@ -911,8 +1062,14 @@ fn workspace_password_for_login(
 
 #[cfg(test)]
 mod tests {
-    use super::{BrowserCallback, parse_browser_callback, workspace_password_for_login};
+    use super::{
+        AuthenticatedWorkspace, BrowserCallback, accepts_plaintext_fallback,
+        accepts_workspace_password_save, authenticated_workspace_from_value,
+        parse_browser_callback, persistence_policy_to_remember,
+        should_offer_workspace_password_save, workspace_password_for_login,
+    };
     use ayx_core::profile::{AlteryxOneProfile, WorkspaceCredential};
+    use httpmock::prelude::*;
     use std::io::Write;
     use std::net::{TcpListener, TcpStream};
     use std::thread;
@@ -968,6 +1125,93 @@ mod tests {
             workspace_password_for_login(&one, None),
             Some("workspace-a-password".to_string())
         );
+    }
+
+    #[test]
+    fn plaintext_fallback_requires_affirmative_consent() {
+        assert!(!accepts_plaintext_fallback(""));
+        assert!(!accepts_plaintext_fallback("no"));
+        assert!(accepts_plaintext_fallback("y"));
+        assert!(accepts_plaintext_fallback(" YES "));
+    }
+
+    #[test]
+    fn workspace_password_save_offer_is_only_for_a_new_interactive_password() {
+        assert!(should_offer_workspace_password_save(false, false, false));
+        assert!(!should_offer_workspace_password_save(true, false, false));
+        assert!(!should_offer_workspace_password_save(false, true, false));
+        assert!(!should_offer_workspace_password_save(false, false, true));
+    }
+
+    #[test]
+    fn workspace_password_save_defaults_to_secure_keyring_storage() {
+        assert!(accepts_workspace_password_save(""));
+        assert!(accepts_workspace_password_save("y"));
+        assert!(!accepts_workspace_password_save("n"));
+        assert!(!accepts_workspace_password_save("NO"));
+    }
+
+    #[test]
+    fn authenticated_workspace_confirmation_uses_numeric_id_and_display_name() {
+        let workspace = authenticated_workspace_from_value(&serde_json::json!({
+            "id": 91946,
+            "name": "Machine Name",
+            "displayName": "Alteryx FDE"
+        }));
+        assert_eq!(
+            workspace,
+            AuthenticatedWorkspace {
+                id: Some("91946".to_string()),
+                name: Some("Alteryx FDE".to_string()),
+            }
+        );
+
+        let fallback = authenticated_workspace_from_value(&serde_json::json!({
+            "workspaceId": "42",
+            "name": "  Secondary Workspace  "
+        }));
+        assert_eq!(fallback.id.as_deref(), Some("42"));
+        assert_eq!(fallback.name.as_deref(), Some("Secondary Workspace"));
+    }
+
+    #[test]
+    fn authenticated_workspace_lookup_is_best_effort_for_http_failures() {
+        let server = MockServer::start();
+        let unavailable = server.mock(|when, then| {
+            when.method(GET).path("/v4/workspaces/current");
+            then.status(503);
+        });
+        assert_eq!(
+            super::lookup_authenticated_workspace(&server.base_url(), "token"),
+            None
+        );
+        unavailable.assert();
+
+        let malformed = MockServer::start();
+        let malformed_response = malformed.mock(|when, then| {
+            when.method(GET).path("/v4/workspaces/current");
+            then.status(200).body("not json");
+        });
+        assert_eq!(
+            super::lookup_authenticated_workspace(&malformed.base_url(), "token"),
+            None
+        );
+        malformed_response.assert();
+    }
+
+    #[test]
+    fn explicit_secure_policy_replaces_a_remembered_plaintext_choice() {
+        use ayx_core::auth::SecretPersistencePolicy::{PlaintextFallback, Secure};
+
+        assert_eq!(
+            persistence_policy_to_remember(Some(Secure), Secure),
+            Some(Secure)
+        );
+        assert_eq!(
+            persistence_policy_to_remember(Some(PlaintextFallback), PlaintextFallback),
+            Some(PlaintextFallback)
+        );
+        assert_eq!(persistence_policy_to_remember(None, Secure), None);
     }
 
     #[test]

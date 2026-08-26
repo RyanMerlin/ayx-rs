@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -16,7 +16,7 @@ use ayx_core::profile::{
     load_ayx_state, normalize_alteryx_base_url, profile_storage_path, save_ayx_state,
 };
 use ayx_core::secrets::{
-    KeyringTransaction, bound_keyring_account_in_namespace, keyring_account,
+    KeyringTransaction, bound_keyring_account_in_namespace, delete_keyring_secret, keyring_account,
     recover_keyring_transaction_locked, resolve_secret_ref, store_secret_with_fallback,
 };
 use ayx_core::sensitive::{SensitiveFileLock, write_sensitive_file};
@@ -1499,9 +1499,53 @@ pub(crate) fn write_config_with_binding_for_rollout(
     binding: Option<&CredentialBinding>,
     rollout: Option<ayx_core::auth::AuthRollout>,
 ) -> Result<SecretizeOutput> {
+    write_config_with_binding_for_rollout_and_delete_keyring_accounts(
+        path,
+        config,
+        policy,
+        binding,
+        rollout,
+        &BTreeSet::new(),
+    )
+}
+
+/// Write a profile and transactionally remove the supplied, already-proven
+/// unreferenced keyring accounts. This is used by logout after it has checked
+/// that another profile does not still point at the same binding-derived
+/// account.
+pub(crate) fn write_config_with_policy_and_delete_keyring_accounts(
+    path: &Path,
+    config: &Config,
+    policy: InlineSecretPolicy,
+    delete_accounts: &BTreeSet<String>,
+) -> Result<SecretizeOutput> {
+    write_config_with_binding_for_rollout_and_delete_keyring_accounts(
+        path,
+        config,
+        policy,
+        None,
+        None,
+        delete_accounts,
+    )
+}
+
+fn write_config_with_binding_for_rollout_and_delete_keyring_accounts(
+    path: &Path,
+    config: &Config,
+    policy: InlineSecretPolicy,
+    binding: Option<&CredentialBinding>,
+    rollout: Option<ayx_core::auth::AuthRollout>,
+    delete_accounts: &BTreeSet<String>,
+) -> Result<SecretizeOutput> {
     let lock = SensitiveFileLock::acquire(path).map_err(anyhow::Error::from)?;
     recover_keyring_transaction_locked(path, &lock).map_err(anyhow::Error::from)?;
     let transaction = KeyringTransaction::begin(&lock);
+    if let Err(err) = delete_keyring_accounts(&transaction, delete_accounts) {
+        if let Err(rollback) = transaction.rollback_and_abort() {
+            return Err(anyhow::anyhow!("{err}; {rollback}"));
+        }
+        return Err(err);
+    }
     // Hard-error when multiple secret representations carry different resolved
     // values.  This is a write-time guard: it prevents silently persisting a
     // mixed-state config that would be ambiguous to reload.
@@ -1566,6 +1610,20 @@ pub(crate) fn write_config_with_binding_for_rollout(
     }
     transaction.commit().map_err(anyhow::Error::from)?;
     Ok(out)
+}
+
+fn delete_keyring_accounts(
+    transaction: &KeyringTransaction<'_>,
+    accounts: &BTreeSet<String>,
+) -> Result<()> {
+    for account in accounts {
+        let Some(previous) = resolve_secret_ref(&format!("keyring:{account}"))? else {
+            continue;
+        };
+        transaction.record_change(account, Some(previous))?;
+        delete_keyring_secret(account)?;
+    }
+    Ok(())
 }
 
 /// Migrate inline authentication secrets into the OS store when it is
