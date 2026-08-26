@@ -58,6 +58,9 @@ fn run_login_with_rollout(home: &TempDir, extra: &[&str], rollout: Option<&str>)
         .env("AYX_CONFIG_HOME", home.path())
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
+        .env_remove("AYX_AUTH_ROLLOUT")
+        .env_remove("AUTH_ROLLOUT")
+        .env_remove("AYX_AUTH_LIVE_CANARY")
         .stdin(Stdio::null());
     if let Some(rollout) = rollout {
         command.env("AYX_AUTH_ROLLOUT", rollout);

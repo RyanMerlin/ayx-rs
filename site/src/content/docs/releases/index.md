@@ -7,9 +7,17 @@ sidebar:
 
 Release notes for each tagged version of `ayx`. For current behavior, use the live docs above; for a specific binary, read the notes for that version.
 
+## v0.17.0-internal.1
+
+Internal Windows and WSL2/Linux evaluation build. The Wizard email-OTP flow
+is the default; use `ayx one login --auth-flow legacy` for the explicit
+rollback lane. Native keyring and disposable-tenant live authentication
+signoff are still required before broad internal distribution. Apple/macOS is
+deferred; the packaged artifact includes the complete internal release notes.
+
 ## v0.16.1
 
-**Legacy email OTP is the v0.16.1 default and rollback lane.** `AYX_AUTH_ROLLOUT=legacy` selects the complete compatibility-pinned flow; invalid rollout values fail instead of silently selecting another implementation. `wizard` and `canary` remain pre-release lanes and are not claimed as executable release-default orchestration.
+**Historical:** Legacy email OTP was the v0.16.1 default and rollback lane. `AYX_AUTH_ROLLOUT=legacy` selected the complete compatibility-pinned flow; invalid rollout values failed instead of silently selecting another implementation.
 
 **Authentication hosts are now validated before use.** Production auth requires HTTPS Alteryx regional/Ping hosts and rejects URL credentials, query strings, fragments, and unsafe redirect schemes. Browser callbacks are bounded and CSRF-validated.
 

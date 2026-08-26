@@ -1276,6 +1276,7 @@ mod tests {
                 workspace_password: None,
                 workspace_password_ref: None,
                 workspace_credentials: Default::default(),
+                auth_rollout: None,
                 expected_workspace_id: None,
                 sp_client_id: None,
                 sp_token_endpoint_url: None,

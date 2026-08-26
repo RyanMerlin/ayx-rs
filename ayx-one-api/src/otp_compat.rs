@@ -232,11 +232,11 @@ impl WizardOtpAdapter {
                             step: WizardStep::SendOtp,
                         } => {
                             anyhow::bail!(
-                                "Wizard OTP reference exhausted; restart through AYX_AUTH_ROLLOUT=legacy"
+                                "Wizard OTP reference exhausted; restart with `ayx one login --auth-flow legacy` (or set AYX_AUTH_ROLLOUT=legacy for automation)"
                             )
                         }
                         action => anyhow::bail!(
-                            "Wizard OTP validation stopped at {action:?}; retry through AYX_AUTH_ROLLOUT=legacy"
+                            "Wizard OTP validation stopped at {action:?}; retry with `ayx one login --auth-flow legacy` (or set AYX_AUTH_ROLLOUT=legacy for automation)"
                         ),
                     }
                 }

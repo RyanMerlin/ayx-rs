@@ -34,7 +34,29 @@ impl std::fmt::Display for OtpValidationRejected {
 
 impl std::error::Error for OtpValidationRejected {}
 
+#[derive(Debug)]
+struct WorkspacePasswordRejected {
+    status: reqwest::StatusCode,
+}
+
+impl std::fmt::Display for WorkspacePasswordRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "workspace password rejected: HTTP {}", self.status)
+    }
+}
+
+impl std::error::Error for WorkspacePasswordRejected {}
+
 fn is_otp_rejection_status(status: reqwest::StatusCode) -> bool {
+    matches!(
+        status,
+        reqwest::StatusCode::BAD_REQUEST
+            | reqwest::StatusCode::UNAUTHORIZED
+            | reqwest::StatusCode::UNPROCESSABLE_ENTITY
+    )
+}
+
+fn is_workspace_password_rejection_status(status: reqwest::StatusCode) -> bool {
     matches!(
         status,
         reqwest::StatusCode::BAD_REQUEST
@@ -397,8 +419,13 @@ fn submit_workspace_password(
     )
     .context("POST /session (workspace password) failed")?;
     if !response.status().is_success() {
+        if is_workspace_password_rejection_status(response.status()) {
+            return Err(anyhow::Error::new(WorkspacePasswordRejected {
+                status: response.status(),
+            }));
+        }
         bail!(
-            "workspace password rejected: POST /session returned HTTP {}",
+            "workspace password request failed after transport/status retries: POST /session returned HTTP {}; not retrying the password",
             response.status()
         );
     }
@@ -798,6 +825,15 @@ where
         };
         match submit_workspace_password(client, base, email, &password) {
             Ok(()) => return Ok(password),
+            Err(err)
+                if !err
+                    .chain()
+                    .any(|cause| cause.is::<WorkspacePasswordRejected>()) =>
+            {
+                return Err(err.context(
+                    "workspace password request failed; not retrying the password because the server or transport did not identify it as an authentication rejection",
+                ));
+            }
             Err(err) if from_fixed_source => {
                 return Err(err.context(
                     "a fixed workspace password was rejected — not retrying, since \
@@ -1011,6 +1047,7 @@ mod tests {
 
     use super::OtpAction;
     use super::email_otp_login_pure_http;
+    use super::is_workspace_password_rejection_status;
     use super::retry_transient;
     use super::should_retry_workspace_password;
     use super::{
@@ -1493,6 +1530,25 @@ mod tests {
             reqwest::StatusCode::INTERNAL_SERVER_ERROR,
         ] {
             assert!(!is_otp_rejection_status(status));
+        }
+    }
+
+    #[test]
+    fn workspace_password_status_classification_is_narrow() {
+        for status in [
+            reqwest::StatusCode::BAD_REQUEST,
+            reqwest::StatusCode::UNAUTHORIZED,
+            reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+        ] {
+            assert!(is_workspace_password_rejection_status(status));
+        }
+        for status in [
+            reqwest::StatusCode::FORBIDDEN,
+            reqwest::StatusCode::REQUEST_TIMEOUT,
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+        ] {
+            assert!(!is_workspace_password_rejection_status(status));
         }
     }
 
@@ -2390,7 +2446,7 @@ mod tests {
         assert!(
             wizard_error
                 .to_string()
-                .contains("restart through AYX_AUTH_ROLLOUT=legacy")
+                .contains("ayx one login --auth-flow legacy")
         );
 
         let result = crate::LegacyOtpAdapter

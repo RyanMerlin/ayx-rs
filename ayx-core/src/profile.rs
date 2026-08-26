@@ -6,6 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::auth::AuthRollout;
 use crate::secrets::{recover_keyring_transaction, resolve_secret_ref};
 use crate::sensitive::{recover_sensitive_file, write_sensitive_file};
 
@@ -491,6 +492,11 @@ pub struct AlteryxOneProfile {
     pub workspace_password_ref: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub workspace_credentials: BTreeMap<String, WorkspaceCredential>,
+    /// Rollout that owns the bound credentials in this profile. Persisting
+    /// the selected lane keeps an explicit one-shot CLI override aligned with
+    /// later API credential consumption.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_rollout: Option<AuthRollout>,
     /// Expected workspace id for mutation safety preflight.
     ///
     /// When set, every mutating One API request (after `--apply`) makes a
@@ -536,6 +542,7 @@ impl Default for AlteryxOneProfile {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
             sp_token_endpoint_url: None,
@@ -578,6 +585,7 @@ impl std::fmt::Debug for AlteryxOneProfile {
             .field("has_refresh_token", &self.refresh_token.is_some())
             .field("has_workspace_password", &self.workspace_password.is_some())
             .field("workspace_credentials", &self.workspace_credentials)
+            .field("auth_rollout", &self.auth_rollout)
             .field("expected_workspace_id", &self.expected_workspace_id)
             .field("sp_client_id", &self.sp_client_id)
             .field("sp_token_endpoint_url", &self.sp_token_endpoint_url)
@@ -1693,6 +1701,7 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: BTreeMap::new(),
+            auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
             sp_token_endpoint_url: None,
@@ -2746,6 +2755,7 @@ mod tests {
                 workspace_password: None,
                 workspace_password_ref: None,
                 workspace_credentials: Default::default(),
+                auth_rollout: None,
                 expected_workspace_id: None,
                 sp_client_id: None,
                 sp_token_endpoint_url: None,
@@ -3026,6 +3036,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
             sp_token_endpoint_url: None,
@@ -3061,6 +3072,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
             sp_token_endpoint_url: None,
@@ -3115,6 +3127,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials,
+            auth_rollout: None,
             expected_workspace_id: Some("ws-1".to_string()),
             sp_client_id: None,
             sp_token_endpoint_url: None,
@@ -3174,6 +3187,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials,
+            auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
             sp_token_endpoint_url: None,
@@ -3233,6 +3247,7 @@ mod tests {
             workspace_password: Some("profile-password".to_string()),
             workspace_password_ref: None,
             workspace_credentials,
+            auth_rollout: None,
             expected_workspace_id: Some("ws-3".to_string()),
             sp_client_id: None,
             sp_token_endpoint_url: None,
@@ -3286,6 +3301,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials,
+            auth_rollout: None,
             expected_workspace_id: Some("ws-1".to_string()),
             sp_client_id: None,
             sp_token_endpoint_url: None,
@@ -3350,6 +3366,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
             sp_token_endpoint_url: None,
@@ -3381,6 +3398,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
             sp_token_endpoint_url: None,

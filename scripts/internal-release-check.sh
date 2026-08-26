@@ -36,7 +36,14 @@ mkdir -p "$dist"
 rm -rf "$stage"
 mkdir -p "$stage"
 cp target/release/ayx "$stage/ayx"
-cp README.md scripts/install.sh docs/releases/v0.17.0-internal.1.md "$stage/"
-tar -czf "$archive" -C "$stage" ayx README.md install.sh v0.17.0-internal.1.md
+cp README.md docs/releases/v0.17.0-internal.1.md "$stage/"
+tar -czf "$archive" -C "$stage" ayx README.md v0.17.0-internal.1.md
+
+verify="$(mktemp -d "$dist/archive-smoke-linux.XXXXXX")"
+tar -xzf "$archive" -C "$verify"
+test -x "$verify/ayx"
+"$verify/ayx" --version
+"$verify/ayx" --help >/dev/null
+rm -rf "$verify"
 
 echo "Internal WSL2/Linux artifact: $archive"

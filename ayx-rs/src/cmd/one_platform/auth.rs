@@ -84,7 +84,21 @@ pub(crate) fn login(
     // Parse rollout before reading credentials or starting the OTP transport.
     // A typo must not be discovered after an irreversible OTP/PAT side effect.
     let rollout = match auth_flow_arg.as_deref() {
-        Some(value) => AuthRollout::parse(value).map_err(|err| anyhow::anyhow!(err))?,
+        Some(value) => {
+            let selected = AuthRollout::parse(value).map_err(|err| anyhow::anyhow!(err))?;
+            if let Ok(environment_value) =
+                std::env::var("AYX_AUTH_ROLLOUT").or_else(|_| std::env::var("AUTH_ROLLOUT"))
+            {
+                if let Ok(environment_rollout) = AuthRollout::parse(&environment_value) {
+                    if environment_rollout != selected {
+                        anyhow::bail!(
+                            "--auth-flow {selected:?} conflicts with AYX_AUTH_ROLLOUT={environment_value}; unset the environment override or choose the same lane"
+                        );
+                    }
+                }
+            }
+            selected
+        }
         None => AuthRollout::from_environment().map_err(|err| anyhow::anyhow!(err))?,
     };
     let mut config = runtime.load_profile_lenient_for_auth(profile.as_deref())?;
@@ -543,7 +557,14 @@ pub(crate) fn login(
     }
 
     let binding = auth_credential_binding(&config, workspace_id.as_deref())?;
-    crate::onboard::validate_auth_credential_bindings(&config, &binding)?;
+    crate::onboard::validate_auth_credential_bindings_for_rollout(
+        &config,
+        &binding,
+        Some(rollout),
+    )?;
+    if let Some(one) = config.alteryx_one.as_mut() {
+        one.auth_rollout = Some(rollout);
+    }
     let explicit_plaintext = requested_policy == Some(SecretPersistencePolicy::PlaintextFallback);
     let allow_inline = persistence_policy == SecretPersistencePolicy::PlaintextFallback
         && (!save_workspace_password

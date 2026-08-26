@@ -45,8 +45,17 @@ if (Test-Path -LiteralPath $stage) {
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 Copy-Item (Join-Path $repo "target\release\ayx.exe") (Join-Path $stage "ayx.exe")
 Copy-Item (Join-Path $repo "README.md") $stage
-Copy-Item (Join-Path $repo "scripts\install.ps1") $stage
 Copy-Item (Join-Path $repo "docs\releases\v0.17.0-internal.1.md") $stage
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $archive -Force
+
+$verify = Join-Path $dist "archive-smoke-windows"
+if (Test-Path -LiteralPath $verify) {
+    Remove-Item -LiteralPath $verify -Recurse -Force
+}
+New-Item -ItemType Directory -Path $verify -Force | Out-Null
+Expand-Archive -LiteralPath $archive -DestinationPath $verify -Force
+Invoke-Checked (Join-Path $verify "ayx.exe") @("--version")
+Invoke-Checked (Join-Path $verify "ayx.exe") @("--help")
+Remove-Item -LiteralPath $verify -Recurse -Force
 
 Write-Host "Internal Windows artifact: $archive"

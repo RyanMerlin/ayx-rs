@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-`ayx one` handles authentication and identity through a small set of commands: `login` and `logout` manage credentials, `whoami` shows who you're signed in as, `auth status` / `auth diagnose` check token posture, `doctor identity` runs a deeper identity health check, and `inventory` summarizes the current One API surface registry.
+`ayx one` handles authentication and identity through a small set of commands: `login` and `logout` manage credentials, `whoami` shows who you're signed in as, `auth status` / `auth diagnose` check token posture, `doctor identity` runs a deeper identity health check, and `inventory` summarizes the current One API surface registry. The Wizard email-OTP flow is the default; if a fresh login needs the compatibility lane, use `ayx one login --auth-flow legacy`.
 
 All mutating commands (anything that creates, updates, suspends, removes, or deletes) are dry-run by default. Add `--apply` to commit the change. Add `--yes` to skip the TTY confirmation in scripts.
 
@@ -53,7 +53,7 @@ The default email-OTP login prompts for the workspace password when it is not al
 ayx one login --save-workspace-password
 ```
 
-After a successful login, the password is stored under the selected workspace credential's keyring reference. On Windows, this uses Windows Credential Manager; it is not written into the profile YAML or an environment file. The flag applies only to the default email-OTP flow, requires `--workspace-id` or an already active workspace credential, and fails if the OS credential store is unavailable rather than storing the password in plaintext.
+After a successful login, the password is stored under the selected workspace credential's keyring reference. On Windows, this uses Windows Credential Manager; it is not written into the profile YAML or an environment file. The flag applies only to the default email-OTP flow and requires `--workspace-id` or an already active workspace credential. If secure storage is unavailable, the interactive login asks for explicit consent before using the profile-file plaintext fallback; choose `--secret-policy session` to avoid persistence entirely.
 
 ## Signing out
 
