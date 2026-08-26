@@ -11,7 +11,7 @@ Release notes for each tagged version of `ayx`. For current behavior, use the li
 
 Internal Windows and WSL2/Linux evaluation build. The Wizard email-OTP flow
 is the default; use `ayx one login --auth-flow legacy` for the explicit
-rollback lane. Native keyring and disposable-tenant live authentication
+rollback lane. Native keyring and existing local-dev live authentication
 signoff are still required before broad internal distribution. Apple/macOS is
 deferred; the packaged artifact includes the complete internal release notes.
 
@@ -25,8 +25,7 @@ deferred; the packaged artifact includes the complete internal release notes.
 
 **Wizard authentication is now the default.** `ayx one login` uses the
 binding-aware orchestration and secure persistence path by default; set
-`AYX_AUTH_ROLLOUT=legacy` for the explicit rollback adapter, or use the
-isolated `canary` rollout for validation. Regional One hosts remain explicit,
+`AYX_AUTH_ROLLOUT=legacy` for the explicit rollback adapter. Regional One hosts remain explicit,
 and the release documents session-only and consent-based plaintext fallback
 options for constrained environments.
 

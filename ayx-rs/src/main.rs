@@ -1609,7 +1609,6 @@ pub(crate) enum OneCommand {
         #[arg(long)]
         workspace_gid: Option<String>,
         /// Authentication flow for email-OTP login: wizard (default) or legacy.
-        /// The canary flow remains available through AYX_AUTH_ROLLOUT=canary.
         #[arg(long, value_name = "FLOW", value_parser = ["wizard", "legacy"])]
         auth_flow: Option<String>,
         /// Save the workspace password used by email-OTP login in the OS keyring.

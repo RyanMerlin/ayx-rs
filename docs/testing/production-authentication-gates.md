@@ -6,17 +6,13 @@ The authentication redesign is released in this order:
    recovery tests, and `cargo test -p ayx-one-api --test auth_compatibility`.
 2. `cargo nextest run --workspace --locked`, `cargo fmt --all --check`, and
    `cargo clippy --workspace --all-targets -- -D warnings`.
-3. Run `scripts/live-auth-canary.ps1` only with a disposable profile copied
-   into an isolated config home. Its `-Rollout canary` mode sets
-   `AYX_AUTH_LIVE_CANARY=1`, requires the real OTP interaction, checks that a
-   PAT expiry is reported, and rejects secret-bearing output. Run separate
-   `-UseDefaultWizard`, `-Rollout wizard`, and `-Rollout legacy` passes to
-   validate the default, named Wizard, and rollback lanes. Use the default
-   session-only policy for transport validation;
-   use `-SecretPolicy secure` only when the isolated profile/keyring is
-   disposable and binding persistence itself is part of the test. The local
-   recorder test verifies the exact legacy endpoint order and one wrong-code
-   re-prompt remains covered without a tenant.
+3. Run `scripts/live-auth-test.ps1` against the existing `local-dev` profile.
+   It discovers the normal config home and profile metadata, requires the
+   real OTP interaction, checks that a PAT expiry is reported, and rejects
+   secret-bearing output. Run separate `-Rollout default`, `-Rollout wizard`,
+   and `-Rollout legacy` passes to validate the default, named Wizard, and
+   rollback lanes. The local recorder test verifies the exact legacy endpoint
+   order and one wrong-code re-prompt remains covered without live traffic.
 4. Complete the Terra review with evidence for stale credentials,
    transient transport failures, concurrent/crash-safe writes, keyring failure,
    explicit plaintext fallback, session-only mode, migration, and secret-free
