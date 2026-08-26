@@ -258,7 +258,7 @@ jobs:
             cargo cyclonedx --manifest-path "$manifest" --format json --override-filename "$filename"
             source="$(dirname "$manifest")/${filename}.json"
             test -f "$source"
-            cp "$source" "sbom/$filename"
+            cp "$source" "sbom/${filename}.json"
           done
           expected="$(jq -r '.packages[].name' metadata.json | sort -u)"
           actual="$(find sbom -maxdepth 1 -type f -name '*.cdx.json' -printf '%f\n' | sed 's/\.cdx\.json$//' | sort -u)"
