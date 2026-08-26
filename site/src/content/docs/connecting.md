@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-`ayx` talks to Alteryx One over its `/v4` REST API. First-time sign-in is an **email one-time passcode (OTP)** flow: you enter a 6-digit code emailed to you plus your workspace password, and `ayx` stores a **30-day token** in your profile and reuses it for every command after. There's no OAuth client to create and no token to paste by hand.
+`ayx` talks to Alteryx One over its `/v4` REST API. First-time sign-in is an **email one-time passcode (OTP)** flow: you enter a 6-digit code emailed to you plus your workspace password, and `ayx` stores a **30-day token** in your profile and reuses it for every command after. The Wizard email-OTP flow and secure persistence are the defaults. There's no OAuth client to create and no token to paste by hand.
 
 ## The quick path
 
@@ -26,6 +26,11 @@ With no flags this runs the **email-OTP flow**:
 1. A 6-digit passcode is emailed to your account address.
 2. `ayx` prompts you for the passcode, then for your **workspace password**.
 3. On success it stores a 30-day token in the active profile.
+4. On the first interactive login, it asks whether to save the workspace password securely for future logins. Press Enter for the default **Yes**, or answer `n` to decline.
+
+The successful login prints an `Authentication Successful!` confirmation only after the credentials and profile state have been persisted. It also reports token expiry and, when available, the authenticated workspace id and name.
+
+Profile selection is `--profile <name>`, then `AYX_PROFILE`, then the active profile pointer, then the central `default` profile.
 
 It reads three fields from your profile — your email (from the onboarding prompt) and your workspace id + region (parsed from the workspace URL you paste during onboarding):
 
@@ -36,6 +41,12 @@ It reads three fields from your profile — your email (from the onboarding prom
 | `base_url` | Your Alteryx One region host, e.g. `https://us1.alteryxcloud.com` (also read from the URL) |
 
 If the token later expires, just run `ayx one login` again.
+
+### Credential persistence
+
+Secure operating-system storage is the default. The first interactive workspace-password login offers to save the password in the OS keyring; Enter accepts the save, while `n` keeps the password session-only. `--save-workspace-password` remains an optional automation shorthand for the default email-OTP flow.
+
+If secure storage is unavailable, `--secret-policy plaintext` is an explicit fallback and requires affirmative consent. The standalone login command rejects `--secret-policy session` because its process exits immediately and cannot retain a usable session.
 
 ### Other sign-in flows
 
@@ -78,7 +89,7 @@ During the OIDC flow, `ayx` applies two transport-level guards:
 
 Response bodies are redacted in auth-flow error output so credential material does not appear in logs or terminal output.
 
-When you sign in on a machine where no OS keyring backend is available, `ayx` warns that credentials will be stored inline in the config file (plaintext at rest). Configuring a keyring backend — the system keychain on macOS, `libsecret` on Linux, or Windows Credential Manager — eliminates plaintext storage and suppresses the warning.
+When you sign in on a machine where no OS keyring backend is available, `ayx` asks for explicit consent before storing credentials inline in the config file (plaintext at rest). Configuring a keyring backend — the system keychain on macOS, `libsecret` on Linux, or Windows Credential Manager — keeps credentials out of the profile and suppresses the warning.
 
 ## Connecting to Alteryx Server (optional)
 

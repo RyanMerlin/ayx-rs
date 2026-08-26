@@ -20,18 +20,26 @@ const sources = [
 ];
 
 function releaseVersion(filename) {
-  const match = /^v(\d+)\.(\d+)\.(\d+)\.md$/.exec(filename);
+  const match = /^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?\.md$/.exec(filename);
   if (!match) return null;
-  return match.slice(1).map(Number);
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    prerelease: match[4] ?? null,
+  };
 }
 
 function compareVersionsDescending(a, b) {
   const av = releaseVersion(a);
   const bv = releaseVersion(b);
-  for (let i = 0; i < 3; i++) {
-    if (av[i] !== bv[i]) return bv[i] - av[i];
+  for (const field of ['major', 'minor', 'patch']) {
+    if (av[field] !== bv[field]) return bv[field] - av[field];
   }
-  return 0;
+  if (av.prerelease === bv.prerelease) return 0;
+  if (!av.prerelease) return -1;
+  if (!bv.prerelease) return 1;
+  return bv.prerelease.localeCompare(av.prerelease, undefined, { numeric: true });
 }
 
 const releaseDir = path.join(docsRoot, 'releases');

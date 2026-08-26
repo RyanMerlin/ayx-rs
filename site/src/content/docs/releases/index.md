@@ -7,6 +7,13 @@ sidebar:
 
 Release notes for each tagged version of `ayx`. For current behavior, use the live docs above; for a specific binary, read the notes for that version.
 
+## v0.17.0-rc.1
+
+The release candidate tag for the internal `0.17.0` authentication rollout.
+The Wizard email-OTP flow is the default, secure persistence is the normal
+path, and Legacy remains available only as an explicit rollback lane. See the
+[full internal release notes](/releases/v0.17.0-internal.1/).
+
 ## v0.17.0-internal.1
 
 Internal Windows and WSL2/Linux evaluation build. The Wizard email-OTP flow

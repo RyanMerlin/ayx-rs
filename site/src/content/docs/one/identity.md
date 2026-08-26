@@ -47,13 +47,15 @@ ayx one login --workspace-id <id> --workspace-gid <gid>
 
 ### Saving the workspace password
 
-The default email-OTP login prompts for the workspace password when it is not already available. It does not save that password unless you explicitly opt in:
+The default email-OTP login prompts for the workspace password when it is not already available. After the remote login succeeds, the first interactive login asks:
 
-```bash
-ayx one login --save-workspace-password
+```text
+Save this workspace password securely for future logins? [Y/n]
 ```
 
-After a successful login, the password is stored under the selected workspace credential's keyring reference. On Windows, this uses Windows Credential Manager; it is not written into the profile YAML or an environment file. The flag applies only to the default email-OTP flow and requires `--workspace-id` or an already active workspace credential. If secure storage is unavailable, the interactive login asks for explicit consent before using the profile-file plaintext fallback; choose `--secret-policy session` to avoid persistence entirely.
+Press Enter to save it in the operating system's secure keyring, or answer `n` to keep it for this login only. Later logins for the selected profile reuse the saved password. On Windows, this uses Windows Credential Manager; it is not written into the profile YAML or an environment file.
+
+`--save-workspace-password` remains an optional automation shorthand for the default email-OTP flow. If secure storage is unavailable, `--secret-policy plaintext` is an explicit fallback that requires affirmative consent. The standalone login command rejects `--secret-policy session` because it cannot preserve a session after the process exits.
 
 ## Signing out
 
@@ -61,7 +63,7 @@ After a successful login, the password is stored under the selected workspace cr
 ayx one logout
 ```
 
-Clears stored Alteryx One credentials from the active profile. Add `--apply` to commit and `--yes` to skip the TTY confirmation.
+Clears stored Alteryx One credentials from the active profile. Local keyring entries are deleted only when no other profile references them; shared entries are retained. Remote token revocation is not attempted. Add `--apply` to commit and `--yes` to skip the TTY confirmation.
 
 ## Who am I?
 

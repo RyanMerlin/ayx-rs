@@ -64,7 +64,15 @@ and you'll be asked for your workspace password.
 Log in now [y/N]:
 ```
 
-Answer **y** and you'll be prompted for the **6-digit passcode** emailed to you and your **workspace password**. `ayx` completes the sign-in and stores a 30-day token in your profile. (Prefer to do it later? Answer **n** — the wizard prints the exact command to run when you're ready.)
+Answer **y** and you'll be prompted for the **6-digit passcode** emailed to you and your **workspace password**. `ayx` completes the sign-in and stores a 30-day token in your profile. On the first interactive login, it then asks:
+
+```text
+Save this workspace password securely for future logins? [Y/n]
+```
+
+Press Enter to save it in your operating system's secure keyring, or answer `n` to keep it for this login only. Later `ayx one login` runs reuse the securely saved password without asking again. (Prefer to do it later? Answer **n** at the onboarding prompt — the wizard prints the exact command to run when you're ready.)
+
+For a normal human login, no auth flags are needed: `ayx one login` uses the active profile, the Wizard email-OTP flow, and secure persistence by default. Use `--profile <name>` when you want a different profile.
 
 You won't need another passcode until the stored token expires (about 30 days); it's reused for every command in between.
 
