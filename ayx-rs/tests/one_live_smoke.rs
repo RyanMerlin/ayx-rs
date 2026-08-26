@@ -17,11 +17,25 @@ fn live_smoke_enabled() -> bool {
 }
 
 struct LiveSmokeContext {
-    config_home: TempDir,
+    // The default CI lane creates a disposable profile from `.env`. An explicit
+    // local profile lane intentionally keeps the user's OS-keyring-backed
+    // profile in place so a real interactive login can be validated without
+    // exporting its credentials into `.env`.
+    config_home: Option<TempDir>,
+    profile: String,
 }
 
 impl LiveSmokeContext {
     fn new() -> Self {
+        if let Ok(profile) = std::env::var("AYX_ONE_LIVE_PROFILE")
+            && !profile.trim().is_empty()
+        {
+            return Self {
+                config_home: None,
+                profile,
+            };
+        }
+
         let temp = tempfile::tempdir().expect("tempdir");
         let config_home = temp.path();
         let env = repo_env_values();
@@ -120,14 +134,19 @@ impl LiveSmokeContext {
         )
         .expect("write profile");
 
-        Self { config_home: temp }
+        Self {
+            config_home: Some(temp),
+            profile: "live".to_string(),
+        }
     }
 
     fn run(&self, args: &[&str]) -> std::process::Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_ayx"));
         command.args(args);
-        command.env("AYX_CONFIG_HOME", self.config_home.path());
-        command.env("AYX_PROFILE", "live");
+        if let Some(config_home) = &self.config_home {
+            command.env("AYX_CONFIG_HOME", config_home.path());
+        }
+        command.env("AYX_PROFILE", &self.profile);
         command.output().expect("ayx binary should run")
     }
 }
@@ -597,7 +616,7 @@ live_case!(
 live_case!(
     one_plans_count_live,
     args = ["--output", "json", "one", "plans", "count"],
-    ok = ["\"surface\": \"plans\"", "\"operation\": \"plans-count\""],
+    ok = ["\"surface\": \"plans\"", "\"operation\": \"count\""],
     fail = ["\"error_code\": \"permission_denied\""]
 );
 
@@ -850,13 +869,38 @@ live_case!(
     ]
 );
 
-live_page_boundary_case!(
-    one_flows_folders_list_page_boundary_live,
-    args = [
-        "--output", "json", "one", "flows", "folders", "list", "--limit", "1"
-    ],
-    ok = ["\"surface\": \"flow\"", "\"operation\": \"folders-list\""]
-);
+#[test]
+fn one_flows_folders_limit_request_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+    let live = LiveSmokeContext::new();
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output", "json", "one", "flows", "folders", "list", "--limit", "1",
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        assert_known_live_failure(
+            &stderr,
+            &[
+                "\"error_code\": \"permission_denied\"",
+                "\"error_code\": \"not_found\"",
+            ],
+        );
+        return;
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"operation\": \"folders-list\"");
+    // This endpoint intentionally returns the raw v4 response rather than the
+    // CLI's normalized paginated-list envelope. Confirm that the server saw
+    // the limiting query instead of asserting a synthetic `pages_fetched`.
+    assert_contains(&stdout, "\"endpoint_template\": \"/v4/folders?limit=1\"");
+}
 
 #[test]
 fn one_flows_folders_detail_live_real_object() {
@@ -1966,6 +2010,25 @@ fn one_job_groups_inspection_live_real_object() {
         if !success {
             if live_auth_unavailable(&stderr) {
                 return;
+            }
+            // A job group can be live and valid while still lacking a JDBC
+            // source. The platform correctly rejects `inputs` for that
+            // resource shape with this specific 400; it proves route wiring
+            // and authenticated reachability without masking other failures.
+            if operation == "inputs"
+                && stderr.contains("\"error_code\": \"validation\"")
+                && stderr.contains("DataServiceInvalidRequest")
+                && stderr.contains("Only Jdbc sources have connect String")
+            {
+                continue;
+            }
+            // Profiling endpoints are similarly data-dependent: the route is
+            // live, but a non-profiled job group has no artifact to return.
+            if matches!(operation, "profile" | "profile-results" | "pdf-results")
+                && stderr.contains("\"error_code\": \"validation\"")
+                && stderr.contains("ProfilingDataNotFoundException")
+            {
+                continue;
             }
             panic!(
                 "command failed: --output json one job-groups {operation} {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"

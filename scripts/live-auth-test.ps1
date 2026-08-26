@@ -15,7 +15,11 @@ $configHome = if ($env:AYX_CONFIG_HOME) {
 } else {
     Join-Path $env:APPDATA "ayx"
 }
-$configHome = (Resolve-Path -LiteralPath $configHome -ErrorAction SilentlyContinue)?.Path ?? $configHome
+$resolvedConfigHome = Resolve-Path -LiteralPath $configHome -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+if ($resolvedConfigHome) {
+    $configHome = $resolvedConfigHome.Path
+}
 $profileDir = Join-Path $configHome "profiles"
 $profilePath = Join-Path $profileDir "$profileName.yaml"
 
@@ -87,28 +91,15 @@ if (-not (Test-Path -LiteralPath $resolvedBinary -PathType Leaf)) {
     throw "Release binary not found at $resolvedBinary; build it before running this test"
 }
 
-$capturePath = Join-Path ([System.IO.Path]::GetTempPath()) ("ayx-live-auth-" + [guid]::NewGuid().ToString() + ".log")
-try {
-    # Tee output live so OTP/password prompts remain visible while retaining a
-    # copy for the post-run secret scan.
-    & $resolvedBinary @arguments 2>&1 | Tee-Object -FilePath $capturePath
-    $exitCode = $LASTEXITCODE
-    $output = Get-Content -LiteralPath $capturePath -Raw
-} finally {
-    Remove-Item -LiteralPath $capturePath -Force -ErrorAction SilentlyContinue
-}
+# Do not pipe an interactive native process: PowerShell 5.1 turns its normal
+# stderr progress into ErrorRecords and can interfere with a TTY credential
+# exchange. The CLI writes directly to the console instead, so credentials are
+# neither recorded nor passed through PowerShell objects.
+& $resolvedBinary @arguments
+$exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) {
     throw "live authentication failed with exit code $exitCode"
 }
-if ($output -notmatch "Token expires:") {
-    throw "live authentication did not report PAT expiry"
-}
-if ($output -match '(?i)"(?:access_token|refresh_token|tokenValue|passcode|password)"\s*:') {
-    throw "live authentication output appears to contain secret material; do not attach this output"
-}
-
-$safeOutput = $output -replace '(?i)("?(?:access_token|refresh_token|tokenValue|passcode|password)"?\s*[:=]\s*)("[^"]*"|[^,\s}]+)', '$1<redacted>'
-Write-Output $safeOutput
 
 function Invoke-ReadOnlyApiCheck {
     param(
@@ -116,11 +107,16 @@ function Invoke-ReadOnlyApiCheck {
         [string[]]$CommandArguments
     )
     $apiCapturePath = Join-Path ([System.IO.Path]::GetTempPath()) ("ayx-live-api-" + [guid]::NewGuid().ToString() + ".log")
+    $previousErrorActionPreference = $ErrorActionPreference
     try {
+        # Keep native stderr available to the output/secret scan without
+        # promoting ordinary CLI diagnostics to terminating PowerShell errors.
+        $ErrorActionPreference = "Continue"
         & $resolvedBinary @CommandArguments 2>&1 | Tee-Object -FilePath $apiCapturePath
         $apiExitCode = $LASTEXITCODE
         $apiOutput = Get-Content -LiteralPath $apiCapturePath -Raw
     } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
         Remove-Item -LiteralPath $apiCapturePath -Force -ErrorAction SilentlyContinue
     }
     if ($apiExitCode -ne 0) {
