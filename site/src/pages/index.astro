@@ -6,18 +6,23 @@ const description =
   'ayx is a command-line operator for Alteryx One and Alteryx Server: a generated command surface, an explicit safety model, structured output, and versioned release notes.';
 const install = 'curl -fsSL https://raw.githubusercontent.com/RyanMerlin/ayx-rs/main/scripts/install.sh | bash';
 
-// An accurate ayx session — every command and flag here is real (verified
-// against the CLI's command tree and config code).
+// A representative ayx session. Names and identifiers are deliberately
+// redacted so the landing page never implies a real tenant or resource.
 const session = [
   { cmd: 'ayx onboard', out: ['profile "default" created at ~/.config/ayx'], kind: 'ok' },
   {
-    cmd: 'ayx --output json one workspace current',
-    out: ['{ "workspace": "acme-prod", "role": "admin" }'],
+    cmd: 'ayx one login',
+    out: ['Authentication Successful!', 'credentials stored securely in profile "default"'],
+    kind: 'ok',
+  },
+  {
+    cmd: 'ayx one workspace current --output json',
+    out: ['{ "ok": true, "data": { … } }'],
     kind: 'json',
   },
   {
-    cmd: 'ayx one flows delete 0b9a47c2',
-    out: ['dry-run · 1 flow would be deleted · re-run with --apply'],
+    cmd: 'ayx one flows delete <flow-id>',
+    out: ['dry-run · no remote change · re-run with --apply'],
     kind: 'note',
   },
   { cmd: 'ayx doctor', out: ['config   ✓ auth   ✓ connectivity'], kind: 'ok' },

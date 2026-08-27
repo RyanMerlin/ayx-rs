@@ -805,6 +805,22 @@ mongo:
     }
 
     #[test]
+    fn accepts_global_output_after_subcommand() {
+        let parsed = Cli::try_parse_from([
+            "ayx",
+            "one",
+            "workspace",
+            "current",
+            "--output",
+            "json",
+        ]);
+        assert!(
+            parsed.is_ok(),
+            "global --output should work after the subcommand"
+        );
+    }
+
+    #[test]
     fn one_only_telemetry_commands_reject_server_source_at_parse_time() {
         for args in [
             ["ayx", "telemetry", "summary", "--source", "server"].as_slice(),
