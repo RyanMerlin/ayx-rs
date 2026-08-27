@@ -1,3 +1,5 @@
+#[cfg(feature = "test-inline-forcing")]
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::env;
 use std::fs;
@@ -22,6 +24,44 @@ const SECRET_SERVICE: &str = "ayx";
 const KEYRING_TRANSACTION_VERSION: u16 = 2;
 const KEYRING_TRANSACTION_SUFFIX: &str = ".auth-txn";
 const KEYRING_TRANSACTION_TMP_SUFFIX: &str = ".auth-txn.tmp";
+
+#[cfg(feature = "test-inline-forcing")]
+thread_local! {
+    static FORCE_KEYRING_UNAVAILABLE_FOR_CURRENT_THREAD: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Forces keyring writes to fail on the current thread until the returned guard
+/// is dropped. This test-only seam avoids mutating process-global environment
+/// variables while Rust unit tests run concurrently.
+#[cfg(feature = "test-inline-forcing")]
+pub struct ForcedKeyringUnavailable {
+    previous: bool,
+}
+
+#[cfg(feature = "test-inline-forcing")]
+impl ForcedKeyringUnavailable {
+    pub fn for_current_thread() -> Self {
+        let previous = FORCE_KEYRING_UNAVAILABLE_FOR_CURRENT_THREAD.with(|forced| {
+            let previous = forced.get();
+            forced.set(true);
+            previous
+        });
+        Self { previous }
+    }
+}
+
+#[cfg(feature = "test-inline-forcing")]
+impl Drop for ForcedKeyringUnavailable {
+    fn drop(&mut self) {
+        FORCE_KEYRING_UNAVAILABLE_FOR_CURRENT_THREAD.with(|forced| forced.set(self.previous));
+    }
+}
+
+#[cfg(feature = "test-inline-forcing")]
+fn keyring_unavailable_is_forced() -> bool {
+    FORCE_KEYRING_UNAVAILABLE_FOR_CURRENT_THREAD.with(Cell::get)
+        || env_truthy("AYX_FORCE_INLINE_SECRETS")
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 struct KeyringTransactionChange {
@@ -530,12 +570,12 @@ pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileErro
 ///
 /// # Test lever (feature-gated; compiled out of release binaries)
 ///
-/// When the `test-inline-forcing` Cargo feature is enabled, setting
-/// `AYX_FORCE_INLINE_SECRETS=1` (or another truthy value) makes this function
-/// behave as if the OS keyring were unavailable — it returns the same error as
-/// a headless host with no D-Bus / Secret Service backend. This lets tests
-/// deterministically exercise the inline-fallback path without requiring a live
-/// Secret Service on the test machine.
+/// When the `test-inline-forcing` Cargo feature is enabled, a
+/// [`ForcedKeyringUnavailable`] guard (or the legacy
+/// `AYX_FORCE_INLINE_SECRETS=1` test lever) makes this function behave as if
+/// the OS keyring were unavailable. This lets tests deterministically exercise
+/// the inline-fallback path without requiring a live Secret Service on the test
+/// machine.
 ///
 /// The feature is **not enabled by default** and is absent from all production
 /// dependency edges. It is intended to be enabled only via
@@ -545,11 +585,10 @@ pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileErro
 /// compiled in and the function goes straight to the real keyring.
 pub fn store_keyring_secret(account: &str, secret: &str) -> Result<String, ProfileError> {
     // Deterministic inline-fallback lever for tests. Compiled out of release
-    // binaries (requires feature "test-inline-forcing"). When the feature is
-    // active, the env var mirrors the AYX_ALLOW_INLINE_SECRETS contract by
-    // making the keyring step itself fail deterministically.
+    // binaries (requires feature "test-inline-forcing"). The scoped guard is
+    // thread-local so parallel tests cannot affect one another.
     #[cfg(feature = "test-inline-forcing")]
-    if env_truthy("AYX_FORCE_INLINE_SECRETS") {
+    if keyring_unavailable_is_forced() {
         return Err(ProfileError::Invalid(format!(
             "unable to open keyring entry '{}': keyring unavailable (forced by \
              AYX_FORCE_INLINE_SECRETS). Set AYX_ALLOW_INLINE_SECRETS=1 to store in YAML instead.",

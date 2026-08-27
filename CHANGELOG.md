@@ -4,6 +4,46 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.18.0 — 2026-08-27
+
+### Breaking
+
+- **`--output json` is now the compact, versioned automation view.** It emits
+  the `ayx.output.v1` envelope and, for list commands, defaults to 20 items
+  with explicit count, truncation, and pagination metadata. Scripts that need
+  the prior lossless envelope must use `--output json-full`.
+
+### Added
+
+- `--output json-full` provides the full redacted envelope for diagnostics,
+  exports, and compatibility migration. `--output-limit N` controls compact
+  list output; `0` disables the cap.
+- The One command tree now supplies command-level output descriptors, giving
+  compact JSON stable command identity, resource kind, and intended fields at
+  every leaf. The agent guide and contract tests document the supported
+  automation surface.
+- `ayx one workflows list` now joins the richer workflow-assets and people
+  directory projections to show owner, last update, and workflow version. The
+  former checksum and compiler-version build internals are no longer default
+  human-facing columns.
+
+### Changed
+
+- Output formatting is centralized across the CLI: text remains the default;
+  `json` is compact; `json-full` and YAML preserve redacted detail. Structured
+  output examples and command-surface tooling use the trailing form, e.g.
+  `ayx one flows list --output json`.
+- The default Wizard email-OTP authentication rollout and its explicit Legacy
+  rollback lane are now the stable 0.18 release behavior. Wizard supports the
+  bounded workspace-password retry and saved-password persistence path used by
+  Legacy.
+
+### Fixed
+
+- Onboarding tests no longer toggle process-global secret environment variables
+  concurrently. The keyring-unavailable test seam is scoped to the current
+  thread, so the full unit suite is deterministic under `cargo test`.
+
 ### Changed
 
 - Wizard is now the default email-OTP authentication flow for the internal

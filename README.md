@@ -81,7 +81,7 @@ ayx server api status
 cargo install --locked --path ayx-rs
 ```
 
-5. Use `--output json` when another tool should consume the result. For `designer workflow yxdb`, pair `--csv <path>` with top-level `--output json` if you want both export and structured metadata.
+5. Use trailing `--output json` when another tool should consume a compact result, or `--output json-full` when it needs raw fields. For `designer workflow yxdb`, pair `--csv <path>` with `--output json` if you want both export and structured metadata.
 
 ## Quick Examples
 
@@ -216,7 +216,7 @@ Start with:
 
 ```powershell
 ayx discover
-ayx --output json catalog list --format full --scope all
+ayx catalog list --format full --scope all --output json-full
 ayx catalog describe mongo/backup
 ayx catalog describe designer.workflow.context
 ayx one doctor discover
@@ -245,8 +245,8 @@ ayx mongo doctor
 
 Agent-oriented catalog notes:
 - `ayx discover [path] [--deep]` is the progressive, rich tree/flag discovery API — the source of truth for flags, positional arguments, aliases, and nested command structure.
-- `ayx --output json catalog list --format full --scope all` is the complete, flattened, machine-readable index of every visible command plus every registered capability. `--scope all` is the default; pass it explicitly in scripts and docs so a future compatibility change to the default can't silently shrink what comes back.
-- `ayx --output json catalog list --format full --scope curated` is the compatibility view for clients that need only the previously curated subset — commands with a full `output`/`safety`/`mutating`/`prerequisites`/`notes` classification, no `unclassified` rows.
+- `ayx catalog list --format full --scope all --output json-full` is the complete, flattened, machine-readable index of every visible command plus every registered capability. `--scope all` is the default; pass it explicitly in scripts and docs so a future compatibility change to the default can't silently shrink what comes back.
+- `ayx catalog list --format full --scope curated --output json-full` is the compatibility view for clients that need only the previously curated subset — commands with a full `output`/`safety`/`mutating`/`prerequisites`/`notes` classification, no `unclassified` rows.
 - `ayx catalog describe <command-or-capability>` continues to accept either a legacy command name/path or a capability id such as `designer.tool.add`.
 - `catalog` remains the derived registry/compatibility view for commands and capabilities — command identity and summaries come live from clap, not a hand-maintained list; it is not the primary discovery entry point.
 - Capability ids, validation metadata, and executor wiring already exist inside the registry layer so we can progressively expose deeper discovery without changing the ids.

@@ -101,7 +101,7 @@ fn successful_live_command_exits_zero_without_thread_local_panic() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([
             "--output",
-            "json",
+            "json-full",
             "one",
             "flows",
             "count",

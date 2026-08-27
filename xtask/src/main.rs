@@ -76,8 +76,19 @@ fn run_catalog_list(repo_root: &Path) -> Result<Value> {
     let output = Command::new("cargo")
         .current_dir(repo_root)
         .args([
-            "run", "-q", "-p", "ayx-rs", "--", "--output", "json", "catalog", "list", "--format",
-            "full", "--scope", "all",
+            "run",
+            "-q",
+            "-p",
+            "ayx-rs",
+            "--",
+            "catalog",
+            "list",
+            "--format",
+            "full",
+            "--scope",
+            "all",
+            "--output",
+            "json-full",
         ])
         .output()
         .with_context(|| "failed to run catalog generation command")?;
@@ -136,7 +147,7 @@ fn render_command_surface(catalog: &Value) -> Result<String> {
     lines.push("# AYX Command Surface".to_string());
     lines.push(String::new());
     lines.push(format!(
-        "_Generated from_ `cargo run -q -p ayx-rs -- --output json catalog list --format full --scope all` _on {}._",
+        "_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on {}._",
         generated_utc
     ));
     lines.push(String::new());

@@ -2583,19 +2583,12 @@ alteryx_one:
         )
         .unwrap();
 
-        unsafe {
-            std::env::set_var("AYX_FORCE_INLINE_SECRETS", "1");
-            std::env::set_var("AYX_ALLOW_INLINE_SECRETS", "1");
-        }
+        let _force_keyring_unavailable =
+            ayx_core::secrets::ForcedKeyringUnavailable::for_current_thread();
         let mut config = Config::load_from_path_with_environment(&path, None).unwrap();
         config.alteryx_one.as_mut().unwrap().workspace_password =
             Some("workspace-password-secret".to_string());
         let result = write_config_with_policy(&path, &config, InlineSecretPolicy::Forbid);
-        unsafe {
-            std::env::remove_var("AYX_FORCE_INLINE_SECRETS");
-            std::env::remove_var("AYX_ALLOW_INLINE_SECRETS");
-        }
-
         let err = result.expect_err("Forbid must fail when the keyring is unavailable");
         assert!(
             !std::fs::read_to_string(&path)
@@ -2990,16 +2983,10 @@ server_api:
     fn workspace_save_surfaces_inline_fields_when_keyring_unavailable() {
         // Force the keyring-store step to fail deterministically so the inline
         // fallback path always runs, regardless of whether the host has a live
-        // D-Bus Secret Service. AYX_FORCE_INLINE_SECRETS is an env-var lever
-        // in store_keyring_secret (see ayx-core/src/secrets.rs). It is NOT
-        // gated with #[cfg(test)] because cfg(test) inside a library crate is
-        // inactive when that crate is compiled as a dependency — the env-var
-        // guard is sufficient for production safety (undocumented, no CLI
-        // surface, inert when unset). nextest process-isolates each test, so
-        // the env mutation is safe.
-        unsafe {
-            std::env::set_var("AYX_FORCE_INLINE_SECRETS", "1");
-        }
+        // D-Bus Secret Service. The scoped test seam is thread-local, so this
+        // test remains safe under `cargo test`'s concurrent execution.
+        let _force_keyring_unavailable =
+            ayx_core::secrets::ForcedKeyringUnavailable::for_current_thread();
         let _home = tempfile::tempdir().unwrap();
         unsafe {
             std::env::set_var("AYX_CONFIG_HOME", _home.path());
@@ -3008,10 +2995,6 @@ server_api:
         let tmp = tempfile::tempdir().unwrap();
         let ws_path = tmp.path().join("ws.yaml");
         let out = write_workspace_config(&ws_path, &ws).unwrap();
-        // Restore before any assertions so a panic doesn't leak the var.
-        unsafe {
-            std::env::remove_var("AYX_FORCE_INLINE_SECRETS");
-        }
         // With the keyring forced unavailable, write_workspace_config must fall
         // back to inline storage AND surface that fact in SecretizeOutput.
         let on_disk = std::fs::read_to_string(&ws_path).unwrap();

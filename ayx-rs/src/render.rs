@@ -301,7 +301,7 @@ pub fn render_object_array(items: &[Value]) -> String {
 
     // Build cell matrix.
     let mut rows: Vec<Vec<String>> = Vec::with_capacity(items.len() + 1);
-    rows.push(columns.iter().map(|c| c.to_uppercase()).collect());
+    rows.push(columns.iter().map(|c| display_column_name(c)).collect());
     for item in items {
         let obj = match item.as_object() {
             Some(o) => o,
@@ -354,6 +354,18 @@ pub fn render_object_array(items: &[Value]) -> String {
         out.pop();
     }
     out
+}
+
+/// Keep machine-facing field names stable while making a few common governance
+/// fields read naturally in the terminal table.
+fn display_column_name(column: &str) -> String {
+    match column {
+        "owner" | "owner_id" => "OWNER".to_string(),
+        "last_updated_at" => "LAST UPDATED".to_string(),
+        "last_updated_by_id" => "LAST EDITOR".to_string(),
+        "workflow_version" => "VERSION".to_string(),
+        _ => column.to_uppercase(),
+    }
 }
 
 fn render_scalar_array(items: &[Value]) -> String {
@@ -438,6 +450,19 @@ mod tests {
         assert!(text.contains("read_only"));
         // header separator
         assert!(text.contains("---"));
+    }
+
+    #[test]
+    fn governance_columns_use_human_friendly_headers() {
+        let text = render_object_array(&[json!({
+            "id": "workflow-1",
+            "owner_id": 42,
+            "last_updated_at": "2026-08-27T22:00:00Z",
+            "workflow_version": 7,
+        })]);
+        assert!(text.contains("OWNER"));
+        assert!(text.contains("LAST UPDATED"));
+        assert!(text.contains("VERSION"));
     }
 
     #[test]

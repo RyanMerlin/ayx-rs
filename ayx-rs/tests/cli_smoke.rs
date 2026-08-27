@@ -148,7 +148,14 @@ fn completions_command_emits_script() {
 #[test]
 fn catalog_surface_lists_core_one_commands() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["--output", "json", "catalog", "list", "--format", "full"])
+        .args([
+            "catalog",
+            "list",
+            "--format",
+            "full",
+            "--output",
+            "json-full",
+        ])
         .output()
         .expect("ayx binary should run");
 
@@ -441,7 +448,7 @@ fn discover_help_renders() {
 #[test]
 fn discover_root_lists_top_level_commands() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["--output", "json", "discover"])
+        .args(["discover", "--output", "json-full"])
         .output()
         .expect("ayx binary should run");
 
@@ -462,8 +469,9 @@ fn discover_root_lists_top_level_commands() {
 fn output_json_works_when_flag_is_trailing_for_discover() {
     assert_json_output_works_before_and_after(&["discover"], |json| {
         assert_eq!(json["ok"], serde_json::json!(true));
-        assert_eq!(json["data"]["schema_version"], serde_json::json!(1));
-        assert_eq!(json["data"]["binary"], serde_json::json!("ayx"));
+        assert_eq!(json["schema_version"], serde_json::json!("ayx.output.v1"));
+        assert_eq!(json["command"], serde_json::json!("discover"));
+        assert_eq!(json["data"]["kind"], serde_json::json!("raw"));
     });
 }
 
@@ -471,9 +479,9 @@ fn output_json_works_when_flag_is_trailing_for_discover() {
 fn output_json_works_when_flag_is_trailing_for_catalog_list() {
     assert_json_output_works_before_and_after(&["catalog", "list", "--format", "full"], |json| {
         assert_eq!(json["ok"], serde_json::json!(true));
-        let commands = json["data"]["commands"].as_array().expect("commands array");
-        assert!(!commands.is_empty());
-        assert!(commands.iter().any(|item| item["name"] == "discover"));
+        assert_eq!(json["schema_version"], serde_json::json!("ayx.output.v1"));
+        assert_eq!(json["command"], serde_json::json!("catalog"));
+        assert_eq!(json["data"]["kind"], serde_json::json!("raw"));
     });
 }
 
@@ -481,32 +489,34 @@ fn output_json_works_when_flag_is_trailing_for_catalog_list() {
 fn output_json_works_when_flag_is_trailing_for_actions_list() {
     assert_json_output_works_before_and_after(&["actions", "list"], |json| {
         assert_eq!(json["ok"], serde_json::json!(true));
-        let actions = json["data"]["actions"].as_array().expect("actions array");
+        let actions = json["data"]["items"].as_array().expect("actions array");
         assert!(!actions.is_empty());
     });
 }
 
 #[test]
-fn actions_export_json_is_parseable_and_contains_raw_yaml() {
-    assert_json_output_works_before_and_after(&["actions", "export", "mongo.doctor"], |json| {
-        assert_eq!(json["ok"], serde_json::json!(true));
-        assert!(json["data"]["yaml"].as_str().unwrap().contains("id:"));
-        assert!(
-            json["data"]["save_hint"]
-                .as_str()
-                .unwrap()
-                .contains("jq -r '.data.yaml'")
-        );
-    });
+fn actions_export_json_full_is_parseable_and_contains_raw_yaml() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["actions", "export", "mongo.doctor", "--output", "json-full"])
+        .output()
+        .expect("ayx binary should run");
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).expect("valid full json");
+    assert_eq!(json["ok"], serde_json::json!(true));
+    assert!(json["data"]["yaml"].as_str().unwrap().contains("id:"));
+    assert!(
+        json["data"]["save_hint"]
+            .as_str()
+            .unwrap()
+            .contains("jq -r '.data.yaml'")
+    );
 }
 
 #[test]
 fn output_json_works_when_flag_is_trailing_for_workflows_list() {
     assert_json_output_works_before_and_after(&["actions", "workflows", "list"], |json| {
         assert_eq!(json["ok"], serde_json::json!(true));
-        let workflows = json["data"]["workflows"]
-            .as_array()
-            .expect("workflows array");
+        let workflows = json["data"]["items"].as_array().expect("workflows array");
         assert!(!workflows.is_empty());
     });
 }
@@ -638,7 +648,14 @@ fn ui_help_is_absent_without_feature() {
 #[test]
 fn catalog_list_tag_smoke() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["--output", "json", "catalog", "list", "--tag", "designer"])
+        .args([
+            "catalog",
+            "list",
+            "--tag",
+            "designer",
+            "--output",
+            "json-full",
+        ])
         .output()
         .expect("ayx binary should run");
 
@@ -663,11 +680,11 @@ fn catalog_list_tag_smoke() {
 fn catalog_describe_capability_smoke() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([
-            "--output",
-            "json",
             "catalog",
             "describe",
             "designer.workflow.context",
+            "--output",
+            "json-full",
         ])
         .output()
         .expect("ayx binary should run");
@@ -695,13 +712,13 @@ fn catalog_run_smoke() {
     let payload = serde_json::json!({ "workflow_path": input.to_string_lossy() }).to_string();
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([
-            "--output",
-            "json",
             "catalog",
             "run",
             "designer.workflow.context",
             "--json",
             &payload,
+            "--output",
+            "json-full",
         ])
         .output()
         .expect("ayx binary should run");
@@ -910,7 +927,13 @@ fn coverage_from_spec_file_reports_missing() {
     );
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([
-            "--output", "json", "one", "api", "coverage", "--spec", fixture,
+            "one",
+            "api",
+            "coverage",
+            "--spec",
+            fixture,
+            "--output",
+            "json-full",
         ])
         .output()
         .expect("ayx binary should run");

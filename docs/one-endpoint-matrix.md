@@ -42,36 +42,37 @@ command for this purpose.
 ayx one login --profile <profile>
 
 # Spot-check a representative command per surface (mirrors the live sweep this doc was built from)
-ayx --output json one workspace current
-ayx --output json one workspace list
-ayx --output json one person current
-ayx --output json one person list
-ayx --output json one token
-ayx --output json one doctor discover
-ayx --output json one doctor plans
-ayx --output json one doctor scheduling
-ayx --output json one plans list
-ayx --output json one plans count
-ayx --output json one flows list
-ayx --output json one flows folders list
-ayx --output json one datasets list
-ayx --output json one datasets wrangled list
-ayx --output json one connections list
-ayx --output json one connections detail <connection_id>
-ayx --output json one workflows list
-ayx --output json one workflows count
-ayx --output json one workflows tools
-ayx --output json one job-groups list
-ayx --output json one job-groups detail <job_group_id>
-ayx --output json one output-objects list
-ayx --output json one write-settings list
-ayx --output json one scheduling list
-ayx --output json one api open-api-spec
-ayx --output json one api coverage
+ayx one workspace current --output json
+ayx one workspace list --output json
+ayx one person current --output json
+ayx one person list --output json
+ayx one token --output json
+ayx one doctor discover --output json
+ayx one doctor plans --output json
+ayx one doctor scheduling --output json
+ayx one plans list --output json
+ayx one plans count --output json
+ayx one flows list --output json
+ayx one flows folders list --output json
+ayx one datasets list --output json
+ayx one datasets wrangled list --output json
+ayx one connections list --output json
+ayx one connections detail <connection_id> --output json
+ayx one workflows list --output json
+ayx one workflows count --output json
+ayx one workflows tools --output json
+ayx one job-groups list --output json
+ayx one job-groups detail <job_group_id> --output json
+ayx one output-objects list --output json
+ayx one write-settings list --output json
+ayx one scheduling list --output json
+ayx one api open-api-spec --output json
+ayx one api coverage --output json
 ```
 
 **Reading list-command output**: `ok: true` alone does not prove the underlying route returned
-`200`. Check `data.page_envelopes[].status_code` (or, for the single-shot `detail`/`status`/`count`
+`200`. Those raw transport fields are available with `--output json-full`: check
+`data.page_envelopes[].status_code` (or, for the single-shot `detail`/`status`/`count`
 shapes, `data.status_code`) — see Methodology below for why.
 
 To regenerate the whole table mechanically instead of hand-verifying one row at a time, dump the

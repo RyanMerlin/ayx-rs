@@ -57,10 +57,17 @@ Legacy YAML import remains supported through:
 
 - `--output text`
 - `--output json`
+- `--output json-full`
 - `--output yaml`
 - `--output table`
 
-Structured responses use a consistent envelope model. The top-level contract is:
+`json` is the versioned compact presentation contract (`schema_version:
+"ayx.output.v1"`) and is capped at 20 projected list rows unless overridden
+with `--output-limit`; use `0` for no compact-list cap. `json-full` and YAML
+serialize the full, recursively redacted envelope. Raw-field scripts must use
+`json-full`.
+
+The full envelope contract is:
 
 - `ok`
 - `message`
@@ -69,8 +76,8 @@ Structured responses use a consistent envelope model. The top-level contract is:
 - `error_code` on failures (`snake_case`: `config_missing`, `auth_failed`, `permission_denied`, `not_found`, `validation`, `conflict`, `rate_limited`, `network`, `upstream`, `workspace_mismatch`, `internal`)
 
 Successful envelopes are written to stdout. Error envelopes are written to
-stderr. JSON is the primary automation target; `yaml` and `table` are also
-supported output formats when an operator wants an alternate presentation.
+stderr. Examples should place `--output` after the complete command path;
+leading placement remains supported for compatibility.
 
 Commands may also emit artifact paths, warnings, or audit metadata inside the
 envelope payload.

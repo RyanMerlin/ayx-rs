@@ -335,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-core"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "apple-native-keyring-store",
  "chrono",
@@ -355,7 +355,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-one"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -365,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-one-api"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-registry"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-rs"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-server"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -456,7 +456,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-server-api"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -469,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-workflow"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "lzf",
@@ -4834,7 +4834,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "chrono",

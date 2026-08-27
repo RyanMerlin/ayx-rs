@@ -37,6 +37,7 @@ use self_update::backends::github::Update as GitHubUpdate;
 mod capability;
 mod cmd;
 mod onboard;
+mod output;
 mod render;
 pub(crate) mod secret;
 mod tui;
@@ -237,14 +238,18 @@ fn auth_token_health(access_token: Option<&str>) -> &'static str {
     styles = AYX_STYLES
 )]
 struct Cli {
-    /// Output format for the result envelope.
+    /// Output format for the result. Put this after the complete command path,
+    /// for example: `ayx one flows list --output json`.
     #[arg(
         long,
-        default_value = "text",
-        value_parser = ["text", "json", "yaml", "table"],
+        default_value_t = output::OutputMode::Text,
         global = true
     )]
-    output: String,
+    output: output::OutputMode,
+    /// Maximum list rows in text and compact JSON output; 0 shows every
+    /// projected row. Does not affect `--output json-full`.
+    #[arg(long, default_value_t = output::DEFAULT_OUTPUT_LIMIT, global = true)]
+    output_limit: usize,
     /// Select a named environment from environments.yaml for this run.
     #[arg(long = "env", alias = "environment", global = true)]
     environment_flag: Option<String>,
@@ -287,6 +292,47 @@ impl Cli {
         self.environment_flag
             .as_deref()
             .or(self.environment_tail.as_deref())
+    }
+}
+
+/// Family-owned display metadata. The central output module owns rendering;
+/// this mapping makes the command family's intended presentation explicit.
+fn output_descriptor(command: &Command) -> output::OutputDescriptor {
+    use output::{OutputDescriptor, ViewKind};
+    match command {
+        Command::Discover { .. } => OutputDescriptor::new("discover", ViewKind::Raw)
+            .with_fields(&["schema_version", "binary"]),
+        Command::Catalog { .. } => OutputDescriptor::new("catalog", ViewKind::Raw),
+        Command::Doctor { .. } => OutputDescriptor::new("doctor", ViewKind::Diagnostic),
+        Command::Telemetry { .. } => OutputDescriptor::new("telemetry", ViewKind::List),
+        Command::Actions { command } => match command {
+            ActionsCommand::List { .. } | ActionsCommand::Resolve { .. } => {
+                OutputDescriptor::new("actions", ViewKind::List)
+            }
+            ActionsCommand::Workflows {
+                command: WorkflowsCommand::List { .. },
+            } => OutputDescriptor::new("actions.workflows", ViewKind::List),
+            ActionsCommand::Export { .. } => {
+                OutputDescriptor::new("actions.export", ViewKind::Export)
+            }
+            _ => OutputDescriptor::new("actions", ViewKind::Result),
+        },
+        Command::Completions { .. } => OutputDescriptor::new("completions", ViewKind::Export)
+            .with_fields(&["shell", "bytes", "usage_hint"]),
+        Command::Tui => OutputDescriptor::new("tui", ViewKind::Raw),
+        Command::One { command } => cmd::one::output_descriptor(command),
+        Command::Server { .. } => OutputDescriptor::new("server", ViewKind::Raw),
+        Command::Mongo { .. } => OutputDescriptor::new("mongo", ViewKind::Raw),
+        Command::Sqlserver { .. } => OutputDescriptor::new("sqlserver", ViewKind::Raw),
+        Command::Designer { .. } => OutputDescriptor::new("designer", ViewKind::Raw),
+        Command::Tools { .. } => OutputDescriptor::new("tools", ViewKind::Result),
+        Command::Profile { .. } => OutputDescriptor::new("profile", ViewKind::Result),
+        Command::Secret { .. } => OutputDescriptor::new("secret", ViewKind::Result),
+        Command::License { .. } => OutputDescriptor::new("license", ViewKind::Raw),
+        Command::Onboard { .. } => OutputDescriptor::new("onboard", ViewKind::Result),
+        Command::Audit { .. } => OutputDescriptor::new("audit", ViewKind::Result),
+        Command::Whoami { .. } => OutputDescriptor::new("whoami", ViewKind::Detail),
+        Command::Update { .. } => OutputDescriptor::new("update", ViewKind::Result),
     }
 }
 
@@ -798,7 +844,7 @@ mongo:
 
     #[test]
     fn accepts_known_output_formats() {
-        for fmt in ["text", "json", "yaml", "table"] {
+        for fmt in ["text", "json", "json-full", "yaml", "table"] {
             let parsed = Cli::try_parse_from(["ayx", "--output", fmt, "profile", "current"]);
             assert!(parsed.is_ok(), "clap should accept --output {fmt}");
         }
@@ -4065,7 +4111,7 @@ pub(crate) fn parse_key_value_params(items: &[String]) -> Result<HashMap<String,
     Ok(map)
 }
 
-fn execute(cli: Cli) -> Result<Envelope> {
+fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
     // Plumb the global gates to BOTH transports. Mutating requests
     // short-circuit to dry-run envelopes unless --apply was passed.
     ayx_one_api::set_one_apply(cli.apply);
@@ -4191,9 +4237,11 @@ fn execute(cli: Cli) -> Result<Envelope> {
             let mut out: Vec<u8> = Vec::new();
             clap_complete::generate(shell, &mut cmd, &bin, &mut out);
             let script = String::from_utf8(out)?;
-            // Print to stdout so users can `>` redirect to a completion file;
-            // also return a small envelope for --output json.
-            print!("{}", script);
+            // Completion scripts retain their direct text-mode output for
+            // shell redirection. Structured modes return only an envelope.
+            if output_mode == output::OutputMode::Text {
+                print!("{}", script);
+            }
             Envelope::ok_with_data(
                 format!("{} completions generated", shell),
                 json!({
@@ -5582,16 +5630,18 @@ fn main() -> Result<()> {
     // Clap owns --help/-h rendering. Previously a hand-rolled print_help()
     // intercepted bare --help; that drifted from the actual command tree.
     let cli = Cli::parse();
-    let output = cli.output.clone();
+    let output = cli.output;
+    let output_limit = cli.output_limit;
+    let descriptor = output_descriptor(&cli.command);
 
     // Dispatch runs on the main thread. On Windows, build.rs reserves a 16 MiB
     // main-thread stack (/STACK) so the deep clap parse can't overflow the 1 MiB
     // MSVC default — see ayx-rs/build.rs and issue #59. No worker thread needed.
-    let result = execute(cli);
+    let result = execute(cli, output);
 
     match result {
         Ok(envelope) => {
-            let rendered = format_envelope(&envelope, &output)?;
+            let rendered = format_envelope(&envelope, output, descriptor, output_limit)?;
             if envelope.ok {
                 print!("{rendered}");
                 println!();
@@ -5634,7 +5684,8 @@ fn main() -> Result<()> {
             // non-JSON `Error: ...` line and corrupt the stderr envelope.
             eprint!(
                 "{}",
-                format_envelope(&err_env, &output).unwrap_or_else(|_| err_env.message.clone())
+                format_envelope(&err_env, output, descriptor, output_limit)
+                    .unwrap_or_else(|_| err_env.message.clone())
             );
             eprintln!();
             let _ = io::stdout().lock().flush();
@@ -5755,24 +5806,14 @@ where
     }
 }
 
-/// Render an envelope in the requested output format. `output` is constrained
-/// by clap (value_parser) to text/json/yaml/table, so the final arm handles
-/// text — the default and the explicit `text`.
-fn format_envelope(envelope: &Envelope, output: &str) -> Result<String> {
-    match output {
-        "json" => Ok(serde_json::to_string_pretty(envelope)?),
-        "yaml" => Ok(serde_yaml::to_string(envelope)
-            .map_err(|e| anyhow!("failed to serialize envelope to yaml: {e}"))?),
-        "table" => {
-            // Table mode is text-mode rendering but only for list-shaped data.
-            // For non-list data we still render text (graceful) rather than
-            // erroring — the operator may have piped through `ayx ... --output
-            // table` in a script and we don't want to break their pipeline.
-            Ok(render::render_text(envelope))
-        }
-        // Default and explicit text.
-        _ => Ok(render::render_text(envelope)),
-    }
+/// Render an envelope through the central output contract.
+fn format_envelope(
+    envelope: &Envelope,
+    output: output::OutputMode,
+    descriptor: output::OutputDescriptor,
+    output_limit: usize,
+) -> Result<String> {
+    output::render_envelope(envelope, output, descriptor, output_limit)
 }
 
 /// Map an `ErrorCode` to a one-line operator hint. `None` means no hint

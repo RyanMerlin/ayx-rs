@@ -200,7 +200,7 @@ pub fn execute_actions(apply: bool, command: ActionsCommand) -> Result<Envelope>
                     "bytes": yaml.len(),
                     "yaml": yaml,
                     "save_hint": format!(
-                        "For raw YAML, run `ayx --output json actions export {id} | jq -r '.data.yaml' > ${{AYX_CONFIG_HOME}}/registry/{}.action.yaml` to fork the bundled stdlib version.",
+                        "For raw YAML, run `ayx actions export {id} --output json | jq -r '.data.yaml' > ${{AYX_CONFIG_HOME}}/registry/{}.action.yaml` to fork the bundled stdlib version.",
                         id.replace('.', "-")
                     ),
                 }),

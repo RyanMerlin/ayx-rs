@@ -16,6 +16,8 @@
 //!     `/v4` gateway's JSON `RouteNotFoundException`. The transport classifies that as
 //!     `response_kind: "html"` and attaches a hint.
 
+use std::collections::HashMap;
+
 use anyhow::{Result, bail};
 use ayx_core::envelope::{Envelope, ErrorCode};
 use ayx_one_api::{
@@ -81,6 +83,23 @@ fn fetch_all_assets(config: &ayx_core::profile::Config) -> Result<Envelope> {
         "workflow",
         "assets",
         ASSETS_LIST_ENDPOINT,
+        &[],
+        &params,
+    )
+}
+
+/// Fetch enough of the people directory to resolve workflow owner/editor ids
+/// into names. The IDs remain in the output as stable keys when a directory
+/// entry is unavailable or omitted by the API.
+fn fetch_all_people(config: &ayx_core::profile::Config) -> Result<Envelope> {
+    let params = OneListParams::new()
+        .with_limit(Some(200))
+        .with_all(true, Some(50));
+    one_api_list_request(
+        config,
+        "workflow",
+        "governance-people",
+        "/v4/people",
         &[],
         &params,
     )
@@ -175,6 +194,90 @@ fn add_workflow_completeness(envelope: &mut Envelope, response: &Value) -> bool 
     let complete = fetched >= total;
     envelope.data["complete"] = Value::Bool(complete);
     complete
+}
+
+/// Add the governance metadata carried by the richer workflow-assets service to
+/// the lightweight `/v4/workflows` list. The two APIs identify the same
+/// workflow by ULID, but the gateway list exposes build internals such as a
+/// checksum while the asset view exposes the information an operator needs to
+/// govern the workflow: owner id, last editor id, last update, and version.
+///
+/// The primary list remains usable if the enrichment request fails; the caller
+/// still receives the successful gateway listing rather than an unrelated
+/// read-only metadata failure.
+fn enrich_workflows_with_governance(
+    list: &mut Envelope,
+    assets: &Envelope,
+    people: Option<&Envelope>,
+) {
+    let Some(workflows) = list.data.get_mut("items").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let Some(asset_items) = assets.data.get("items").and_then(Value::as_array) else {
+        return;
+    };
+
+    let people_by_id = people
+        .filter(|people| people.ok)
+        .map(people_by_id)
+        .unwrap_or_default();
+
+    for workflow in workflows {
+        let Some(id) = workflow.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(asset) = asset_items
+            .iter()
+            .find(|asset| asset.get("id").and_then(Value::as_str) == Some(id))
+        else {
+            continue;
+        };
+        let Some(workflow) = workflow.as_object_mut() else {
+            continue;
+        };
+        for (target, source) in [
+            ("owner_id", "createdBy"),
+            ("last_updated_by_id", "updatedBy"),
+            ("last_updated_at", "updatedAt"),
+            ("workflow_version", "version"),
+        ] {
+            if let Some(value) = asset.get(source) {
+                workflow.insert(target.to_string(), value.clone());
+            }
+        }
+        if !workflow.contains_key("workflow_version")
+            && let Some(value) = asset
+                .get("asset_active")
+                .and_then(|active| active.get("versionNum"))
+        {
+            workflow.insert("workflow_version".to_string(), value.clone());
+        }
+        if let Some(owner_id) = workflow.get("owner_id").and_then(person_id_as_u64)
+            && let Some(owner) = people_by_id.get(&owner_id)
+        {
+            workflow.insert("owner".to_string(), Value::String(owner.clone()));
+        }
+    }
+    list.data["governance_source"] =
+        Value::String("joined from GET /svc-workflow/api/v1/assets by workflow id".to_string());
+}
+
+fn people_by_id(envelope: &Envelope) -> HashMap<u64, String> {
+    envelope
+        .data
+        .get("items")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|person| {
+            let id = person.get("id").and_then(person_id_as_u64)?;
+            let name = ["name", "displayName", "email"]
+                .into_iter()
+                .find_map(|key| person.get(key).and_then(Value::as_str))?
+                .to_string();
+            Some((id, name))
+        })
+        .collect()
 }
 
 /// Resolve a single workflow's detail from an already-fetched assets-list
@@ -411,20 +514,35 @@ pub(crate) fn execute(
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             if all {
-                return fetch_all_workflows(&config, limit, page_token);
+                let mut workflows = fetch_all_workflows(&config, limit, page_token)?;
+                if let Ok(assets) = fetch_all_assets(&config)
+                    && assets.ok
+                {
+                    let people = fetch_all_people(&config).ok();
+                    enrich_workflows_with_governance(&mut workflows, &assets, people.as_ref());
+                }
+                return Ok(workflows);
             }
             let params = OneListParams::new()
                 .with_limit(limit)
                 .with_page_token(page_token)
                 .with_all(all, max_pages);
-            one_api_list_request(
+            let mut workflows = one_api_list_request(
                 &config,
                 "workflow",
                 "list",
                 WORKFLOWS_LIST_ENDPOINT,
                 &[],
                 &params,
-            )?
+            )?;
+            if workflows.ok
+                && let Ok(assets) = fetch_all_assets(&config)
+                && assets.ok
+            {
+                let people = fetch_all_people(&config).ok();
+                enrich_workflows_with_governance(&mut workflows, &assets, people.as_ref());
+            }
+            workflows
         }
         OneWorkflowsCommand::Assets {
             profile,
@@ -732,8 +850,8 @@ fn resolve_workflow_version(config: &ayx_core::profile::Config, id: &str) -> Res
 #[cfg(test)]
 mod tests {
     use super::{
-        add_workflow_completeness, find_workflow_asset, resolve_workflow_detail,
-        synthesize_workflow_count,
+        add_workflow_completeness, enrich_workflows_with_governance, find_workflow_asset,
+        resolve_workflow_detail, synthesize_workflow_count,
     };
     use ayx_core::envelope::{Envelope, ErrorCode};
     use serde_json::json;
@@ -857,6 +975,50 @@ mod tests {
         assert!(add_workflow_completeness(&mut envelope, &response));
         assert_eq!(envelope.data["complete"], json!(true));
         assert_eq!(envelope.data["items"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn workflow_list_governance_uses_asset_metadata_not_build_internals() {
+        let mut list = Envelope::ok_with_data(
+            "workflow list ok",
+            json!({
+                "items": [{
+                    "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+                    "name": "governed-workflow",
+                    "contentChecksum": "not-for-display",
+                    "compilerVersion": "8.7.0"
+                }]
+            }),
+        );
+        let assets = Envelope::ok_with_data(
+            "workflow assets ok",
+            json!({
+                "items": [{
+                    "id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+                    "createdBy": 42,
+                    "updatedBy": 84,
+                    "updatedAt": "2026-08-27T22:00:00Z",
+                    "version": 7
+                }]
+            }),
+        );
+
+        let people = Envelope::ok_with_data(
+            "people ok",
+            json!({"items": [{"id": 42, "name": "Avery Owner"}]}),
+        );
+        enrich_workflows_with_governance(&mut list, &assets, Some(&people));
+
+        let item = &list.data["items"][0];
+        assert_eq!(item["owner"], "Avery Owner");
+        assert_eq!(item["owner_id"], 42);
+        assert_eq!(item["last_updated_by_id"], 84);
+        assert_eq!(item["last_updated_at"], "2026-08-27T22:00:00Z");
+        assert_eq!(item["workflow_version"], 7);
+        assert_eq!(
+            list.data["governance_source"],
+            "joined from GET /svc-workflow/api/v1/assets by workflow id"
+        );
     }
 }
 

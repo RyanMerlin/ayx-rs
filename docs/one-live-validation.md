@@ -5,6 +5,11 @@ release-testing procedure.
 
 This document tracks the live validation strategy for the wired Alteryx One surface.
 
+> **Output-contract note:** the historical command snippets below inspect raw
+> `.data.*` fields with `jq`. Run those snippets as `<full command> --output
+> json-full` (trailing placement), not as `ayx --output json <command>`.
+> `--output json` now returns the compact `ayx.output.v1` presentation envelope.
+
 ## Coverage Model
 
 - `validated_live`: a real request returned from the One API host and the response was asserted.
@@ -194,47 +199,47 @@ cd /path/to/ayx-rs
 set -a && source .env && set +a
 
 # resolve ids the sweep needs
-ayx --output json one connections list | jq -r '.data.items[0].id'
-ayx --output json one job-groups list  | jq -r '.data.items[0].id'
-ayx --output json one workflows list   | jq -r '.data.items[0].id'   # reused in Phase 4/5b
+ayx one connections list --output json | jq -r '.data.items[0].id'
+ayx one job-groups list --output json  | jq -r '.data.items[0].id'
+ayx one workflows list --output json   | jq -r '.data.items[0].id'   # reused in Phase 4/5b
 ```
 
 Run the matrix's read-only command block:
 
 ```bash
-ayx --output json one workspace current
-ayx --output json one workspace list
-ayx --output json one person current
-ayx --output json one person list
-ayx --output json one token
-ayx --output json one doctor discover
-ayx --output json one doctor plans
-ayx --output json one doctor scheduling
-ayx --output json one plans list
-ayx --output json one plans count
-ayx --output json one flows list
-ayx --output json one flows folders list
-ayx --output json one datasets list
-ayx --output json one datasets wrangled list
-ayx --output json one connections list
-ayx --output json one connections detail <connection_id>
-ayx --output json one workflows list
-ayx --output json one workflows count
-ayx --output json one workflows tools
-ayx --output json one job-groups list
-ayx --output json one job-groups detail <job_group_id>
-ayx --output json one output-objects list
-ayx --output json one write-settings list
-ayx --output json one scheduling list
-ayx --output json one api open-api-spec
-ayx --output json one api coverage
+ayx one workspace current --output json
+ayx one workspace list --output json
+ayx one person current --output json
+ayx one person list --output json
+ayx one token --output json
+ayx one doctor discover --output json
+ayx one doctor plans --output json
+ayx one doctor scheduling --output json
+ayx one plans list --output json
+ayx one plans count --output json
+ayx one flows list --output json
+ayx one flows folders list --output json
+ayx one datasets list --output json
+ayx one datasets wrangled list --output json
+ayx one connections list --output json
+ayx one connections detail <connection_id> --output json
+ayx one workflows list --output json
+ayx one workflows count --output json
+ayx one workflows tools --output json
+ayx one job-groups list --output json
+ayx one job-groups detail <job_group_id> --output json
+ayx one output-objects list --output json
+ayx one write-settings list --output json
+ayx one scheduling list --output json
+ayx one api open-api-spec --output json
+ayx one api coverage --output json
 ```
 
 **Critical trap:** `"ok": true` on a `list` command does **not** prove a 200. Check status
 explicitly:
 
 ```bash
-ayx --output json one <cmd> | jq -c '{ok, code: (.data.page_envelopes[0].status_code // .data.status_code), n: (.data.items | length?)}'
+ayx one <cmd> --output json | jq -c '{ok, code: (.data.page_envelopes[0].status_code // .data.status_code), n: (.data.items | length?)}'
 ```
 
 For `plans`/`scheduling`, cross-check against `one doctor <surface>` rather than
@@ -282,7 +287,7 @@ unit-test-validated only.
    awk '!/^[[:space:]]*(export[[:space:]]+)?AYX_ONE_BASE_URL[[:space:]]*=/' .env > "$probe_dir/.env"
    ( cd "$probe_dir" && env -u AYX_ONE_BASE_URL -u AYX_ONE_API_BASE_URL \
        AYX_ONE_API_BASE_URL=https://ayx-rc-check.invalid \
-       ayx --output json one workflows list ); echo "exit=$?"
+       ayx one workflows list --output json ); echo "exit=$?"
    rm -rf "$probe_dir"
    ```
 
@@ -298,7 +303,7 @@ unit-test-validated only.
 2. **`one api coverage` breaking shape + false-green fix**:
 
    ```bash
-   ayx --output json one api coverage | jq '{coverage_pct, inventory_total, spec_operations, outside_spec_namespace_len: (.data.outside_spec_namespace | length?), stale_commands_is_array: (.data.stale[0].commands | type)}'
+   ayx one api coverage --output json | jq '{coverage_pct, inventory_total, spec_operations, outside_spec_namespace_len: (.data.outside_spec_namespace | length?), stale_commands_is_array: (.data.stale[0].commands | type)}'
    ```
 
    PASS: `stale[].commands` is an array, `coverage_pct` is `null` if `spec_operations` is still 0
@@ -307,7 +312,7 @@ unit-test-validated only.
 3. **`one connections permissions` route fix**:
 
    ```bash
-   ayx --output json one connections permissions list <CONNECTION_ID> | jq -c '{ok, code: (.data.page_envelopes[0].status_code // .data.status_code)}'
+   ayx one connections permissions list <CONNECTION_ID> --output json | jq -c '{ok, code: (.data.page_envelopes[0].status_code // .data.status_code)}'
    ```
 
    PASS: not a `RouteNotFoundException`.
@@ -316,7 +321,7 @@ unit-test-validated only.
    before any network call):
 
    ```bash
-   ayx --output json one output-objects wrangle-to-python 999999 | jq '.data | {dry_run, mutating, would_send}'
+   ayx one output-objects wrangle-to-python 999999 --output json | jq '.data | {dry_run, mutating, would_send}'
    ```
 
    PASS: dry-run envelope.
@@ -333,10 +338,10 @@ for c in list count detail dependencies assets engines tools copy share; do
 done
 
 ayx one workflows list
-ayx --output table one workflows list
-diff <(ayx one workflows list) <(ayx --output table one workflows list) && echo "table == text"
-ayx --output json one workflows list | head -40
-ayx --output yaml one workflows list | head -40
+ayx one workflows list --output table
+diff <(ayx one workflows list) <(ayx one workflows list --output table) && echo "table == text"
+ayx one workflows list --output json | head -40
+ayx one workflows list --output yaml | head -40
 
 ayx one workflows list --limit 5
 ayx one workflows list --all | tail -5
@@ -350,8 +355,8 @@ ayx one workflows assets --limit 5
 ayx one workflows tools | head -30
 
 # dry-run mutations — safe, no --apply, no network
-ayx --output json one workflows copy <ULID> --name "rc-check-copy" | jq '.data'
-ayx --output json one workflows share <ULID> --to-person <YOUR_EMAIL> | jq '.data'
+ayx one workflows copy <ULID> --name "rc-check-copy" --output json | jq '.data'
+ayx one workflows share <ULID> --to-person <YOUR_EMAIL> --output json | jq '.data'
 
 # error UX
 ayx one workflows detail 01AAAAAAAAAAAAAAAAAAAAAAAA   # well-formed ULID, no such asset
@@ -368,14 +373,14 @@ malformed-id behavior. Deliver a short papercut list tagged **blocks-demo** / **
 ### 5a. Reversible `one flows` cycle — closes the 410 regression check
 
 ```bash
-ayx --output json one flows list | jq '.data.items | length'      # baseline, expect 0
-ayx --output json one flows create --body <payload.json> | jq '.data.would_send'   # dry-run first
-ayx --output json one flows create --body <payload.json> --apply   # TTY confirm fires — do not pass --yes
-ayx --output json one flows detail <NEW_ID>
-ayx --output json one flows update <NEW_ID> --body <patch.json> --apply
-ayx --output json one flows delete <NEW_ID> --apply
-ayx --output json one flows detail <NEW_ID> | jq '{ok, error_code: .error.code}'   # PASS: not_found
-ayx --output json one flows list | jq '.data.items | length'      # must be back to 0 — hard requirement
+ayx one flows list --output json | jq '.data.items | length'      # baseline, expect 0
+ayx one flows create --body <payload.json> --output json | jq '.data.would_send'   # dry-run first
+ayx one flows create --body <payload.json> --apply --output json   # TTY confirm fires — do not pass --yes
+ayx one flows detail <NEW_ID> --output json
+ayx one flows update <NEW_ID> --body <patch.json> --apply --output json
+ayx one flows delete <NEW_ID> --apply --output json
+ayx one flows detail <NEW_ID> --output json | jq '{ok, error_code: .error.code}'   # PASS: not_found
+ayx one flows list --output json | jq '.data.items | length'      # must be back to 0 — hard requirement
 ```
 
 If the final count isn't 0, the pass isn't complete — record the residue, don't leave it silent.
@@ -392,7 +397,7 @@ This is demo prep, not a test. Before running it:
 - Get one explicit confirmation immediately before running, restating the actual cleanup story.
 
 ```bash
-ayx --output json one workflows copy <CHOSEN_ULID> --name "<CHOSEN_NAME>" --apply
+ayx one workflows copy <CHOSEN_ULID> --name "<CHOSEN_NAME>" --apply --output json
 ```
 
 (`--send-email` is intentionally omitted from `share` in this pass — no real share, only the copy,
@@ -435,23 +440,23 @@ $groupUpdate = 'ayx-rs/tests/fixtures/one-group-canary-update.json'
 $plan = 'ayx-rs/tests/fixtures/one-plan-canary.json'
 $planUpdate = 'ayx-rs/tests/fixtures/one-plan-canary-update.json'
 
-ayx --output json one workspace current                         # capture <WORKSPACE_ID>
-ayx --output json one workspace groups <WORKSPACE_ID>
-ayx --output json one plans list
-ayx --output json one workspace create-group <WORKSPACE_ID> --body $group # dry-run
-ayx --output json one plans create --body $plan                      # dry-run
+ayx one workspace current --output json                         # capture <WORKSPACE_ID>
+ayx one workspace groups <WORKSPACE_ID> --output json
+ayx one plans list --output json
+ayx one workspace create-group <WORKSPACE_ID> --body $group --output json # dry-run
+ayx one plans create --body $plan --output json                      # dry-run
 # Apply create, capture each returned id, then update and verify each object:
-ayx --output json one workspace create-group <WORKSPACE_ID> --body $group --apply --yes
-ayx --output json one workspace update-group <WORKSPACE_ID> <GROUP_ID> --body $groupUpdate --apply --yes
-ayx --output json one workspace groups <WORKSPACE_ID>                # assert updated group
-ayx --output json one plans create --body $plan --apply --yes
-ayx --output json one plans update <PLAN_ID> --body $planUpdate --apply --yes
-ayx --output json one plans detail <PLAN_ID>
+   ayx one workspace create-group <WORKSPACE_ID> --body $group --apply --yes --output json
+   ayx one workspace update-group <WORKSPACE_ID> <GROUP_ID> --body $groupUpdate --apply --yes --output json
+   ayx one workspace groups <WORKSPACE_ID> --output json                # assert updated group
+   ayx one plans create --body $plan --apply --yes --output json
+   ayx one plans update <PLAN_ID> --body $planUpdate --apply --yes --output json
+   ayx one plans detail <PLAN_ID> --output json
 # Always delete in a finally block, verify not_found/detail behavior, and re-list:
-ayx --output json one plans delete <PLAN_ID> --apply --yes
-ayx --output json one workspace delete-group <WORKSPACE_ID> <GROUP_ID> --apply --yes
-ayx --output json one plans list
-ayx --output json one workspace groups <WORKSPACE_ID>
+   ayx one plans delete <PLAN_ID> --apply --yes --output json
+   ayx one workspace delete-group <WORKSPACE_ID> <GROUP_ID> --apply --yes --output json
+   ayx one plans list --output json
+   ayx one workspace groups <WORKSPACE_ID> --output json
 ```
 
 The gate passes only when create, update, detail, and delete all succeed and

@@ -1,0 +1,4 @@
+interface:
+  display_name: "AYX CLI Agent"
+  short_description: "Use AYX CLI discovery and safe One operations"
+  default_prompt: "Use the AYX CLI discovery-first workflow for this task."
