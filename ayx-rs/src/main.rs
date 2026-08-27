@@ -806,14 +806,8 @@ mongo:
 
     #[test]
     fn accepts_global_output_after_subcommand() {
-        let parsed = Cli::try_parse_from([
-            "ayx",
-            "one",
-            "workspace",
-            "current",
-            "--output",
-            "json",
-        ]);
+        let parsed =
+            Cli::try_parse_from(["ayx", "one", "workspace", "current", "--output", "json"]);
         assert!(
             parsed.is_ok(),
             "global --output should work after the subcommand"
