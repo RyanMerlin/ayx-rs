@@ -9,6 +9,8 @@ Status: active
 - Public fixtures and generated artifacts must stay sanitized.
 - Release plumbing should continue to point install, update, and publish flows
   at the public GitHub repository.
+- Post-release work from the `v0.17.0` launch is tracked in [Post-v0.17.0
+  follow-ups](post-v0.17.0-follow-ups.md).
 
 ## Next Steps
 

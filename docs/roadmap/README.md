@@ -23,6 +23,7 @@ letting stale notes accumulate.
 ## Active Topics
 
 - [Public release hygiene](public-release-and-doc-hygiene.md)
+- [Post-v0.17.0 follow-ups](post-v0.17.0-follow-ups.md)
 - [Discovery substrate and command surface](discovery-and-catalog.md)
 - [Workspace and environment tooling](workspace-and-registry-tooling.md)
 - [Mongo registry and remediation](mongo-registry-and-remediation.md)
