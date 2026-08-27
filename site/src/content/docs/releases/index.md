@@ -7,19 +7,19 @@ sidebar:
 
 Release notes for each tagged version of `ayx`. For current behavior, use the live docs above; for a specific binary, read the notes for that version.
 
+## v0.17.0
+
+First stable release of the `0.17.0` authentication rollout. The Wizard
+email-OTP flow is the default, secure persistence is the normal path, and
+Legacy remains available only as an explicit rollback lane. See the [release
+notes](/releases/v0.17.0/).
+
 ## v0.17.0-rc.3
 
-The published release candidate for the `0.17.0` authentication rollout.
+Historical release candidate for the `0.17.0` authentication rollout.
 The Wizard email-OTP flow is the default, secure persistence is the normal
 path, and Legacy remains available only as an explicit rollback lane. See the
 [candidate release notes](/releases/v0.17.0-rc.3/).
-
-## v0.17.0-internal.1
-
-Historical internal evaluation build behind the `rc.3` candidate. The Wizard
-email-OTP flow is the default; use `ayx one login --auth-flow legacy` for the
-explicit rollback lane. The candidate now includes Linux, Windows, and macOS
-artifacts; macOS artifacts are currently unsigned and not notarized.
 
 ## v0.16.1
 
