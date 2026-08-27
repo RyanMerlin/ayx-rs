@@ -55,7 +55,7 @@ Manually review:
 
 ## Functional Validation
 
-A live validation pass per [docs/one-live-validation.md](one-live-validation.md) must be green, or have every deviation explicitly recorded, before tagging a release; the v0.16.0 release candidate pass is recorded on 2026-08-20 against a disposable validation workspace.
+A live validation pass per [docs/one-live-validation.md](one-live-validation.md) must be green, or have every deviation explicitly recorded, before tagging a release; the v0.17.0-rc.3 candidate pass is recorded on 2026-08-20 against a disposable validation workspace.
 
 ## GitHub Protections
 

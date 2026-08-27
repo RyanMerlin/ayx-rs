@@ -75,10 +75,9 @@ The current smoke harness lives in `ayx-rs/tests/one_live_smoke.rs` and already:
 - short-circuits cleanly when auth acquisition is unavailable
 - validates the most important read paths across the One surface
 - reports the surface and operation names in the envelope assertions
-- contains 75 generated live tests as of this repo state. The v0.16.0
-  release-candidate validation used a fresh Wizard login and a release-binary
-  read sweep; tests requiring a live token remain explicitly gated by
-  `AYX_ONE_LIVE_SMOKE`.
+- contains 75 generated live tests as of this repo state. The v0.17.0-rc.3
+  validation used a fresh Wizard login and a release-binary read sweep; tests
+  requiring a live token remain explicitly gated by `AYX_ONE_LIVE_SMOKE`.
 
 ## Methodology traps
 
