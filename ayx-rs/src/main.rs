@@ -4572,9 +4572,16 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
             SecretCommand::Migrate { profile } => {
                 let resolution = resolve_runtime_profile(profile.as_deref())?;
                 let output = secret::migrate_profile(Path::new(&resolution.resolved_profile_path))?;
+                let migrated_slots = secret::migrated_slot_names(&output);
                 Envelope::ok_with_data(
                     "secret migration completed",
-                    json!({ "profile": resolution.selected_profile, "migrated_slots": output }),
+                    json!({
+                        "profile": resolution.selected_profile,
+                        "migrated_fields": output,
+                        // Compatibility alias retained for scripts introduced
+                        // with the initial secret lifecycle release.
+                        "migrated_slots": migrated_slots,
+                    }),
                 )
             }
             SecretCommand::EnvTemplate { profile, format } => {

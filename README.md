@@ -142,8 +142,9 @@ Minimum expectations:
 - `observability.api_logging.redact_bodies` stays on by default so secrets are not written to the log
 
 Sensitive values should live in the OS keyring by default, with environment variables remaining first-class for automation.
-`ayx secret status` reports the source and resolution posture of every supported
-secret slot without printing secret values.  For local setup, paste a value into
+`ayx secret status` reports the source and resolution posture of every
+AYX-managed secret, including One login and workspace credentials, without
+printing secret values. For local setup, paste a value into
 `ayx secret set <slot>` (or use `--from-stdin` in a script); AYX stores it in the
 OS keyring and saves only a profile-scoped reference.  Use `ayx secret set <slot>
 --from-env AYX_NAME` for CI, where the platform injects `AYX_NAME` and AYX never
@@ -153,8 +154,9 @@ and `ayx secret env-template` prints a non-secret variable manifest.
 
 Hand-authored plaintext remains compatible, but `ayx secret status`, `ayx secret
 validate`, and `ayx doctor config` warn about it. Run `ayx secret migrate` to move
-supported plaintext fields into keyring-backed refs. Use `.env.example` only as a
-non-secret template for local overrides and automation.
+supported plaintext fields, including One auth credentials, into keyring-backed
+refs. Use `.env.example` only as a non-secret template for local overrides and
+automation.
 Central profile files, workspace files, runtime state, audit artifacts, and
 observability logs are all treated as sensitive local artifacts and are written
 with owner-only permissions on supported platforms.

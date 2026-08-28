@@ -51,21 +51,26 @@ must have separate secrets.
 
 Use named secret slots rather than arbitrary YAML paths:
 
-- `ayx secret status` shows source, presence, and resolution state without
+- `ayx secret status` shows source, presence, and resolution state for every
+  AYX-managed secret, including One login and workspace credentials, without
   returning values or reference names.
 - `ayx secret set <slot>` securely prompts and stores the value in the OS
   keyring. `--from-stdin` is the non-interactive input path; secret values are
   never accepted as command-line arguments.
 - `ayx secret set <slot> --from-env NAME` stores `env:NAME` without reading the
   value. This is the preferred CI configuration; the CI provider injects `NAME`.
-- `ayx secret validate` performs offline configuration and resolution checks,
-  exits non-zero for unresolved/invalid references, and leaves live connectivity
-  to an explicit auth/network command.
+- `ayx secret validate` performs offline configuration and resolution checks
+  across every AYX-managed secret, exits non-zero for unresolved/invalid
+  references, and leaves live connectivity to an explicit auth/network command.
 - `ayx secret unset <slot>` detaches the reference and deletes only an
   AYX-created profile-scoped keyring account proven unreferenced by other
   profiles. Manually shared references are detached but never deleted.
-- `ayx secret migrate` moves supported plaintext values into the secure store.
+- `ayx secret migrate` moves every supported plaintext profile value, including
+  One login and workspace credentials, into the secure store and reports the
+  persisted field paths.
 
 Supported slots are `server.api.client-secret`, `mongo.managed.password`,
 `sql.controller.password`, `sql.server-ui.password`, `one.client-secret`, and
-`one.service-principal-client-secret`.
+`one.service-principal-client-secret`. Login-managed and workspace credentials
+are visible to `status` and `validate`, and are migrated in bulk, but are not
+accepted by `secret set`; update them through the appropriate One auth flow.
