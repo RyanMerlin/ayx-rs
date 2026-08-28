@@ -924,16 +924,14 @@ pub fn inline_secret_fields(config: &crate::profile::Config) -> Vec<String> {
     if let Some(one) = config.alteryx_one.as_ref() {
         for slot in OneSecretSlot::ALL {
             let (value, reference) = top_level_secret_slot(one, slot);
-            if value.as_ref().is_some_and(|value| !value.trim().is_empty()) && reference.is_none() {
+            if crate::secrets::holds_plaintext_secret(value.as_deref(), reference.as_deref()) {
                 fields.push(format!("alteryx_one.{}", slot.name()));
             }
         }
         for (workspace_id, credential) in &one.workspace_credentials {
             for slot in OneSecretSlot::ALL {
                 let (value, reference) = workspace_secret_slot(credential, slot);
-                if value.as_ref().is_some_and(|value| !value.trim().is_empty())
-                    && reference.is_none()
-                {
+                if crate::secrets::holds_plaintext_secret(value.as_deref(), reference.as_deref()) {
                     fields.push(format!(
                         "alteryx_one.workspace_credentials['{workspace_id}'].{}",
                         slot.name()

@@ -4585,8 +4585,19 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
                 if let Some(warning) = result.warning.as_deref() {
                     eprintln!("[ayx WARN] {warning}");
                 }
+                // Stay `ok` — a keyring-less host is a warned no-op by design,
+                // not a failure — but never say "completed" over plaintext that
+                // is still on disk. An operator reading only the message, or a
+                // CI step keying on it, would take that as an all-clear.
+                let message = if result.warning.is_some() && result.migrated.is_empty() {
+                    "secret migration incomplete: plaintext remains in the profile"
+                } else if result.warning.is_some() {
+                    "secret migration partially completed"
+                } else {
+                    "secret migration completed"
+                };
                 Envelope::ok_with_data(
-                    "secret migration completed",
+                    message,
                     json!({
                         "profile": resolution.selected_profile,
                         "migrated_fields": result.migrated,

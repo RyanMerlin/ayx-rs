@@ -1123,3 +1123,76 @@ fn setting_one_slot_does_not_bind_ambient_environment_variables() {
         );
     }
 }
+
+/// `secret migrate` must see plaintext held *inside* an `inline:` reference.
+///
+/// This is the exact state the keyring-unavailable bootstrap path writes, and
+/// the state migrate exists to unwind. Inline detection tested "value present
+/// AND reference absent", so an `inline:<secret>` reference was invisible:
+/// migrate short-circuited before touching the keyring and returned
+/// `migrated: [], warning: null` with an affirmative "migration completed" —
+/// an all-clear over a cleartext credential that is still on disk. The
+/// remediation printed by `secret set`, by every `secret status` row, and by
+/// SECURITY.md was a command that did nothing.
+///
+/// `AYX_FORCE_INLINE_SECRETS` makes the keyring-unavailable branch deterministic
+/// so this runs identically on a developer laptop and a headless CI runner.
+#[test]
+fn secret_migrate_sees_plaintext_held_in_an_inline_reference() {
+    const HELD: &str = "held-inside-an-inline-reference";
+    let home = config_home(&[(
+        "inl",
+        &format!(
+            "profile_name: inl\n\
+             alteryx_one:\n\
+            \x20 account_email: user@example.invalid\n\
+            \x20 base_url: https://example.invalid\n\
+            \x20 client_secret_ref: inline:{HELD}\n"
+        ),
+    )]);
+
+    let out = run_env(
+        &home,
+        &[
+            "secret",
+            "migrate",
+            "--profile",
+            "inl",
+            "--output",
+            "json-full",
+        ],
+        &[("AYX_FORCE_INLINE_SECRETS", "1")],
+    );
+    assert!(
+        out.ok,
+        "a keyring-less host is a warned no-op, not a failure\n{}",
+        out.combined()
+    );
+
+    let data = &out.json()["data"];
+    let warning = data["warning"].as_str().unwrap_or("");
+    assert!(
+        warning.contains("alteryx_one.client_secret"),
+        "migrate must name the credential it could not move\nwarning: {warning:?}\n{}",
+        out.combined()
+    );
+    assert_eq!(
+        data["migrated_fields"].as_array().map(Vec::len),
+        Some(0),
+        "nothing can be migrated without secure storage"
+    );
+
+    // The headline must not read as an all-clear while plaintext is on disk.
+    let message = out.json()["message"].as_str().unwrap_or("").to_string();
+    assert!(
+        !message.contains("migration completed"),
+        "an unfinished migration must not report completion: {message:?}"
+    );
+
+    // Unchanged on disk, and the secret never reaches a stream.
+    assert!(
+        profile_text(&home, "inl").contains("client_secret_ref: inline:"),
+        "the inline reference is still there — migrate could not move it"
+    );
+    out.assert_absent(HELD, "the secret held inside the inline reference");
+}

@@ -204,6 +204,21 @@ pub enum ProfileError {
     },
     #[error("invalid config: {0}")]
     Invalid(String),
+    /// The OS keyring could not be written to.
+    ///
+    /// Distinct from [`ProfileError::Invalid`] purely so callers can classify
+    /// by cause. Reading, writing and deleting a keyring entry all produce
+    /// prose containing "keyring entry" or "keyring secret", so a substring
+    /// test could not tell a *store* failure — where offering a plaintext
+    /// fallback is meaningful — from a *read* denial or a failed rollback,
+    /// where it is not. That ambiguity offered to rewrite every credential as
+    /// cleartext on hosts whose keyring was present and working but merely
+    /// locked, or when an unrelated write failed and its keyring rollback
+    /// failed too.
+    ///
+    /// Renders identically to `Invalid`, so operator-facing text is unchanged.
+    #[error("invalid config: {0}")]
+    KeyringUnavailable(String),
     #[error("failed to write config file '{path}': {source}")]
     Write {
         path: String,

@@ -519,20 +519,26 @@ fn is_valid_env_name(name: &str) -> bool {
         && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
-/// Whether `err` reports a failure to store into the OS keyring.
+/// Whether `err` reports a failure to **store** into the OS keyring.
 ///
-/// Checks the typed error first, then the rendered message: `secretize_config`
-/// re-wraps its failures with `anyhow!("{field}: {err}")`, which erases the
-/// `ProfileError` type, so a downcast alone misses the migration path.
+/// This decides whether the secret is written as cleartext instead, so it must
+/// be exact. It used to fall back to substring-matching the rendered message,
+/// because `secretize_config` re-wrapped its failures with
+/// `anyhow!("{field}: {err}")` and erased the type. That fallback matched far
+/// more than it meant to:
+///
+///   * a keyring *read* denial — a locked macOS keychain, or a user clicking
+///     Deny on the Secret Service prompt — on a host whose keyring is present
+///     and perfectly writable, and
+///   * a *rollback* failure, where the profile write failed for an unrelated
+///     reason (`EPERM`, `ENOSPC`, a serialization error) and the keyring
+///     rollback failed too, concatenating "keyring entry" into the message.
+///
+/// Both then offered to rewrite every credential as plaintext. The wrap now
+/// preserves the typed error, so classification is by cause only.
 fn is_keyring_failure(err: &anyhow::Error) -> bool {
-    if err
-        .downcast_ref::<ayx_core::profile::ProfileError>()
+    err.downcast_ref::<ayx_core::profile::ProfileError>()
         .is_some_and(ayx_core::secrets::is_keyring_storage_error)
-    {
-        return true;
-    }
-    let text = err.to_string();
-    text.contains("keyring entry") || text.contains("keyring secret")
 }
 
 pub struct MigrateResult {
@@ -551,7 +557,7 @@ pub fn migrate_profile(path: &Path) -> Result<MigrateResult> {
             source_and_values(&config, slot)
                 .ok()
                 .filter(|(value, reference)| {
-                    value.is_some_and(|value| !value.is_empty()) && reference.is_none()
+                    ayx_core::secrets::holds_plaintext_secret(*value, *reference)
                 })
                 .map(|_| slot.field.to_string())
         })

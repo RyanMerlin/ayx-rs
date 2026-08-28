@@ -607,13 +607,17 @@ fn store(
                 .map_err(|err| match err {
                     // Rebuild from the inner message, not `to_string()`, so the
                     // variant's own "invalid config: " prefix is not doubled.
-                    ayx_core::profile::ProfileError::Invalid(message) => {
+                    // Keep the variant: this *is* a keyring-store failure, and
+                    // callers classify the plaintext fallback by that variant.
+                    ayx_core::profile::ProfileError::KeyringUnavailable(message) => {
                         match message.split_once(". Set AYX_ALLOW_INLINE_SECRETS=1") {
-                            Some((cause, _)) => ayx_core::profile::ProfileError::Invalid(format!(
-                                "{cause}. This write requires secure storage and cannot fall \
-                                 back to plaintext; configure a keyring backend and retry."
-                            )),
-                            None => ayx_core::profile::ProfileError::Invalid(message),
+                            Some((cause, _)) => {
+                                ayx_core::profile::ProfileError::KeyringUnavailable(format!(
+                                    "{cause}. This write requires secure storage and cannot fall \
+                                     back to plaintext; configure a keyring backend and retry."
+                                ))
+                            }
+                            None => ayx_core::profile::ProfileError::KeyringUnavailable(message),
                         }
                     }
                     other => other,
@@ -621,7 +625,16 @@ fn store(
         }
         InlineSecretPolicy::Allow => store_secret_with_fallback(account, value, true),
     };
-    let (reference, was_inline) = result.map_err(|err| anyhow::anyhow!("{field}: {err}"))?;
+    // Render the message first, then attach it as context over the *typed*
+    // error. `anyhow!("{field}: {err}")` produced an identical string but threw
+    // the `ProfileError` away, which forced callers to re-classify the failure
+    // by substring-matching this prose — and "keyring entry"/"keyring secret"
+    // appear equally in read and rollback failures, where a plaintext fallback
+    // is wrong. The rendered text is unchanged; the cause now survives.
+    let (reference, was_inline) = result.map_err(|err| {
+        let message = format!("{field}: {err}");
+        anyhow::Error::new(err).context(message)
+    })?;
     if was_inline {
         out.inline_fields.push(field.to_string());
     } else if reference.starts_with("keyring:") {
