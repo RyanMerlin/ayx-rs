@@ -431,11 +431,44 @@ pub fn set_slot(path: &Path, name: &str, input: SecretInput) -> Result<SetResult
                 .and_then(|stem| stem.to_str())
                 .unwrap_or(&config.profile_name);
             let account = keyring_account(profile_stem, slot.field);
-            set_value(&mut config, slot, None, Some(format!("keyring:{account}")))?;
-            onboard::write_config_exact(path, &config, Some((&account, &value)), &BTreeSet::new())?;
+
+            // Where the secret will live has to be decided before the profile is
+            // serialized, because the reference written into the YAML differs by
+            // destination. The keyring write itself still happens inside
+            // `write_config_exact`'s transaction, so a failed profile write rolls
+            // the keyring back.
+            if ayx_core::secrets::keyring_writable() {
+                set_value(&mut config, slot, None, Some(format!("keyring:{account}")))?;
+                onboard::write_config_exact(
+                    path,
+                    &config,
+                    Some((&account, &value)),
+                    &BTreeSet::new(),
+                )?;
+                return Ok(SetResult {
+                    slot: slot.name,
+                    source: "keyring",
+                });
+            }
+
+            // No keyring. SECURITY.md gates inline storage behind an explicit
+            // opt-in; without it, refuse rather than silently downgrading.
+            if !ayx_core::secrets::inline_secrets_allowed_by_env() {
+                bail!(
+                    "cannot store '{}': the OS keyring is unavailable. Use \
+                     `ayx secret set {} --from-env NAME` to reference an environment \
+                     variable instead, configure a keyring backend, or set \
+                     AYX_ALLOW_INLINE_SECRETS=1 to accept plaintext storage in the \
+                     profile YAML.",
+                    slot.name,
+                    slot.name
+                );
+            }
+            set_value(&mut config, slot, None, Some(format!("inline:{value}")))?;
+            onboard::write_config_exact(path, &config, None, &BTreeSet::new())?;
             Ok(SetResult {
                 slot: slot.name,
-                source: "keyring",
+                source: "inline",
             })
         }
     }

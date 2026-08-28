@@ -597,8 +597,27 @@ fn store(
             // Do not call `store_secret_with_fallback` here: its global
             // AYX_ALLOW_INLINE_SECRETS escape hatch is intentionally ignored
             // for explicitly protected writes such as workspace passwords.
+            //
+            // `store_keyring_secret`'s error text advertises that variable,
+            // which is true for `Allow` callers and false here. Replace the
+            // remediation rather than send the operator after a flag this path
+            // deliberately ignores.
             ayx_core::secrets::store_keyring_secret(account, value)
                 .map(|reference| (reference, false))
+                .map_err(|err| match err {
+                    // Rebuild from the inner message, not `to_string()`, so the
+                    // variant's own "invalid config: " prefix is not doubled.
+                    ayx_core::profile::ProfileError::Invalid(message) => {
+                        match message.split_once(". Set AYX_ALLOW_INLINE_SECRETS=1") {
+                            Some((cause, _)) => ayx_core::profile::ProfileError::Invalid(format!(
+                                "{cause}. This write requires secure storage and cannot fall \
+                                 back to plaintext; configure a keyring backend and retry."
+                            )),
+                            None => ayx_core::profile::ProfileError::Invalid(message),
+                        }
+                    }
+                    other => other,
+                })
         }
         InlineSecretPolicy::Allow => store_secret_with_fallback(account, value, true),
     };

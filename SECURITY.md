@@ -52,6 +52,12 @@ caller passing `InlineSecretPolicy::Allow`. If you find a code path that
 silently falls back to inline storage without that opt-in, treat it as a
 security issue and report it.
 
+Some writes are protected and ignore the opt-in entirely
+(`InlineSecretPolicy::Forbid`): workspace passwords, and `ayx secret migrate`,
+whose whole purpose is moving plaintext *into* secure storage — migrating it to
+inline plaintext would accomplish nothing. Those fail when no keyring is
+available rather than downgrading, and say so.
+
 ## Hardening checklist for operators
 
 - Run `ayx doctor config` after install; address every `inline:` ref.

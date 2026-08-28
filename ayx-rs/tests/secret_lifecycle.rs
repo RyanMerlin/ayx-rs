@@ -872,6 +872,128 @@ fn a_failed_keyring_write_leaves_no_journal_or_temp_file() {
 }
 
 // ---------------------------------------------------------------------------
+// keyring-unavailable policy
+// ---------------------------------------------------------------------------
+
+/// Without a keyring and without the documented opt-in, `secret set` refuses
+/// rather than silently downgrading to plaintext, and the remediation it offers
+/// is one that actually works.
+#[test]
+fn secret_set_without_keyring_refuses_and_offers_working_remediation() {
+    const SECRET: &str = "refuse-sentinel-9a1c";
+    let home = config_home(&[("t", EMPTY_PROFILE)]);
+    if keyring_available() {
+        eprintln!("skipping: this host has a keyring, so the refusal path cannot be reached");
+        return;
+    }
+    let out = run_in(
+        &home,
+        home.path(),
+        &[
+            "secret",
+            "set",
+            "one.client-secret",
+            "--profile",
+            "t",
+            "--from-stdin",
+        ],
+        Some(SECRET),
+        &[],
+    );
+    assert!(!out.ok, "must refuse without an opt-in\n{}", out.combined());
+    out.assert_absent(SECRET, "the secret being stored");
+    assert!(
+        out.combined().contains("--from-env"),
+        "the remediation should point at the keyring-free option\n{}",
+        out.combined()
+    );
+    assert!(
+        !profile_text(&home, "t").contains("client_secret_ref:"),
+        "nothing should have been written"
+    );
+}
+
+/// With the opt-in documented in SECURITY.md, the same call stores inline.
+/// Before this, `AYX_ALLOW_INLINE_SECRETS` was advertised by the error and
+/// then ignored, so `--from-stdin` was impossible on any keyring-less host.
+#[test]
+fn secret_set_honours_the_documented_inline_opt_in() {
+    const SECRET: &str = "optin-sentinel-2b4d";
+    let home = config_home(&[("t", EMPTY_PROFILE)]);
+    if keyring_available() {
+        eprintln!("skipping: this host has a keyring, so the inline path is not taken");
+        return;
+    }
+    let out = run_in(
+        &home,
+        home.path(),
+        &[
+            "secret",
+            "set",
+            "one.client-secret",
+            "--profile",
+            "t",
+            "--from-stdin",
+        ],
+        Some(SECRET),
+        &[("AYX_ALLOW_INLINE_SECRETS", "1")],
+    );
+    assert!(
+        out.ok,
+        "the opt-in should permit the write\n{}",
+        out.combined()
+    );
+    out.assert_absent(SECRET, "the secret being stored");
+    assert!(
+        profile_text(&home, "t").contains("client_secret_ref: inline:"),
+        "the opt-in stores an inline reference"
+    );
+}
+
+/// `secret migrate` moves plaintext *into* secure storage. With no keyring
+/// there is nowhere better to put it, so it refuses even under the opt-in, and
+/// must not claim otherwise in its error.
+#[test]
+fn secret_migrate_refuses_without_keyring_even_under_the_opt_in() {
+    const PLAINTEXT: &str = "nomigrate-sentinel-6c8e";
+    let home = config_home(&[(
+        "m",
+        &format!(
+            "profile_name: m\n\
+             alteryx_one:\n\
+            \x20 account_email: user@example.invalid\n\
+            \x20 client_secret: {PLAINTEXT}\n"
+        ),
+    )]);
+    if keyring_available() {
+        eprintln!("skipping: this host has a keyring, so migration succeeds");
+        return;
+    }
+    let before = profile_text(&home, "m");
+    let out = run_env(
+        &home,
+        &["secret", "migrate", "--profile", "m"],
+        &[("AYX_ALLOW_INLINE_SECRETS", "1")],
+    );
+    assert!(
+        !out.ok,
+        "migration into plaintext accomplishes nothing and must refuse\n{}",
+        out.combined()
+    );
+    out.assert_absent(PLAINTEXT, "the plaintext being migrated");
+    assert_eq!(
+        before,
+        profile_text(&home, "m"),
+        "the profile must be untouched"
+    );
+    assert!(
+        !out.combined().contains("Set AYX_ALLOW_INLINE_SECRETS=1"),
+        "the error must not advertise a flag this path ignores\n{}",
+        out.combined()
+    );
+}
+
+// ---------------------------------------------------------------------------
 // env-template
 // ---------------------------------------------------------------------------
 
