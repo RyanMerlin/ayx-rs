@@ -56,13 +56,8 @@ const RESULT_FIELDS: &[&str] = &[
     "would_send",
     "audit_artifact",
 ];
-const WORKFLOW_LIST_FIELDS: &[&str] = &[
-    "id",
-    "name",
-    "owner",
-    "last_updated_at",
-    "workflow_version",
-];
+const WORKFLOW_LIST_FIELDS: &[&str] =
+    &["id", "name", "owner", "last_updated_at", "workflow_version"];
 
 fn list(command: &'static str) -> OutputDescriptor {
     OutputDescriptor::new(command, ViewKind::List).with_fields(LIST_FIELDS)

@@ -4,6 +4,34 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.18.1 — 2026-08-27
+
+This is the first published release of the 0.18 output-contract and
+governance work. It carries the complete release notes in
+`docs/releases/v0.18.1.md`.
+
+### User-visible changes
+
+- Human-readable text remains the default output and now presents workflow
+  governance fields as `ID`, `NAME`, `OWNER`, `LAST UPDATED`, and `VERSION`.
+- `--output json` is the compact, versioned `ayx.output.v1` automation view;
+  compact lists default to 20 rows and report counts, truncation, and paging.
+- `--output json-full` remains available for complete redacted payloads,
+  diagnostics, exports, and compatibility migration; `--output-limit 0`
+  disables the compact-list cap.
+- One leaf commands now expose stable output descriptors, and
+  `ayx one workflows list` joins workflow assets with the people directory to
+  resolve governance metadata where available.
+- Wizard email-OTP authentication is the default, with Legacy retained as an
+  explicit rollback lane.
+
+### Reliability
+
+- Onboarding keyring-unavailable test isolation is thread-scoped, removing
+  the previous parallel-test flakiness.
+- Release artifacts include platform packages, checksums, Sigstore bundles,
+  SBOMs, and build-provenance attestations when supported by GitHub.
+
 ## 0.18.0 — 2026-08-27
 
 ### Breaking
