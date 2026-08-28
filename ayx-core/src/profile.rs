@@ -1985,21 +1985,12 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         env_secret_name(env_values, &["AYX_ONE_API_REFRESH_TOKEN"]).map(|n| env_secret_ref(&n));
     let client_secret_ref =
         env_secret_name(env_values, &["AYX_ONE_CLIENT_SECRET"]).map(|n| env_secret_ref(&n));
-    // SP creds: canonical names first, then the workspace-namespaced variants
-    // already present in the user's .env (AYX_ONE_ALTERYX_FDE_*). The SP
-    // client secret now has its own dedicated field.
-    let sp_client_id = env_value(env_values, "AYX_ONE_SP_CLIENT_ID")
-        .or_else(|| env_value(env_values, "AYX_ONE_ALTERYX_FDE_SP007_CLIENT_ID"));
-    let sp_client_secret_ref = env_secret_name(
-        env_values,
-        &[
-            "AYX_ONE_SP_CLIENT_SECRET",
-            "AYX_ONE_ALTERYX_FDE_SA007_SECRET",
-        ],
-    )
-    .map(|n| env_secret_ref(&n));
-    let sp_token_endpoint_url = env_value(env_values, "AYX_ONE_SP_TOKEN_ENDPOINT_URL")
-        .or_else(|| env_value(env_values, "AYX_ONE_ALTERYX_FDE_TOKEN_ENDPOINT"));
+    // The SP client secret has its own dedicated field, separate from the user
+    // flow's `client_secret`.
+    let sp_client_id = env_value(env_values, "AYX_ONE_SP_CLIENT_ID");
+    let sp_client_secret_ref =
+        env_secret_name(env_values, &["AYX_ONE_SP_CLIENT_SECRET"]).map(|n| env_secret_ref(&n));
+    let sp_token_endpoint_url = env_value(env_values, "AYX_ONE_SP_TOKEN_ENDPOINT_URL");
     let workspace_gid = env_value(env_values, "AYX_ONE_WORKSPACE_GID");
 
     if account_email.is_some()
@@ -4439,7 +4430,7 @@ server:
             "AYX_ONE_API_ACCESS_TOKEN=access-sentinel-a1\n\
              AYX_ONE_API_REFRESH_TOKEN=refresh-sentinel-b2\n\
              AYX_ONE_CLIENT_SECRET=client-sentinel-c3\n\
-             AYX_ONE_ALTERYX_FDE_SA007_SECRET=sp-sentinel-d4\n",
+             AYX_ONE_SP_CLIENT_SECRET=sp-sentinel-d4\n",
         )
         .unwrap();
 
@@ -4467,7 +4458,7 @@ server:
         );
         assert_eq!(
             one.sp_client_secret_ref.as_deref(),
-            Some("env:AYX_ONE_ALTERYX_FDE_SA007_SECRET")
+            Some("env:AYX_ONE_SP_CLIENT_SECRET")
         );
 
         // The reference must still resolve, or the credential is unusable.
