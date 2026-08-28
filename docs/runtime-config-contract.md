@@ -25,3 +25,24 @@ When adding a new runtime command:
 - Use the shared runtime loader in the CLI dispatch/runtime layer plus `ayx-core::profile`.
 - Treat any file-path config input as import, migrate, or onboard-only.
 - If the command returns config metadata, include the selected central profile and resolved central profile path.
+
+## Server credentials and keyring references
+
+Server API credentials support both setup-friendly plaintext and protected
+references:
+
+- `server.api.client_secret` is the literal secret value. It is accepted for
+  ease of onboarding and should produce an inline-secret warning in diagnostic
+  output.
+- `server.api.client_secret_ref` is a reference, not a place to paste the
+  secret. It must use `keyring:<account>`, `env:<variable>`, or
+  `inline:<value>`.
+
+Keyring accounts are exact operating-system account names; the keyring does
+not know which YAML profile referred to an account. For example,
+`keyring:default/server.storage.mongo.managed.password` is shared by every
+profile that uses that exact reference, including both `default` and
+`local-dev`. Use distinct account names such as
+`keyring:default/server.storage.mongo.managed.password` and
+`keyring:local-dev/server.storage.mongo.managed.password` when the profiles
+must have separate secrets.

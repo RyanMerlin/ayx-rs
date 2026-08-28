@@ -694,6 +694,20 @@ mongo:
             .expect("legacy profile-scoped refs remain readable for compatibility");
     }
 
+    #[test]
+    fn auth_summary_keeps_one_and_server_readiness_independent() {
+        let (status, summary) = doctor_auth_status_summary(
+            true, false, false, false, // One is configured but incomplete.
+            true, true, true, // Server is fully configured.
+        );
+
+        assert_eq!(status, "warn");
+        assert_eq!(summary, "One incomplete; Server configured");
+        assert_eq!(auth_product_status(true, false), "incomplete");
+        assert_eq!(auth_product_status(true, true), "configured");
+        assert_eq!(auth_product_status(false, false), "not_configured");
+    }
+
     /// `ayx-server-api` embeds the code it already computed as
     /// `error_code=<code>`; the dispatcher must read that rather than scanning
     /// prose. It previously did not: the prose scan looks for `"not found"`
@@ -4980,12 +4994,22 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
         server_api_key_present,
         server_api_secret_present,
     );
+    let one_status = auth_product_status(
+        one_configured,
+        one_access_token_present && one_refresh_token_present && one_oauth_client_id_present,
+    );
+    let server_status = auth_product_status(
+        server_configured,
+        server_api_key_present && server_api_secret_present,
+    );
     Ok(Envelope::ok_with_data(
         "doctor auth completed",
         json!({
             "profile": config.profile_name,
             "status": status,
             "summary": summary,
+            "one_status": one_status,
+            "server_status": server_status,
             "inline_secret_fields": ayx_core::auth::inline_secret_fields(&config),
             "migration": {
                 "available": !ayx_core::auth::inline_secret_fields(&config).is_empty(),
@@ -5048,12 +5072,22 @@ pub(crate) fn doctor_auth_envelope_from_path(
         server_api_key_present,
         server_api_secret_present,
     );
+    let one_status = auth_product_status(
+        one_configured,
+        one_access_token_present && one_refresh_token_present && one_oauth_client_id_present,
+    );
+    let server_status = auth_product_status(
+        server_configured,
+        server_api_key_present && server_api_secret_present,
+    );
     Ok(Envelope::ok_with_data(
         "doctor auth completed",
         json!({
             "profile": config.profile_name,
             "status": status,
             "summary": summary,
+            "one_status": one_status,
+            "server_status": server_status,
             "inline_secret_fields": ayx_core::auth::inline_secret_fields(&config),
             "migration": {
                 "available": !ayx_core::auth::inline_secret_fields(&config).is_empty(),
@@ -5289,17 +5323,21 @@ fn doctor_auth_status_summary(
         || (one_access_token_present && one_refresh_token_present && one_oauth_client_id_present);
     let server_ready = !server_configured || (server_api_key_present && server_api_secret_present);
     if !one_ready || !server_ready {
-        let mut incomplete = Vec::new();
-        if one_configured && !one_ready {
-            incomplete.push("One");
-        }
-        if server_configured && !server_ready {
-            incomplete.push("Server");
-        }
-        return (
-            "warn",
-            format!("{} auth incomplete", incomplete.join(" and ")),
-        );
+        let one_label = if !one_configured {
+            "One not configured"
+        } else if one_ready {
+            "One configured"
+        } else {
+            "One incomplete"
+        };
+        let server_label = if !server_configured {
+            "Server not configured"
+        } else if server_ready {
+            "Server configured"
+        } else {
+            "Server incomplete"
+        };
+        return ("warn", format!("{one_label}; {server_label}"));
     }
 
     let summary = match (one_configured, server_configured) {
@@ -5309,6 +5347,14 @@ fn doctor_auth_status_summary(
         (false, false) => "One and Server auth not configured",
     };
     ("ok", summary.to_string())
+}
+
+fn auth_product_status(configured: bool, ready: bool) -> &'static str {
+    match (configured, ready) {
+        (false, _) => "not_configured",
+        (true, true) => "configured",
+        (true, false) => "incomplete",
+    }
 }
 
 fn doctor_network_status_summary(

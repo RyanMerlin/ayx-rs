@@ -559,7 +559,10 @@ pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileErro
             ))),
         };
     }
-    Ok(None)
+    Err(ProfileError::Invalid(
+        "unsupported secret reference format; use the plaintext field for a literal value, or keyring:<account>, env:<variable>, or inline:<value>"
+            .to_string(),
+    ))
 }
 
 /// Store a secret in the OS keyring.
@@ -708,6 +711,15 @@ mod tests {
             resolve_secret_ref("inline:fresh-token").expect("inline ref should resolve"),
             Some("fresh-token".to_string())
         );
+    }
+
+    #[test]
+    fn bare_secret_ref_is_rejected_with_plaintext_remediation() {
+        let error = resolve_secret_ref("literal-secret")
+            .expect_err("a literal must not be silently treated as a missing reference");
+        let message = error.to_string();
+        assert!(message.contains("use the plaintext field"));
+        assert!(message.contains("keyring:<account>"));
     }
 
     #[test]
