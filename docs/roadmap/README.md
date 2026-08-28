@@ -32,6 +32,7 @@ letting stale notes accumulate.
 - [Workspace hardening](workspace-hardening.md)
 - [Command surface coverage and gaps](command-surface-coverage.md) (mostly
   delivered)
+- [Headless Alteryx integration](headless-alteryx-integration.md)
 
 ## Relationship To Other Docs
 
