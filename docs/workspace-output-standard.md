@@ -23,3 +23,18 @@ release may remove them after a warning-and-migration period.
 Compact JSON uses the versioned `ayx.output.v1` envelope. `json-full` is a
 sanitized diagnostic/transport view: credentials, tokens, headers, cookies,
 passwords, OTPs, and secret references remain redacted.
+
+Redaction targets fields that *carry* credential material. Fields that only
+describe it are exempt, because redacting them would blank the diagnostics
+whose whole purpose is reporting credential posture, along with parts of the
+documented list contract. The exemption covers `next_page_token`,
+`secret_values_returned`, any `has_*` field, and any field ending in
+`_present`, `_source`, `_fields`, `_risks`, `_posture`, `_length`, `_type`,
+`_claims`, `_endpoint`, `_endpoint_url`, `_refs`, or `_env`. Name new metadata
+fields to match that shape so they are not swallowed.
+
+A command whose output descriptor declares no field list projects every
+top-level key in compact JSON, with nested objects and arrays summarized
+(`"N field(s); use --output json-full for details"`). Descriptors that do
+declare a field list still project only those fields and report the rest under
+`omitted_fields`.

@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::auth::AuthRollout;
-use crate::secrets::{recover_keyring_transaction, resolve_secret_ref};
+use crate::secrets::{
+    env_secret_ref, recover_keyring_transaction, resolve_secret_ref, resolve_secret_ref_with,
+};
 use crate::sensitive::{recover_sensitive_file, write_sensitive_file};
 
 // ---------------------------------------------------------------------------
@@ -1295,7 +1297,9 @@ impl Config {
         current_path: &Path,
     ) -> Result<Self, ProfileError> {
         let config = apply_env_fallbacks(config, &env_values);
-        let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
+        let config = config
+            .with_server_api_overrides(&env_values)?
+            .resolve_secret_refs(&env_values)?;
         // Warn-only: a mixed-state config is suspicious but still loadable.
         // The write boundary enforces the hard-error; reads must proceed so the
         // operator can inspect and repair the config.
@@ -1311,7 +1315,9 @@ impl Config {
         _current_path: &Path,
     ) -> Result<Self, ProfileError> {
         let config = apply_env_fallbacks(config, &env_values);
-        let config = config.with_server_api_overrides()?.resolve_secret_refs()?;
+        let config = config
+            .with_server_api_overrides(&env_values)?
+            .resolve_secret_refs(&env_values)?;
         // Warn-only: same rationale as finalize_loaded_config above.
         if let Err(e) = detect_secret_conflict(&config) {
             eprintln!("[ayx WARN] {e}");
@@ -1319,7 +1325,10 @@ impl Config {
         Ok(config)
     }
 
-    fn with_server_api_overrides(mut self) -> Result<Self, ProfileError> {
+    fn with_server_api_overrides(
+        mut self,
+        env_files: &HashMap<String, String>,
+    ) -> Result<Self, ProfileError> {
         // Resolve an `env:`/`keyring:`/`inline:` ref on the shared `server_api`
         // secret BEFORE it is expanded into the `api`/`server` representations, so
         // all three carry the same resolved value, and propagate the ref so the
@@ -1327,7 +1336,7 @@ impl Config {
         if let Some(shared) = self.server_api.as_mut()
             && shared.client_secret.is_empty()
             && let Some(reference) = shared.client_secret_ref.as_deref()
-            && let Some(secret) = resolve_secret_ref(reference)?
+            && let Some(secret) = resolve_secret_ref_with(reference, env_files)?
         {
             shared.client_secret = secret;
         }
@@ -1363,58 +1372,61 @@ impl Config {
         Ok(self)
     }
 
-    fn resolve_secret_refs(mut self) -> Result<Self, ProfileError> {
+    fn resolve_secret_refs(
+        mut self,
+        env_files: &HashMap<String, String>,
+    ) -> Result<Self, ProfileError> {
         if let Some(one) = self.alteryx_one.as_mut() {
             if one.access_token.is_none()
                 && let Some(reference) = one.access_token_ref.as_deref()
             {
-                one.access_token = resolve_secret_ref(reference)?;
+                one.access_token = resolve_secret_ref_with(reference, env_files)?;
             }
             if one.refresh_token.is_none()
                 && let Some(reference) = one.refresh_token_ref.as_deref()
             {
-                one.refresh_token = resolve_secret_ref(reference)?;
+                one.refresh_token = resolve_secret_ref_with(reference, env_files)?;
             }
             if one.workspace_password.is_none()
                 && let Some(reference) = one.workspace_password_ref.as_deref()
             {
-                one.workspace_password = resolve_secret_ref(reference)?;
+                one.workspace_password = resolve_secret_ref_with(reference, env_files)?;
             }
             if one.client_secret.is_none()
                 && let Some(reference) = one.client_secret_ref.as_deref()
             {
-                one.client_secret = resolve_secret_ref(reference)?;
+                one.client_secret = resolve_secret_ref_with(reference, env_files)?;
             }
             if one.sp_client_secret.is_none()
                 && let Some(reference) = one.sp_client_secret_ref.as_deref()
             {
-                one.sp_client_secret = resolve_secret_ref(reference)?;
+                one.sp_client_secret = resolve_secret_ref_with(reference, env_files)?;
             }
             for credential in one.workspace_credentials.values_mut() {
                 if credential.access_token.is_none()
                     && let Some(reference) = credential.access_token_ref.as_deref()
                 {
-                    credential.access_token = resolve_secret_ref(reference)?;
+                    credential.access_token = resolve_secret_ref_with(reference, env_files)?;
                 }
                 if credential.refresh_token.is_none()
                     && let Some(reference) = credential.refresh_token_ref.as_deref()
                 {
-                    credential.refresh_token = resolve_secret_ref(reference)?;
+                    credential.refresh_token = resolve_secret_ref_with(reference, env_files)?;
                 }
                 if credential.workspace_password.is_none()
                     && let Some(reference) = credential.workspace_password_ref.as_deref()
                 {
-                    credential.workspace_password = resolve_secret_ref(reference)?;
+                    credential.workspace_password = resolve_secret_ref_with(reference, env_files)?;
                 }
                 if credential.client_secret.is_none()
                     && let Some(reference) = credential.client_secret_ref.as_deref()
                 {
-                    credential.client_secret = resolve_secret_ref(reference)?;
+                    credential.client_secret = resolve_secret_ref_with(reference, env_files)?;
                 }
                 if credential.sp_client_secret.is_none()
                     && let Some(reference) = credential.sp_client_secret_ref.as_deref()
                 {
-                    credential.sp_client_secret = resolve_secret_ref(reference)?;
+                    credential.sp_client_secret = resolve_secret_ref_with(reference, env_files)?;
                 }
             }
             one.canonicalize();
@@ -1424,13 +1436,13 @@ impl Config {
             && api.auth.client_secret.is_none()
             && let Some(reference) = api.auth.client_secret_ref.as_deref()
         {
-            api.auth.client_secret = resolve_secret_ref(reference)?;
+            api.auth.client_secret = resolve_secret_ref_with(reference, env_files)?;
         }
 
         if let Some(server) = self.server.as_mut()
             && server.curator_api_secret.is_empty()
             && let Some(reference) = server.curator_api_secret_ref.as_deref()
-            && let Some(secret) = resolve_secret_ref(reference)?
+            && let Some(secret) = resolve_secret_ref_with(reference, env_files)?
         {
             server.curator_api_secret = secret;
         }
@@ -1443,7 +1455,7 @@ impl Config {
                 if conn.password.is_none()
                     && let Some(reference) = conn.password_ref.as_deref()
                 {
-                    conn.password = resolve_secret_ref(reference)?;
+                    conn.password = resolve_secret_ref_with(reference, env_files)?;
                 }
             }
         }
@@ -1452,7 +1464,7 @@ impl Config {
             && mongo.password.is_none()
             && let Some(reference) = mongo.password_ref.as_deref()
         {
-            mongo.password = resolve_secret_ref(reference)?;
+            mongo.password = resolve_secret_ref_with(reference, env_files)?;
         }
 
         Ok(self)
@@ -1798,9 +1810,30 @@ fn read_env_file_if_present(path: &Path) -> std::io::Result<HashMap<String, Stri
     Ok(values)
 }
 
+/// The `.env` values the loader would apply for `profile_path`.
+///
+/// Exposed so commands that resolve secret references *after* load (notably
+/// `ayx secret status` / `validate`) see the same environment view the loader
+/// used, rather than reporting an `env:` reference as unresolvable because the
+/// value lives in a `.env` file instead of a process variable.
+///
+/// Returns an empty map when the files cannot be read; a missing or unreadable
+/// `.env` is not an error.
+pub fn env_file_values(profile_path: &Path) -> HashMap<String, String> {
+    collect_env_overrides(profile_path).unwrap_or_default()
+}
+
 fn collect_env_overrides(profile_path: &Path) -> std::io::Result<HashMap<String, String>> {
     let mut values = HashMap::new();
-    if let Ok(cwd) = env::current_dir() {
+    // The working-directory `.env` is a developer convenience for running `ayx`
+    // out of a project checkout.  It is deliberately skipped when the caller has
+    // set AYX_CONFIG_HOME, which is the explicit isolation knob: tests, CI, and
+    // scripted runs point it at a scratch directory and must not silently
+    // inherit whatever `.env` happens to sit in the current directory.  Real
+    // process environment variables still apply in both cases via `env_value`.
+    if env::var_os("AYX_CONFIG_HOME").is_none()
+        && let Ok(cwd) = env::current_dir()
+    {
         values.extend(read_env_file_if_present(&cwd.join(".env"))?);
     }
     if let Some(parent) = profile_path.parent() {
@@ -1881,22 +1914,53 @@ fn env_value(env_values: &HashMap<String, String>, name: &str) -> Option<String>
         .or_else(|| env::var(name).ok())
 }
 
+/// Resolve the first variable in `names` that has a value, returning the
+/// variable *name* that matched rather than the value itself.
+///
+/// Secret-bearing fields use this instead of [`env_value`] so the profile can
+/// record an `env:NAME` reference.  Storing the reference (not the resolved
+/// value) is what keeps an env-sourced secret out of the serialized YAML: a
+/// bare value has no `_ref`, so `secret status` reports it as `plaintext` and
+/// a later save writes it back as `inline:<secret>`.
+fn env_secret_name(env_values: &HashMap<String, String>, names: &[&str]) -> Option<String> {
+    names
+        .iter()
+        .find(|name| {
+            env_values
+                .get(**name)
+                .is_some_and(|value| !value.trim().is_empty())
+                || env::var(*name).is_ok_and(|value| !value.trim().is_empty())
+        })
+        .map(|name| (*name).to_string())
+}
+
 fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>) -> Config {
     let account_email = env_value(env_values, "AYX_ACCOUNT_EMAIL");
     let base_url = env_value(env_values, "AYX_ONE_BASE_URL");
     let oauth_client_id = env_value(env_values, "AYX_ONE_OAUTH_CLIENT_ID")
         .or_else(|| env_value(env_values, "AYX_ONE_CLIENT_ID"));
     let token_endpoint_url = env_value(env_values, "AYX_ONE_TOKEN_ENDPOINT_URL");
-    let access_token = env_value(env_values, "AYX_ONE_API_ACCESS_TOKEN");
-    let refresh_token = env_value(env_values, "AYX_ONE_API_REFRESH_TOKEN");
-    let client_secret = env_value(env_values, "AYX_ONE_CLIENT_SECRET");
+    // Secret-bearing fields resolve to an `env:NAME` reference, never to the
+    // value.  See `env_secret_name`.
+    let access_token_ref =
+        env_secret_name(env_values, &["AYX_ONE_API_ACCESS_TOKEN"]).map(|n| env_secret_ref(&n));
+    let refresh_token_ref =
+        env_secret_name(env_values, &["AYX_ONE_API_REFRESH_TOKEN"]).map(|n| env_secret_ref(&n));
+    let client_secret_ref =
+        env_secret_name(env_values, &["AYX_ONE_CLIENT_SECRET"]).map(|n| env_secret_ref(&n));
     // SP creds: canonical names first, then the workspace-namespaced variants
     // already present in the user's .env (AYX_ONE_ALTERYX_FDE_*). The SP
     // client secret now has its own dedicated field.
     let sp_client_id = env_value(env_values, "AYX_ONE_SP_CLIENT_ID")
         .or_else(|| env_value(env_values, "AYX_ONE_ALTERYX_FDE_SP007_CLIENT_ID"));
-    let sp_client_secret = env_value(env_values, "AYX_ONE_SP_CLIENT_SECRET")
-        .or_else(|| env_value(env_values, "AYX_ONE_ALTERYX_FDE_SA007_SECRET"));
+    let sp_client_secret_ref = env_secret_name(
+        env_values,
+        &[
+            "AYX_ONE_SP_CLIENT_SECRET",
+            "AYX_ONE_ALTERYX_FDE_SA007_SECRET",
+        ],
+    )
+    .map(|n| env_secret_ref(&n));
     let sp_token_endpoint_url = env_value(env_values, "AYX_ONE_SP_TOKEN_ENDPOINT_URL")
         .or_else(|| env_value(env_values, "AYX_ONE_ALTERYX_FDE_TOKEN_ENDPOINT"));
     let workspace_gid = env_value(env_values, "AYX_ONE_WORKSPACE_GID");
@@ -1905,11 +1969,11 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         || base_url.is_some()
         || oauth_client_id.is_some()
         || token_endpoint_url.is_some()
-        || access_token.is_some()
-        || refresh_token.is_some()
-        || client_secret.is_some()
+        || access_token_ref.is_some()
+        || refresh_token_ref.is_some()
+        || client_secret_ref.is_some()
         || sp_client_id.is_some()
-        || sp_client_secret.is_some()
+        || sp_client_secret_ref.is_some()
         || sp_token_endpoint_url.is_some()
         || workspace_gid.is_some()
     {
@@ -1938,12 +2002,16 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
             workspace_gid: None,
             auth_mode: AuthMode::default(),
         });
+        // `account_email` is the deliberate exception to the gap-fill rule
+        // below: a `.env` value overrides a populated profile so a stale
+        // account can be refreshed without hand-editing the YAML. See
+        // `env_file_overrides_stale_profile_auth_fields`.
         if let Some(value) = account_email {
             one.account_email = value;
         }
-        // Gap-fill rule: env vars fill only when the profile value is absent
-        // or empty. A non-empty profile value always wins. This is consistent
-        // with the token fields below and makes profiles authoritative.
+        // Gap-fill rule: for every field after this point, env vars fill only
+        // when the profile value is absent or empty. A non-empty profile value
+        // always wins, which makes profiles authoritative.
         if one
             .base_url
             .as_ref()
@@ -1958,19 +2026,31 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         {
             one.oauth_client_id = oauth_client_id;
         }
+        // Secret fields take the `env:NAME` reference, and only when the
+        // profile carries neither a value nor a `_ref` of its own.  A stored
+        // `_ref` (keyring or inline) is the authoritative credential; the env
+        // var is a last-resort fallback.
         if one
             .client_secret
             .as_ref()
             .is_none_or(|value| value.trim().is_empty())
+            && one
+                .client_secret_ref
+                .as_ref()
+                .is_none_or(|value| value.trim().is_empty())
         {
-            one.client_secret = client_secret;
+            one.client_secret_ref = client_secret_ref;
         }
         if one
             .sp_client_secret
             .as_ref()
             .is_none_or(|value| value.trim().is_empty())
+            && one
+                .sp_client_secret_ref
+                .as_ref()
+                .is_none_or(|value| value.trim().is_empty())
         {
-            one.sp_client_secret = sp_client_secret;
+            one.sp_client_secret_ref = sp_client_secret_ref;
         }
         if one
             .token_endpoint_url
@@ -1991,7 +2071,7 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
                 .as_ref()
                 .is_none_or(|v| v.trim().is_empty())
         {
-            one.access_token = access_token;
+            one.access_token_ref = access_token_ref;
         }
         if one
             .refresh_token
@@ -2002,7 +2082,7 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
                 .as_ref()
                 .is_none_or(|v| v.trim().is_empty())
         {
-            one.refresh_token = refresh_token;
+            one.refresh_token_ref = refresh_token_ref;
         }
         if one
             .sp_client_id
@@ -2910,6 +2990,15 @@ mod tests {
             // Tests serialize env access with TEST_ENV_LOCK.
             unsafe {
                 std::env::set_var(key, value);
+            }
+            Self { key, old }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let old = std::env::var(key).ok();
+            // Tests serialize env access with TEST_ENV_LOCK.
+            unsafe {
+                std::env::remove_var(key);
             }
             Self { key, old }
         }
@@ -4234,7 +4323,7 @@ server:
     #[test]
     fn synthesized_api_and_server_are_marked_derived() {
         let cfg = config_with_server_api_only("https://x.example", "cid", "shh");
-        let finalized = cfg.with_server_api_overrides().unwrap();
+        let finalized = cfg.with_server_api_overrides(&HashMap::new()).unwrap();
         assert!(
             finalized.api.as_ref().unwrap().is_derived(),
             "synthesized api must be derived"
@@ -4248,7 +4337,7 @@ server:
     #[test]
     fn user_authored_api_is_not_derived() {
         let cfg = config_with_explicit_api("https://x.example", "cid", "shh");
-        let finalized = cfg.with_server_api_overrides().unwrap();
+        let finalized = cfg.with_server_api_overrides(&HashMap::new()).unwrap();
         assert!(
             !finalized.api.as_ref().unwrap().is_derived(),
             "explicit api must not be derived"
@@ -4290,5 +4379,149 @@ server:
             "inline:***",
             "workspace_password_ref must redact inline secrets"
         );
+    }
+
+    /// A secret supplied through `.env` must be recorded as an `env:NAME`
+    /// reference, never as a bare value.
+    ///
+    /// A bare value has no `_ref`, so `ayx secret status` classifies it as
+    /// `plaintext` and the next profile save serializes it as
+    /// `inline:<secret>` — writing a live credential to disk in cleartext for
+    /// anyone who happened to run `ayx` next to a `.env`.
+    #[test]
+    fn env_sourced_one_secrets_become_env_refs_not_plaintext() {
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let config_home = temp.path().join("ayx-home");
+        let profiles = config_home.join("profiles");
+        fs::create_dir_all(&profiles).unwrap();
+        let _guard = EnvGuard::set("AYX_CONFIG_HOME", config_home.to_str().unwrap());
+
+        fs::write(
+            profiles.join(".env"),
+            "AYX_ONE_API_ACCESS_TOKEN=access-sentinel-a1\n\
+             AYX_ONE_API_REFRESH_TOKEN=refresh-sentinel-b2\n\
+             AYX_ONE_CLIENT_SECRET=client-sentinel-c3\n\
+             AYX_ONE_ALTERYX_FDE_SA007_SECRET=sp-sentinel-d4\n",
+        )
+        .unwrap();
+
+        let path = profiles.join("envrefs.yaml");
+        fs::write(
+            &path,
+            serde_yaml::to_string(&base_config("envrefs", "Svc")).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = Config::load_from_path_lenient_without_active_overlay(&path).unwrap();
+        let one = loaded.alteryx_one.as_ref().expect("alteryx_one present");
+
+        assert_eq!(
+            one.access_token_ref.as_deref(),
+            Some("env:AYX_ONE_API_ACCESS_TOKEN")
+        );
+        assert_eq!(
+            one.refresh_token_ref.as_deref(),
+            Some("env:AYX_ONE_API_REFRESH_TOKEN")
+        );
+        assert_eq!(
+            one.client_secret_ref.as_deref(),
+            Some("env:AYX_ONE_CLIENT_SECRET")
+        );
+        assert_eq!(
+            one.sp_client_secret_ref.as_deref(),
+            Some("env:AYX_ONE_ALTERYX_FDE_SA007_SECRET")
+        );
+
+        // The reference must still resolve, or the credential is unusable.
+        assert_eq!(one.access_token.as_deref(), Some("access-sentinel-a1"));
+        assert_eq!(one.sp_client_secret.as_deref(), Some("sp-sentinel-d4"));
+
+        // Nothing on disk may carry the value.
+        let on_disk = fs::read_to_string(&path).unwrap();
+        for sentinel in [
+            "access-sentinel-a1",
+            "refresh-sentinel-b2",
+            "client-sentinel-c3",
+            "sp-sentinel-d4",
+        ] {
+            assert!(
+                !on_disk.contains(sentinel),
+                "profile must not contain the resolved secret {sentinel}"
+            );
+        }
+        assert!(
+            !on_disk.contains("inline:"),
+            "env-sourced secrets must never be persisted as inline: refs"
+        );
+    }
+
+    /// AYX_CONFIG_HOME is the isolation knob. When it is set, the
+    /// working-directory `.env` must not bleed in: tests and CI point it at a
+    /// scratch directory and must not inherit whichever repo checkout the
+    /// process happens to be standing in.
+    #[test]
+    fn cwd_env_file_is_ignored_when_config_home_is_set() {
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let workdir = temp.path().join("checkout");
+        let config_home = temp.path().join("ayx-home");
+        fs::create_dir_all(&workdir).unwrap();
+        fs::create_dir_all(config_home.join("profiles")).unwrap();
+        fs::write(
+            workdir.join(".env"),
+            "AYX_ONE_API_ACCESS_TOKEN=cwd-must-not-bleed\n",
+        )
+        .unwrap();
+
+        let path = config_home.join("profiles").join("isolated.yaml");
+        fs::write(
+            &path,
+            serde_yaml::to_string(&base_config("isolated", "Svc")).unwrap(),
+        )
+        .unwrap();
+
+        let _cwd = CurrentDirGuard::set(&workdir);
+        let _guard = EnvGuard::set("AYX_CONFIG_HOME", config_home.to_str().unwrap());
+
+        let loaded = Config::load_from_path_lenient_without_active_overlay(&path).unwrap();
+        let one = loaded.alteryx_one.as_ref().expect("alteryx_one present");
+        assert_eq!(one.access_token_ref, None);
+        assert_eq!(one.access_token, None);
+    }
+
+    /// Without AYX_CONFIG_HOME the working-directory `.env` remains a
+    /// developer convenience, so the isolation guard above cannot be mistaken
+    /// for removing the feature.
+    #[test]
+    fn cwd_env_file_still_applies_without_config_home() {
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let workdir = temp.path().join("checkout");
+        fs::create_dir_all(&workdir).unwrap();
+        fs::write(
+            workdir.join(".env"),
+            "AYX_ONE_API_ACCESS_TOKEN=cwd-applies\n",
+        )
+        .unwrap();
+
+        // The profile is loaded by explicit path, so no real config home is read.
+        let path = temp.path().join("plain.yaml");
+        fs::write(
+            &path,
+            serde_yaml::to_string(&base_config("plain", "Svc")).unwrap(),
+        )
+        .unwrap();
+
+        let _cwd = CurrentDirGuard::set(&workdir);
+        let _guard = EnvGuard::unset("AYX_CONFIG_HOME");
+
+        let loaded = Config::load_from_path_lenient_without_active_overlay(&path).unwrap();
+        let one = loaded.alteryx_one.as_ref().expect("alteryx_one present");
+        assert_eq!(
+            one.access_token_ref.as_deref(),
+            Some("env:AYX_ONE_API_ACCESS_TOKEN")
+        );
+        assert_eq!(one.access_token.as_deref(), Some("cwd-applies"));
     }
 }

@@ -228,13 +228,25 @@ fn compact_list(data: &Value, descriptor_fields: &[&str], limit: usize) -> Value
 }
 
 fn compact_object(kind: &str, data: &Value, descriptor_fields: &[&str]) -> Value {
-    let fields = selected_fields(descriptor_fields);
     match data.as_object() {
-        Some(object) => json!({
-            "kind": kind,
-            "fields": project_object(Some(object), &fields),
-            "omitted_fields": omitted_fields(Some(object), &fields),
-        }),
+        Some(object) => {
+            // A descriptor that declares no fields projects every key the object
+            // has.  Nested values are still summarized by `scalar_projection`, so
+            // the payload stays bounded.  The former `priority_fields()` fallback
+            // was an allowlist of key *names*, which meant any command whose keys
+            // were not on it (whoami, profile, doctor, secret) emitted `{}` and
+            // reported its entire payload under `omitted_fields`.
+            let fields: Vec<&str> = if descriptor_fields.is_empty() {
+                object.keys().map(String::as_str).collect()
+            } else {
+                descriptor_fields.to_vec()
+            };
+            json!({
+                "kind": kind,
+                "fields": project_object(Some(object), &fields),
+                "omitted_fields": omitted_fields(Some(object), &fields),
+            })
+        }
         None => {
             json!({ "kind": kind, "fields": { "value": scalar_projection(data) }, "omitted_fields": [] })
         }
@@ -386,6 +398,9 @@ fn redact_value(value: &Value, key: Option<&str>) -> Value {
 }
 
 fn is_sensitive_key(key: &str) -> bool {
+    if is_metadata_key(key) {
+        return false;
+    }
     let key = key.to_ascii_lowercase().replace(['-', '_'], "");
     [
         "authorization",
@@ -399,6 +414,40 @@ fn is_sensitive_key(key: &str) -> bool {
     ]
     .iter()
     .any(|needle| key.contains(needle))
+}
+
+/// Keys that *describe* a credential rather than carry one.
+///
+/// The sensitive-key check is a substring match, so without this exception it
+/// also swallows every field whose name merely mentions a credential:
+/// `next_page_token` (part of the documented compact-list contract),
+/// `access_token_present`, `refresh_token_source`, `inline_secret_risks`
+/// (a list of field *names*), `secret_posture`, `token_type`, and so on.
+/// Those carry no secret material, and redacting them makes the diagnostics
+/// that exist to report credential posture unable to report it.
+///
+/// This is a rule rather than an enumeration so a newly added `*_source` or
+/// `*_present` field does not silently regress.
+fn is_metadata_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    const EXACT: &[&str] = &["next_page_token", "secret_values_returned"];
+    const SUFFIXES: &[&str] = &[
+        "_present",
+        "_source",
+        "_fields",
+        "_risks",
+        "_posture",
+        "_length",
+        "_type",
+        "_claims",
+        "_endpoint",
+        "_endpoint_url",
+        "_refs",
+        "_env",
+    ];
+    EXACT.contains(&key.as_str())
+        || key.starts_with("has_")
+        || SUFFIXES.iter().any(|suffix| key.ends_with(suffix))
 }
 
 fn is_sensitive_value(value: &str) -> bool {
@@ -432,5 +481,133 @@ mod tests {
         assert_eq!(clean.data["authorization"], "[REDACTED]");
         assert_eq!(clean.data["nested"][0]["password"], "[REDACTED]");
         assert_eq!(clean.data["url"], "[REDACTED]");
+    }
+
+    /// Keys that merely *describe* a credential must survive redaction.
+    ///
+    /// The sensitive-key check is a substring match, so before the metadata
+    /// exception every one of these was replaced with `[REDACTED]` in every
+    /// output mode. `next_page_token` is part of the documented compact-list
+    /// contract, and `inline_secret_risks` is the payload of the diagnostic
+    /// whose entire job is reporting inline-secret posture.
+    #[test]
+    fn metadata_keys_describing_credentials_are_not_redacted() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({
+                "next_page_token": "cursor-42",
+                "access_token_present": true,
+                "access_token_source": "keyring",
+                "refresh_token_source": "env",
+                "has_access_token": true,
+                "token_type": "Bearer",
+                "token_length": 128,
+                "secret_posture": "secure",
+                "secret_refs": ["keyring:acct"],
+                "inline_secret_fields": ["client_secret"],
+                "inline_secret_risks": ["inline secret detected for client_secret"],
+                "curator_api_secret_present": false,
+                "token_endpoint_url": "https://example.invalid/as/token",
+                "password_env": "AYX_ONE_WS_PASSWORD",
+                "secret_values_returned": false,
+            }),
+        );
+        let clean = redacted_envelope(&env);
+        for key in [
+            "next_page_token",
+            "access_token_present",
+            "access_token_source",
+            "refresh_token_source",
+            "has_access_token",
+            "token_type",
+            "token_length",
+            "secret_posture",
+            "secret_refs",
+            "inline_secret_fields",
+            "inline_secret_risks",
+            "curator_api_secret_present",
+            "token_endpoint_url",
+            "password_env",
+            "secret_values_returned",
+        ] {
+            assert_ne!(
+                clean.data[key], "[REDACTED]",
+                "{key} carries no secret material and must not be redacted"
+            );
+        }
+    }
+
+    /// The metadata exception must not widen into the real credential fields.
+    #[test]
+    fn credential_bearing_keys_are_still_redacted() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({
+                "access_token": "real-token",
+                "refresh_token": "real-refresh",
+                "client_secret": "real-secret",
+                "sp_client_secret": "real-sp-secret",
+                "workspace_password": "real-password",
+                "api_key": "real-key",
+                "cookie": "session=abc",
+                "connection_string": "Server=x;Password=y",
+            }),
+        );
+        let clean = redacted_envelope(&env);
+        for key in [
+            "access_token",
+            "refresh_token",
+            "client_secret",
+            "sp_client_secret",
+            "workspace_password",
+            "api_key",
+            "cookie",
+            "connection_string",
+        ] {
+            assert_eq!(clean.data[key], "[REDACTED]", "{key} must stay redacted");
+        }
+    }
+
+    /// A descriptor with no declared fields previously projected against a
+    /// hardcoded name allowlist, so any command whose keys were not on it
+    /// emitted `{}` and reported its whole payload as omitted.
+    #[test]
+    fn object_view_without_descriptor_fields_projects_every_key() {
+        let value = compact_data(
+            &json!({
+                "active_profile": "envtest",
+                "account_email": "user@example.invalid",
+                "config_home": "/tmp/ayx",
+                "resolution": {"selected_profile": "envtest"},
+            }),
+            ViewKind::Detail,
+            &[],
+            20,
+            false,
+        );
+        assert_eq!(value["omitted_fields"].as_array().unwrap().len(), 0);
+        assert_eq!(value["fields"]["active_profile"], "envtest");
+        assert_eq!(value["fields"]["account_email"], "user@example.invalid");
+        assert_eq!(value["fields"]["config_home"], "/tmp/ayx");
+        // Nested values stay summarized so the compact view remains bounded.
+        assert_eq!(
+            value["fields"]["resolution"],
+            "1 field(s); use --output json-full for details"
+        );
+    }
+
+    /// An explicit field list still narrows the view.
+    #[test]
+    fn descriptor_fields_still_restrict_the_projection() {
+        let value = compact_data(
+            &json!({"status": "ok", "noise": 1, "more_noise": 2}),
+            ViewKind::Result,
+            &["status"],
+            20,
+            false,
+        );
+        assert_eq!(value["fields"]["status"], "ok");
+        assert_eq!(value["fields"].as_object().unwrap().len(), 1);
+        assert_eq!(value["omitted_fields"].as_array().unwrap().len(), 2);
     }
 }

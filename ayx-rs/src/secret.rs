@@ -6,7 +6,7 @@
 //!
 
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     fs,
     path::Path,
 };
@@ -15,7 +15,7 @@ use anyhow::{Context, Result, bail};
 use ayx_core::{
     auth::OneSecretSlot,
     profile::Config,
-    secrets::{keyring_account, resolve_secret_ref},
+    secrets::{keyring_account, resolve_secret_ref_with},
 };
 use serde::Serialize;
 
@@ -229,6 +229,7 @@ fn report_secret(
     value: Option<&str>,
     reference: Option<&str>,
     can_set_directly: bool,
+    env_files: &HashMap<String, String>,
 ) -> SlotReport {
     let slot = slot.into();
     let unavailable_remediation = if can_set_directly {
@@ -251,7 +252,7 @@ fn report_secret(
             validation: "warning",
             remediation: Some("run `ayx secret migrate` when secure storage is available"),
         },
-        Some(reference) => match resolve_secret_ref(reference) {
+        Some(reference) => match resolve_secret_ref_with(reference, env_files) {
             Ok(Some(_)) => SlotReport {
                 slot,
                 source: if reference.starts_with("keyring:") {
@@ -351,12 +352,16 @@ pub fn inspect_profile(path: &Path) -> Result<Vec<SlotReport>> {
     // profile state, which could otherwise cause a targeted mutation to write
     // credentials from another profile into this one.
     let config = Config::load_from_path_lenient_without_active_overlay(path)?;
+    // Resolve `env:` references against the same `.env` view the loader used,
+    // so a credential supplied through a `.env` file is not reported as an
+    // unresolvable reference.
+    let env_files = ayx_core::profile::env_file_values(path);
     let mut reports: Vec<_> = SLOTS
         .iter()
         .copied()
         .map(|slot| {
             let (value, reference) = source_and_values(&config, slot)?;
-            Ok(report_secret(slot.name, value, reference, true))
+            Ok(report_secret(slot.name, value, reference, true, &env_files))
         })
         .collect::<Result<_>>()?;
 
@@ -374,6 +379,7 @@ pub fn inspect_profile(path: &Path) -> Result<Vec<SlotReport>> {
                 value.as_deref(),
                 reference.as_deref(),
                 false,
+                &env_files,
             ));
         }
         for (workspace_id, credential) in &one.workspace_credentials {
@@ -387,6 +393,7 @@ pub fn inspect_profile(path: &Path) -> Result<Vec<SlotReport>> {
                     value.as_deref(),
                     reference.as_deref(),
                     false,
+                    &env_files,
                 ));
             }
         }
