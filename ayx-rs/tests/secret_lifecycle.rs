@@ -914,3 +914,63 @@ fn secret_env_template_emits_variable_names_with_empty_values() {
         );
     }
 }
+
+/// A write must record only the slot it was asked to record.
+///
+/// The read path injects an `env:NAME` reference for every credential-shaped
+/// variable that happens to be exported, so a write that started from the
+/// env-augmented view baked those ambient variables into the profile as durable
+/// configuration. From then on the credential is whatever the environment
+/// supplies — a CI runner's variables, a container image's `ENV`, or a `.env`
+/// dropped beside the profile — and `secret status` calls that healthy.
+#[test]
+fn setting_one_slot_does_not_bind_ambient_environment_variables() {
+    let home = config_home(&[(
+        "amb",
+        "profile_name: amb\n\
+         alteryx_one:\n\
+        \x20 account_email: user@example.invalid\n\
+        \x20 base_url: https://example.invalid\n",
+    )]);
+    let out = run_env(
+        &home,
+        &[
+            "secret",
+            "set",
+            "one.service-principal-client-secret",
+            "--profile",
+            "amb",
+            "--from-env",
+            "AYX_TEST_ASKED_FOR",
+        ],
+        &[
+            ("AYX_TEST_ASKED_FOR", "asked-for-value"),
+            ("AYX_ONE_API_ACCESS_TOKEN", "ambient-token-must-not-persist"),
+            ("AYX_ONE_CLIENT_SECRET", "ambient-secret-must-not-persist"),
+        ],
+    );
+    assert!(out.ok, "the write should succeed\n{}", out.combined());
+
+    let text = profile_text(&home, "amb");
+    assert!(
+        text.contains("sp_client_secret_ref: env:AYX_TEST_ASKED_FOR"),
+        "the requested slot must be recorded\n{text}"
+    );
+    for ambient in ["AYX_ONE_API_ACCESS_TOKEN", "AYX_ONE_CLIENT_SECRET"] {
+        assert!(
+            !text.contains(ambient),
+            "{ambient} was never requested and must not be persisted as a binding\n{text}"
+        );
+    }
+    // The values themselves must never land on disk either.
+    for sentinel in [
+        "ambient-token-must-not-persist",
+        "ambient-secret-must-not-persist",
+        "asked-for-value",
+    ] {
+        assert!(
+            !text.contains(sentinel),
+            "a secret value must never be written to the profile\n{text}"
+        );
+    }
+}

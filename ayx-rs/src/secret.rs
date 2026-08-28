@@ -403,7 +403,11 @@ pub fn inspect_profile(path: &Path) -> Result<Vec<SlotReport>> {
 
 pub fn set_slot(path: &Path, name: &str, input: SecretInput) -> Result<SetResult> {
     let slot = slot(name)?;
-    let mut config = Config::load_from_path_lenient_without_active_overlay(path)?;
+    // Write path: start from the file as written, never from the env-augmented
+    // read view. Loading the augmented view here persisted an `env:NAME`
+    // reference for every credential-shaped variable that happened to be
+    // exported, silently rebinding slots the caller never named.
+    let mut config = Config::load_from_path_for_write(path)?;
     match input {
         SecretInput::Environment(name) => {
             if !is_valid_env_name(&name) {

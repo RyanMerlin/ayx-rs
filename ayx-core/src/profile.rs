@@ -1136,6 +1136,43 @@ impl Config {
         Self::load_from_resolved_path_lenient_without_active_overlay(&resolved)
     }
 
+    /// Load a profile exactly as it is written on disk: no environment
+    /// fallbacks applied, no secret references resolved.
+    ///
+    /// Read paths deliberately augment the file. `apply_env_fallbacks` injects
+    /// an `env:NAME` reference for whatever the environment happens to export,
+    /// and `resolve_secret_refs` hydrates the value behind each reference. That
+    /// augmented view is correct to *use* and wrong to *persist*: writing it
+    /// back records configuration the operator never asked for, permanently
+    /// rebinding a credential to an ambient variable that happened to be set
+    /// during an unrelated command.
+    ///
+    /// A write path must start from the operator's file and change only the
+    /// field it was asked to change, so it uses this loader instead.
+    pub fn load_from_path_for_write(path: &Path) -> Result<Self, ProfileError> {
+        let resolved = resolve_profile_path(path)?;
+        let (path_str, _env_values, value) = Self::read_profile_value(&resolved)?;
+        if is_workspace_value(&value) {
+            let workspace: WorkspaceConfig =
+                serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+                    path: path_str.clone(),
+                    source,
+                })?;
+            let active = workspace.active_environment.clone();
+            workspace.environments.get(&active).cloned().ok_or_else(|| {
+                ProfileError::Invalid(format!(
+                    "workspace '{}' does not contain environment '{}'",
+                    workspace.workspace_name, active
+                ))
+            })
+        } else {
+            serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+                path: path_str,
+                source,
+            })
+        }
+    }
+
     pub fn load_from_path_with_environment_lenient(
         path: &Path,
         environment: Option<&str>,

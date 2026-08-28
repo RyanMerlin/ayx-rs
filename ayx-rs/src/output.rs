@@ -453,6 +453,14 @@ fn is_metadata_key(key: &str) -> bool {
 fn is_sensitive_value(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
     lower.starts_with("bearer ")
+        // An `inline:` reference *is* the plaintext. This is a value-level
+        // backstop for the key-level exemption in `is_metadata_key`: a field
+        // named `*_refs`/`*_source` disables key matching at any depth, and
+        // `docs/workspace-output-standard.md` actively tells contributors to
+        // name new metadata fields into that shape. Today every such emitter
+        // prints reference *names*, so nothing leaks — this keeps that true
+        // when one of them starts printing reference *values*.
+        || lower.starts_with("inline:")
         || has_populated_assignment(&lower, "password=")
         || has_populated_assignment(&lower, "pwd=")
 }
@@ -465,14 +473,23 @@ fn is_sensitive_value(value: &str) -> bool {
 /// `ayx secret env-template` output is a list of `NAME=` lines, one of which
 /// ends in `_PASSWORD`, so the whole non-secret template was replaced with
 /// `[REDACTED]`.
+///
+/// A quote is the standard *opening* delimiter of a populated value in ODBC,
+/// JDBC and `.env` syntax (`Password="hunter2"`), so it must not be read as
+/// "no value follows" — doing so silently stopped redacting the quoted form,
+/// which is the common one. The assignment is empty only when the quote closes
+/// immediately, or when the line ends, or when a field delimiter follows.
 fn has_populated_assignment(haystack: &str, needle: &str) -> bool {
     haystack.match_indices(needle).any(|(index, _)| {
-        haystack[index + needle.len()..]
-            .chars()
-            .next()
-            .is_some_and(|next| {
-                !matches!(next, '&' | ';' | ',' | '"' | '\'') && !next.is_whitespace()
-            })
+        // Padding between `=` and the value is legal in connection strings, but
+        // a line break ends the assignment — so skip blanks, not newlines.
+        let rest = haystack[index + needle.len()..].trim_start_matches([' ', '\t']);
+        let mut chars = rest.chars();
+        match chars.next() {
+            Some(quote @ ('"' | '\'')) => chars.next().is_some_and(|next| next != quote),
+            Some(next) => !matches!(next, '&' | ';' | ',' | '\n' | '\r'),
+            None => false,
+        }
     })
 }
 
@@ -587,6 +604,70 @@ mod tests {
         ] {
             assert_eq!(clean.data[key], "[REDACTED]", "{key} must stay redacted");
         }
+    }
+
+    /// Quoting is the norm for ODBC/JDBC connection strings and `.env` values,
+    /// and the value-based check is the only guard for a secret embedded in a
+    /// free-text string under a key the name-matcher does not flag (a driver
+    /// error echoing the connection string it failed on, for instance). Reading
+    /// the opening quote as "no value follows" silently stopped redacting the
+    /// most common form.
+    #[test]
+    fn quoted_password_assignments_are_still_redacted() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({
+                "double": "Server=db;User Id=sa;Password=\"hunter2\";",
+                "single": "Server=db;Password='hunter2';",
+                "mongo": "mongodb://sa:x@h/?password=\"s3cr3t\"",
+                "padded": "Server=db;Password= hunter2",
+                "pwd_quoted": "PWD='hunter2'",
+                // Still empty: the quote closes immediately, or the line ends.
+                "empty_quoted": "AYX_ONE_WS_PASSWORD=\"\"",
+                "empty_template": "AYX_ONE_WS_PASSWORD=\nAYX_SERVER_API_SECRET=",
+            }),
+        );
+        let clean = redacted_envelope(&env);
+        for key in ["double", "single", "mongo", "padded", "pwd_quoted"] {
+            assert_eq!(
+                clean.data[key], "[REDACTED]",
+                "{key} carries a populated password and must be redacted"
+            );
+        }
+        assert_ne!(
+            clean.data["empty_quoted"], "[REDACTED]",
+            "an immediately-closed quote carries no secret"
+        );
+        assert_ne!(
+            clean.data["empty_template"], "[REDACTED]",
+            "a template of empty assignments carries no secret"
+        );
+    }
+
+    /// `is_metadata_key` exempts any `*_refs`/`*_source`-shaped key from the
+    /// name-based check, at any nesting depth. No emitter prints a reference
+    /// *value* today, so nothing leaks — this pins the value-level backstop so
+    /// that stays true if one ever does.
+    #[test]
+    fn inline_references_are_redacted_even_under_an_exempt_key() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({
+                "secret_refs": ["inline:hunter2", "keyring:acct", "env:AYX_TOKEN"],
+                "client_secret_source": "inline:hunter2",
+            }),
+        );
+        let clean = redacted_envelope(&env);
+        assert_eq!(clean.data["secret_refs"][0], "[REDACTED]");
+        assert_eq!(
+            clean.data["secret_refs"][1], "keyring:acct",
+            "a keyring reference names an account and carries no secret"
+        );
+        assert_eq!(
+            clean.data["secret_refs"][2], "env:AYX_TOKEN",
+            "an env reference names a variable and carries no secret"
+        );
+        assert_eq!(clean.data["client_secret_source"], "[REDACTED]");
     }
 
     /// A descriptor with no declared fields previously projected against a
