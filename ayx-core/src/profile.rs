@@ -1388,7 +1388,7 @@ impl Config {
         if let Some(shared) = self.server_api.as_mut()
             && shared.client_secret.is_empty()
             && let Some(reference) = shared.client_secret_ref.as_deref()
-            && let Some(secret) = resolve_secret_ref_with(reference, env_files)?
+            && let Some(secret) = resolve_ref_for_load(reference, env_files)?
         {
             shared.client_secret = secret;
         }
@@ -1432,53 +1432,53 @@ impl Config {
             if one.access_token.is_none()
                 && let Some(reference) = one.access_token_ref.as_deref()
             {
-                one.access_token = resolve_secret_ref_with(reference, env_files)?;
+                one.access_token = resolve_ref_for_load(reference, env_files)?;
             }
             if one.refresh_token.is_none()
                 && let Some(reference) = one.refresh_token_ref.as_deref()
             {
-                one.refresh_token = resolve_secret_ref_with(reference, env_files)?;
+                one.refresh_token = resolve_ref_for_load(reference, env_files)?;
             }
             if one.workspace_password.is_none()
                 && let Some(reference) = one.workspace_password_ref.as_deref()
             {
-                one.workspace_password = resolve_secret_ref_with(reference, env_files)?;
+                one.workspace_password = resolve_ref_for_load(reference, env_files)?;
             }
             if one.client_secret.is_none()
                 && let Some(reference) = one.client_secret_ref.as_deref()
             {
-                one.client_secret = resolve_secret_ref_with(reference, env_files)?;
+                one.client_secret = resolve_ref_for_load(reference, env_files)?;
             }
             if one.sp_client_secret.is_none()
                 && let Some(reference) = one.sp_client_secret_ref.as_deref()
             {
-                one.sp_client_secret = resolve_secret_ref_with(reference, env_files)?;
+                one.sp_client_secret = resolve_ref_for_load(reference, env_files)?;
             }
             for credential in one.workspace_credentials.values_mut() {
                 if credential.access_token.is_none()
                     && let Some(reference) = credential.access_token_ref.as_deref()
                 {
-                    credential.access_token = resolve_secret_ref_with(reference, env_files)?;
+                    credential.access_token = resolve_ref_for_load(reference, env_files)?;
                 }
                 if credential.refresh_token.is_none()
                     && let Some(reference) = credential.refresh_token_ref.as_deref()
                 {
-                    credential.refresh_token = resolve_secret_ref_with(reference, env_files)?;
+                    credential.refresh_token = resolve_ref_for_load(reference, env_files)?;
                 }
                 if credential.workspace_password.is_none()
                     && let Some(reference) = credential.workspace_password_ref.as_deref()
                 {
-                    credential.workspace_password = resolve_secret_ref_with(reference, env_files)?;
+                    credential.workspace_password = resolve_ref_for_load(reference, env_files)?;
                 }
                 if credential.client_secret.is_none()
                     && let Some(reference) = credential.client_secret_ref.as_deref()
                 {
-                    credential.client_secret = resolve_secret_ref_with(reference, env_files)?;
+                    credential.client_secret = resolve_ref_for_load(reference, env_files)?;
                 }
                 if credential.sp_client_secret.is_none()
                     && let Some(reference) = credential.sp_client_secret_ref.as_deref()
                 {
-                    credential.sp_client_secret = resolve_secret_ref_with(reference, env_files)?;
+                    credential.sp_client_secret = resolve_ref_for_load(reference, env_files)?;
                 }
             }
             one.canonicalize();
@@ -1488,13 +1488,13 @@ impl Config {
             && api.auth.client_secret.is_none()
             && let Some(reference) = api.auth.client_secret_ref.as_deref()
         {
-            api.auth.client_secret = resolve_secret_ref_with(reference, env_files)?;
+            api.auth.client_secret = resolve_ref_for_load(reference, env_files)?;
         }
 
         if let Some(server) = self.server.as_mut()
             && server.curator_api_secret.is_empty()
             && let Some(reference) = server.curator_api_secret_ref.as_deref()
-            && let Some(secret) = resolve_secret_ref_with(reference, env_files)?
+            && let Some(secret) = resolve_ref_for_load(reference, env_files)?
         {
             server.curator_api_secret = secret;
         }
@@ -1507,7 +1507,7 @@ impl Config {
                 if conn.password.is_none()
                     && let Some(reference) = conn.password_ref.as_deref()
                 {
-                    conn.password = resolve_secret_ref_with(reference, env_files)?;
+                    conn.password = resolve_ref_for_load(reference, env_files)?;
                 }
             }
         }
@@ -1516,7 +1516,7 @@ impl Config {
             && mongo.password.is_none()
             && let Some(reference) = mongo.password_ref.as_deref()
         {
-            mongo.password = resolve_secret_ref_with(reference, env_files)?;
+            mongo.password = resolve_ref_for_load(reference, env_files)?;
         }
 
         Ok(self)
@@ -2184,6 +2184,33 @@ fn load_active_profile_one_from_state(current_path: &Path) -> Option<AlteryxOneP
             one.canonicalize();
             one
         })
+}
+
+/// Resolve a secret reference during profile load, degrading an unreadable
+/// keyring entry to "unresolved" instead of failing the load.
+///
+/// A profile that names a keyring account the OS cannot read is a condition the
+/// operator needs *reported*, not one that should make every command fail —
+/// including `ayx secret status` and `ayx doctor`, the diagnostics whose job is
+/// to report it. Which failure a host produces is platform-dependent: a machine
+/// with no store at all already yielded `Ok(None)` and degraded gracefully,
+/// while macOS with no default keychain returns a hard error, so the same
+/// profile worked on one and broke every command on the other.
+///
+/// The credential is left unset and the reference is preserved, so
+/// `secret status` reports the slot as unresolved with its remediation. Only
+/// keyring read failures degrade; a malformed reference is still an error.
+fn resolve_ref_for_load(
+    reference: &str,
+    env_files: &HashMap<String, String>,
+) -> Result<Option<String>, ProfileError> {
+    match resolve_secret_ref_with(reference, env_files) {
+        Err(err) if crate::secrets::is_keyring_storage_error(&err) => {
+            eprintln!("[ayx WARN] {err} — continuing without this credential");
+            Ok(None)
+        }
+        other => other,
+    }
 }
 
 fn merge_one_profiles(

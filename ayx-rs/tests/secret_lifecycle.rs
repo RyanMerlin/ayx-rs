@@ -1020,6 +1020,53 @@ fn secret_migrate_without_keyring_is_a_warned_no_op() {
     );
 }
 
+/// A keyring account the OS cannot read must be *reported*, not fatal.
+///
+/// `resolve_secret_refs` used to propagate the error out of profile load, so a
+/// single unreadable reference broke every command — including `secret status`,
+/// the diagnostic whose job is to report exactly this. Which failure a host
+/// produces is platform-dependent: no store at all already degraded to
+/// `Ok(None)`, while macOS with no default keychain returned a hard error, so
+/// the same profile worked on one machine and broke every command on another.
+#[test]
+fn an_unreadable_keyring_reference_is_reported_not_fatal() {
+    let home = config_home(&[(
+        "kr",
+        "profile_name: kr\n\
+         alteryx_one:\n\
+        \x20 account_email: user@example.invalid\n\
+        \x20 client_secret_ref: keyring:kr/alteryx_one.client_secret\n",
+    )]);
+
+    let out = run(
+        &home,
+        &[
+            "secret",
+            "status",
+            "--profile",
+            "kr",
+            "--output",
+            "json-full",
+        ],
+    );
+    assert!(
+        out.ok,
+        "status must still run so it can report the unreadable reference\n{}",
+        out.combined()
+    );
+
+    let entry = slot(&home, "kr", "one.client-secret");
+    assert_eq!(
+        entry["source"], "keyring",
+        "the reference form is still known"
+    );
+    assert_eq!(entry["resolved"], false, "but it did not resolve");
+    assert!(
+        entry["remediation"].is_string(),
+        "an unresolved slot should carry remediation: {entry}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // env-template
 // ---------------------------------------------------------------------------
