@@ -46,3 +46,26 @@ profile that uses that exact reference, including both `default` and
 `keyring:default/server.storage.mongo.managed.password` and
 `keyring:local-dev/server.storage.mongo.managed.password` when the profiles
 must have separate secrets.
+
+## Secret lifecycle
+
+Use named secret slots rather than arbitrary YAML paths:
+
+- `ayx secret status` shows source, presence, and resolution state without
+  returning values or reference names.
+- `ayx secret set <slot>` securely prompts and stores the value in the OS
+  keyring. `--from-stdin` is the non-interactive input path; secret values are
+  never accepted as command-line arguments.
+- `ayx secret set <slot> --from-env NAME` stores `env:NAME` without reading the
+  value. This is the preferred CI configuration; the CI provider injects `NAME`.
+- `ayx secret validate` performs offline configuration and resolution checks,
+  exits non-zero for unresolved/invalid references, and leaves live connectivity
+  to an explicit auth/network command.
+- `ayx secret unset <slot>` detaches the reference and deletes only an
+  AYX-created profile-scoped keyring account proven unreferenced by other
+  profiles. Manually shared references are detached but never deleted.
+- `ayx secret migrate` moves supported plaintext values into the secure store.
+
+Supported slots are `server.api.client-secret`, `mongo.managed.password`,
+`sql.controller.password`, `sql.server-ui.password`, `one.client-secret`, and
+`one.service-principal-client-secret`.

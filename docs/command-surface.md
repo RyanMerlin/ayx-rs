@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-08-27 22:51:48 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-08-28 17:14:17 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 378
+- Commands: 384
 - Capabilities: 6
 
 ## Commands
@@ -368,7 +368,13 @@ cargo run -q -p xtask -- refresh-command-surface
 | Name | Path | Safety | Mutating | Summary |
 | --- | --- | --- | --- | --- |
 | secret | `secret` | unclassified |  | Keyring secret inspection and maintenance |
+| secret env-template | `secret/env-template` | unclassified |  | Print a non-secret environment-variable template for automation |
+| secret migrate | `secret/migrate` | unclassified |  | Move supported plaintext profile secrets into the OS keyring |
 | secret prune | `secret/prune` | unclassified |  | Remove orphaned keyring accounts from the pre-v0.11.0 profile_name-scoped naming scheme |
+| secret set | `secret/set` | unclassified |  | Store a named secret in the OS keyring, or attach an environment reference |
+| secret status | `secret/status` | unclassified |  | Show secret source and resolution posture without returning secret values |
+| secret unset | `secret/unset` | unclassified |  | Detach a named secret and safely remove its private keyring entry |
+| secret validate | `secret/validate` | unclassified |  | Validate configured secret references without making network requests |
 
 ### `server`
 

@@ -50,6 +50,35 @@ const AYX_STYLES: Styles = Styles::styled()
     .literal(Style::new().fg_color(Some(ALTERYX_CYAN)).bold())
     .placeholder(Style::new().fg_color(Some(ALTERYX_CYAN)));
 
+/// Read automation input without accepting secrets on the process command line.
+fn read_secret_stdin() -> Result<String> {
+    use std::io::Read;
+
+    let mut value = String::new();
+    io::stdin()
+        .take(64 * 1024 + 1)
+        .read_to_string(&mut value)
+        .context("failed to read secret from standard input")?;
+    if value.len() > 64 * 1024 {
+        bail!("secret input exceeds the 64 KiB safety limit");
+    }
+    let value = value.trim_end_matches(['\r', '\n']).to_string();
+    if value.is_empty() {
+        bail!("secret input cannot be empty");
+    }
+    Ok(value)
+}
+
+/// Interactive secret entry deliberately uses the terminal's no-echo facility.
+fn read_secret_prompt(slot: &str) -> Result<String> {
+    let value = rpassword::prompt_password(format!("Secret for {slot}: "))
+        .context("failed to read secret from terminal")?;
+    if value.is_empty() {
+        bail!("secret input cannot be empty");
+    }
+    Ok(value)
+}
+
 fn decode_token_claims(access_token: &str) -> Option<Value> {
     let mut parts = access_token.split('.');
     let _header = parts.next()?;
@@ -944,6 +973,48 @@ enum ProfileCommand {
 
 #[derive(Subcommand, Debug)]
 enum SecretCommand {
+    #[command(about = "Show secret source and resolution posture without returning secret values")]
+    Status {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    #[command(about = "Validate configured secret references without making network requests")]
+    Validate {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    #[command(about = "Store a named secret in the OS keyring, or attach an environment reference")]
+    Set {
+        #[arg(value_name = "SLOT")]
+        slot: String,
+        #[arg(long)]
+        profile: Option<String>,
+        /// Read the secret from standard input. Never pass secret values as command arguments.
+        #[arg(long, conflicts_with = "from_env")]
+        from_stdin: bool,
+        /// Persist env:NAME without reading or storing the environment value.
+        #[arg(long, value_name = "NAME", conflicts_with = "from_stdin")]
+        from_env: Option<String>,
+    },
+    #[command(about = "Detach a named secret and safely remove its private keyring entry")]
+    Unset {
+        #[arg(value_name = "SLOT")]
+        slot: String,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    #[command(about = "Move supported plaintext profile secrets into the OS keyring")]
+    Migrate {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    #[command(about = "Print a non-secret environment-variable template for automation")]
+    EnvTemplate {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long, default_value = "dotenv", value_parser = ["dotenv", "json"])]
+        format: String,
+    },
     #[command(
         about = "Remove orphaned keyring accounts from the pre-v0.11.0 profile_name-scoped naming scheme",
         long_about = "Identifies keyring accounts written by ayx < v0.11.0 where the \
@@ -4425,6 +4496,102 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
             }
         },
         Command::Secret { command } => match command {
+            SecretCommand::Status { profile } => {
+                let resolution = resolve_runtime_profile(profile.as_deref())?;
+                let report = secret::inspect_profile(Path::new(&resolution.resolved_profile_path))?;
+                Envelope::ok_with_data(
+                    "secret status",
+                    json!({ "profile": resolution.selected_profile, "slots": report }),
+                )
+            }
+            SecretCommand::Validate { profile } => {
+                let resolution = resolve_runtime_profile(profile.as_deref())?;
+                let report = secret::inspect_profile(Path::new(&resolution.resolved_profile_path))?;
+                let failures = report
+                    .iter()
+                    .filter(|entry| entry.validation == "error")
+                    .count();
+                let warnings = report
+                    .iter()
+                    .filter(|entry| entry.validation == "warning")
+                    .count();
+                if failures > 0 {
+                    bail!(
+                        "secret validation failed: {failures} unresolved or invalid reference(s); run `ayx secret status` for remediation"
+                    );
+                }
+                let status = if warnings > 0 { "warning" } else { "passed" };
+                Envelope::ok_with_data(
+                    "secret validation completed",
+                    json!({
+                        "profile": resolution.selected_profile,
+                        "status": status,
+                        "failures": failures,
+                        "warnings": warnings,
+                        "slots": report,
+                        "network_checked": false,
+                    }),
+                )
+            }
+            SecretCommand::Set {
+                slot,
+                profile,
+                from_stdin,
+                from_env,
+            } => {
+                let resolution = resolve_runtime_profile(profile.as_deref())?;
+                let input = match (from_stdin, from_env) {
+                    (true, _) => secret::SecretInput::Stdin(read_secret_stdin()?),
+                    (false, Some(name)) => secret::SecretInput::Environment(name),
+                    (false, None) if cli.no_input => {
+                        bail!(
+                            "`--no-input` requires `--from-stdin` or `--from-env NAME` for `ayx secret set`"
+                        );
+                    }
+                    (false, None) => secret::SecretInput::Prompt(read_secret_prompt(&slot)?),
+                };
+                let result =
+                    secret::set_slot(Path::new(&resolution.resolved_profile_path), &slot, input)?;
+                Envelope::ok_with_data(
+                    "secret stored",
+                    json!({ "profile": resolution.selected_profile, "slot": result.slot, "source": result.source, "reference_changed": true }),
+                )
+            }
+            SecretCommand::Unset { slot, profile } => {
+                let resolution = resolve_runtime_profile(profile.as_deref())?;
+                let result = secret::unset_slot(
+                    Path::new(&resolution.resolved_profile_path),
+                    &slot,
+                    &ayx_profiles_dir()?,
+                )?;
+                Envelope::ok_with_data(
+                    "secret removed",
+                    json!({ "profile": resolution.selected_profile, "slot": result.slot, "keyring_entry_deleted": result.keyring_entry_deleted }),
+                )
+            }
+            SecretCommand::Migrate { profile } => {
+                let resolution = resolve_runtime_profile(profile.as_deref())?;
+                let output = secret::migrate_profile(Path::new(&resolution.resolved_profile_path))?;
+                Envelope::ok_with_data(
+                    "secret migration completed",
+                    json!({ "profile": resolution.selected_profile, "migrated_slots": output }),
+                )
+            }
+            SecretCommand::EnvTemplate { profile, format } => {
+                let resolution = resolve_runtime_profile(profile.as_deref())?;
+                let template = secret::env_template(Path::new(&resolution.resolved_profile_path))?;
+                if format == "json" {
+                    Envelope::ok_with_data(
+                        "secret environment template",
+                        json!({ "profile": resolution.selected_profile, "variables": template }),
+                    )
+                } else {
+                    Envelope::ok_with_data(
+                        "secret environment template",
+                        json!({ "profile": resolution.selected_profile, "format": "dotenv", "content": template.iter().map(|name| format!("{name}=")).collect::<Vec<_>>().join("\n") }),
+                    )
+                }
+            }
             SecretCommand::Prune { profile, apply } => {
                 let config_home = ayx_config_home().map_err(|e| anyhow::anyhow!("{}", e))?;
                 let profile_filter = profile.as_deref();
@@ -4910,6 +5077,15 @@ fn doctor_config_envelope(profile: Option<&str>, fix: bool) -> Result<Envelope> 
     };
     let (status, summary) =
         doctor_config_status_summary(&resolution.selected_profile, shape, &inline_risks);
+    let secret_posture = secret::inspect_profile(Path::new(&resolution.resolved_profile_path))
+        .map(|slots| json!({ "available": true, "slots": slots }))
+        .unwrap_or_else(|_| {
+            json!({
+                "available": false,
+                "status": "unavailable",
+                "hint": "run `ayx secret validate` for reference remediation"
+            })
+        });
     Ok(Envelope::ok_with_data(
         "doctor config completed",
         json!({
@@ -4920,6 +5096,7 @@ fn doctor_config_envelope(profile: Option<&str>, fix: bool) -> Result<Envelope> 
             "resolution": resolution,
             "shape": shape,
             "inline_secret_risks": inline_risks,
+            "secret_posture": secret_posture,
             "fix_applied": fix,
             "status": status,
             "summary": summary,
@@ -4951,6 +5128,15 @@ pub(crate) fn doctor_config_envelope_from_path(profile: &Path, fix: bool) -> Res
         .and_then(|value| value.to_str())
         .unwrap_or("profile");
     let (status, summary) = doctor_config_status_summary(label, shape, &inline_risks);
+    let secret_posture = secret::inspect_profile(profile)
+        .map(|slots| json!({ "available": true, "slots": slots }))
+        .unwrap_or_else(|_| {
+            json!({
+                "available": false,
+                "status": "unavailable",
+                "hint": "run `ayx secret validate` for reference remediation"
+            })
+        });
     Ok(Envelope::ok_with_data(
         "doctor config completed",
         json!({
@@ -4961,6 +5147,7 @@ pub(crate) fn doctor_config_envelope_from_path(profile: &Path, fix: bool) -> Res
             "resolution": resolution,
             "shape": shape,
             "inline_secret_risks": inline_risks,
+            "secret_posture": secret_posture,
             "fix_applied": fix,
             "status": status,
             "summary": summary,

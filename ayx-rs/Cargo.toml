@@ -37,6 +37,7 @@ self_update.workspace = true
 tokio.workspace = true
 base64.workspace = true
 keyring-core.workspace = true
+rpassword = "7.5.4"
 
 [dev-dependencies]
 tempfile.workspace = true

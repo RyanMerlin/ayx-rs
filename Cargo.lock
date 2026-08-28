@@ -422,6 +422,7 @@ dependencies = [
  "regex",
  "reqwest",
  "roxmltree",
+ "rpassword",
  "self_update",
  "serde",
  "serde_json",

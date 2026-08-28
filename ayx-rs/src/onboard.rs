@@ -17,7 +17,8 @@ use ayx_core::profile::{
 };
 use ayx_core::secrets::{
     KeyringTransaction, bound_keyring_account_in_namespace, delete_keyring_secret, keyring_account,
-    recover_keyring_transaction_locked, resolve_secret_ref, store_secret_with_fallback,
+    recover_keyring_transaction_locked, resolve_secret_ref, store_keyring_secret,
+    store_secret_with_fallback,
 };
 use ayx_core::sensitive::{SensitiveFileLock, write_sensitive_file};
 use ayx_server::util::runtime_settings_summary;
@@ -1529,6 +1530,45 @@ pub(crate) fn write_config_with_policy_and_delete_keyring_accounts(
         None,
         delete_accounts,
     )
+}
+
+/// Persist an already-prepared profile without relocating any unrelated inline
+/// values. The optional keyring write and requested deletions share the same
+/// journal as the profile replacement, so a failed profile commit restores the
+/// keyring pre-images. This is the narrow write path for `ayx secret set` and
+/// `unset`; bulk plaintext migration intentionally uses `write_config_with_policy`.
+pub(crate) fn write_config_exact(
+    path: &Path,
+    config: &Config,
+    keyring_write: Option<(&str, &str)>,
+    delete_accounts: &BTreeSet<String>,
+) -> Result<()> {
+    let lock = SensitiveFileLock::acquire(path).map_err(anyhow::Error::from)?;
+    recover_keyring_transaction_locked(path, &lock).map_err(anyhow::Error::from)?;
+    let transaction = KeyringTransaction::begin(&lock);
+
+    let operation = || -> Result<()> {
+        if let Some((account, secret)) = keyring_write {
+            let previous = resolve_secret_ref(&format!("keyring:{account}"))?;
+            transaction.record_change(account, previous)?;
+            store_keyring_secret(account, secret)?;
+        }
+        delete_keyring_accounts(&transaction, delete_accounts)?;
+        detect_secret_conflict(config).map_err(anyhow::Error::from)?;
+        let canonical = canonical_profile_value(config)?;
+        let body = serde_yaml::to_string(&canonical)?;
+        transaction.set_target_digest(body.as_bytes())?;
+        lock.write(body.as_bytes()).map_err(anyhow::Error::from)?;
+        Ok(())
+    };
+
+    if let Err(err) = operation() {
+        if let Err(rollback) = transaction.rollback_and_abort() {
+            return Err(anyhow::anyhow!("{err}; {rollback}"));
+        }
+        return Err(err);
+    }
+    transaction.commit().map_err(anyhow::Error::from)
 }
 
 fn write_config_with_binding_for_rollout_and_delete_keyring_accounts(

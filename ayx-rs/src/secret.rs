@@ -5,10 +5,400 @@
 //! on-disk file stem.  When these differ, old accounts become orphaned.
 //!
 
-use std::{collections::HashSet, fs, path::Path};
+use std::{
+    collections::{BTreeSet, HashSet},
+    fs,
+    path::Path,
+};
 
-use anyhow::Result;
-use ayx_core::{auth::OneSecretSlot, secrets::keyring_account};
+use anyhow::{Context, Result, bail};
+use ayx_core::{
+    auth::OneSecretSlot,
+    profile::Config,
+    secrets::{keyring_account, resolve_secret_ref},
+};
+use serde::Serialize;
+
+use crate::onboard::{self, InlineSecretPolicy};
+
+/// Stable, user-facing names for secrets AYX can manage without interpreting
+/// arbitrary YAML paths. The canonical field matches the existing keyring
+/// naming contract used by `secretize_config`.
+#[derive(Debug, Clone, Copy)]
+struct SecretSlot {
+    name: &'static str,
+    field: &'static str,
+    env: &'static str,
+}
+
+const SLOTS: &[SecretSlot] = &[
+    SecretSlot {
+        name: "server.api.client-secret",
+        field: "server.api.client_secret",
+        env: "AYX_SERVER_API_CLIENT_SECRET",
+    },
+    SecretSlot {
+        name: "mongo.managed.password",
+        field: "server.storage.mongo.managed.password",
+        env: "AYX_MONGO_MANAGED_PASSWORD",
+    },
+    SecretSlot {
+        name: "sql.controller.password",
+        field: "server.storage.sqlserver.controller.password",
+        env: "AYX_SQL_CONTROLLER_PASSWORD",
+    },
+    SecretSlot {
+        name: "sql.server-ui.password",
+        field: "server.storage.sqlserver.server_ui.password",
+        env: "AYX_SQL_SERVER_UI_PASSWORD",
+    },
+    SecretSlot {
+        name: "one.client-secret",
+        field: "alteryx_one.client_secret",
+        env: "AYX_ONE_CLIENT_SECRET",
+    },
+    SecretSlot {
+        name: "one.service-principal-client-secret",
+        field: "alteryx_one.sp_client_secret",
+        env: "AYX_ONE_SP_CLIENT_SECRET",
+    },
+];
+
+#[derive(Debug, Serialize)]
+pub struct SlotReport {
+    pub slot: &'static str,
+    pub source: &'static str,
+    pub configured: bool,
+    pub resolved: bool,
+    pub validation: &'static str,
+    pub remediation: Option<&'static str>,
+}
+
+pub enum SecretInput {
+    Prompt(String),
+    Stdin(String),
+    Environment(String),
+}
+
+pub struct SetResult {
+    pub slot: &'static str,
+    pub source: &'static str,
+}
+
+pub struct UnsetResult {
+    pub slot: &'static str,
+    pub keyring_entry_deleted: bool,
+}
+
+fn slot(name: &str) -> Result<SecretSlot> {
+    SLOTS
+        .iter()
+        .copied()
+        .find(|candidate| candidate.name == name)
+        .with_context(|| {
+            format!(
+                "unknown secret slot '{name}'; use one of: {}",
+                SLOTS
+                    .iter()
+                    .map(|slot| slot.name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
+}
+
+fn source_and_values(config: &Config, slot: SecretSlot) -> Result<(Option<&str>, Option<&str>)> {
+    match slot.name {
+        "server.api.client-secret" => {
+            if let Some(server_api) = config.server_api.as_ref() {
+                Ok((
+                    Some(server_api.client_secret.as_str()).filter(|v| !v.is_empty()),
+                    server_api.client_secret_ref.as_deref(),
+                ))
+            } else if let Some(server) = config.server.as_ref() {
+                Ok((
+                    Some(server.curator_api_secret.as_str()).filter(|v| !v.is_empty()),
+                    server.curator_api_secret_ref.as_deref(),
+                ))
+            } else {
+                Ok((None, None))
+            }
+        }
+        "mongo.managed.password" => {
+            Ok(config.mongo.managed.as_ref().map_or((None, None), |mongo| {
+                (mongo.password.as_deref(), mongo.password_ref.as_deref())
+            }))
+        }
+        "sql.controller.password" => Ok(config
+            .sqlserver
+            .as_ref()
+            .and_then(|sql| sql.controller.as_ref())
+            .map_or((None, None), |connection| {
+                (
+                    connection.password.as_deref(),
+                    connection.password_ref.as_deref(),
+                )
+            })),
+        "sql.server-ui.password" => Ok(config
+            .sqlserver
+            .as_ref()
+            .and_then(|sql| sql.server_ui.as_ref())
+            .map_or((None, None), |connection| {
+                (
+                    connection.password.as_deref(),
+                    connection.password_ref.as_deref(),
+                )
+            })),
+        "one.client-secret" => Ok(config.alteryx_one.as_ref().map_or((None, None), |one| {
+            (
+                one.client_secret.as_deref(),
+                one.client_secret_ref.as_deref(),
+            )
+        })),
+        "one.service-principal-client-secret" => {
+            Ok(config.alteryx_one.as_ref().map_or((None, None), |one| {
+                (
+                    one.sp_client_secret.as_deref(),
+                    one.sp_client_secret_ref.as_deref(),
+                )
+            }))
+        }
+        _ => unreachable!("slot registry is exhaustive"),
+    }
+}
+
+fn set_value(
+    config: &mut Config,
+    slot: SecretSlot,
+    value: Option<String>,
+    reference: Option<String>,
+) -> Result<()> {
+    match slot.name {
+        "server.api.client-secret" => {
+            if let Some(server_api) = config.server_api.as_mut() {
+                server_api.client_secret = value.unwrap_or_default();
+                server_api.client_secret_ref = reference;
+            } else if let Some(server) = config.server.as_ref() {
+                config.server_api = Some(ayx_core::profile::ServerApiProfile {
+                    base_url: server.webapi_url.clone(),
+                    client_id: server.curator_api_key.clone(),
+                    client_secret: value.unwrap_or_default(),
+                    client_secret_ref: reference,
+                });
+            } else {
+                bail!(
+                    "{} requires server_api or server configuration; run `ayx onboard` first",
+                    slot.name
+                );
+            }
+        }
+        "mongo.managed.password" => {
+            let mongo = config.mongo.managed.as_mut().context("mongo.managed.password requires managed Mongo configuration; run `ayx onboard` first")?;
+            mongo.password = value;
+            mongo.password_ref = reference;
+        }
+        "sql.controller.password" => {
+            let connection = config.sqlserver.as_mut().and_then(|sql| sql.controller.as_mut()).context("sql.controller.password requires SQL controller configuration; run `ayx onboard` first")?;
+            connection.password = value;
+            connection.password_ref = reference;
+        }
+        "sql.server-ui.password" => {
+            let connection = config.sqlserver.as_mut().and_then(|sql| sql.server_ui.as_mut()).context("sql.server-ui.password requires SQL Server UI configuration; run `ayx onboard` first")?;
+            connection.password = value;
+            connection.password_ref = reference;
+        }
+        "one.client-secret" => {
+            let one = config.alteryx_one.as_mut().context(
+                "one.client-secret requires Alteryx One configuration; run `ayx onboard` first",
+            )?;
+            one.client_secret = value;
+            one.client_secret_ref = reference;
+        }
+        "one.service-principal-client-secret" => {
+            let one = config.alteryx_one.as_mut().context("one.service-principal-client-secret requires Alteryx One configuration; run `ayx onboard` first")?;
+            one.sp_client_secret = value;
+            one.sp_client_secret_ref = reference;
+        }
+        _ => unreachable!("slot registry is exhaustive"),
+    }
+    Ok(())
+}
+
+pub fn inspect_profile(path: &Path) -> Result<Vec<SlotReport>> {
+    // Secret maintenance edits the selected file only. Do not overlay active
+    // profile state, which could otherwise cause a targeted mutation to write
+    // credentials from another profile into this one.
+    let config = Config::load_from_path_lenient_without_active_overlay(path)?;
+    SLOTS
+        .iter()
+        .copied()
+        .map(|slot| {
+            let (value, reference) = source_and_values(&config, slot)?;
+            let report = match reference {
+                Some(reference) if reference.starts_with("inline:") => SlotReport {
+                    slot: slot.name,
+                    source: "inline",
+                    configured: true,
+                    resolved: true,
+                    validation: "warning",
+                    remediation: Some("run `ayx secret migrate` when secure storage is available"),
+                },
+                Some(reference) => match resolve_secret_ref(reference) {
+                    Ok(Some(_)) => SlotReport {
+                        slot: slot.name,
+                        source: if reference.starts_with("keyring:") {
+                            "keyring"
+                        } else if reference.starts_with("env:") {
+                            "env"
+                        } else {
+                            "reference"
+                        },
+                        configured: true,
+                        resolved: true,
+                        validation: "passed",
+                        remediation: None,
+                    },
+                    Ok(None) => SlotReport {
+                        slot: slot.name,
+                        source: if reference.starts_with("keyring:") {
+                            "keyring"
+                        } else if reference.starts_with("env:") {
+                            "env"
+                        } else {
+                            "reference"
+                        },
+                        configured: true,
+                        resolved: false,
+                        validation: "error",
+                        remediation: Some(
+                            "set the referenced secret, or run `ayx secret set <slot>`",
+                        ),
+                    },
+                    Err(_) => SlotReport {
+                        slot: slot.name,
+                        source: "invalid_reference",
+                        configured: true,
+                        resolved: false,
+                        validation: "error",
+                        remediation: Some(
+                            "use keyring:<account>, env:<variable>, or run `ayx secret set <slot>`",
+                        ),
+                    },
+                },
+                None if value.is_some_and(|value| !value.is_empty()) => SlotReport {
+                    slot: slot.name,
+                    source: "plaintext",
+                    configured: true,
+                    resolved: true,
+                    validation: "warning",
+                    remediation: Some(
+                        "run `ayx secret migrate` to move this value into the OS keyring",
+                    ),
+                },
+                None => SlotReport {
+                    slot: slot.name,
+                    source: "missing",
+                    configured: false,
+                    resolved: false,
+                    validation: "not_configured",
+                    remediation: None,
+                },
+            };
+            Ok(report)
+        })
+        .collect()
+}
+
+pub fn set_slot(path: &Path, name: &str, input: SecretInput) -> Result<SetResult> {
+    let slot = slot(name)?;
+    let mut config = Config::load_from_path_lenient_without_active_overlay(path)?;
+    match input {
+        SecretInput::Environment(name) => {
+            if !is_valid_env_name(&name) {
+                bail!(
+                    "invalid environment variable name '{name}'; use letters, digits, and underscores, beginning with a letter or underscore"
+                );
+            }
+            set_value(&mut config, slot, None, Some(format!("env:{name}")))?;
+            onboard::write_config_exact(path, &config, None, &BTreeSet::new())?;
+            Ok(SetResult {
+                slot: slot.name,
+                source: "env",
+            })
+        }
+        SecretInput::Prompt(value) | SecretInput::Stdin(value) => {
+            if value.is_empty() {
+                bail!("secret input cannot be empty");
+            }
+            let profile_stem = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or(&config.profile_name);
+            let account = keyring_account(profile_stem, slot.field);
+            set_value(&mut config, slot, None, Some(format!("keyring:{account}")))?;
+            onboard::write_config_exact(path, &config, Some((&account, &value)), &BTreeSet::new())?;
+            Ok(SetResult {
+                slot: slot.name,
+                source: "keyring",
+            })
+        }
+    }
+}
+
+pub fn unset_slot(path: &Path, name: &str, profiles_dir: &Path) -> Result<UnsetResult> {
+    let slot = slot(name)?;
+    let mut config = Config::load_from_path_lenient_without_active_overlay(path)?;
+    let (_, existing_ref) = source_and_values(&config, slot)?;
+    let profile_stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(&config.profile_name);
+    let private_account = keyring_account(profile_stem, slot.field);
+    let delete_accounts = if existing_ref == Some(format!("keyring:{private_account}").as_str()) {
+        let candidates = HashSet::from([private_account.clone()]);
+        unreferenced_keyring_accounts_excluding_profile(profiles_dir, path, &candidates)?
+            .into_iter()
+            .collect()
+    } else {
+        BTreeSet::new()
+    };
+    set_value(&mut config, slot, None, None)?;
+    onboard::write_config_exact(path, &config, None, &delete_accounts)?;
+    Ok(UnsetResult {
+        slot: slot.name,
+        keyring_entry_deleted: !delete_accounts.is_empty(),
+    })
+}
+
+fn is_valid_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(character) if character.is_ascii_alphabetic() || character == '_')
+        && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
+}
+
+pub fn migrate_profile(path: &Path) -> Result<Vec<&'static str>> {
+    let config = Config::load_from_path_lenient_without_active_overlay(path)?;
+    let migrate: Vec<_> = SLOTS
+        .iter()
+        .copied()
+        .filter_map(|slot| {
+            source_and_values(&config, slot)
+                .ok()
+                .and_then(|(value, reference)| {
+                    (value.is_some_and(|value| !value.is_empty()) && reference.is_none())
+                        .then_some(slot.name)
+                })
+        })
+        .collect();
+    if !migrate.is_empty() {
+        onboard::write_config_with_policy(path, &config, InlineSecretPolicy::Forbid)?;
+    }
+    Ok(migrate)
+}
+
+pub fn env_template(_path: &Path) -> Result<Vec<&'static str>> {
+    Ok(SLOTS.iter().map(|slot| slot.env).collect())
+}
 
 /// Secretizable fields that `secretize_config` may write for a given scope.
 /// Dynamic workspace-credential fields are derived at runtime from the profile
@@ -309,6 +699,122 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_slots_are_stable_and_reject_yaml_paths() {
+        assert_eq!(
+            slot("mongo.managed.password").unwrap().env,
+            "AYX_MONGO_MANAGED_PASSWORD"
+        );
+        assert!(slot("mongo.managed.password_ref").is_err());
+    }
+
+    #[test]
+    fn automation_template_never_contains_secret_values() {
+        let template = env_template(Path::new("profile.yaml")).unwrap();
+        assert!(template.contains(&"AYX_ONE_CLIENT_SECRET"));
+        assert!(template.iter().all(|entry| entry.starts_with("AYX_")));
+    }
+
+    #[test]
+    fn environment_names_are_safe_and_portable() {
+        assert!(is_valid_env_name("AYX_SERVER_SECRET"));
+        assert!(is_valid_env_name("_AYX_SECRET_2"));
+        assert!(!is_valid_env_name("2AYX_SECRET"));
+        assert!(!is_valid_env_name("AYX-SECRET"));
+        assert!(!is_valid_env_name("AYX_SECRET=bad"));
+    }
+
+    #[test]
+    fn set_stores_only_a_keyring_reference_in_the_profile() {
+        ayx_core::secrets::install_test_keyring_store();
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("demo.yaml");
+        let mut config = crate::onboard::default_config();
+        config.server = Some(ayx_core::profile::ServerProfile {
+            webapi_url: "https://server.example.test".to_string(),
+            curator_api_key: "client".to_string(),
+            curator_api_secret: String::new(),
+            curator_api_secret_ref: None,
+            verify_tls: Some(true),
+            derived: false,
+        });
+        crate::onboard::write_config_with_policy(&path, &config, InlineSecretPolicy::Forbid)
+            .unwrap();
+
+        set_slot(
+            &path,
+            "server.api.client-secret",
+            SecretInput::Stdin("not-in-yaml".to_string()),
+        )
+        .unwrap();
+
+        let profile = fs::read_to_string(&path).unwrap();
+        assert!(!profile.contains("not-in-yaml"));
+        assert!(profile.contains("keyring:demo/server.api.client_secret"));
+        let report = inspect_profile(&path).unwrap();
+        assert!(report.iter().any(|entry| {
+            entry.slot == "server.api.client-secret"
+                && entry.source == "keyring"
+                && entry.validation == "passed"
+        }));
+    }
+
+    #[test]
+    fn unset_does_not_delete_an_external_or_shared_reference() {
+        let temp = tempfile::tempdir().unwrap();
+        let profiles = temp.path().join("profiles");
+        fs::create_dir_all(&profiles).unwrap();
+        let path = profiles.join("demo.yaml");
+        let mut config = crate::onboard::default_config();
+        config.server = Some(ayx_core::profile::ServerProfile {
+            webapi_url: "https://server.example.test".to_string(),
+            curator_api_key: "client".to_string(),
+            curator_api_secret: String::new(),
+            curator_api_secret_ref: Some("env:AYX_SHARED_SERVER_SECRET".to_string()),
+            verify_tls: Some(true),
+            derived: false,
+        });
+        crate::onboard::write_config_with_policy(&path, &config, InlineSecretPolicy::Forbid)
+            .unwrap();
+
+        let result = unset_slot(&path, "server.api.client-secret", &profiles).unwrap();
+        assert!(!result.keyring_entry_deleted);
+        let profile = fs::read_to_string(&path).unwrap();
+        assert!(!profile.contains("AYX_SHARED_SERVER_SECRET"));
+    }
+
+    #[test]
+    fn set_does_not_migrate_unrelated_plaintext_fields() {
+        ayx_core::secrets::install_test_keyring_store();
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("demo.yaml");
+        let mut config = crate::onboard::default_config();
+        config.server = Some(ayx_core::profile::ServerProfile {
+            webapi_url: "https://server.example.test".to_string(),
+            curator_api_key: "client".to_string(),
+            curator_api_secret: String::new(),
+            curator_api_secret_ref: None,
+            verify_tls: Some(true),
+            derived: false,
+        });
+        config.mongo.managed = Some(ayx_core::profile::MongoManaged {
+            password: Some("unrelated-plaintext".to_string()),
+            ..Default::default()
+        });
+        crate::onboard::write_config_exact(&path, &config, None, &BTreeSet::new()).unwrap();
+
+        set_slot(
+            &path,
+            "server.api.client-secret",
+            SecretInput::Stdin("new-server-secret".to_string()),
+        )
+        .unwrap();
+
+        let profile = fs::read_to_string(&path).unwrap();
+        assert!(profile.contains("password: unrelated-plaintext"));
+        assert!(!profile.contains("keyring:demo/server.storage.mongo.managed.password"));
+    }
 
     #[test]
     fn static_fields_count() {
