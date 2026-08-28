@@ -1067,6 +1067,83 @@ fn an_unreadable_keyring_reference_is_reported_not_fatal() {
     );
 }
 
+/// Writing one slot must not persist any *other* credential as plaintext.
+///
+/// Loading a profile hydrates every reference into its value field so the
+/// credential can be used. Those fields are serializable, so a write-back used
+/// to persist the resolved plaintext beside the reference it came from — a
+/// keyring- or env-backed secret became cleartext on disk purely as a side
+/// effect of touching an unrelated slot.
+#[test]
+fn writing_one_slot_does_not_persist_other_resolved_secrets() {
+    let home = config_home(&[(
+        "leak",
+        "profile_name: leak\n\
+         alteryx_one:\n\
+        \x20 account_email: user@example.invalid\n\
+        \x20 access_token_ref: env:AYX_TEST_LEAK_TOKEN\n",
+    )]);
+    let out = run_env(
+        &home,
+        &[
+            "secret",
+            "set",
+            "one.client-secret",
+            "--profile",
+            "leak",
+            "--from-env",
+            "AYX_TEST_SOME_OTHER_VAR",
+        ],
+        &[("AYX_TEST_LEAK_TOKEN", "leaked-token-sentinel-4f2a")],
+    );
+    assert!(out.ok, "set should succeed\n{}", out.combined());
+    out.assert_absent("leaked-token-sentinel-4f2a", "an unrelated resolved secret");
+
+    let yaml = profile_text(&home, "leak");
+    assert!(
+        !yaml.contains("leaked-token-sentinel-4f2a"),
+        "the resolved value of an unrelated reference must not be persisted\n{yaml}"
+    );
+    assert!(
+        yaml.contains("access_token_ref: env:AYX_TEST_LEAK_TOKEN"),
+        "the reference itself must survive\n{yaml}"
+    );
+}
+
+/// An `inline:` reference *is* the plaintext, so the diagnostics must say so.
+///
+/// `doctor config` scanned for bare `client_secret:` style fields and therefore
+/// reported "no inline secrets" for a profile whose credentials were entirely
+/// cleartext — which is exactly the state the keyring-unavailable bootstrap
+/// path produces.
+#[test]
+fn doctor_flags_plaintext_held_in_an_inline_reference() {
+    let home = config_home(&[(
+        "inl",
+        "profile_name: inl\n\
+         alteryx_one:\n\
+        \x20 account_email: user@example.invalid\n\
+        \x20 client_secret_ref: inline:plaintext-in-a-ref-8b3c\n",
+    )]);
+    let used = run(&home, &["profile", "use", "inl"]);
+    assert!(used.ok, "profile use should succeed\n{}", used.combined());
+
+    let out = run(&home, &["doctor", "config", "--output", "json-full"]);
+    assert!(out.ok, "doctor should run\n{}", out.combined());
+    out.assert_absent("plaintext-in-a-ref-8b3c", "the secret value");
+
+    let json = out.json();
+    assert_eq!(
+        json["data"]["status"], "warn",
+        "an inline secret is a warning"
+    );
+    let risks = json["data"]["inline_secret_risks"].to_string();
+    assert!(
+        risks.contains("client_secret"),
+        "the risk list should name the field: {risks}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // env-template
 // ---------------------------------------------------------------------------

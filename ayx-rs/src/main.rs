@@ -5643,6 +5643,27 @@ fn collect_inline_secret_warnings(raw: &str) -> Vec<String> {
             ));
         }
     }
+
+    // An `inline:` reference *is* the plaintext — `store_secret_with_fallback`
+    // returns `inline:<secret>` verbatim. The bare-field scan above misses it,
+    // because the line reads `client_secret_ref: inline:...`, not
+    // `client_secret:`. Without this, `doctor config` reported "no inline
+    // secrets" for a profile whose credentials were entirely cleartext, which
+    // is exactly the state the keyring-unavailable bootstrap path produces.
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        let Some((field, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        if value.trim_start().starts_with("inline:") {
+            warnings.push(format!(
+                "inline secret detected for {}",
+                field.trim().trim_end_matches("_ref")
+            ));
+        }
+    }
+    warnings.sort();
+    warnings.dedup();
     warnings
 }
 

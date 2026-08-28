@@ -2497,7 +2497,100 @@ fn normalize_canonical_server_block(
     Ok(serde_yaml::Value::Mapping(merged))
 }
 
+/// Drop credential values that a `_ref` already accounts for, before the
+/// profile is serialized.
+///
+/// Loading a profile *hydrates* every `keyring:`/`env:`/`inline:` reference into
+/// its plaintext value field so the rest of the process can use the credential
+/// (`resolve_secret_refs`). Those value fields are serializable, so any command
+/// that loads a profile and writes it back — `ayx secret set`, `ayx secret
+/// unset`, and anything else round-tripping through `write_config_exact` — used
+/// to persist the resolved plaintext next to the reference it came from. A
+/// keyring- or env-backed credential silently became cleartext on disk as a
+/// side effect of touching an unrelated slot.
+///
+/// This is the exact inverse of `resolve_secret_refs`: wherever a reference is
+/// present, the in-memory value belongs to that reference and must not be
+/// written. Values with no reference are genuine plaintext the user put there
+/// and are preserved.
+fn strip_values_covered_by_refs(config: &Config) -> Config {
+    fn clear(value: &mut Option<String>, reference: Option<&String>) {
+        if reference.is_some_and(|r| !r.trim().is_empty()) {
+            *value = None;
+        }
+    }
+
+    let mut config = config.clone();
+    if let Some(one) = config.alteryx_one.as_mut() {
+        clear(&mut one.access_token, one.access_token_ref.as_ref());
+        clear(&mut one.refresh_token, one.refresh_token_ref.as_ref());
+        clear(
+            &mut one.workspace_password,
+            one.workspace_password_ref.as_ref(),
+        );
+        clear(&mut one.client_secret, one.client_secret_ref.as_ref());
+        clear(&mut one.sp_client_secret, one.sp_client_secret_ref.as_ref());
+        for credential in one.workspace_credentials.values_mut() {
+            clear(
+                &mut credential.access_token,
+                credential.access_token_ref.as_ref(),
+            );
+            clear(
+                &mut credential.refresh_token,
+                credential.refresh_token_ref.as_ref(),
+            );
+            clear(
+                &mut credential.workspace_password,
+                credential.workspace_password_ref.as_ref(),
+            );
+            clear(
+                &mut credential.client_secret,
+                credential.client_secret_ref.as_ref(),
+            );
+            clear(
+                &mut credential.sp_client_secret,
+                credential.sp_client_secret_ref.as_ref(),
+            );
+        }
+    }
+    if let Some(api) = config.api.as_mut() {
+        clear(
+            &mut api.auth.client_secret,
+            api.auth.client_secret_ref.as_ref(),
+        );
+    }
+    if let Some(server) = config.server.as_mut()
+        && server
+            .curator_api_secret_ref
+            .as_ref()
+            .is_some_and(|r| !r.trim().is_empty())
+    {
+        server.curator_api_secret = String::new();
+    }
+    if let Some(server_api) = config.server_api.as_mut()
+        && server_api
+            .client_secret_ref
+            .as_ref()
+            .is_some_and(|r| !r.trim().is_empty())
+    {
+        server_api.client_secret = String::new();
+    }
+    if let Some(sqlserver) = config.sqlserver.as_mut() {
+        for conn in [sqlserver.controller.as_mut(), sqlserver.server_ui.as_mut()]
+            .into_iter()
+            .flatten()
+        {
+            clear(&mut conn.password, conn.password_ref.as_ref());
+        }
+    }
+    if let Some(mongo) = config.mongo.managed.as_mut() {
+        clear(&mut mongo.password, mongo.password_ref.as_ref());
+    }
+    config
+}
+
 pub fn canonical_profile_value(config: &Config) -> Result<serde_yaml::Value, ProfileError> {
+    let config = &strip_values_covered_by_refs(config);
     let mut root = serde_yaml::Mapping::new();
     root.insert(
         serde_yaml::Value::String("profile_name".to_string()),
