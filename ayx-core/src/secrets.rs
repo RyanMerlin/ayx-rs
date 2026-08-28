@@ -553,11 +553,19 @@ pub fn resolve_secret_ref_with(
         return Ok(Some(value.to_string()));
     }
     if let Some(name) = reference.strip_prefix("env:") {
+        // Both sources are filtered identically. Treating an empty `.env` entry
+        // as absent but an empty process variable as present made `FOO=""`
+        // resolve to `Some("")`, which `secret status` then reported as
+        // `resolved: true, validation: passed` — an all-clear over a credential
+        // that is not actually set.
+        // Each source is filtered on its own, so an empty `.env` entry still
+        // falls through to the process variable, as the precedence note above
+        // describes.
         return Ok(env_files
             .get(name)
             .cloned()
             .filter(|value| !value.trim().is_empty())
-            .or_else(|| env::var(name).ok()));
+            .or_else(|| env::var(name).ok().filter(|value| !value.trim().is_empty())));
     }
     if let Some(account) = reference.strip_prefix("keyring:") {
         ensure_keyring_store();
@@ -656,14 +664,13 @@ pub fn is_keyring_storage_error(error: &ProfileError) -> bool {
     matches!(error, ProfileError::KeyringUnavailable(_))
 }
 
-/// Whether the caller has opted into inline (plaintext-in-YAML) storage via the
-/// documented `AYX_ALLOW_INLINE_SECRETS` environment variable.
-///
-/// See SECURITY.md: inline fallback is gated behind this variable or an
-/// explicit `InlineSecretPolicy::Allow` from the calling code.
-pub fn inline_secrets_allowed_by_env() -> bool {
-    env_truthy("AYX_ALLOW_INLINE_SECRETS")
-}
+// `inline_secrets_allowed_by_env` was introduced alongside the warned inline
+// fallback and never called. Left in place it read as though `secret set`
+// consults `AYX_ALLOW_INLINE_SECRETS` before downgrading to plaintext — it does
+// not, deliberately: a bootstrap on a keyring-less host must not be blocked
+// behind a flag the operator has not heard of. An accessor that documents a
+// gate which does not exist is worse than no accessor, so it is gone.
+// `store_secret_with_fallback` still honours the variable for its own callers.
 
 /// Whether a secret slot holds plaintext that belongs in secure storage.
 ///
