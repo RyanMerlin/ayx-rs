@@ -637,27 +637,20 @@ pub fn store_keyring_secret(account: &str, secret: &str) -> Result<String, Profi
     Ok(keyring_secret_ref(account))
 }
 
-/// Whether the OS keyring can be opened for writing.
+/// Whether `error` reports a failure to store into the OS keyring, as opposed
+/// to some other failure during a profile write.
 ///
-/// Mirrors the guards [`store_keyring_secret`] applies, without writing
-/// anything, so a caller can choose where a secret will live *before* it starts
-/// a profile transaction. Used by `ayx secret set`, which must pick the
-/// reference it serializes (`keyring:` or `inline:`) up front.
-///
-/// This is advisory. The keyring can still fail on the subsequent write, which
-/// surfaces as a normal error and rolls the transaction back.
-pub fn keyring_writable() -> bool {
-    #[cfg(feature = "test-inline-forcing")]
-    if keyring_unavailable_is_forced() {
+/// Callers that offer an inline fallback use this to decide whether retrying
+/// without the keyring is meaningful. Probing writability up front is not
+/// reliable: on macOS with no default keychain `Entry::new` succeeds and only
+/// the password operation fails, so the failure has to be observed rather than
+/// predicted.
+pub fn is_keyring_storage_error(error: &ProfileError) -> bool {
+    let ProfileError::Invalid(message) = error else {
         return false;
-    }
-    ensure_keyring_store();
-    Entry::new(SECRET_SERVICE, KEYRING_PROBE_ACCOUNT).is_ok()
+    };
+    message.contains("keyring entry") || message.contains("keyring secret")
 }
-
-/// Account name used only by [`keyring_writable`] to test whether entries can
-/// be opened. Never written to.
-const KEYRING_PROBE_ACCOUNT: &str = "ayx/.probe";
 
 /// Whether the caller has opted into inline (plaintext-in-YAML) storage via the
 /// documented `AYX_ALLOW_INLINE_SECRETS` environment variable.

@@ -432,38 +432,56 @@ pub fn set_slot(path: &Path, name: &str, input: SecretInput) -> Result<SetResult
                 .unwrap_or(&config.profile_name);
             let account = keyring_account(profile_stem, slot.field);
 
-            // Where the secret will live has to be decided before the profile is
-            // serialized, because the reference written into the YAML differs by
-            // destination. The keyring write itself still happens inside
-            // `write_config_exact`'s transaction, so a failed profile write rolls
-            // the keyring back.
-            if ayx_core::secrets::keyring_writable() {
-                set_value(&mut config, slot, None, Some(format!("keyring:{account}")))?;
-                onboard::write_config_exact(
-                    path,
-                    &config,
-                    Some((&account, &value)),
-                    &BTreeSet::new(),
-                )?;
-                return Ok(SetResult {
-                    slot: slot.name,
-                    source: "keyring",
-                });
+            // Attempt secure storage first. Writability cannot be probed
+            // reliably up front: on macOS with no default keychain the entry
+            // opens fine and only the password operation fails, so the failure
+            // has to be observed. `write_config_exact` rolls back completely on
+            // error, so retrying afterwards starts from a clean profile.
+            let keyring_ref = format!("keyring:{account}");
+            let mut attempt = config.clone();
+            set_value(&mut attempt, slot, None, Some(keyring_ref))?;
+            let stored = onboard::write_config_exact(
+                path,
+                &attempt,
+                Some((&account, &value)),
+                &BTreeSet::new(),
+            );
+            match stored {
+                Ok(()) => {
+                    return Ok(SetResult {
+                        slot: slot.name,
+                        source: "keyring",
+                    });
+                }
+                Err(err) => {
+                    let keyring_failure = err
+                        .downcast_ref::<ayx_core::profile::ProfileError>()
+                        .is_some_and(ayx_core::secrets::is_keyring_storage_error);
+                    if !keyring_failure {
+                        return Err(err);
+                    }
+                    // SECURITY.md gates inline storage behind an explicit
+                    // opt-in; without it, refuse rather than silently
+                    // downgrading to plaintext.
+                    if !ayx_core::secrets::inline_secrets_allowed_by_env() {
+                        // Keep the cause, drop the inner remediation: it names
+                        // the same env var this message already explains.
+                        let text = err.to_string();
+                        let cause = text
+                            .split_once(". Set AYX_ALLOW_INLINE_SECRETS=1")
+                            .map_or(text.as_str(), |(cause, _)| cause);
+                        bail!(
+                            "cannot store '{}': {cause}. Use `ayx secret set {} --from-env NAME` \
+                             to reference an environment variable instead, configure a keyring \
+                             backend, or set AYX_ALLOW_INLINE_SECRETS=1 to accept plaintext \
+                             storage in the profile YAML.",
+                            slot.name,
+                            slot.name
+                        );
+                    }
+                }
             }
 
-            // No keyring. SECURITY.md gates inline storage behind an explicit
-            // opt-in; without it, refuse rather than silently downgrading.
-            if !ayx_core::secrets::inline_secrets_allowed_by_env() {
-                bail!(
-                    "cannot store '{}': the OS keyring is unavailable. Use \
-                     `ayx secret set {} --from-env NAME` to reference an environment \
-                     variable instead, configure a keyring backend, or set \
-                     AYX_ALLOW_INLINE_SECRETS=1 to accept plaintext storage in the \
-                     profile YAML.",
-                    slot.name,
-                    slot.name
-                );
-            }
             set_value(&mut config, slot, None, Some(format!("inline:{value}")))?;
             onboard::write_config_exact(path, &config, None, &BTreeSet::new())?;
             Ok(SetResult {
