@@ -452,7 +452,28 @@ fn is_metadata_key(key: &str) -> bool {
 
 fn is_sensitive_value(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
-    lower.starts_with("bearer ") || lower.contains("password=") || lower.contains("pwd=")
+    lower.starts_with("bearer ")
+        || has_populated_assignment(&lower, "password=")
+        || has_populated_assignment(&lower, "pwd=")
+}
+
+/// True when `needle` appears with an actual value after the `=`.
+///
+/// The point of the value-based check is catching a secret embedded in a URL or
+/// connection string (`...?password=hunter2`). An empty assignment carries no
+/// secret, and treating it as one redacts things that exist to be read: the
+/// `ayx secret env-template` output is a list of `NAME=` lines, one of which
+/// ends in `_PASSWORD`, so the whole non-secret template was replaced with
+/// `[REDACTED]`.
+fn has_populated_assignment(haystack: &str, needle: &str) -> bool {
+    haystack.match_indices(needle).any(|(index, _)| {
+        haystack[index + needle.len()..]
+            .chars()
+            .next()
+            .is_some_and(|next| {
+                !matches!(next, '&' | ';' | ',' | '"' | '\'') && !next.is_whitespace()
+            })
+    })
 }
 
 #[cfg(test)]
@@ -594,6 +615,36 @@ mod tests {
             value["fields"]["resolution"],
             "1 field(s); use --output json-full for details"
         );
+    }
+
+    /// An empty `NAME=` assignment carries no secret. `ayx secret env-template`
+    /// emits exactly that, including one slot ending in `_PASSWORD`, and the
+    /// whole non-secret template was being replaced with `[REDACTED]`.
+    #[test]
+    fn empty_assignments_are_not_treated_as_secret_values() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({
+                "content": "AYX_ONE_WS_PASSWORD=\nAYX_SERVER_API_SECRET=\nAYX_ONE_CLIENT_SECRET=",
+                "populated": "Server=x;Password=hunter2",
+                "query": "https://example.invalid/?password=hunter2",
+                "bearer": "Bearer abc123",
+            }),
+        );
+        let clean = redacted_envelope(&env);
+        assert_ne!(
+            clean.data["content"], "[REDACTED]",
+            "a template of empty assignments carries no secret"
+        );
+        assert!(
+            clean.data["content"]
+                .as_str()
+                .unwrap()
+                .contains("AYX_ONE_WS_PASSWORD=")
+        );
+        assert_eq!(clean.data["populated"], "[REDACTED]");
+        assert_eq!(clean.data["query"], "[REDACTED]");
+        assert_eq!(clean.data["bearer"], "[REDACTED]");
     }
 
     /// An explicit field list still narrows the view.
