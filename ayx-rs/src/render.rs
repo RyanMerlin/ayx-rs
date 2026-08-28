@@ -178,6 +178,28 @@ fn format_doctor(data: &Value, color: bool) -> String {
 
 /// Pretty-print just the data payload. Used by both text and table modes.
 fn render_data_text(data: &Value) -> String {
+    // Catalog uses named collections rather than the usual `items` wrapper.
+    // Keep its operator view useful without changing the lossless JSON
+    // contract consumed by agents and scripts.
+    if data.get("commands").is_some() || data.get("capabilities").is_some() {
+        let mut sections = Vec::new();
+        for (key, label) in [("commands", "Commands"), ("capabilities", "Capabilities")] {
+            if let Some(items) = data.get(key).and_then(Value::as_array) {
+                let body = if items.is_empty() {
+                    "(none)".to_string()
+                } else if items.iter().all(Value::is_object) {
+                    render_object_array(items)
+                } else {
+                    render_scalar_array(items)
+                };
+                sections.push(format!("{label} ({})\n{body}", items.len()));
+            }
+        }
+        if !sections.is_empty() {
+            return sections.join("\n\n");
+        }
+    }
+
     // Highest-priority shape: { "items": [ {...}, {...} ] } — pagination wrapper.
     if let Some(items) = data.get("items").and_then(|v| v.as_array()) {
         if items.is_empty() {
@@ -476,6 +498,27 @@ mod tests {
         let text = render_text(&env);
         assert!(text.contains("mongo.doctor"));
         assert!(text.contains("ID"));
+    }
+
+    #[test]
+    fn catalog_collections_render_as_separate_human_tables() {
+        let env = env_with(
+            "catalog entries listed",
+            json!({
+                "commands": [
+                    {"name": "one workspace list", "path": "one/workspace/list", "kind": "command"}
+                ],
+                "capabilities": [
+                    {"id": "one.workspace.list", "title": "List workspaces"}
+                ]
+            }),
+        );
+        let text = render_text(&env);
+        assert!(text.contains("Commands (1)"));
+        assert!(text.contains("one workspace list"));
+        assert!(text.contains("Capabilities (1)"));
+        assert!(text.contains("one.workspace.list"));
+        assert!(text.contains("---"));
     }
 
     #[test]
