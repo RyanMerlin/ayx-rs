@@ -2509,16 +2509,47 @@ fn normalize_canonical_server_block(
 /// keyring- or env-backed credential silently became cleartext on disk as a
 /// side effect of touching an unrelated slot.
 ///
-/// This is the exact inverse of `resolve_secret_refs`: wherever a reference is
-/// present, the in-memory value belongs to that reference and must not be
-/// written. Values with no reference are genuine plaintext the user put there
-/// and are preserved.
-fn strip_values_covered_by_refs(config: &Config) -> Config {
-    fn clear(value: &mut Option<String>, reference: Option<&String>) {
-        if reference.is_some_and(|r| !r.trim().is_empty()) {
-            *value = None;
+/// This is the exact inverse of `resolve_secret_refs`, and it is deliberately
+/// narrow: a value is dropped only when its reference **actually produces that
+/// same value**. Presence of a reference is not enough.
+///
+/// The difference is not academic. `resolve_secret_refs` hydrates a reference
+/// only when the value is absent, so a profile carrying both a hand-written
+/// plaintext value *and* a stale or dead reference reaches serialization with
+/// the plaintext as the only working copy of the credential. Clearing on mere
+/// presence deleted it — during an unrelated `ayx secret set`, with exit 0 and
+/// no warning, and with no undo because `write_config_exact` replaces the file.
+/// A mixed-state profile is exactly what a copied profile, a restored backup, a
+/// wiped keyring, or the very write-back bug above produces, and the loader
+/// tolerates it on purpose (`detect_secret_conflict` is warn-only) so the
+/// operator can repair it.
+///
+/// So: an unresolvable reference, or one resolving to something different,
+/// leaves the value alone. Values with no reference at all are genuine
+/// plaintext the user put there and are likewise preserved.
+fn strip_values_covered_by_refs(config: &Config, env_files: &HashMap<String, String>) -> Config {
+    fn covers(
+        reference: Option<&String>,
+        value: Option<&str>,
+        env_files: &HashMap<String, String>,
+    ) -> bool {
+        let Some(reference) = reference.filter(|r| !r.trim().is_empty()) else {
+            return false;
+        };
+        // A keyring read failure lands in the `Err` arm and resolves to
+        // "not covered", so the credential survives. Preserving a secret we
+        // cannot re-derive is the only safe direction here.
+        match resolve_secret_ref_with(reference, env_files) {
+            Ok(Some(resolved)) => Some(resolved.as_str()) == value,
+            _ => false,
         }
     }
+
+    let clear = |value: &mut Option<String>, reference: Option<&String>| {
+        if covers(reference, value.as_deref(), env_files) {
+            *value = None;
+        }
+    };
 
     let mut config = config.clone();
     if let Some(one) = config.alteryx_one.as_mut() {
@@ -2560,18 +2591,20 @@ fn strip_values_covered_by_refs(config: &Config) -> Config {
         );
     }
     if let Some(server) = config.server.as_mut()
-        && server
-            .curator_api_secret_ref
-            .as_ref()
-            .is_some_and(|r| !r.trim().is_empty())
+        && covers(
+            server.curator_api_secret_ref.as_ref(),
+            Some(server.curator_api_secret.as_str()),
+            env_files,
+        )
     {
         server.curator_api_secret = String::new();
     }
     if let Some(server_api) = config.server_api.as_mut()
-        && server_api
-            .client_secret_ref
-            .as_ref()
-            .is_some_and(|r| !r.trim().is_empty())
+        && covers(
+            server_api.client_secret_ref.as_ref(),
+            Some(server_api.client_secret.as_str()),
+            env_files,
+        )
     {
         server_api.client_secret = String::new();
     }
@@ -2589,8 +2622,24 @@ fn strip_values_covered_by_refs(config: &Config) -> Config {
     config
 }
 
+/// Serialize a profile, dropping values their references demonstrably cover.
+///
+/// Prefer [`canonical_profile_value_with_env`] wherever the profile path is in
+/// hand: without the profile-adjacent `.env`, an `env:NAME` reference supplied
+/// through that file cannot be resolved, so its value is treated as uncovered
+/// and preserved. That is the safe direction — a credential is never destroyed
+/// — but it can leave plaintext beside a reference that did in fact cover it.
 pub fn canonical_profile_value(config: &Config) -> Result<serde_yaml::Value, ProfileError> {
-    let config = &strip_values_covered_by_refs(config);
+    canonical_profile_value_with_env(config, &HashMap::new())
+}
+
+/// [`canonical_profile_value`], resolving `env:` references against the same
+/// `.env` view the loader used.
+pub fn canonical_profile_value_with_env(
+    config: &Config,
+    env_files: &HashMap<String, String>,
+) -> Result<serde_yaml::Value, ProfileError> {
+    let config = &strip_values_covered_by_refs(config, env_files);
     let mut root = serde_yaml::Mapping::new();
     root.insert(
         serde_yaml::Value::String("profile_name".to_string()),

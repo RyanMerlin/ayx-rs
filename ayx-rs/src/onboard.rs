@@ -11,9 +11,10 @@ use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::profile::{
     AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded, MongoManaged, MongoMode,
     MongoProfile, ServerProfile, SqlServerConnectionProfile, SqlServerProfile, TlsConfig,
-    WorkspaceConfig, canonical_profile_value, canonical_workspace_value,
-    default_profile_storage_path, default_workspace_storage_path, detect_secret_conflict,
-    load_ayx_state, normalize_alteryx_base_url, profile_storage_path, save_ayx_state,
+    WorkspaceConfig, canonical_profile_value, canonical_profile_value_with_env,
+    canonical_workspace_value, default_profile_storage_path, default_workspace_storage_path,
+    detect_secret_conflict, load_ayx_state, normalize_alteryx_base_url, profile_storage_path,
+    save_ayx_state,
 };
 use ayx_core::secrets::{
     KeyringTransaction, bound_keyring_account_in_namespace, delete_keyring_secret, keyring_account,
@@ -1587,7 +1588,11 @@ pub(crate) fn write_config_exact(
         }
         delete_keyring_accounts(&transaction, delete_accounts)?;
         detect_secret_conflict(config).map_err(anyhow::Error::from)?;
-        let canonical = canonical_profile_value(config)?;
+        // Resolve `env:` references against the same `.env` view the loader
+        // used, so a value that reference genuinely covers is recognised as
+        // covered rather than written back out as plaintext beside it.
+        let canonical =
+            canonical_profile_value_with_env(config, &ayx_core::profile::env_file_values(path))?;
         let body = serde_yaml::to_string(&canonical)?;
         transaction.set_target_digest(body.as_bytes())?;
         lock.write(body.as_bytes()).map_err(anyhow::Error::from)?;

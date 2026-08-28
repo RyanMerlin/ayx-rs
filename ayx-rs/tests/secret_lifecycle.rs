@@ -1320,3 +1320,151 @@ fn secret_migrate_sees_plaintext_held_in_an_inline_reference() {
     );
     out.assert_absent(HELD, "the secret held inside the inline reference");
 }
+
+// ---------------------------------------------------------------------------
+// write-back must not destroy a credential its reference cannot reproduce
+// ---------------------------------------------------------------------------
+
+/// A dead `_ref` beside a live plaintext value must not delete the value.
+///
+/// `resolve_secret_refs` hydrates a reference only when the value is absent, so
+/// in a mixed-state profile the plaintext is the *only* working copy and the
+/// reference is stale. Clearing on the mere presence of a reference deleted it
+/// during an unrelated `secret set` — exit 0, no warning, no undo, and
+/// `secret status` had already reported the reference as unresolved. Mixed
+/// state is not exotic: a copied profile, a restored backup, a wiped keyring,
+/// or the very write-back bug this strip was added to fix all produce it.
+#[test]
+fn a_write_does_not_delete_a_credential_its_reference_cannot_reproduce() {
+    const LIVE: &str = "live-credential-do-not-lose";
+    let home = config_home(&[(
+        "mix",
+        &format!(
+            "profile_name: mix\n\
+             alteryx_one:\n\
+            \x20 account_email: user@example.invalid\n\
+            \x20 base_url: https://example.invalid\n\
+            \x20 client_secret: {LIVE}\n\
+            \x20 client_secret_ref: keyring:mix/alteryx_one.client_secret\n"
+        ),
+    )]);
+
+    // Touch an entirely different slot.
+    let out = run_env(
+        &home,
+        &[
+            "secret",
+            "set",
+            "one.service-principal-client-secret",
+            "--profile",
+            "mix",
+            "--from-env",
+            "AYX_TEST_UNRELATED",
+        ],
+        &[("AYX_TEST_UNRELATED", "unrelated")],
+    );
+    assert!(
+        out.ok,
+        "the unrelated write should succeed\n{}",
+        out.combined()
+    );
+
+    let text = profile_text(&home, "mix");
+    assert!(
+        text.contains(LIVE),
+        "the only working copy of the credential must survive an unrelated write\n{text}"
+    );
+    assert!(
+        text.contains("sp_client_secret_ref: env:AYX_TEST_UNRELATED"),
+        "the requested slot must still be recorded\n{text}"
+    );
+}
+
+/// The converse: a reference that *does* cover the value still strips it.
+///
+/// This is the property the strip exists for. Guarding the fix above must not
+/// quietly reinstate the original defect, where a resolved secret was written
+/// back out as cleartext beside the reference it came from.
+#[test]
+fn a_write_still_strips_a_value_its_reference_reproduces() {
+    const COVERED: &str = "value-that-the-reference-covers";
+    let home = config_home(&[(
+        "cov",
+        &format!(
+            "profile_name: cov\n\
+             alteryx_one:\n\
+            \x20 account_email: user@example.invalid\n\
+            \x20 base_url: https://example.invalid\n\
+            \x20 client_secret: {COVERED}\n\
+            \x20 client_secret_ref: env:AYX_TEST_COVERING\n"
+        ),
+    )]);
+
+    let out = run_env(
+        &home,
+        &[
+            "secret",
+            "set",
+            "one.service-principal-client-secret",
+            "--profile",
+            "cov",
+            "--from-env",
+            "AYX_TEST_UNRELATED",
+        ],
+        &[
+            ("AYX_TEST_UNRELATED", "unrelated"),
+            ("AYX_TEST_COVERING", COVERED),
+        ],
+    );
+    assert!(
+        out.ok,
+        "the unrelated write should succeed\n{}",
+        out.combined()
+    );
+
+    let text = profile_text(&home, "cov");
+    assert!(
+        !text.contains(COVERED),
+        "a value its reference reproduces must not be written back as plaintext\n{text}"
+    );
+    assert!(
+        text.contains("client_secret_ref: env:AYX_TEST_COVERING"),
+        "the covering reference must remain\n{text}"
+    );
+}
+
+/// `doctor config` must see an inline reference whose secret forced quoting.
+///
+/// `serde_yaml` quotes a scalar whose content requires it, so a secret
+/// containing `: ` or a leading `*` serializes as `'inline:...'`. Matching the
+/// raw line for a leading `inline:` missed those and reported the profile
+/// clean — reintroducing the bug for exactly the awkward, high-entropy secrets
+/// most likely to need quoting.
+#[test]
+fn doctor_flags_an_inline_reference_whose_secret_forced_yaml_quoting() {
+    let home = config_home(&[(
+        "qtd",
+        "profile_name: qtd\n\
+         alteryx_one:\n\
+        \x20 account_email: user@example.invalid\n\
+        \x20 client_secret_ref: 'inline:*star: needs quoting'\n",
+    )]);
+    let used = run(&home, &["profile", "use", "qtd"]);
+    assert!(used.ok, "profile use should succeed\n{}", used.combined());
+
+    let out = run(&home, &["doctor", "config", "--output", "json-full"]);
+    assert!(out.ok, "doctor should run\n{}", out.combined());
+
+    let json = out.json();
+    assert_eq!(
+        json["data"]["status"],
+        "warn",
+        "a quoted inline secret is still an inline secret\n{}",
+        out.combined()
+    );
+    let risks = json["data"]["inline_secret_risks"].to_string();
+    assert!(
+        risks.contains("client_secret"),
+        "the risk list should name the field: {risks}"
+    );
+}

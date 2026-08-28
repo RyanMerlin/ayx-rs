@@ -5650,21 +5650,70 @@ fn collect_inline_secret_warnings(raw: &str) -> Vec<String> {
     // `client_secret:`. Without this, `doctor config` reported "no inline
     // secrets" for a profile whose credentials were entirely cleartext, which
     // is exactly the state the keyring-unavailable bootstrap path produces.
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        let Some((field, value)) = trimmed.split_once(':') else {
-            continue;
-        };
-        if value.trim_start().starts_with("inline:") {
-            warnings.push(format!(
-                "inline secret detected for {}",
-                field.trim().trim_end_matches("_ref")
-            ));
+    //
+    // Parse rather than pattern-match the text: `serde_yaml` quotes any scalar
+    // whose content requires it, so a secret containing `: `, or a leading
+    // `*`/`&`/`%`/`@`, serializes as `client_secret_ref: 'inline:...'`. Testing
+    // the raw line for a leading `inline:` misses every one of those and
+    // reports the profile clean — reintroducing this exact bug for precisely
+    // the awkward, high-entropy secrets most likely to need quoting. Parsing
+    // also finds references nested under workspace credentials, which a flat
+    // line scan cannot attribute.
+    if let Ok(parsed) = serde_yaml::from_str::<serde_yaml::Value>(raw) {
+        let mut fields = Vec::new();
+        collect_inline_reference_fields(&parsed, &mut fields);
+        for field in fields {
+            warnings.push(format!("inline secret detected for {field}"));
+        }
+    } else {
+        // Unparseable file: fall back to the text scan, so `doctor config` —
+        // the command whose job is to explain a broken profile — still reports
+        // what it can. Tolerate a quote so the fallback is not blind to the
+        // case above either.
+        for line in raw.lines() {
+            let trimmed = line.trim();
+            let Some((field, value)) = trimmed.split_once(':') else {
+                continue;
+            };
+            let value = value.trim_start();
+            let value = value.strip_prefix(['\'', '"']).unwrap_or(value);
+            if value.starts_with("inline:") {
+                warnings.push(format!(
+                    "inline secret detected for {}",
+                    field.trim().trim_end_matches("_ref")
+                ));
+            }
         }
     }
     warnings.sort();
     warnings.dedup();
     warnings
+}
+
+/// Every mapping key whose value is an `inline:` reference, at any depth.
+///
+/// An `inline:` reference *is* the plaintext — `store_secret_with_fallback`
+/// returns `inline:<secret>` verbatim — so these are cleartext credentials on
+/// disk regardless of which key happens to hold them.
+fn collect_inline_reference_fields(value: &serde_yaml::Value, out: &mut Vec<String>) {
+    match value {
+        serde_yaml::Value::Mapping(mapping) => {
+            for (key, child) in mapping {
+                if let (Some(key), Some(text)) = (key.as_str(), child.as_str())
+                    && text.starts_with("inline:")
+                {
+                    out.push(key.trim_end_matches("_ref").to_string());
+                }
+                collect_inline_reference_fields(child, out);
+            }
+        }
+        serde_yaml::Value::Sequence(items) => {
+            for item in items {
+                collect_inline_reference_fields(item, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn secret_source(reference: Option<&String>, value: Option<&str>) -> &'static str {
