@@ -4552,9 +4552,18 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
                 };
                 let result =
                     secret::set_slot(Path::new(&resolution.resolved_profile_path), &slot, input)?;
+                if let Some(warning) = result.warning.as_deref() {
+                    eprintln!("[ayx WARN] {warning}");
+                }
                 Envelope::ok_with_data(
                     "secret stored",
-                    json!({ "profile": resolution.selected_profile, "slot": result.slot, "source": result.source, "reference_changed": true }),
+                    json!({
+                        "profile": resolution.selected_profile,
+                        "slot": result.slot,
+                        "source": result.source,
+                        "reference_changed": true,
+                        "warning": result.warning,
+                    }),
                 )
             }
             SecretCommand::Unset { slot, profile } => {
@@ -4571,16 +4580,20 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
             }
             SecretCommand::Migrate { profile } => {
                 let resolution = resolve_runtime_profile(profile.as_deref())?;
-                let output = secret::migrate_profile(Path::new(&resolution.resolved_profile_path))?;
-                let migrated_slots = secret::migrated_slot_names(&output);
+                let result = secret::migrate_profile(Path::new(&resolution.resolved_profile_path))?;
+                let migrated_slots = secret::migrated_slot_names(&result.migrated);
+                if let Some(warning) = result.warning.as_deref() {
+                    eprintln!("[ayx WARN] {warning}");
+                }
                 Envelope::ok_with_data(
                     "secret migration completed",
                     json!({
                         "profile": resolution.selected_profile,
-                        "migrated_fields": output,
+                        "migrated_fields": result.migrated,
                         // Compatibility alias retained for scripts introduced
                         // with the initial secret lifecycle release.
                         "migrated_slots": migrated_slots,
+                        "warning": result.warning,
                     }),
                 )
             }

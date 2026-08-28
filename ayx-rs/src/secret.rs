@@ -83,6 +83,9 @@ pub enum SecretInput {
 pub struct SetResult {
     pub slot: &'static str,
     pub source: &'static str,
+    /// Set when the secret had to be stored as plaintext in the profile YAML
+    /// because no secure store was available. Callers must surface this.
+    pub warning: Option<String>,
 }
 
 pub struct UnsetResult {
@@ -420,6 +423,7 @@ pub fn set_slot(path: &Path, name: &str, input: SecretInput) -> Result<SetResult
             Ok(SetResult {
                 slot: slot.name,
                 source: "env",
+                warning: None,
             })
         }
         SecretInput::Prompt(value) | SecretInput::Stdin(value) => {
@@ -451,42 +455,34 @@ pub fn set_slot(path: &Path, name: &str, input: SecretInput) -> Result<SetResult
                     return Ok(SetResult {
                         slot: slot.name,
                         source: "keyring",
+                        warning: None,
                     });
                 }
                 Err(err) => {
-                    let keyring_failure = err
-                        .downcast_ref::<ayx_core::profile::ProfileError>()
-                        .is_some_and(ayx_core::secrets::is_keyring_storage_error);
-                    if !keyring_failure {
+                    if !is_keyring_failure(&err) {
                         return Err(err);
-                    }
-                    // SECURITY.md gates inline storage behind an explicit
-                    // opt-in; without it, refuse rather than silently
-                    // downgrading to plaintext.
-                    if !ayx_core::secrets::inline_secrets_allowed_by_env() {
-                        // Keep the cause, drop the inner remediation: it names
-                        // the same env var this message already explains.
-                        let text = err.to_string();
-                        let cause = text
-                            .split_once(". Set AYX_ALLOW_INLINE_SECRETS=1")
-                            .map_or(text.as_str(), |(cause, _)| cause);
-                        bail!(
-                            "cannot store '{}': {cause}. Use `ayx secret set {} --from-env NAME` \
-                             to reference an environment variable instead, configure a keyring \
-                             backend, or set AYX_ALLOW_INLINE_SECRETS=1 to accept plaintext \
-                             storage in the profile YAML.",
-                            slot.name,
-                            slot.name
-                        );
                     }
                 }
             }
 
+            // No secure store. Store plaintext and say so loudly rather than
+            // refusing: a hard failure here strands anyone bootstrapping on a
+            // host without a keyring, and the alternative they reach for is
+            // hand-editing the same plaintext into the YAML with no warning at
+            // all. `doctor config` and `secret status` keep reporting the
+            // posture until it is resolved.
             set_value(&mut config, slot, None, Some(format!("inline:{value}")))?;
             onboard::write_config_exact(path, &config, None, &BTreeSet::new())?;
             Ok(SetResult {
                 slot: slot.name,
                 source: "inline",
+                warning: Some(format!(
+                    "Stored '{}' as plaintext in the profile YAML because no OS keyring was \
+                     available. Anyone who can read the file can read the secret. Configure a \
+                     keyring backend and run `ayx secret migrate`, or use `ayx secret set {} \
+                     --from-env NAME` to reference an environment variable instead.",
+                    slot.name, slot.name
+                )),
             })
         }
     }
@@ -523,7 +519,30 @@ fn is_valid_env_name(name: &str) -> bool {
         && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
-pub fn migrate_profile(path: &Path) -> Result<Vec<String>> {
+/// Whether `err` reports a failure to store into the OS keyring.
+///
+/// Checks the typed error first, then the rendered message: `secretize_config`
+/// re-wraps its failures with `anyhow!("{field}: {err}")`, which erases the
+/// `ProfileError` type, so a downcast alone misses the migration path.
+fn is_keyring_failure(err: &anyhow::Error) -> bool {
+    if err
+        .downcast_ref::<ayx_core::profile::ProfileError>()
+        .is_some_and(ayx_core::secrets::is_keyring_storage_error)
+    {
+        return true;
+    }
+    let text = err.to_string();
+    text.contains("keyring entry") || text.contains("keyring secret")
+}
+
+pub struct MigrateResult {
+    pub migrated: Vec<String>,
+    /// Set when plaintext was found but no secure store was available to move
+    /// it into. Callers must surface this.
+    pub warning: Option<String>,
+}
+
+pub fn migrate_profile(path: &Path) -> Result<MigrateResult> {
     let config = Config::load_from_path_lenient_without_active_overlay(path)?;
     let mut plaintext_fields: BTreeSet<String> = SLOTS
         .iter()
@@ -539,14 +558,43 @@ pub fn migrate_profile(path: &Path) -> Result<Vec<String>> {
         .collect();
     plaintext_fields.extend(ayx_core::auth::inline_secret_fields(&config));
     if plaintext_fields.is_empty() {
-        return Ok(Vec::new());
+        return Ok(MigrateResult {
+            migrated: Vec::new(),
+            warning: None,
+        });
     }
-    let output = onboard::write_config_with_policy(path, &config, InlineSecretPolicy::Forbid)?;
-    Ok(output
-        .refs
-        .into_keys()
-        .filter(|field| plaintext_fields.contains(field))
-        .collect())
+    // Migration moves plaintext *into* secure storage, so `Forbid` is correct:
+    // rewriting it as inline plaintext would accomplish nothing. But a missing
+    // keyring is an environment condition, not a user error, so report it as an
+    // unfinished no-op instead of failing. The secrets stay exactly where they
+    // were and `doctor config` keeps flagging them.
+    let output = match onboard::write_config_with_policy(path, &config, InlineSecretPolicy::Forbid)
+    {
+        Ok(output) => output,
+        Err(err) if is_keyring_failure(&err) => {
+            let mut fields: Vec<String> = plaintext_fields.into_iter().collect();
+            fields.sort();
+            return Ok(MigrateResult {
+                migrated: Vec::new(),
+                warning: Some(format!(
+                    "No OS keyring is available, so {} plaintext secret(s) were left in the \
+                     profile YAML: {}. They remain readable by anyone who can read the file. \
+                     Configure a keyring backend and re-run `ayx secret migrate`.",
+                    fields.len(),
+                    fields.join(", ")
+                )),
+            });
+        }
+        Err(err) => return Err(err),
+    };
+    Ok(MigrateResult {
+        migrated: output
+            .refs
+            .into_keys()
+            .filter(|field| plaintext_fields.contains(field))
+            .collect(),
+        warning: None,
+    })
 }
 
 /// Compatibility projection for the original `migrated_slots` response field.
@@ -1028,8 +1076,9 @@ mod tests {
         config.alteryx_one = Some(one);
         crate::onboard::write_config_exact(&path, &config, None, &BTreeSet::new()).unwrap();
 
-        let migrated = migrate_profile(&path).unwrap();
-        assert_eq!(migrated, vec!["alteryx_one.access_token"]);
+        let result = migrate_profile(&path).unwrap();
+        assert_eq!(result.migrated, vec!["alteryx_one.access_token"]);
+        assert!(result.warning.is_none(), "a keyring was available");
         let profile = fs::read_to_string(&path).unwrap();
         assert!(!profile.contains("auth-token-must-not-remain-in-yaml"));
         assert!(profile.contains("keyring:demo/alteryx_one.access_token"));
@@ -1051,8 +1100,9 @@ mod tests {
         config.alteryx_one = Some(one);
         crate::onboard::write_config_exact(&path, &config, None, &BTreeSet::new()).unwrap();
 
-        let migrated = migrate_profile(&path).unwrap();
-        assert_eq!(migrated, vec!["alteryx_one.access_token"]);
+        let result = migrate_profile(&path).unwrap();
+        assert_eq!(result.migrated, vec!["alteryx_one.access_token"]);
+        assert!(result.warning.is_none(), "a keyring was available");
     }
 
     #[test]

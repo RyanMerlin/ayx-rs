@@ -45,18 +45,37 @@ Out of scope:
 
 ## Secret handling expectations
 
-`ayx` stores authentication material in the OS keyring by default
-(`keyring:` references in `profile.yaml`). Inline fallback (`inline:` /
-plaintext-in-YAML) is gated behind `AYX_ALLOW_INLINE_SECRETS=1` or the
-caller passing `InlineSecretPolicy::Allow`. If you find a code path that
-silently falls back to inline storage without that opt-in, treat it as a
-security issue and report it.
+`ayx` stores authentication material in the OS keyring whenever one is
+available (`keyring:` references in `profile.yaml`).
 
-Some writes are protected and ignore the opt-in entirely
-(`InlineSecretPolicy::Forbid`): workspace passwords, and `ayx secret migrate`,
-whose whole purpose is moving plaintext *into* secure storage — migrating it to
-inline plaintext would accomplish nothing. Those fail when no keyring is
-available rather than downgrading, and say so.
+A missing keyring does not block setup. On a host with no secure store the CLI
+stores the secret as plaintext in the profile YAML so you can finish
+bootstrapping, and says so every time:
+
+- the write itself warns on stderr and returns a `warning` field in the
+  envelope;
+- `ayx doctor config` reports `status: warn` and names each affected field;
+- `ayx secret status` reports the slot as `source: inline` (or `plaintext`)
+  with `validation: warning` and its remediation.
+
+The downgrade must never be **silent** — that is the property to protect. If
+you find a code path that stores plaintext without warning, treat it as a
+security issue and report it. Library callers control this explicitly through
+`InlineSecretPolicy`, and `AYX_ALLOW_INLINE_SECRETS=1` opts in for
+`store_secret_with_fallback`.
+
+Two things never downgrade, because doing so would defeat their purpose:
+
+- **Workspace passwords** (`InlineSecretPolicy::Forbid`) — a reusable
+  credential submitted to a login endpoint.
+- **`ayx secret migrate`** — its whole job is moving plaintext *into* secure
+  storage, so rewriting it as plaintext would accomplish nothing. With no
+  keyring it reports an unfinished no-op naming what was left behind, rather
+  than failing; the secrets stay exactly where they were.
+
+To avoid plaintext entirely on a host with no keyring, reference an environment
+variable instead: `ayx secret set <slot> --from-env NAME` stores `env:NAME` and
+never writes the value.
 
 ## Hardening checklist for operators
 

@@ -169,7 +169,7 @@ fn slot(home: &TempDir, profile: &str, name: &str) -> Value {
 /// are asserted unconditionally elsewhere.
 fn keyring_available() -> bool {
     let home = config_home(&[("probe", EMPTY_PROFILE)]);
-    run_in(
+    let out = run_in(
         &home,
         home.path(),
         &[
@@ -179,11 +179,15 @@ fn keyring_available() -> bool {
             "--profile",
             "probe",
             "--from-stdin",
+            "--output",
+            "json-full",
         ],
         Some("keyring-probe"),
         &[],
-    )
-    .ok
+    );
+    // `secret set` succeeds either way now — it falls back to plaintext rather
+    // than blocking — so success is not the signal. Where the secret landed is.
+    out.ok && out.json()["data"]["source"] == "keyring"
 }
 
 // ---------------------------------------------------------------------------
@@ -392,22 +396,26 @@ fn secret_set_from_stdin_never_echoes_the_value() {
         &[],
     );
 
-    // Holds either way: this is the property that matters.
+    // Holds on every path: the value must never reach the terminal or a log.
+    assert!(out.ok, "the write should complete\n{}", out.combined());
     out.assert_absent(SECRET, "the secret read from stdin");
-    assert!(
-        !profile_text(&home, "t").contains(SECRET),
-        "the profile must never contain the stdin value"
-    );
 
-    if out.ok {
+    let yaml = profile_text(&home, "t");
+    if yaml.contains("client_secret_ref: keyring:") {
         assert!(
-            profile_text(&home, "t").contains("client_secret_ref: keyring:"),
-            "a successful set should store a keyring reference"
+            !yaml.contains(SECRET),
+            "a keyring-backed profile must not contain the value\n{yaml}"
         );
     } else {
+        // Plaintext fallback: the value is in the file by design, and the
+        // command must have said so.
         assert!(
-            out.combined().contains("keyring"),
-            "the failure should be attributed to keyring storage\n{}",
+            yaml.contains("client_secret_ref: inline:"),
+            "the secret should be stored inline when no keyring exists\n{yaml}"
+        );
+        assert!(
+            out.combined().contains("plaintext"),
+            "the downgrade must be announced\n{}",
             out.combined()
         );
     }
@@ -781,11 +789,12 @@ fn secret_migrate_moves_plaintext_out_of_the_profile_and_reports_only_real_conve
     out.assert_absent(TOP, "the top-level plaintext secret");
     out.assert_absent(WORKSPACE, "the workspace plaintext secret");
 
-    if !out.ok {
+    assert!(out.ok, "migrate should not fail\n{}", out.combined());
+    if out.json()["data"]["warning"].is_string() {
         assert_eq!(
             before,
             profile_text(&home, "mig"),
-            "a failed migration must leave the profile byte-identical"
+            "an unfinished migration must leave the profile byte-identical"
         );
         eprintln!("skipping migration success assertions: no OS keyring on this host");
         return;
@@ -820,16 +829,12 @@ fn secret_migrate_moves_plaintext_out_of_the_profile_and_reports_only_real_conve
 // 7. failure behaviour leaves no residue
 // ---------------------------------------------------------------------------
 
-/// A keyring write that cannot complete must not leave the profile half-written
-/// or strand a transaction journal or temp file beside it.
+/// Neither the keyring path nor the plaintext fallback may strand a
+/// transaction journal or temp file beside the profile.
 #[test]
-fn a_failed_keyring_write_leaves_no_journal_or_temp_file() {
+fn a_secret_write_leaves_no_journal_or_temp_file() {
     const SECRET: &str = "atomic-sentinel-7e8f";
     let home = config_home(&[("t", EMPTY_PROFILE)]);
-    let before = profile_text(&home, "t");
-
-    // Force the keyring unavailable *without* allowing the inline fallback, so
-    // the write has nowhere to land and must fail.
     let out = run_in(
         &home,
         home.path(),
@@ -842,20 +847,10 @@ fn a_failed_keyring_write_leaves_no_journal_or_temp_file() {
             "--from-stdin",
         ],
         Some(SECRET),
-        &[("AYX_FORCE_INLINE_SECRETS", "1")],
+        &[],
     );
-    assert!(
-        !out.ok,
-        "the write must fail when it cannot be stored\n{}",
-        out.combined()
-    );
+    assert!(out.ok, "the write should complete\n{}", out.combined());
     out.assert_absent(SECRET, "the secret being stored");
-
-    assert_eq!(
-        before,
-        profile_text(&home, "t"),
-        "a failed write must leave the profile byte-identical"
-    );
 
     let dir = home.path().join("profiles");
     for entry in fs::read_dir(&dir).expect("read profiles dir") {
@@ -866,7 +861,7 @@ fn a_failed_keyring_write_leaves_no_journal_or_temp_file() {
             .into_owned();
         assert!(
             !name.ends_with(".auth-txn") && !name.ends_with(".tmp"),
-            "a failed write must not strand {name}"
+            "the write must not strand {name}"
         );
     }
 }
@@ -875,15 +870,20 @@ fn a_failed_keyring_write_leaves_no_journal_or_temp_file() {
 // keyring-unavailable policy
 // ---------------------------------------------------------------------------
 
-/// Without a keyring and without the documented opt-in, `secret set` refuses
-/// rather than silently downgrading to plaintext, and the remediation it offers
-/// is one that actually works.
+/// Without a keyring, `secret set` stores plaintext and warns loudly rather
+/// than failing.
+///
+/// Blocking here strands anyone bootstrapping on a host with no keyring, and
+/// the workaround they reach for — hand-editing the same value into the YAML —
+/// produces identical plaintext with no warning at all. The warning goes to
+/// stderr and into the envelope, and `doctor config` / `secret status` keep
+/// reporting the posture until it is resolved.
 #[test]
-fn secret_set_without_keyring_refuses_and_offers_working_remediation() {
-    const SECRET: &str = "refuse-sentinel-9a1c";
+fn secret_set_without_keyring_stores_plaintext_and_warns() {
+    const SECRET: &str = "bootstrap-sentinel-9a1c";
     let home = config_home(&[("t", EMPTY_PROFILE)]);
     if keyring_available() {
-        eprintln!("skipping: this host has a keyring, so the refusal path cannot be reached");
+        eprintln!("skipping: this host has a keyring, so the fallback is not taken");
         return;
     }
     let out = run_in(
@@ -900,28 +900,36 @@ fn secret_set_without_keyring_refuses_and_offers_working_remediation() {
         Some(SECRET),
         &[],
     );
-    assert!(!out.ok, "must refuse without an opt-in\n{}", out.combined());
+    assert!(
+        out.ok,
+        "a missing keyring must not block bootstrapping\n{}",
+        out.combined()
+    );
     out.assert_absent(SECRET, "the secret being stored");
     assert!(
-        out.combined().contains("--from-env"),
-        "the remediation should point at the keyring-free option\n{}",
+        out.combined().contains("plaintext"),
+        "the downgrade must be stated plainly\n{}",
         out.combined()
     );
     assert!(
-        !profile_text(&home, "t").contains("client_secret_ref:"),
-        "nothing should have been written"
+        profile_text(&home, "t").contains("client_secret_ref: inline:"),
+        "the secret should be stored inline"
     );
+
+    // And the posture keeps being reported afterwards.
+    let entry = slot(&home, "t", "one.client-secret");
+    assert_eq!(entry["source"], "inline");
+    assert_eq!(entry["validation"], "warning");
 }
 
-/// With the opt-in documented in SECURITY.md, the same call stores inline.
-/// Before this, `AYX_ALLOW_INLINE_SECRETS` was advertised by the error and
-/// then ignored, so `--from-stdin` was impossible on any keyring-less host.
+/// The fallback needs no environment opt-in, and the warning is machine
+/// readable so an agent or CI step can act on it.
 #[test]
-fn secret_set_honours_the_documented_inline_opt_in() {
+fn secret_set_fallback_warning_is_machine_readable() {
     const SECRET: &str = "optin-sentinel-2b4d";
     let home = config_home(&[("t", EMPTY_PROFILE)]);
     if keyring_available() {
-        eprintln!("skipping: this host has a keyring, so the inline path is not taken");
+        eprintln!("skipping: this host has a keyring, so the fallback is not taken");
         return;
     }
     let out = run_in(
@@ -934,27 +942,33 @@ fn secret_set_honours_the_documented_inline_opt_in() {
             "--profile",
             "t",
             "--from-stdin",
+            "--output",
+            "json-full",
         ],
         Some(SECRET),
-        &[("AYX_ALLOW_INLINE_SECRETS", "1")],
+        &[],
     );
     assert!(
         out.ok,
-        "the opt-in should permit the write\n{}",
+        "should succeed without any opt-in\n{}",
         out.combined()
     );
     out.assert_absent(SECRET, "the secret being stored");
+    let json = out.json();
+    assert_eq!(json["data"]["source"], "inline");
     assert!(
-        profile_text(&home, "t").contains("client_secret_ref: inline:"),
-        "the opt-in stores an inline reference"
+        json["data"]["warning"].is_string(),
+        "the envelope must carry the warning: {}",
+        json["data"]
     );
 }
 
 /// `secret migrate` moves plaintext *into* secure storage. With no keyring
-/// there is nowhere better to put it, so it refuses even under the opt-in, and
-/// must not claim otherwise in its error.
+/// there is nowhere better to put it, so it reports an unfinished no-op rather
+/// than failing — a missing keyring is an environment condition, not a user
+/// error — and never rewrites the secret as inline plaintext.
 #[test]
-fn secret_migrate_refuses_without_keyring_even_under_the_opt_in() {
+fn secret_migrate_without_keyring_is_a_warned_no_op() {
     const PLAINTEXT: &str = "nomigrate-sentinel-6c8e";
     let home = config_home(&[(
         "m",
@@ -970,14 +984,20 @@ fn secret_migrate_refuses_without_keyring_even_under_the_opt_in() {
         return;
     }
     let before = profile_text(&home, "m");
-    let out = run_env(
+    let out = run(
         &home,
-        &["secret", "migrate", "--profile", "m"],
-        &[("AYX_ALLOW_INLINE_SECRETS", "1")],
+        &[
+            "secret",
+            "migrate",
+            "--profile",
+            "m",
+            "--output",
+            "json-full",
+        ],
     );
     assert!(
-        !out.ok,
-        "migration into plaintext accomplishes nothing and must refuse\n{}",
+        out.ok,
+        "a missing keyring must not fail the command\n{}",
         out.combined()
     );
     out.assert_absent(PLAINTEXT, "the plaintext being migrated");
@@ -986,10 +1006,17 @@ fn secret_migrate_refuses_without_keyring_even_under_the_opt_in() {
         profile_text(&home, "m"),
         "the profile must be untouched"
     );
+
+    let json = out.json();
+    assert_eq!(
+        json["data"]["migrated_fields"].as_array().map(Vec::len),
+        Some(0),
+        "nothing was migrated"
+    );
+    let warning = json["data"]["warning"].as_str().unwrap_or_default();
     assert!(
-        !out.combined().contains("Set AYX_ALLOW_INLINE_SECRETS=1"),
-        "the error must not advertise a flag this path ignores\n{}",
-        out.combined()
+        warning.contains("alteryx_one.client_secret"),
+        "the warning should name what was left behind: {warning}"
     );
 }
 
