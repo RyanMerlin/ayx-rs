@@ -274,6 +274,7 @@ fn config() -> Config {
             managed: None,
         },
         alteryx_one: Some(AlteryxOneProfile {
+            schema_version: ayx_core::profile::CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: "doc-regen@example.com".to_string(),
             base_url: Some("https://us1.alteryxcloud.com".to_string()),
             oauth_client_id: Some("client-id".to_string()),
@@ -289,6 +290,7 @@ fn config() -> Config {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,

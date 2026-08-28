@@ -4,7 +4,6 @@ use ayx_core::profile::profile_storage_path;
 use ayx_one_api::{
     one_api_live_request, one_api_live_request_with_body, one_api_live_request_with_query,
 };
-use serde_json::Value;
 use serde_json::json;
 
 use crate::{
@@ -39,42 +38,17 @@ fn resolve_workspace_path_id(
         ));
     }
 
-    let response = envelope
-        .data
-        .get("response")
-        .filter(|value| value.is_object())
-        .unwrap_or(&envelope.data);
+    let response = envelope.data.get("response").unwrap_or(&envelope.data);
+    let identity = ayx_one_api::parse_current_workspace_identity(response)
+        .map_err(|err| anyhow!("workspace path preflight failed: {err}"))?;
     validate_workspace_gid(
         config
             .alteryx_one
             .as_ref()
             .and_then(|one| one.resolved_workspace_gid()),
-        response.get("gid").and_then(Value::as_str),
+        Some(identity.workspace_gid.as_str()),
     )?;
-
-    let current_id = response.get("id").and_then(|candidate| {
-        candidate
-            .as_i64()
-            .map(|id| id.to_string())
-            .or_else(|| candidate.as_u64().map(|id| id.to_string()))
-            .or_else(|| {
-                candidate.as_str().and_then(|id| {
-                    id.chars()
-                        .all(|ch| ch.is_ascii_digit())
-                        .then(|| id.to_string())
-                })
-            })
-    });
-    let current_id = current_id.ok_or_else(|| {
-        let response_preview = if response.is_object() {
-            "current workspace response did not include a numeric id"
-        } else {
-            "current workspace response was not an object"
-        };
-        anyhow!(response_preview)
-    })?;
-
-    validate_workspace_path_id(explicit.as_deref(), current_id)
+    validate_workspace_path_id(explicit.as_deref(), identity.workspace_id)
 }
 
 fn validate_workspace_path_id(explicit: Option<&str>, current_id: String) -> Result<String> {
@@ -143,6 +117,7 @@ pub(crate) fn execute(
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let params = ayx_one_api::OneListParams::new()
+                .with_page_size(runtime.page_size)
                 .with_limit(limit)
                 .with_page_token(page_token)
                 .with_all(all, max_pages);
@@ -387,7 +362,7 @@ pub(crate) fn execute(
         }
         OneWorkspaceCommand::Groups { workspace_id } => {
             let config = runtime.load_profile_lenient(None)?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             one_api_live_request(
                 &config,
                 "workspace",
@@ -618,8 +593,45 @@ pub(crate) fn execute(
                 .alteryx_one
                 .as_mut()
                 .ok_or_else(|| anyhow!("no alteryx_one section in profile"))?;
+            one.validate_workspace_identities()
+                .map_err(|message| anyhow!("workspace switch: {message}"))?;
+            if id.is_none() {
+                let rows = one.workspace_credentials.iter().map(|(id, credential)| {
+                    json!({
+                        "workspace_id": credential.workspace_id.as_deref().unwrap_or(id),
+                        "workspace_gid": credential.workspace_gid,
+                        "workspace_name": credential.workspace_name,
+                        "active": one.active_workspace_id.as_deref() == Some(id.as_str()),
+                        "credential_health": credential.credential_health.as_deref().unwrap_or("unknown"),
+                        "has_access_token": credential.access_token.is_some() || credential.access_token_ref.is_some(),
+                    })
+                }).collect::<Vec<_>>();
+                return Ok(Envelope::ok_with_data(
+                    "saved credential workspaces",
+                    json!({
+                        "items": rows,
+                        "active_workspace_id": one.active_workspace_id,
+                    }),
+                ));
+            }
+            let selector = id.expect("checked above");
+            let key = one
+                .resolve_workspace_selector(&selector)
+                .map_err(|message| anyhow!("workspace switch: {message}"))?;
+            let credential = one
+                .workspace_credentials
+                .get(&key)
+                .ok_or_else(|| anyhow!("workspace switch resolved to a missing credential"))?;
+            let target = ayx_core::profile::WorkspaceTarget::from_credential(
+                &key,
+                credential,
+                ayx_core::profile::WorkspaceResolutionSource::SavedCredential,
+            )
+            .ok_or_else(|| {
+                anyhow!("workspace switch requires saved ID, GID, and exact name metadata")
+            })?;
             let available: Vec<String> = one.workspace_credentials.keys().cloned().collect();
-            if !one.workspace_credentials.contains_key(&id) {
+            if credential.access_token.is_none() && credential.access_token_ref.is_none() {
                 let profile_name = config.profile_name.clone();
                 return Err(anyhow!(
                     "no stored credential for workspace '{}' in profile '{}'. \
@@ -628,7 +640,7 @@ pub(crate) fn execute(
                      the token is workspace-bound). \
                      Available: {}. \
                      Run `ayx one workspace list` to see workspaces.",
-                    id,
+                    selector,
                     profile_name,
                     if available.is_empty() {
                         "(none)".to_string()
@@ -637,7 +649,25 @@ pub(crate) fn execute(
                     }
                 ));
             }
-            one.expected_workspace_id = Some(id.clone());
+            // Select the credential only in memory first. The current-workspace
+            // endpoint is authoritative for token identity; durable state is
+            // changed only after that probe succeeds.
+            one.active_workspace_id = Some(key.clone());
+            let _ = one;
+            let identity = ayx_one_api::probe_config_current_workspace(&config).map_err(|err| {
+                anyhow!("workspace switch verification failed: {err}; active state was not changed")
+            })?;
+            if identity.workspace_id != target.workspace_id
+                || identity.workspace_gid != target.workspace_gid
+            {
+                return Err(anyhow!(
+                    "selected workspace token identity ('{}', '{}') does not match saved workspace ('{}', '{}'); active state was not changed",
+                    identity.workspace_id,
+                    identity.workspace_gid,
+                    target.workspace_id,
+                    target.workspace_gid
+                ));
+            }
             let profile_name = config.profile_name.clone();
             let available_after: Vec<String> = config
                 .alteryx_one
@@ -652,9 +682,9 @@ pub(crate) fn execute(
                 eprintln!("warning: {msg}");
             }
             Envelope::ok_with_data(
-                format!("active workspace set to '{id}'"),
+                format!("active workspace set to '{}'", target.workspace_id),
                 json!({
-                    "active_workspace_id": id,
+                    "active_workspace_id": target.workspace_id,
                     "available_workspace_ids": available_after,
                     "profile": profile_name,
                 }),

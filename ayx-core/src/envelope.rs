@@ -32,6 +32,10 @@ pub enum ErrorCode {
     Upstream,
     /// Workspace identity preflight detected the wrong workspace.
     WorkspaceMismatch,
+    /// Automatic pagination could not retrieve the complete collection.
+    Incomplete,
+    /// The upstream payload shape cannot be rendered in the requested view.
+    OutputClassification,
     /// Generic internal error / unexpected condition.
     Internal,
 }
@@ -50,6 +54,8 @@ impl ErrorCode {
             ErrorCode::Network => "network",
             ErrorCode::Upstream => "upstream",
             ErrorCode::WorkspaceMismatch => "workspace_mismatch",
+            ErrorCode::Incomplete => "incomplete",
+            ErrorCode::OutputClassification => "output_classification",
             ErrorCode::Internal => "internal",
         }
     }
@@ -72,6 +78,8 @@ impl ErrorCode {
             "network" => ErrorCode::Network,
             "upstream" => ErrorCode::Upstream,
             "workspace_mismatch" => ErrorCode::WorkspaceMismatch,
+            "incomplete" => ErrorCode::Incomplete,
+            "output_classification" => ErrorCode::OutputClassification,
             "internal" => ErrorCode::Internal,
             _ => return None,
         })

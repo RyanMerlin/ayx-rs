@@ -2254,6 +2254,7 @@ impl App {
             TargetKind::Profile => self.current_config.clone(),
         };
         let mut one = config.alteryx_one.unwrap_or(AlteryxOneProfile {
+            schema_version: ayx_core::profile::CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: String::new(),
             base_url: None,
             oauth_client_id: None,
@@ -2269,6 +2270,7 @@ impl App {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,

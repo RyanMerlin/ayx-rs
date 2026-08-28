@@ -524,6 +524,7 @@ pub(crate) fn execute(
                 return Ok(workflows);
             }
             let params = OneListParams::new()
+                .with_page_size(runtime.page_size)
                 .with_limit(limit)
                 .with_page_token(page_token)
                 .with_all(all, max_pages);

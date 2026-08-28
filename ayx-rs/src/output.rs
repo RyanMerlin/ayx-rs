@@ -12,6 +12,13 @@ use crate::render;
 pub const COMPACT_SCHEMA_VERSION: &str = "ayx.output.v1";
 pub const DEFAULT_OUTPUT_LIMIT: usize = 20;
 
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ErrorFormat {
+    #[default]
+    Text,
+    Json,
+}
+
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {
     Text,

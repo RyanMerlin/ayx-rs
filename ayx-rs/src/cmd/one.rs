@@ -483,6 +483,10 @@ pub struct Ctx<'a> {
     pub apply: bool,
     pub yes: bool,
     pub environment: Option<&'a str>,
+    pub workspace: Option<&'a str>,
+    pub workspace_source: ayx_core::profile::WorkspaceResolutionSource,
+    pub no_input: bool,
+    pub page_size: Option<u32>,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -490,7 +494,11 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
     // Capture `environment` up-front so `cli.environment` reads through the
     // helper don't conflict with `cli` itself being borrowed by other arms.
     let environment = cli.environment;
-    let runtime = crate::cmd::RuntimeCtx::new(environment);
+    let mut runtime = crate::cmd::RuntimeCtx::new(environment);
+    runtime.workspace = cli.workspace;
+    runtime.workspace_source = cli.workspace_source;
+    runtime.no_input = cli.no_input;
+    runtime.page_size = cli.page_size;
     Ok(match command {
         OneCommand::Login {
             profile,

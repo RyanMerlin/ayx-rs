@@ -422,6 +422,12 @@ pub enum AuthMode {
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct WorkspaceCredential {
+    /// Numeric workspace id. The map key remains a backward-compatible lookup
+    /// key; this field keeps the identity distinct when credentials are
+    /// imported from another source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    /// Stable workspace GID returned by the One API.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access_token: Option<String>,
     #[serde(default)]
@@ -455,14 +461,78 @@ pub struct WorkspaceCredential {
     /// requests.  For user flow this is informational only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_gid: Option<String>,
+    /// Exact display name captured from the account/workspace directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_name: Option<String>,
+    /// Last known credential health; informational and never a substitute for
+    /// a live token probe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_health: Option<String>,
     /// Override the API base URL for this credential (e.g. a regional cell
     /// host for SP tokens).  Falls back to the profile `base_url` default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_base_url: Option<String>,
 }
 
+/// Canonical identity used when a command binds a credential to a workspace.
+/// The numeric ID is the stable key; GID and name are corroborating metadata
+/// used for display and fail-closed selector checks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorkspaceTarget {
+    pub workspace_id: String,
+    pub workspace_gid: String,
+    pub display_name: String,
+    pub credential_key: String,
+    pub resolution_source: WorkspaceResolutionSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceResolutionSource {
+    Cli,
+    Environment,
+    ActiveProfile,
+    SavedCredential,
+    Directory,
+}
+
+impl WorkspaceTarget {
+    pub fn from_credential(
+        credential_key: impl Into<String>,
+        credential: &WorkspaceCredential,
+        resolution_source: WorkspaceResolutionSource,
+    ) -> Option<Self> {
+        let credential_key = credential_key.into();
+        let workspace_id = credential.workspace_id.clone()?.trim().to_string();
+        if workspace_id.is_empty()
+            || !workspace_id
+                .chars()
+                .all(|character| character.is_ascii_digit())
+            || credential_key != workspace_id
+        {
+            return None;
+        }
+        let workspace_gid = credential.workspace_gid.clone()?.trim().to_string();
+        let display_name = credential.workspace_name.clone()?.trim().to_string();
+        if workspace_gid.is_empty() || display_name.is_empty() {
+            return None;
+        }
+        Some(Self {
+            workspace_id,
+            workspace_gid,
+            display_name,
+            credential_key,
+            resolution_source,
+        })
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 pub struct AlteryxOneProfile {
+    /// Version of the serialized workspace/profile shape. Older profiles omit
+    /// this field and are interpreted as the current legacy-compatible shape.
+    #[serde(default = "default_profile_schema_version")]
+    pub schema_version: u32,
     pub account_email: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
@@ -492,6 +562,10 @@ pub struct AlteryxOneProfile {
     pub workspace_password_ref: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub workspace_credentials: BTreeMap<String, WorkspaceCredential>,
+    /// Active workspace selector, separate from `expected_workspace_id`, which
+    /// remains an optional mutation safety guard.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_workspace_id: Option<String>,
     /// Rollout that owns the bound credentials in this profile. Persisting
     /// the selected lane keeps an explicit one-shot CLI override aligned with
     /// later API credential consumption.
@@ -524,9 +598,16 @@ pub struct AlteryxOneProfile {
     pub auth_mode: AuthMode,
 }
 
+pub const CURRENT_PROFILE_SCHEMA_VERSION: u32 = 1;
+
+fn default_profile_schema_version() -> u32 {
+    CURRENT_PROFILE_SCHEMA_VERSION
+}
+
 impl Default for AlteryxOneProfile {
     fn default() -> Self {
         Self {
+            schema_version: CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: String::new(),
             base_url: None,
             oauth_client_id: None,
@@ -542,6 +623,7 @@ impl Default for AlteryxOneProfile {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
@@ -627,6 +709,11 @@ impl AlteryxOneProfile {
     }
 
     pub fn active_workspace_id(&self) -> Option<&str> {
+        if let Some(active) = self.active_workspace_id.as_deref()
+            && self.workspace_credentials.contains_key(active)
+        {
+            return Some(active);
+        }
         if let Some(expected_workspace_id) = self.expected_workspace_id.as_deref()
             && self
                 .workspace_credentials
@@ -640,31 +727,172 @@ impl AlteryxOneProfile {
         None
     }
 
+    /// Resolve a universal workspace selector without conflating numeric IDs,
+    /// GIDs, and display names. Exact name matching is intentionally strict.
+    pub fn resolve_workspace_selector(&self, selector: &str) -> Result<String, String> {
+        Ok(self
+            .resolve_workspace_target(selector, WorkspaceResolutionSource::Cli)?
+            .credential_key)
+    }
+
+    /// Resolve a selector and preserve how it was chosen for diagnostics and
+    /// audit output. Matching is exact and never performs fuzzy name lookup.
+    pub fn resolve_workspace_target(
+        &self,
+        selector: &str,
+        source: WorkspaceResolutionSource,
+    ) -> Result<WorkspaceTarget, String> {
+        let selector = selector.trim();
+        if selector.is_empty() {
+            return Err("workspace selector cannot be empty".to_string());
+        }
+        let mut matches = self
+            .workspace_credentials
+            .iter()
+            .filter_map(|(key, c)| {
+                let id_match = key == selector || c.workspace_id.as_deref() == Some(selector);
+                let gid_match = c.workspace_gid.as_deref() == Some(selector);
+                let name_match = c.workspace_name.as_deref() == Some(selector);
+                (id_match || gid_match || name_match).then_some(key.clone())
+            })
+            .collect::<Vec<_>>();
+        matches.sort();
+        matches.dedup();
+        match matches.as_slice() {
+            [only] => WorkspaceTarget::from_credential(
+                only,
+                self.workspace_credentials
+                    .get(only)
+                    .expect("selector match must have a credential"),
+                source,
+            )
+            .ok_or_else(|| {
+                format!("workspace '{selector}' has incomplete or non-canonical identity metadata")
+            }),
+            [] => Err(format!(
+                "workspace '{selector}' is not a saved credential workspace"
+            )),
+            _ => Err(format!(
+                "workspace selector '{selector}' is ambiguous; use its numeric ID or GID"
+            )),
+        }
+    }
+
+    /// Validate all saved identities before a workspace-scoped operation.
+    /// Legacy entries remain readable, but duplicate or malformed identity
+    /// metadata must never be selected implicitly.
+    pub fn validate_workspace_identities(&self) -> Result<(), String> {
+        let mut ids = std::collections::BTreeMap::<String, String>::new();
+        let mut gids = std::collections::BTreeMap::<String, String>::new();
+        let mut names = std::collections::BTreeMap::<String, String>::new();
+        for (key, credential) in &self.workspace_credentials {
+            let Some(id) = credential.workspace_id.as_deref() else {
+                continue;
+            };
+            if id.is_empty() || !id.chars().all(|character| character.is_ascii_digit()) {
+                return Err(format!(
+                    "workspace credential '{key}' has a non-numeric workspace ID"
+                ));
+            }
+            if let Some(previous) = ids.insert(id.to_string(), key.clone())
+                && previous != *key
+            {
+                return Err(format!(
+                    "duplicate workspace ID '{id}' in credentials '{previous}' and '{key}'"
+                ));
+            }
+            if let Some(gid) = credential.workspace_gid.as_deref()
+                && let Some(previous) = gids.insert(gid.to_string(), key.clone())
+                && previous != *key
+            {
+                return Err(format!(
+                    "duplicate workspace GID '{gid}' in credentials '{previous}' and '{key}'"
+                ));
+            }
+            if let Some(name) = credential.workspace_name.as_deref()
+                && let Some(previous) = names.insert(name.to_string(), key.clone())
+                && previous != *key
+            {
+                return Err(format!(
+                    "duplicate workspace name '{name}' in credentials '{previous}' and '{key}'"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Normalize legacy credential map keys in memory. Fully identified
+    /// records are re-keyed by numeric workspace ID; incomplete records remain
+    /// readable but are marked stale and cannot be selected as active targets.
+    /// The caller decides when to persist the returned mutation.
+    pub fn migrate_workspace_credentials(&mut self) -> Result<usize, String> {
+        if self.schema_version > CURRENT_PROFILE_SCHEMA_VERSION {
+            return Err(format!(
+                "profile schema version {} is newer than supported version {}",
+                self.schema_version, CURRENT_PROFILE_SCHEMA_VERSION
+            ));
+        }
+        self.validate_workspace_identities()?;
+        // Build a replacement without mutating the live map until every
+        // entry has been checked. This keeps failed migrations recoverable.
+        let original = self.workspace_credentials.clone();
+        let mut normalized = std::collections::BTreeMap::new();
+        let mut changes = usize::from(self.schema_version != CURRENT_PROFILE_SCHEMA_VERSION);
+        for (key, mut credential) in original {
+            let canonical_id = credential.workspace_id.as_deref().and_then(|id| {
+                (!id.is_empty() && id.chars().all(|character| character.is_ascii_digit()))
+                    .then_some(id.to_string())
+            });
+            let target_key = canonical_id.unwrap_or_else(|| {
+                credential.credential_health = Some("stale".to_string());
+                key.clone()
+            });
+            if target_key != key {
+                changes += 1;
+            }
+            if normalized.insert(target_key.clone(), credential).is_some() {
+                return Err(format!(
+                    "workspace credential migration would merge duplicate key '{target_key}'"
+                ));
+            }
+        }
+        self.workspace_credentials = normalized;
+        self.schema_version = CURRENT_PROFILE_SCHEMA_VERSION;
+        self.validate_workspace_identities()?;
+        Ok(changes)
+    }
+
     pub fn active_workspace_credential(&self) -> Option<&WorkspaceCredential> {
         self.active_workspace_id()
             .and_then(|workspace_id| self.workspace_credential_for(Some(workspace_id)))
     }
 
     pub fn resolved_access_token(&self) -> Option<&str> {
-        self.active_workspace_credential()
-            .and_then(|credential| credential.access_token.as_deref())
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| {
-                self.access_token
-                    .as_deref()
-                    .filter(|value| !value.trim().is_empty())
-            })
+        let active = self.active_workspace_id();
+        let token = active.and_then(|workspace_id| {
+            self.workspace_credential_for(Some(workspace_id))
+                .and_then(|credential| credential.access_token.as_deref())
+        });
+        token.filter(|value| !value.trim().is_empty()).or_else(|| {
+            (active.is_none() && self.workspace_credentials.len() <= 1)
+                .then_some(self.access_token.as_deref())
+                .flatten()
+                .filter(|value| !value.trim().is_empty())
+        })
     }
 
     pub fn resolved_refresh_token(&self) -> Option<&str> {
-        self.active_workspace_credential()
-            .and_then(|credential| credential.refresh_token.as_deref())
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| {
-                self.refresh_token
-                    .as_deref()
-                    .filter(|value| !value.trim().is_empty())
-            })
+        let active = self.active_workspace_id();
+        let token = active.and_then(|workspace_id| {
+            self.workspace_credential_for(Some(workspace_id))
+                .and_then(|credential| credential.refresh_token.as_deref())
+        });
+        token.filter(|value| !value.trim().is_empty()).or_else(|| {
+            (active.is_none() && self.workspace_credentials.len() <= 1)
+                .then_some(self.refresh_token.as_deref())
+                .flatten()
+                .filter(|value| !value.trim().is_empty())
+        })
     }
 
     pub fn resolved_workspace_password(&self) -> Option<&str> {
@@ -1686,6 +1914,7 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         || workspace_gid.is_some()
     {
         let mut one = config.alteryx_one.unwrap_or(AlteryxOneProfile {
+            schema_version: CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: account_email.clone().unwrap_or_default(),
             base_url: None,
             oauth_client_id: None,
@@ -1701,6 +1930,7 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: BTreeMap::new(),
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
@@ -2740,6 +2970,7 @@ mod tests {
                 managed: None,
             },
             alteryx_one: Some(AlteryxOneProfile {
+                schema_version: CURRENT_PROFILE_SCHEMA_VERSION,
                 account_email: "user@example.com".to_string(),
                 base_url: Some("https://us1.alteryxcloud.com".to_string()),
                 oauth_client_id: None,
@@ -2755,6 +2986,7 @@ mod tests {
                 workspace_password: None,
                 workspace_password_ref: None,
                 workspace_credentials: Default::default(),
+                active_workspace_id: None,
                 auth_rollout: None,
                 expected_workspace_id: None,
                 sp_client_id: None,
@@ -3021,6 +3253,7 @@ mod tests {
     #[test]
     fn one_token_endpoint_normalizes_issuer_root() {
         let profile = AlteryxOneProfile {
+            schema_version: CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: "user@example.com".to_string(),
             base_url: Some("https://pingauth.alteryxcloud.com".to_string()),
             oauth_client_id: None,
@@ -3036,6 +3269,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
@@ -3057,6 +3291,7 @@ mod tests {
     #[test]
     fn one_token_endpoint_does_not_infer_api_base_url_from_auth_host() {
         let profile = AlteryxOneProfile {
+            schema_version: CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: "user@example.com".to_string(),
             base_url: None,
             oauth_client_id: None,
@@ -3072,6 +3307,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
@@ -3093,6 +3329,9 @@ mod tests {
         workspace_credentials.insert(
             "ws-1".to_string(),
             WorkspaceCredential {
+                workspace_id: None,
+                workspace_name: None,
+                credential_health: None,
                 access_token: Some("workspace-access".to_string()),
                 access_token_ref: None,
                 refresh_token: Some("workspace-refresh".to_string()),
@@ -3112,6 +3351,7 @@ mod tests {
         );
 
         let profile = AlteryxOneProfile {
+            schema_version: CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: "user@example.com".to_string(),
             base_url: Some("https://us1.alteryxcloud.com".to_string()),
             oauth_client_id: Some("legacy-client".to_string()),
@@ -3127,6 +3367,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials,
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: Some("ws-1".to_string()),
             sp_client_id: None,
@@ -3153,6 +3394,9 @@ mod tests {
         workspace_credentials.insert(
             "ws-2".to_string(),
             WorkspaceCredential {
+                workspace_id: None,
+                workspace_name: None,
+                credential_health: None,
                 access_token: Some("single-access".to_string()),
                 access_token_ref: None,
                 refresh_token: Some("single-refresh".to_string()),
@@ -3172,6 +3416,7 @@ mod tests {
         );
 
         let profile = AlteryxOneProfile {
+            schema_version: CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: "user@example.com".to_string(),
             base_url: Some("https://us1.alteryxcloud.com".to_string()),
             oauth_client_id: Some("legacy-client".to_string()),
@@ -3187,6 +3432,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials,
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
@@ -3208,11 +3454,120 @@ mod tests {
     }
 
     #[test]
+    fn workspace_selector_keeps_active_selection_separate_from_mutation_guard() {
+        let mut profile = AlteryxOneProfile::default();
+        profile.workspace_credentials.insert(
+            "42".to_string(),
+            WorkspaceCredential {
+                workspace_id: Some("42".to_string()),
+                workspace_gid: Some("gid-42".to_string()),
+                workspace_name: Some("Finance".to_string()),
+                credential_health: Some("fresh".to_string()),
+                ..WorkspaceCredential::default()
+            },
+        );
+        profile.expected_workspace_id = Some("guard".to_string());
+        assert_eq!(profile.resolve_workspace_selector("gid-42").unwrap(), "42");
+        assert_eq!(profile.resolve_workspace_selector("Finance").unwrap(), "42");
+        profile.active_workspace_id = Some("42".to_string());
+        assert_eq!(profile.active_workspace_id(), Some("42"));
+        assert_eq!(profile.expected_workspace_id.as_deref(), Some("guard"));
+    }
+
+    #[test]
+    fn workspace_target_requires_canonical_complete_identity() {
+        let complete = WorkspaceCredential {
+            workspace_id: Some("42".to_string()),
+            workspace_gid: Some("gid-42".to_string()),
+            workspace_name: Some("Finance".to_string()),
+            ..WorkspaceCredential::default()
+        };
+        assert!(
+            WorkspaceTarget::from_credential(
+                "42",
+                &complete,
+                WorkspaceResolutionSource::SavedCredential,
+            )
+            .is_some()
+        );
+        assert!(
+            WorkspaceTarget::from_credential(
+                "legacy-name",
+                &complete,
+                WorkspaceResolutionSource::SavedCredential,
+            )
+            .is_none()
+        );
+        assert!(
+            WorkspaceTarget::from_credential(
+                "42",
+                &WorkspaceCredential {
+                    workspace_id: Some("42".to_string()),
+                    workspace_gid: None,
+                    workspace_name: Some("Finance".to_string()),
+                    ..WorkspaceCredential::default()
+                },
+                WorkspaceResolutionSource::SavedCredential,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn workspace_identity_validation_rejects_duplicate_metadata() {
+        let mut profile = AlteryxOneProfile::default();
+        let credential = WorkspaceCredential {
+            workspace_id: Some("42".to_string()),
+            workspace_gid: Some("gid-42".to_string()),
+            workspace_name: Some("Finance".to_string()),
+            ..WorkspaceCredential::default()
+        };
+        profile
+            .workspace_credentials
+            .insert("42".to_string(), credential.clone());
+        profile
+            .workspace_credentials
+            .insert("43".to_string(), credential);
+        let error = profile
+            .validate_workspace_identities()
+            .expect_err("duplicate identities must fail closed");
+        assert!(error.contains("duplicate workspace ID"));
+    }
+
+    #[test]
+    fn workspace_credential_migration_rekeys_complete_and_stales_legacy() {
+        let mut profile = AlteryxOneProfile::default();
+        profile.workspace_credentials.insert(
+            "legacy-label".to_string(),
+            WorkspaceCredential {
+                workspace_id: Some("42".to_string()),
+                workspace_gid: Some("gid-42".to_string()),
+                workspace_name: Some("Finance".to_string()),
+                ..WorkspaceCredential::default()
+            },
+        );
+        profile
+            .workspace_credentials
+            .insert("unknown".to_string(), WorkspaceCredential::default());
+        assert_eq!(profile.migrate_workspace_credentials().unwrap(), 1);
+        assert!(profile.workspace_credentials.contains_key("42"));
+        assert_eq!(
+            profile.workspace_credentials["unknown"]
+                .credential_health
+                .as_deref(),
+            Some("stale")
+        );
+    }
+
+    #[test]
     fn one_workspace_password_prefers_workspace_credential_over_profile_fallback() {
         let mut workspace_credentials = BTreeMap::new();
         workspace_credentials.insert(
             "ws-3".to_string(),
             WorkspaceCredential {
+                workspace_id: None,
+                workspace_name: None,
+                credential_health: None,
                 access_token: Some("workspace-access".to_string()),
                 access_token_ref: None,
                 refresh_token: None,
@@ -3232,6 +3587,7 @@ mod tests {
         );
 
         let profile = AlteryxOneProfile {
+            schema_version: CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: "user@example.com".to_string(),
             base_url: Some("https://us1.alteryxcloud.com".to_string()),
             oauth_client_id: None,
@@ -3247,6 +3603,7 @@ mod tests {
             workspace_password: Some("profile-password".to_string()),
             workspace_password_ref: None,
             workspace_credentials,
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: Some("ws-3".to_string()),
             sp_client_id: None,
@@ -3267,6 +3624,9 @@ mod tests {
         workspace_credentials.insert(
             "ws-1".to_string(),
             WorkspaceCredential {
+                workspace_id: None,
+                workspace_name: None,
+                credential_health: None,
                 access_token: None,
                 access_token_ref: None,
                 refresh_token: None,
@@ -3286,6 +3646,7 @@ mod tests {
         );
 
         let profile = AlteryxOneProfile {
+            schema_version: CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: "user@example.com".to_string(),
             base_url: Some("https://us1.alteryxcloud.com".to_string()),
             oauth_client_id: None,
@@ -3301,6 +3662,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials,
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: Some("ws-1".to_string()),
             sp_client_id: None,
@@ -3351,6 +3713,7 @@ mod tests {
     #[test]
     fn resolved_sp_client_secret_falls_back_to_shared_client_secret_for_compatibility() {
         let profile = AlteryxOneProfile {
+            schema_version: CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: "user@example.com".to_string(),
             base_url: Some("https://us1.alteryxcloud.com".to_string()),
             oauth_client_id: None,
@@ -3366,6 +3729,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
@@ -3383,6 +3747,7 @@ mod tests {
     #[test]
     fn resolved_sp_client_secret_prefers_dedicated_field_over_shared_client_secret() {
         let profile = AlteryxOneProfile {
+            schema_version: CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: "user@example.com".to_string(),
             base_url: Some("https://us1.alteryxcloud.com".to_string()),
             oauth_client_id: None,
@@ -3398,6 +3763,7 @@ mod tests {
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
@@ -3436,6 +3802,9 @@ mod tests {
         profile.alteryx_one.as_mut().unwrap().workspace_credentials = BTreeMap::from([(
             "ws-1".to_string(),
             WorkspaceCredential {
+                workspace_id: None,
+                workspace_name: None,
+                credential_health: None,
                 access_token: Some("test-access".to_string()),
                 access_token_ref: None,
                 refresh_token: None,
@@ -3475,6 +3844,9 @@ mod tests {
         one.workspace_credentials.insert(
             "ws-rt".to_string(),
             WorkspaceCredential {
+                workspace_id: None,
+                workspace_name: None,
+                credential_health: None,
                 access_token: None,
                 access_token_ref: None,
                 refresh_token: None,

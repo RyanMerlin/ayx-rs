@@ -1312,6 +1312,7 @@ fn update_or_create_one(
     account_email: String,
 ) -> AlteryxOneProfile {
     let mut one = existing.unwrap_or(AlteryxOneProfile {
+        schema_version: ayx_core::profile::CURRENT_PROFILE_SCHEMA_VERSION,
         account_email: account_email.clone(),
         base_url: None,
         oauth_client_id: None,
@@ -1327,6 +1328,7 @@ fn update_or_create_one(
         workspace_password: None,
         workspace_password_ref: None,
         workspace_credentials: Default::default(),
+        active_workspace_id: None,
         auth_rollout: None,
         expected_workspace_id: None,
         sp_client_id: None,

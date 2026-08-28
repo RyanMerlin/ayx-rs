@@ -246,6 +246,20 @@ struct Cli {
         global = true
     )]
     output: output::OutputMode,
+    /// Universal One workspace selector: numeric ID, GID, or exact saved name.
+    #[arg(long, global = true)]
+    workspace: Option<String>,
+    /// Refuse all interactive input. Login then requires explicit token-based
+    /// credentials and ambiguous workspace selections fail closed.
+    #[arg(long, global = true)]
+    no_input: bool,
+    /// Preferred per-page size for list requests. `--limit` remains supported
+    /// on individual commands as a deprecated compatibility alias.
+    #[arg(long, global = true)]
+    page_size: Option<u32>,
+    /// Format command errors independently from successful command output.
+    #[arg(long, value_enum, default_value_t = output::ErrorFormat::Text, global = true)]
+    error_format: output::ErrorFormat,
     /// Maximum list rows in text and compact JSON output; 0 shows every
     /// projected row. Does not affect `--output json-full`.
     #[arg(long, default_value_t = output::DEFAULT_OUTPUT_LIMIT, global = true)]
@@ -396,7 +410,7 @@ enum Command {
     Onboard {
         #[arg(long, default_value = "config.yaml")]
         profile: PathBuf,
-        #[arg(long, alias = "workspace")]
+        #[arg(long)]
         environments: bool,
         #[arg(long)]
         non_interactive: bool,
@@ -2025,7 +2039,7 @@ pub(crate) enum OneWorkspaceCommand {
     /// List groups in a One workspace.
     Groups {
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
+        workspace_id: Option<String>,
     },
     /// List groups visible to the current One user.
     GroupsGlobal,
@@ -2101,8 +2115,8 @@ pub(crate) enum OneWorkspaceCommand {
     Switch {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
+        #[arg(value_name = "TARGET")]
+        id: Option<String>,
     },
     /// Invite users to a One workspace.
     InviteUsers {
@@ -4112,6 +4126,14 @@ pub(crate) fn parse_key_value_params(items: &[String]) -> Result<HashMap<String,
 }
 
 fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
+    // A few older command-family adapters still receive only `--yes`. Make
+    // the global noninteractive policy visible to their shared confirmation
+    // helper so no mutation can accidentally prompt when stdin is a TTY.
+    if cli.no_input {
+        // This process is single-threaded during dispatch; the variable is
+        // removed by the process boundary and is never persisted.
+        unsafe { std::env::set_var("AYX_NO_INPUT", "1") };
+    }
     // Plumb the global gates to BOTH transports. Mutating requests
     // short-circuit to dry-run envelopes unless --apply was passed.
     ayx_one_api::set_one_apply(cli.apply);
@@ -4138,6 +4160,22 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
         .environment_flag
         .clone()
         .or(cli.environment_tail.clone());
+    let (workspace, workspace_source) = if let Some(value) = cli.workspace.clone() {
+        (
+            Some(value),
+            ayx_core::profile::WorkspaceResolutionSource::Cli,
+        )
+    } else if let Ok(value) = std::env::var("AYX_WORKSPACE") {
+        (
+            Some(value),
+            ayx_core::profile::WorkspaceResolutionSource::Environment,
+        )
+    } else {
+        (
+            None,
+            ayx_core::profile::WorkspaceResolutionSource::ActiveProfile,
+        )
+    };
     let load_profile = |profile: Option<&str>| -> Result<Config> {
         load_profile_with_env(profile, environment.as_deref())
     };
@@ -4193,6 +4231,10 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
                 apply: cli.apply,
                 yes: cli.yes,
                 environment: environment.as_deref(),
+                workspace: workspace.as_deref(),
+                workspace_source,
+                no_input: cli.no_input,
+                page_size: cli.page_size,
             },
             command,
         )?,
@@ -5631,6 +5673,7 @@ fn main() -> Result<()> {
     // intercepted bare --help; that drifted from the actual command tree.
     let cli = Cli::parse();
     let output = cli.output;
+    let error_format = cli.error_format;
     let output_limit = cli.output_limit;
     let descriptor = output_descriptor(&cli.command);
 
@@ -5684,19 +5727,40 @@ fn main() -> Result<()> {
             // non-JSON `Error: ...` line and corrupt the stderr envelope.
             eprint!(
                 "{}",
-                format_envelope(&err_env, output, descriptor, output_limit)
-                    .unwrap_or_else(|_| err_env.message.clone())
+                format_envelope(
+                    &err_env,
+                    if error_format == output::ErrorFormat::Json {
+                        output::OutputMode::Json
+                    } else {
+                        output
+                    },
+                    descriptor,
+                    output_limit,
+                )
+                .unwrap_or_else(|_| err_env.message.clone())
             );
             eprintln!();
             let _ = io::stdout().lock().flush();
             let _ = io::stderr().lock().flush();
-            std::process::exit(1);
+            std::process::exit(exit_code_for_envelope(&err_env));
         }
     }
 }
 
 fn exit_code_for_envelope(envelope: &Envelope) -> i32 {
-    if envelope.ok { 0 } else { 1 }
+    if envelope.ok {
+        return 0;
+    }
+    use ayx_core::envelope::ErrorCode::*;
+    match envelope.error_code.unwrap_or(Internal) {
+        Validation => 2,
+        ConfigMissing | WorkspaceMismatch => 3,
+        AuthFailed => 4,
+        PermissionDenied => 5,
+        NotFound | Gone | Conflict | RateLimited | Network | Upstream => 6,
+        Incomplete => 7,
+        OutputClassification | Internal => 70,
+    }
 }
 
 /// Input accepted by the shared profile loader shims. Runtime callers pass a
@@ -5854,6 +5918,12 @@ fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static s
         WorkspaceMismatch => Some(
             "Re-authenticate against the expected workspace, or unset alteryx_one.expected_workspace_id.",
         ),
+        Incomplete => Some(
+            "The response is partial. Resume with the returned next_page_token or raise --max-pages.",
+        ),
+        OutputClassification => {
+            Some("Use --output json-full to inspect the sanitized upstream envelope.")
+        }
         Internal => None,
     }
 }

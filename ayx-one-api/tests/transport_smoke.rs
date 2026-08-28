@@ -33,6 +33,7 @@ mongo:
     )
     .expect("base config parses");
     config.alteryx_one = Some(AlteryxOneProfile {
+        schema_version: ayx_core::profile::CURRENT_PROFILE_SCHEMA_VERSION,
         account_email: "tester@example.com".to_string(),
         base_url: Some(base.to_string()),
         oauth_client_id: None,
@@ -48,6 +49,7 @@ mongo:
         workspace_password: None,
         workspace_password_ref: None,
         workspace_credentials: Default::default(),
+        active_workspace_id: None,
         auth_rollout: None,
         expected_workspace_id: expected_workspace.map(|s| s.to_string()),
         sp_client_id: None,

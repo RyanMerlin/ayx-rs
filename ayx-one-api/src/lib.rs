@@ -20,8 +20,134 @@ use reqwest::blocking::Client;
 use reqwest::blocking::multipart::{Form, Part};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER};
 use serde_json::{Value, json};
+use std::collections::HashSet;
 use url::form_urlencoded::Serializer;
 const ONE_API_BASE_URL: &str = "https://us1.alteryxcloud.com";
+
+/// Canonical identity returned by `/v4/workspaces/current`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurrentWorkspaceIdentity {
+    pub workspace_id: String,
+    pub workspace_gid: String,
+    pub display_name: Option<String>,
+}
+
+/// Parse the current-workspace response in one place for login, switch, and
+/// mutation preflight. Numeric IDs may arrive as JSON numbers or strings, but
+/// the canonical representation is always a non-empty decimal string.
+pub fn parse_current_workspace_identity(value: &Value) -> Result<CurrentWorkspaceIdentity> {
+    let value = value.get("response").unwrap_or(value);
+    let workspace_id = value
+        .get("id")
+        .or_else(|| value.get("workspaceId"))
+        .or_else(|| value.get("workspace_id"))
+        .and_then(|id| {
+            id.as_u64()
+                .map(|id| id.to_string())
+                .or_else(|| id.as_str().map(str::to_string))
+        })
+        .filter(|id| !id.is_empty() && id.chars().all(|character| character.is_ascii_digit()))
+        .ok_or_else(|| {
+            anyhow::anyhow!("current workspace response did not include a numeric workspace ID")
+        })?;
+    let workspace_gid = value
+        .get("gid")
+        .or_else(|| value.get("workspaceGid"))
+        .or_else(|| value.get("workspace_gid"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|gid| !gid.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            anyhow::anyhow!("current workspace response did not include a workspace GID")
+        })?;
+    let display_name = ["displayName", "name"]
+        .into_iter()
+        .filter_map(|field| value.get(field).and_then(Value::as_str))
+        .map(str::trim)
+        .find(|name| !name.is_empty())
+        .map(str::to_string);
+    Ok(CurrentWorkspaceIdentity {
+        workspace_id,
+        workspace_gid,
+        display_name,
+    })
+}
+
+/// Probe the authoritative current workspace for a bearer token. This is the
+/// single bounded network operation used to establish workspace identity before
+/// credentials are activated or persisted.
+pub fn probe_current_workspace(
+    base_url: &str,
+    access_token: &str,
+) -> Result<CurrentWorkspaceIdentity> {
+    let endpoint = format!("{}/v4/workspaces/current", base_url.trim_end_matches('/'));
+    let client = Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .context("could not create workspace verification client")?;
+    let response = client
+        .get(&endpoint)
+        .header(AUTHORIZATION, format!("Bearer {access_token}"))
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .context("workspace verification request failed")?;
+    let status = response.status();
+    let text = response
+        .text()
+        .context("failed to read workspace verification response")?;
+    if !status.is_success() {
+        bail!(
+            "workspace verification failed with HTTP {} ({})",
+            status.as_u16(),
+            redact_text(&text.chars().take(200).collect::<String>())
+        );
+    }
+    let body: Value =
+        serde_json::from_str(&text).context("workspace verification returned invalid JSON")?;
+    parse_current_workspace_identity(&body)
+}
+
+/// Probe the active profile's token against the authoritative workspace
+/// endpoint. Callers should compare the returned identity before persisting
+/// active-workspace changes or sending a mutation.
+pub fn probe_config_current_workspace(config: &Config) -> Result<CurrentWorkspaceIdentity> {
+    let client = build_client()?;
+    let token = resolve_one_access_token(config, &client)?;
+    probe_current_workspace(&resolve_one_base_url(config), &token)
+}
+
+#[cfg(test)]
+mod current_workspace_identity_tests {
+    use super::parse_current_workspace_identity;
+    use serde_json::json;
+
+    #[test]
+    fn accepts_gateway_aliases_and_numeric_id_strings() {
+        let identity = parse_current_workspace_identity(&json!({
+            "response": {
+                "workspace_id": "42",
+                "workspace_gid": "gid-42",
+                "displayName": "Finance"
+            }
+        }))
+        .expect("identity should parse");
+        assert_eq!(identity.workspace_id, "42");
+        assert_eq!(identity.workspace_gid, "gid-42");
+        assert_eq!(identity.display_name.as_deref(), Some("Finance"));
+    }
+
+    #[test]
+    fn rejects_missing_or_non_numeric_identity() {
+        for value in [
+            json!({"id": "workspace-name", "gid": "gid-1"}),
+            json!({"id": 42}),
+            json!({"id": 42, "gid": ""}),
+        ] {
+            assert!(parse_current_workspace_identity(&value).is_err());
+        }
+    }
+}
 
 /// Parses a production authentication endpoint.  Unit tests that exercise the
 /// HTTP transport use explicit loopback fixtures; that exception is compiled
@@ -755,6 +881,9 @@ fn endpoint_with_query_params(endpoint: &str, query_params: &[(&str, &str)]) -> 
 #[derive(Debug, Clone, Default)]
 pub struct OneListParams {
     pub limit: Option<u32>,
+    /// Preferred spelling for the per-page size. `limit` remains accepted as
+    /// a compatibility alias by the CLI.
+    pub page_size: Option<u32>,
     pub page_token: Option<String>,
     pub auto_all: bool,
     pub max_pages: Option<u32>,
@@ -766,6 +895,10 @@ impl OneListParams {
     }
     pub fn with_limit(mut self, limit: Option<u32>) -> Self {
         self.limit = limit;
+        self
+    }
+    pub fn with_page_size(mut self, page_size: Option<u32>) -> Self {
+        self.page_size = page_size;
         self
     }
     pub fn with_page_token(mut self, token: Option<String>) -> Self {
@@ -803,14 +936,21 @@ pub fn one_api_list_request(
     let mut aggregated_items: Vec<Value> = Vec::new();
     let mut page_envelopes: Vec<Value> = Vec::new();
     let mut last_next_token: Option<String> = None;
+    let mut seen_tokens: HashSet<String> = HashSet::new();
+    let mut incomplete_reason: Option<String> = None;
 
     loop {
         if pages_fetched >= max_pages {
+            if params.auto_all && last_next_token.is_some() {
+                incomplete_reason = Some(format!(
+                    "pagination page cap ({max_pages}) reached before the collection was exhausted"
+                ));
+            }
             break;
         }
         let mut endpoint_with_query = endpoint.to_string();
         let mut q: Vec<(&str, String)> = Vec::new();
-        if let Some(limit) = params.limit {
+        if let Some(limit) = params.page_size.or(params.limit) {
             q.push(("limit", limit.to_string()));
         }
         if let Some(ref token) = current_token {
@@ -909,10 +1049,34 @@ pub fn one_api_list_request(
         }
         match &last_next_token {
             Some(t) if !t.is_empty() => {
+                if !seen_tokens.insert(t.clone()) {
+                    incomplete_reason = Some(
+                        "pagination returned a repeated continuation token; refusing to loop"
+                            .to_string(),
+                    );
+                    break;
+                }
                 current_token = Some(t.clone());
             }
             _ => break,
         }
+    }
+
+    if let Some(reason) = incomplete_reason {
+        return Ok(Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::Incomplete,
+            format!("{surface} {operation} incomplete: {reason}"),
+            json!({
+                "surface": surface,
+                "operation": operation,
+                "partial": true,
+                "items": aggregated_items,
+                "pages_fetched": pages_fetched,
+                "next_page_token": last_next_token,
+                "page_envelopes": page_envelopes,
+                "reason": reason,
+            }),
+        ));
     }
 
     Ok(Envelope::ok_with_data(
@@ -1022,16 +1186,39 @@ pub fn one_api_live_request_with_body(
         return Ok(envelope);
     }
 
-    // Workspace identity preflight: when --apply is set and the profile pins
-    // an expected workspace id, fail closed if the token's current workspace
-    // doesn't match. Avoids "right command, wrong tenant" disasters.
-    if mutating
-        && let Some(expected) = config
-            .alteryx_one
-            .as_ref()
-            .and_then(|o| o.expected_workspace_id.as_deref())
-    {
-        verify_workspace_identity(config, surface, operation, &url, expected)?;
+    // Every applied One mutation must have a complete selected workspace
+    // identity. The old guard was conditional on the legacy
+    // `expected_workspace_id` field and could therefore send a mutation with
+    // only an unverified numeric ID or top-level token context.
+    if mutating {
+        let one = config.alteryx_one.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("workspace identity is required for an applied One mutation")
+        })?;
+        let key = one
+            .active_workspace_id()
+            .ok_or_else(|| anyhow::anyhow!("no active verified workspace credential; authenticate or select a workspace before applying a mutation"))?;
+        let credential = one
+            .workspace_credentials
+            .get(key)
+            .ok_or_else(|| anyhow::anyhow!("active workspace credential is missing"))?;
+        let target = ayx_core::profile::WorkspaceTarget::from_credential(
+            key,
+            credential,
+            ayx_core::profile::WorkspaceResolutionSource::ActiveProfile,
+        )
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "active workspace credential lacks complete verified ID, GID, or name metadata"
+            )
+        })?;
+        verify_workspace_identity(
+            config,
+            surface,
+            operation,
+            &url,
+            &target.workspace_id,
+            &target.workspace_gid,
+        )?;
     }
 
     let client = build_client()?;
@@ -1895,6 +2082,7 @@ fn verify_workspace_identity(
     operation: &str,
     mutation_url: &str,
     expected: &str,
+    expected_gid: &str,
 ) -> Result<()> {
     let client = build_client()?;
     let token = resolve_one_access_token(config, &client)?;
@@ -1930,21 +2118,16 @@ fn verify_workspace_identity(
             );
         }
     };
-    let actual = body
-        .get("id")
-        .and_then(|v| v.as_str())
-        .or_else(|| body.get("workspaceId").and_then(|v| v.as_str()))
-        .or_else(|| body.get("workspace_id").and_then(|v| v.as_str()))
-        .unwrap_or("");
-    if actual.is_empty() {
+    let identity = parse_current_workspace_identity(&body).map_err(|err| {
+        anyhow::anyhow!(
+            "workspace preflight identity parse failure: {err}. Refusing to send mutating request to {mutation_url}"
+        )
+    })?;
+    if identity.workspace_id != expected || identity.workspace_gid != expected_gid {
         bail!(
-            "workspace preflight: /v4/workspaces/current succeeded but the response had no id/workspaceId field. Body shape: {}. Refusing to send mutating request to {mutation_url}.",
-            response_shape(&body)
-        );
-    }
-    if actual != expected {
-        bail!(
-            "workspace mismatch: expected '{expected}', token is authenticated for '{actual}'. Refusing to send mutating request to {mutation_url}. Either re-authenticate against the expected workspace or update alteryx_one.expected_workspace_id."
+            "workspace mismatch: expected ('{expected}', '{expected_gid}'), token is authenticated for ('{}', '{}'). Refusing to send mutating request to {mutation_url}",
+            identity.workspace_id,
+            identity.workspace_gid
         );
     }
     Ok(())
@@ -2635,6 +2818,7 @@ mongo:
         )
         .expect("config parses");
         config.alteryx_one = Some(AlteryxOneProfile {
+            schema_version: ayx_core::profile::CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: "tester@example.com".to_string(),
             base_url: Some(base_url.to_string()),
             oauth_client_id: Some("client-id".to_string()),
@@ -2650,6 +2834,7 @@ mongo:
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
@@ -2792,6 +2977,7 @@ mongo:
         )
         .expect("config parses");
         config.alteryx_one = Some(AlteryxOneProfile {
+            schema_version: ayx_core::profile::CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: "tester@example.com".to_string(),
             base_url: Some(server.base_url()),
             oauth_client_id: Some("client-id".to_string()),
@@ -2807,6 +2993,7 @@ mongo:
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: None,
@@ -2863,6 +3050,9 @@ mongo:
         workspace_credentials.insert(
             "ws-123".to_string(),
             WorkspaceCredential {
+                workspace_id: None,
+                workspace_name: None,
+                credential_health: None,
                 access_token: Some("workspace-stale".to_string()),
                 access_token_ref: None,
                 refresh_token: Some("workspace-refresh".to_string()),
@@ -2881,6 +3071,7 @@ mongo:
             },
         );
         config.alteryx_one = Some(AlteryxOneProfile {
+            schema_version: ayx_core::profile::CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: "tester@example.com".to_string(),
             base_url: Some(server.base_url()),
             oauth_client_id: Some("legacy-client".to_string()),
@@ -2896,6 +3087,7 @@ mongo:
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials,
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: Some("ws-123".to_string()),
             sp_client_id: None,
@@ -3364,6 +3556,7 @@ mongo:
         )
         .expect("config parses");
         config.alteryx_one = Some(AlteryxOneProfile {
+            schema_version: ayx_core::profile::CURRENT_PROFILE_SCHEMA_VERSION,
             account_email: "tester@example.com".to_string(),
             base_url: Some(server.base_url()),
             oauth_client_id: None,
@@ -3379,6 +3572,7 @@ mongo:
             workspace_password: None,
             workspace_password_ref: None,
             workspace_credentials: Default::default(),
+            active_workspace_id: None,
             auth_rollout: None,
             expected_workspace_id: None,
             sp_client_id: Some("sp-client".to_string()),

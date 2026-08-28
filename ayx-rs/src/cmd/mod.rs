@@ -43,25 +43,62 @@ pub mod workflow;
 /// Shared runtime context for command families that need to load profiles.
 pub(crate) struct RuntimeCtx<'a> {
     pub environment: Option<&'a str>,
+    pub workspace: Option<&'a str>,
+    pub workspace_source: ayx_core::profile::WorkspaceResolutionSource,
+    pub no_input: bool,
+    pub page_size: Option<u32>,
 }
 
 impl<'a> RuntimeCtx<'a> {
     pub(crate) fn new(environment: Option<&'a str>) -> Self {
-        Self { environment }
+        Self {
+            environment,
+            workspace: None,
+            workspace_source: ayx_core::profile::WorkspaceResolutionSource::ActiveProfile,
+            no_input: false,
+            page_size: None,
+        }
+    }
+
+    fn apply_workspace(
+        &self,
+        mut config: ayx_core::profile::Config,
+    ) -> Result<ayx_core::profile::Config> {
+        if let Some(one) = config.alteryx_one.as_mut() {
+            one.migrate_workspace_credentials().map_err(|message| {
+                anyhow::anyhow!("workspace credential migration failed: {message}")
+            })?;
+        }
+        if let Some(selector) = self.workspace {
+            let one = config
+                .alteryx_one
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("--workspace requires an alteryx_one profile"))?;
+            one.validate_workspace_identities()
+                .map_err(|message| anyhow::anyhow!("--workspace: {message}"))?;
+            let target = one
+                .resolve_workspace_target(selector, self.workspace_source)
+                .map_err(|message| anyhow::anyhow!("--workspace: {message}"))?;
+            one.active_workspace_id = Some(target.workspace_id);
+        }
+        Ok(config)
     }
 
     pub(crate) fn load_profile<P>(&self, profile: P) -> Result<ayx_core::profile::Config>
     where
         P: Into<crate::ProfileInput<'a>>,
     {
-        crate::load_profile_with_env(profile, self.environment)
+        self.apply_workspace(crate::load_profile_with_env(profile, self.environment)?)
     }
 
     pub(crate) fn load_profile_lenient<P>(&self, profile: P) -> Result<ayx_core::profile::Config>
     where
         P: Into<crate::ProfileInput<'a>>,
     {
-        crate::load_profile_with_env_lenient(profile, self.environment)
+        self.apply_workspace(crate::load_profile_with_env_lenient(
+            profile,
+            self.environment,
+        )?)
     }
 
     /// Login resolves its rollout before validating bound keyring references,
@@ -73,6 +110,9 @@ impl<'a> RuntimeCtx<'a> {
     where
         P: Into<crate::ProfileInput<'a>>,
     {
-        crate::load_profile_with_env_lenient_unvalidated(profile, self.environment)
+        self.apply_workspace(crate::load_profile_with_env_lenient_unvalidated(
+            profile,
+            self.environment,
+        )?)
     }
 }

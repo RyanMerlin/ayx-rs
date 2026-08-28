@@ -14,16 +14,25 @@
 use anyhow::{Result, bail};
 use std::io::{self, IsTerminal, Write};
 
-/// Prompt the operator on a TTY; refuse non-TTY callers that haven't
-/// passed `--yes`. Returns `Err` on rejection.
-///
-/// `consent` short-circuits the prompt entirely — pass `cli.yes` from the
-/// global `--yes` flag.
-pub fn require_tty_confirmation(consent: bool, message: &str) -> Result<()> {
-    if consent {
+/// Controls whether a mutating command may obtain consent interactively.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ConfirmationPolicy {
+    pub yes: bool,
+    pub no_input: bool,
+}
+
+impl ConfirmationPolicy {
+    pub const fn new(yes: bool, no_input: bool) -> Self {
+        Self { yes, no_input }
+    }
+}
+
+/// Enforce mutation consent using an explicit policy.
+pub fn require_confirmation(policy: ConfirmationPolicy, message: &str) -> Result<()> {
+    if policy.yes {
         return Ok(());
     }
-    if !io::stdin().is_terminal() {
+    if policy.no_input || !io::stdin().is_terminal() {
         bail!(
             "destructive operation requires confirmation. Re-run with --yes (non-interactive) or attach a TTY for the interactive prompt. Action: {message}"
         );
@@ -43,6 +52,18 @@ pub fn require_tty_confirmation(consent: bool, message: &str) -> Result<()> {
     }
 }
 
+/// Prompt the operator on a TTY; refuse non-TTY callers that haven't
+/// passed `--yes`. Returns `Err` on rejection.
+///
+/// `consent` short-circuits the prompt entirely — pass `cli.yes` from the
+/// global `--yes` flag.
+pub fn require_tty_confirmation(consent: bool, message: &str) -> Result<()> {
+    // Keep the public compatibility helper, while allowing the CLI's global
+    // policy to reach legacy call sites until they are migrated individually.
+    let no_input = std::env::var_os("AYX_NO_INPUT").is_some();
+    require_confirmation(ConfirmationPolicy::new(consent, no_input), message)
+}
+
 /// Build a consistent warning for governance actions that change access.
 ///
 /// We keep the phrasing short and explicit so destructive IAM flows all feel
@@ -58,4 +79,28 @@ pub fn destructive_action_message(action: &str, subject: &str, profile: &str) ->
     format!(
         "About to {action} {subject} on profile '{profile}'. This is destructive and may affect live workflows or users. Review carefully before proceeding."
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_input_refuses_without_reading_stdin() {
+        let err = require_confirmation(
+            ConfirmationPolicy::new(false, true),
+            "delete the test resource",
+        )
+        .expect_err("noninteractive mutation must require explicit consent");
+        assert!(err.to_string().contains("--yes"));
+    }
+
+    #[test]
+    fn yes_bypasses_even_when_no_input_is_set() {
+        require_confirmation(
+            ConfirmationPolicy::new(true, true),
+            "delete the test resource",
+        )
+        .expect("explicit consent should bypass prompting");
+    }
 }

@@ -15,6 +15,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let params = ayx_one_api::OneListParams::new()
+                .with_page_size(runtime.page_size)
                 .with_limit(limit)
                 .with_page_token(page_token)
                 .with_all(all, max_pages);

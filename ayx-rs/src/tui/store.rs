@@ -60,6 +60,7 @@ fn default_one_profile_template(profile_name: &str) -> Config {
     let mut config = default_config();
     config.profile_name = profile_name.to_string();
     config.alteryx_one = Some(AlteryxOneProfile {
+        schema_version: ayx_core::profile::CURRENT_PROFILE_SCHEMA_VERSION,
         account_email: String::new(),
         base_url: None,
         oauth_client_id: None,
@@ -75,6 +76,7 @@ fn default_one_profile_template(profile_name: &str) -> Config {
         workspace_password: None,
         workspace_password_ref: None,
         workspace_credentials: Default::default(),
+        active_workspace_id: None,
         auth_rollout: None,
         expected_workspace_id: None,
         sp_client_id: None,

@@ -83,6 +83,12 @@ pub(crate) fn login(
     };
     use serde_json::json;
 
+    if runtime.no_input && refresh_token_arg.is_none() && access_token_arg.is_none() {
+        bail!(
+            "--no-input requires --access-token or --refresh-token; interactive login flows are disabled"
+        );
+    }
+
     // Parse rollout before reading credentials or starting the OTP transport.
     // A typo must not be discovered after an irreversible OTP/PAT side effect.
     let rollout = match auth_flow_arg.as_deref() {
@@ -102,6 +108,53 @@ pub(crate) fn login(
         None => AuthRollout::from_environment().map_err(|err| anyhow::anyhow!(err))?,
     };
     let mut config = runtime.load_profile_lenient_for_auth(profile.as_deref())?;
+    if let Some(one) = config.alteryx_one.as_mut() {
+        let migrated = one.migrate_workspace_credentials().map_err(|message| {
+            anyhow::anyhow!("workspace credential migration failed: {message}")
+        })?;
+        if migrated > 0 {
+            eprintln!(
+                "warning: normalized {migrated} legacy workspace credential key{} in memory; it will be persisted only after login verification succeeds",
+                if migrated == 1 { "" } else { "s" }
+            );
+        }
+    }
+    // Legacy `--workspace-id` is now an alias for the universal selector. A
+    // saved GID/name resolves to its canonical numeric key; an unsaved target
+    // may only be an explicit decimal ID because login has not discovered it
+    // yet.
+    let workspace_id = if let Some(selector) = workspace_id {
+        if let Some(one) = config.alteryx_one.as_ref()
+            && let Ok(target) = one.resolve_workspace_target(
+                &selector,
+                ayx_core::profile::WorkspaceResolutionSource::Cli,
+            )
+        {
+            Some(target.workspace_id)
+        } else if config
+            .alteryx_one
+            .as_ref()
+            .is_some_and(|one| one.workspace_credentials.contains_key(&selector))
+        {
+            // Deprecated legacy map-key selector. Keep it readable long
+            // enough for the authoritative probe to reject a mismatched GID;
+            // successful persistence below always uses the server's numeric ID.
+            eprintln!(
+                "warning: selecting workspace by legacy credential key '{selector}'; use --workspace with the numeric workspace ID or GID"
+            );
+            Some(selector)
+        } else if !selector.is_empty()
+            && selector.chars().all(|character| character.is_ascii_digit())
+        {
+            Some(selector)
+        } else {
+            return Err(anyhow::anyhow!(
+                "workspace selector '{selector}' is not a saved workspace and is not a numeric workspace ID"
+            ));
+        }
+    } else {
+        None
+    };
     let profile_name = config.profile_name.clone();
     let path = profile_storage_path(&profile_name)?;
     let requested_policy = secret_policy_arg
@@ -420,7 +473,9 @@ pub(crate) fn login(
 
         if let Some(password) = captured_workspace_password
             && (save_workspace_password
-                || (offer_workspace_password_save && interactive_workspace_password_save()?))
+                || (offer_workspace_password_save
+                    && !runtime.no_input
+                    && interactive_workspace_password_save()?))
         {
             workspace_password_to_save = Some(password);
         }
@@ -508,37 +563,65 @@ pub(crate) fn login(
         }
     };
 
-    // Store the tokens.
+    // A token is not safe to persist until the authoritative current-workspace
+    // probe confirms its identity. This also prevents a successful token
+    // exchange for the wrong workspace from poisoning a saved credential.
+    let endpoint_for_verification = config
+        .alteryx_one
+        .as_ref()
+        .and_then(|one| one.normalized_base_url())
+        .unwrap_or_default();
+    let authenticated_workspace = verify_authenticated_workspace(
+        &endpoint_for_verification,
+        &final_access_token,
+        workspace_id.as_deref(),
+        workspace_gid_arg.as_deref().or_else(|| {
+            config.alteryx_one.as_ref().and_then(|one| {
+                workspace_id
+                    .as_deref()
+                    .and_then(|id| one.workspace_credentials.get(id))
+                    .and_then(|credential| credential.workspace_gid.as_deref())
+            })
+        }),
+    )?;
+    // A successful login always becomes a workspace-scoped credential.  The
+    // server's numeric identity is authoritative when the caller omitted an
+    // explicit selector; never fall back to the legacy top-level token slot.
+    let authenticated_workspace_id = authenticated_workspace.id.clone().context(
+        "workspace verification returned no numeric workspace ID; nothing was persisted",
+    )?;
+    if authenticated_workspace
+        .name
+        .as_deref()
+        .is_none_or(|name| name.trim().is_empty())
+    {
+        bail!(
+            "workspace verification response did not include an exact workspace name; nothing was persisted"
+        );
+    }
+    let credential_workspace_id = Some(authenticated_workspace_id.as_str());
+
+    // Store the tokens only after verification succeeds.
     let one = config.alteryx_one.as_mut().unwrap();
     if let Some(password) = workspace_password_to_save {
-        if let Some(ws_id) = password_workspace_id.as_deref() {
-            one.workspace_credentials
-                .entry(ws_id.to_string())
-                .or_default()
-                .workspace_password = Some(password);
-        } else {
-            // A profile with only a workspace GID has no numeric workspace key
-            // to scope a nested credential. The top-level secret remains bound
-            // to that GID at the keyring write boundary, so it is safe to reuse
-            // for this single-profile login on the next invocation.
-            one.workspace_password = Some(password);
-        }
+        one.workspace_credentials
+            .entry(authenticated_workspace_id.clone())
+            .or_default()
+            .workspace_password = Some(password);
     }
-    if let Some(ws_id) = workspace_id.as_deref() {
-        let cred = one
-            .workspace_credentials
-            .entry(ws_id.to_string())
-            .or_default();
-        cred.access_token = Some(final_access_token.clone());
-        if let Some(rt) = final_refresh_token.clone() {
-            cred.refresh_token = Some(rt);
-        }
-    } else {
-        one.access_token = Some(final_access_token.clone());
-        if let Some(rt) = final_refresh_token.clone() {
-            one.refresh_token = Some(rt);
-        }
+    let cred = one
+        .workspace_credentials
+        .entry(authenticated_workspace_id.clone())
+        .or_default();
+    cred.workspace_id = Some(authenticated_workspace_id.clone());
+    cred.workspace_gid = authenticated_workspace.gid.clone();
+    cred.workspace_name = authenticated_workspace.name.clone();
+    cred.credential_health = Some("verified".to_string());
+    cred.access_token = Some(final_access_token.clone());
+    if let Some(rt) = final_refresh_token.clone() {
+        cred.refresh_token = Some(rt);
     }
+    one.active_workspace_id = Some(authenticated_workspace_id.clone());
 
     let email = one.account_email.clone();
     let endpoint = one.normalized_base_url().unwrap_or_default();
@@ -548,7 +631,7 @@ pub(crate) fn login(
             .map_err(|err| anyhow::anyhow!(err))?;
     }
 
-    let binding = auth_credential_binding(&config, workspace_id.as_deref())?;
+    let binding = auth_credential_binding(&config, credential_workspace_id)?;
     crate::onboard::validate_auth_credential_bindings_for_rollout(
         &config,
         &binding,
@@ -582,7 +665,8 @@ pub(crate) fn login(
         Ok(output) => output,
         Err(_err)
             if persistence_policy == SecretPersistencePolicy::Secure
-                && interactive_secret_fallback()? =>
+            && !runtime.no_input
+            && interactive_secret_fallback()? =>
         {
             let output = crate::onboard::write_config_with_binding_for_rollout(
                 &path,
@@ -629,7 +713,6 @@ pub(crate) fn login(
     // Resolve workspace display metadata only after that point. The lookup is
     // bounded and best-effort, so it cannot turn a successful login into a
     // hang or a failure.
-    let authenticated_workspace = lookup_authenticated_workspace(&endpoint, &final_access_token);
     eprintln!("\nAuthentication Successful!\n");
     if let Some(expires) = token_expires_at {
         eprintln!("Token expires: {expires}");
@@ -643,8 +726,8 @@ pub(crate) fn login(
             "profile": profile_name,
             "account_email": email,
             "endpoint": endpoint,
-            "workspace_id": authenticated_workspace.as_ref().and_then(|workspace| workspace.id.as_deref()),
-            "workspace_name": authenticated_workspace.as_ref().and_then(|workspace| workspace.name.as_deref()),
+            "workspace_id": authenticated_workspace.id.as_deref(),
+            "workspace_name": authenticated_workspace.name.as_deref(),
             "token_length": final_access_token.len(),
             "has_refresh_token": final_refresh_token.is_some(),
             "inline_secret_fields": secretize.inline_fields,
@@ -763,31 +846,50 @@ fn ensure_visible_line_input() -> Result<()> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AuthenticatedWorkspace {
     id: Option<String>,
+    gid: Option<String>,
     name: Option<String>,
 }
 
 /// The OTP flow identifies a workspace by GID, while the platform's current
-/// workspace endpoint provides the numeric ID and operator-facing name. This
-/// is best-effort confirmation only: a successful login must not become a
-/// failure because a subsequent informational read is unavailable.
-fn lookup_authenticated_workspace(
+/// workspace endpoint provides the numeric ID, GID, and operator-facing name.
+/// This is an authoritative pre-persistence identity check.
+fn verify_authenticated_workspace(
     base_url: &str,
     access_token: &str,
-) -> Option<AuthenticatedWorkspace> {
-    let endpoint = format!("{}/v4/workspaces/current", base_url.trim_end_matches('/'));
-    let http = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .ok()?;
-    let response = http.get(endpoint).bearer_auth(access_token).send().ok()?;
-    if !response.status().is_success() {
-        return None;
+    expected_id: Option<&str>,
+    expected_gid: Option<&str>,
+) -> Result<AuthenticatedWorkspace> {
+    let identity = ayx_one_api::probe_current_workspace(base_url, access_token)
+        .context("workspace verification response did not include a valid numeric ID and GID")?;
+    let workspace = AuthenticatedWorkspace {
+        id: Some(identity.workspace_id),
+        gid: Some(identity.workspace_gid.clone()),
+        name: identity.display_name,
+    };
+    if let Some(expected_id) = expected_id
+        && workspace.id.as_deref() != Some(expected_id)
+    {
+        bail!(
+            "workspace verification mismatch: token is bound to workspace {:?}, expected '{}'; nothing was persisted",
+            workspace.id,
+            expected_id
+        );
     }
-    let value: serde_json::Value = response.json().ok()?;
-    Some(authenticated_workspace_from_value(&value))
+    if let Some(expected_gid) = expected_gid
+        && workspace.gid.as_deref() != Some(expected_gid)
+    {
+        bail!(
+            "workspace verification GID mismatch: token is bound to {:?}, expected '{}'; nothing was persisted",
+            workspace.gid,
+            expected_gid
+        );
+    }
+    Ok(workspace)
 }
 
+#[cfg(test)]
 fn authenticated_workspace_from_value(value: &serde_json::Value) -> AuthenticatedWorkspace {
+    let value = value.get("response").unwrap_or(value);
     let id = value
         .get("id")
         .or_else(|| value.get("workspaceId"))
@@ -804,7 +906,29 @@ fn authenticated_workspace_from_value(value: &serde_json::Value) -> Authenticate
         .map(str::trim)
         .find(|value| !value.is_empty())
         .map(str::to_string);
-    AuthenticatedWorkspace { id, name }
+    let gid = workspace_gid_value(value);
+    AuthenticatedWorkspace { id, gid, name }
+}
+
+#[cfg(test)]
+fn workspace_gid_value(value: &serde_json::Value) -> Option<String> {
+    let value = value.get("response").unwrap_or(value);
+    ["gid", "workspaceGid", "workspace_gid"]
+        .into_iter()
+        .find_map(|field| {
+            value
+                .get(field)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+}
+
+#[cfg(test)]
+fn lookup_authenticated_workspace(
+    base_url: &str,
+    access_token: &str,
+) -> Option<AuthenticatedWorkspace> {
+    verify_authenticated_workspace(base_url, access_token, None, None).ok()
 }
 
 fn workspace_password_is_supplied_by_environment() -> bool {
@@ -1162,6 +1286,7 @@ mod tests {
             workspace,
             AuthenticatedWorkspace {
                 id: Some("91946".to_string()),
+                gid: None,
                 name: Some("Alteryx FDE".to_string()),
             }
         );
