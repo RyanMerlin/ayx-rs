@@ -255,7 +255,8 @@ fn restore_keyring_changes(changes: &[KeyringTransactionChange]) -> Result<(), P
         if let Some(backup_account) = change.backup_account.as_deref() {
             match resolve_secret_ref(&format!("keyring:{backup_account}"))? {
                 Some(previous) => {
-                    store_keyring_secret(&change.account, &previous)?;
+                    store_keyring_secret(&change.account, &previous)
+                        .map_err(demote_keyring_store_error)?;
                 }
                 None if change.backup_ready => {
                     return Err(ProfileError::Invalid(format!(
@@ -388,7 +389,8 @@ fn recover_legacy_transaction(
         for change in journal.changes.iter().rev() {
             match change.previous.as_deref() {
                 Some(secret) => {
-                    store_keyring_secret(&change.account, secret)?;
+                    store_keyring_secret(&change.account, secret)
+                        .map_err(demote_keyring_store_error)?;
                 }
                 None => {
                     delete_keyring_secret(&change.account)?;
@@ -575,7 +577,7 @@ pub fn resolve_secret_ref_with(
             // Treat as "keyring unavailable" per the documented contract.
             Err(Error::NoDefaultStore) => return Ok(None),
             Err(source) => {
-                return Err(ProfileError::Invalid(format!(
+                return Err(ProfileError::KeyringUnreadable(format!(
                     "unable to open keyring entry '{}': {}",
                     account, source
                 )));
@@ -584,7 +586,7 @@ pub fn resolve_secret_ref_with(
         return match entry.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(Error::NoEntry) => Ok(None),
-            Err(err) => Err(ProfileError::Invalid(format!(
+            Err(err) => Err(ProfileError::KeyringUnreadable(format!(
                 "unable to load keyring secret '{}': {}",
                 account, err
             ))),
@@ -662,6 +664,39 @@ pub fn store_keyring_secret(account: &str, secret: &str) -> Result<String, Profi
 /// failure has to be observed rather than predicted.
 pub fn is_keyring_storage_error(error: &ProfileError) -> bool {
     matches!(error, ProfileError::KeyringUnavailable(_))
+}
+
+/// Re-type a keyring-store failure that happened during rollback or journal
+/// recovery, not during the caller's own write.
+///
+/// `restore_keyring_changes` and `recover_legacy_transaction` reuse
+/// [`store_keyring_secret`], so without this their failures carry
+/// [`ProfileError::KeyringUnavailable`] and would tell a caller "this host has
+/// no keyring to write to" — authorising a plaintext downgrade off the back of
+/// a *recovery* failure. They are ordinary write failures to their callers.
+fn demote_keyring_store_error(error: ProfileError) -> ProfileError {
+    match error {
+        ProfileError::KeyringUnavailable(message) => ProfileError::Invalid(message),
+        other => other,
+    }
+}
+
+/// Whether `error` reports a failure to **read** an existing keyring entry.
+///
+/// The counterpart to [`is_keyring_storage_error`], and deliberately a separate
+/// predicate rather than a shared "something about the keyring went wrong": the
+/// two callers want opposite things from it.
+///
+/// A read failure means the profile names a keyring account this host cannot
+/// read right now — a locked keychain, a denied Secret Service prompt, or on
+/// macOS a registered Keychain store with no default keychain. That must
+/// *degrade the load* (report the slot as unresolved and carry on, so
+/// `secret status` and `doctor` can still explain it) and must **never**
+/// authorise writing the credential to disk in cleartext, which is what
+/// [`is_keyring_storage_error`] gates. Collapsing the two into one predicate
+/// silently disabled one of them.
+pub fn is_keyring_read_error(error: &ProfileError) -> bool {
+    matches!(error, ProfileError::KeyringUnreadable(_))
 }
 
 // `inline_secrets_allowed_by_env` was introduced alongside the warned inline
@@ -1004,11 +1039,47 @@ mod tests {
         }
     }
 
+    /// Store and read failures must not answer to the same predicate.
+    ///
+    /// They were briefly collapsed into one, which silently disabled the
+    /// keyring-read degradation: `resolve_ref_for_load`'s guard could never
+    /// fire, so an unreadable `keyring:` reference failed the whole profile
+    /// load again — including `secret status` and `doctor`, the commands whose
+    /// job is to report it. The two callers want opposite things, so they get
+    /// two predicates.
+    #[test]
+    fn store_and_read_failures_are_classified_separately() {
+        let store = ProfileError::KeyringUnavailable("cannot write".to_string());
+        let read = ProfileError::KeyringUnreadable("cannot read".to_string());
+
+        assert!(is_keyring_storage_error(&store));
+        assert!(
+            !is_keyring_read_error(&store),
+            "a store failure must not be treated as a read failure"
+        );
+
+        assert!(
+            is_keyring_read_error(&read),
+            "a read failure must degrade the load, so it has to be recognised"
+        );
+        assert!(
+            !is_keyring_storage_error(&read),
+            "a read failure must never authorise writing the secret as plaintext"
+        );
+
+        let other = ProfileError::Invalid("something else".to_string());
+        assert!(!is_keyring_storage_error(&other) && !is_keyring_read_error(&other));
+    }
+
     /// The distinction is by cause, so the operator-facing text must not change.
     #[test]
     fn keyring_unavailable_renders_like_invalid() {
         assert_eq!(
             ProfileError::KeyringUnavailable("boom".to_string()).to_string(),
+            ProfileError::Invalid("boom".to_string()).to_string()
+        );
+        assert_eq!(
+            ProfileError::KeyringUnreadable("boom".to_string()).to_string(),
             ProfileError::Invalid("boom".to_string()).to_string()
         );
     }

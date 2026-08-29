@@ -5004,12 +5004,21 @@ fn profile_migrate_envelope(profile: &Path, name: Option<&str>) -> Result<Envelo
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(&target_name);
+    // The `.env` that resolved these values sits beside the *source* profile,
+    // so that is the view the "does this env: ref already cover the value"
+    // check must use. Without it a `.env`-supplied credential is treated as
+    // uncovered and re-stored — as `inline:<plaintext>` on a keyring-less host.
+    let migrate_env_files = ayx_core::profile::env_file_values(profile);
     let secretize = onboard::secretize_config(
         &mut config,
         migrate_scope,
         onboard::InlineSecretPolicy::Allow,
+        &migrate_env_files,
     )?;
-    let body = serde_yaml::to_string(&ayx_core::profile::canonical_profile_value(&config)?)?;
+    let body = serde_yaml::to_string(&ayx_core::profile::canonical_profile_value_with_env(
+        &config,
+        &migrate_env_files,
+    )?)?;
     onboard::write_restricted(&target, body.as_bytes())?;
     let mut state = load_ayx_state()?;
     // Use the same normalized stem that write_config_with_policy uses for scope so
@@ -5101,7 +5110,7 @@ fn doctor_config_envelope(profile: Option<&str>, fix: bool) -> Result<Envelope> 
         let value: serde_yaml::Value = serde_yaml::from_str(&raw)?;
         (
             profile_shape_label(&value),
-            collect_inline_secret_warnings(&raw),
+            collect_inline_secret_warnings(&raw, &value),
         )
     } else {
         ("missing", Vec::new())
@@ -5149,7 +5158,7 @@ pub(crate) fn doctor_config_envelope_from_path(profile: &Path, fix: bool) -> Res
         let value: serde_yaml::Value = serde_yaml::from_str(&raw)?;
         (
             profile_shape_label(&value),
-            collect_inline_secret_warnings(&raw),
+            collect_inline_secret_warnings(&raw, &value),
         )
     } else {
         ("missing", Vec::new())
@@ -5624,7 +5633,12 @@ fn doctor_rollup_status(statuses: [&str; 6]) -> &'static str {
     }
 }
 
-fn collect_inline_secret_warnings(raw: &str) -> Vec<String> {
+/// `raw` feeds the bare-field scan; `parsed` is the same document already
+/// parsed by the caller. Taking the parsed value rather than re-parsing keeps
+/// this honest: an earlier version carried a text-scan "fallback for an
+/// unparseable profile" that could never run, because both callers parse with
+/// `?` first and fail before reaching here.
+fn collect_inline_secret_warnings(raw: &str, parsed: &serde_yaml::Value) -> Vec<String> {
     let mut warnings = Vec::new();
     for key in [
         "access_token:",
@@ -5659,31 +5673,10 @@ fn collect_inline_secret_warnings(raw: &str) -> Vec<String> {
     // the awkward, high-entropy secrets most likely to need quoting. Parsing
     // also finds references nested under workspace credentials, which a flat
     // line scan cannot attribute.
-    if let Ok(parsed) = serde_yaml::from_str::<serde_yaml::Value>(raw) {
-        let mut fields = Vec::new();
-        collect_inline_reference_fields(&parsed, &mut fields);
-        for field in fields {
-            warnings.push(format!("inline secret detected for {field}"));
-        }
-    } else {
-        // Unparseable file: fall back to the text scan, so `doctor config` —
-        // the command whose job is to explain a broken profile — still reports
-        // what it can. Tolerate a quote so the fallback is not blind to the
-        // case above either.
-        for line in raw.lines() {
-            let trimmed = line.trim();
-            let Some((field, value)) = trimmed.split_once(':') else {
-                continue;
-            };
-            let value = value.trim_start();
-            let value = value.strip_prefix(['\'', '"']).unwrap_or(value);
-            if value.starts_with("inline:") {
-                warnings.push(format!(
-                    "inline secret detected for {}",
-                    field.trim().trim_end_matches("_ref")
-                ));
-            }
-        }
+    let mut fields = Vec::new();
+    collect_inline_reference_fields(parsed, &mut fields);
+    for field in fields {
+        warnings.push(format!("inline secret detected for {field}"));
     }
     warnings.sort();
     warnings.dedup();
@@ -5696,20 +5689,44 @@ fn collect_inline_secret_warnings(raw: &str) -> Vec<String> {
 /// returns `inline:<secret>` verbatim — so these are cleartext credentials on
 /// disk regardless of which key happens to hold them.
 fn collect_inline_reference_fields(value: &serde_yaml::Value, out: &mut Vec<String>) {
+    collect_inline_reference_fields_at(value, "", out);
+}
+
+/// Walk with the enclosing path, so two credentials in different workspace
+/// credential blocks are reported as two risks rather than deduplicated into
+/// one. Reporting `client_secret` three times for three distinct inline secrets
+/// collapses to a single warning and understates the exposure.
+fn collect_inline_reference_fields_at(
+    value: &serde_yaml::Value,
+    prefix: &str,
+    out: &mut Vec<String>,
+) {
     match value {
         serde_yaml::Value::Mapping(mapping) => {
             for (key, child) in mapping {
-                if let (Some(key), Some(text)) = (key.as_str(), child.as_str())
-                    && text.starts_with("inline:")
-                {
-                    out.push(key.trim_end_matches("_ref").to_string());
+                let Some(key) = key.as_str() else { continue };
+                if child.as_str().is_some_and(|text| {
+                    text.strip_prefix("inline:")
+                        .is_some_and(|secret| !secret.trim().is_empty())
+                }) {
+                    let field = key.trim_end_matches("_ref");
+                    out.push(if prefix.is_empty() {
+                        field.to_string()
+                    } else {
+                        format!("{prefix}.{field}")
+                    });
                 }
-                collect_inline_reference_fields(child, out);
+                let child_prefix = if prefix.is_empty() {
+                    key.to_string()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                collect_inline_reference_fields_at(child, &child_prefix, out);
             }
         }
         serde_yaml::Value::Sequence(items) => {
             for item in items {
-                collect_inline_reference_fields(item, out);
+                collect_inline_reference_fields_at(item, prefix, out);
             }
         }
         _ => {}

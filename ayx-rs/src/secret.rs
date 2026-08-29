@@ -247,14 +247,25 @@ fn report_secret(
     };
 
     match reference {
-        Some(reference) if reference.starts_with("inline:") => SlotReport {
-            slot,
-            source: "inline",
-            configured: true,
-            resolved: true,
-            validation: "warning",
-            remediation: Some("run `ayx secret migrate` when secure storage is available"),
-        },
+        // Same rule as `holds_plaintext_secret`: an `inline:` reference is a
+        // plaintext secret only when it actually carries one. Without the
+        // non-empty test this row promised "run `ayx secret migrate`" for an
+        // empty `inline:`, which migrate then correctly declines to act on —
+        // the do-nothing remediation loop this stack exists to remove.
+        Some(reference)
+            if reference
+                .strip_prefix("inline:")
+                .is_some_and(|secret| !secret.trim().is_empty()) =>
+        {
+            SlotReport {
+                slot,
+                source: "inline",
+                configured: true,
+                resolved: true,
+                validation: "warning",
+                remediation: Some("run `ayx secret migrate` when secure storage is available"),
+            }
+        }
         Some(reference) => match resolve_secret_ref_with(reference, env_files) {
             Ok(Some(_)) => SlotReport {
                 slot,
@@ -490,7 +501,11 @@ pub fn set_slot(path: &Path, name: &str, input: SecretInput) -> Result<SetResult
 
 pub fn unset_slot(path: &Path, name: &str, profiles_dir: &Path) -> Result<UnsetResult> {
     let slot = slot(name)?;
-    let mut config = Config::load_from_path_lenient_without_active_overlay(path)?;
+    // Same rule as `set_slot`: a write starts from the file as written. Loading
+    // the env-augmented view here bound every credential-shaped variable that
+    // happened to be exported into the profile, during a command whose whole
+    // purpose is to *remove* a credential.
+    let mut config = Config::load_from_path_for_write(path)?;
     let (_, existing_ref) = source_and_values(&config, slot)?;
     let profile_stem = path
         .file_stem()
@@ -549,7 +564,11 @@ pub struct MigrateResult {
 }
 
 pub fn migrate_profile(path: &Path) -> Result<MigrateResult> {
-    let config = Config::load_from_path_lenient_without_active_overlay(path)?;
+    // Migration must read the credential behind an `inline:`/`keyring:`
+    // reference in order to move it, so it resolves references — but it writes
+    // the profile back, so it must not pick up the env-derived fallbacks that
+    // would bind ambient variables into the file.
+    let config = Config::load_from_path_resolving_without_env_fallbacks(path)?;
     let mut plaintext_fields: BTreeSet<String> = SLOTS
         .iter()
         .copied()

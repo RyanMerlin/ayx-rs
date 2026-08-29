@@ -219,6 +219,16 @@ pub enum ProfileError {
     /// Renders identically to `Invalid`, so operator-facing text is unchanged.
     #[error("invalid config: {0}")]
     KeyringUnavailable(String),
+    /// An existing OS keyring entry could not be read.
+    ///
+    /// The counterpart to [`ProfileError::KeyringUnavailable`], and separate
+    /// from it on purpose: a *read* failure must degrade the profile load so
+    /// the diagnostics can report the unresolved slot, and must never authorise
+    /// the plaintext fallback, which only a *store* failure does.
+    ///
+    /// Renders identically to `Invalid`, so operator-facing text is unchanged.
+    #[error("invalid config: {0}")]
+    KeyringUnreadable(String),
     #[error("failed to write config file '{path}': {source}")]
     Write {
         path: String,
@@ -1151,6 +1161,41 @@ impl Config {
         Self::load_from_resolved_path_lenient_without_active_overlay(&resolved)
     }
 
+    /// Load a profile for a write that still needs its references resolved.
+    ///
+    /// `secret migrate` has to *read* the credential behind an `inline:` or
+    /// `keyring:` reference in order to move it, so it cannot use
+    /// [`Config::load_from_path_for_write`]. It must still avoid
+    /// `apply_env_fallbacks` and `with_server_api_overrides`, which inject
+    /// configuration derived from whatever the environment happens to export;
+    /// writing that back binds slots the operator never named.
+    ///
+    /// So: references resolve, ambient environment does not leak into the file.
+    pub fn load_from_path_resolving_without_env_fallbacks(
+        path: &Path,
+    ) -> Result<Self, ProfileError> {
+        let resolved = resolve_profile_path(path)?;
+        let (path_str, env_values, value) = Self::read_profile_value(&resolved)?;
+        if is_workspace_value(&value) {
+            // Fail closed. Flattening a workspace to its active environment and
+            // handing that back to a caller that writes the file would discard
+            // `workspace_name`, `active_environment`, and every other
+            // environment — including credentials held only there — with exit 0
+            // and no warning. A write path must never be the thing that decides
+            // to drop them.
+            return Err(ProfileError::Invalid(format!(
+                "'{path_str}' is a workspace file, not a single profile. Writing one \
+                 environment back would discard the other environments and the workspace \
+                 metadata. Target the environment's own profile instead."
+            )));
+        }
+        let config: Self = serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+            path: path_str,
+            source,
+        })?;
+        config.resolve_secret_refs(&env_values)
+    }
+
     /// Load a profile exactly as it is written on disk: no environment
     /// fallbacks applied, no secret references resolved.
     ///
@@ -1168,24 +1213,22 @@ impl Config {
         let resolved = resolve_profile_path(path)?;
         let (path_str, _env_values, value) = Self::read_profile_value(&resolved)?;
         if is_workspace_value(&value) {
-            let workspace: WorkspaceConfig =
-                serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
-                    path: path_str.clone(),
-                    source,
-                })?;
-            let active = workspace.active_environment.clone();
-            workspace.environments.get(&active).cloned().ok_or_else(|| {
-                ProfileError::Invalid(format!(
-                    "workspace '{}' does not contain environment '{}'",
-                    workspace.workspace_name, active
-                ))
-            })
-        } else {
-            serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
-                path: path_str,
-                source,
-            })
+            // Fail closed. Flattening a workspace to its active environment and
+            // handing that back to a caller that writes the file would discard
+            // `workspace_name`, `active_environment`, and every other
+            // environment — including credentials held only there — with exit 0
+            // and no warning. A write path must never be the thing that decides
+            // to drop them.
+            return Err(ProfileError::Invalid(format!(
+                "'{path_str}' is a workspace file, not a single profile. Writing one \
+                 environment back would discard the other environments and the workspace \
+                 metadata. Target the environment's own profile instead."
+            )));
         }
+        serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+            path: path_str,
+            source,
+        })
     }
 
     pub fn load_from_path_with_environment_lenient(
@@ -2205,7 +2248,7 @@ fn resolve_ref_for_load(
     env_files: &HashMap<String, String>,
 ) -> Result<Option<String>, ProfileError> {
     match resolve_secret_ref_with(reference, env_files) {
-        Err(err) if crate::secrets::is_keyring_storage_error(&err) => {
+        Err(err) if crate::secrets::is_keyring_read_error(&err) => {
             eprintln!("[ayx WARN] {err} — continuing without this credential");
             Ok(None)
         }

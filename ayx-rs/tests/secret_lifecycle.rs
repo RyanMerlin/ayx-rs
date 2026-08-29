@@ -1468,3 +1468,157 @@ fn doctor_flags_an_inline_reference_whose_secret_forced_yaml_quoting() {
         "the risk list should name the field: {risks}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// a write records only what it was asked to record — every write command
+// ---------------------------------------------------------------------------
+
+/// `unset` must not bind ambient variables either.
+///
+/// `set_slot` was moved to the write loader for exactly this reason; its
+/// sibling four lines away was left on the env-augmented loader, so a command
+/// whose whole purpose is to *remove* a credential permanently bound three
+/// other slots to whatever the shell happened to export.
+#[test]
+fn unsetting_one_slot_does_not_bind_ambient_environment_variables() {
+    let home = config_home(&[(
+        "amu",
+        "profile_name: amu\n\
+         alteryx_one:\n\
+        \x20 account_email: user@example.invalid\n\
+        \x20 base_url: https://example.invalid\n\
+        \x20 client_secret_ref: inline:secret-to-remove\n",
+    )]);
+    let out = run_env(
+        &home,
+        &["secret", "unset", "one.client-secret", "--profile", "amu"],
+        &[
+            ("AYX_ONE_API_ACCESS_TOKEN", "ambient-token-must-not-persist"),
+            ("AYX_ONE_SP_CLIENT_SECRET", "ambient-sp-must-not-persist"),
+        ],
+    );
+    assert!(out.ok, "unset should succeed\n{}", out.combined());
+
+    let text = profile_text(&home, "amu");
+    for ambient in ["AYX_ONE_API_ACCESS_TOKEN", "AYX_ONE_SP_CLIENT_SECRET"] {
+        assert!(
+            !text.contains(ambient),
+            "{ambient} was never requested and must not be persisted as a binding\n{text}"
+        );
+    }
+    assert!(
+        !text.contains("secret-to-remove"),
+        "the removed credential must be gone\n{text}"
+    );
+}
+
+/// A credential the operator kept in `.env` must stay out of the profile.
+///
+/// The loader learned to resolve `env:` references from the profile-adjacent
+/// `.env`, but the "does this reference already cover the value" check still
+/// consulted the process environment only. The reference therefore never
+/// matched, the live value was re-stored, and on a keyring-less host that
+/// wrote the secret into the YAML as `inline:<plaintext>` — silently, exit 0.
+#[test]
+fn a_dotenv_sourced_credential_is_not_rewritten_into_the_profile() {
+    let home = config_home(&[]);
+    let legacy = home.path().join("legacy");
+    fs::create_dir_all(&legacy).expect("legacy dir");
+    fs::write(
+        legacy.join("config.yaml"),
+        "profile_name: leg\n\
+         alteryx_one:\n\
+        \x20 account_email: user@example.invalid\n\
+        \x20 base_url: https://example.invalid\n\
+        \x20 oauth_client_id: cid-123\n\
+        \x20 client_secret_ref: env:AYX_TEST_DOTENV_ONLY\n",
+    )
+    .expect("write legacy profile");
+    fs::write(
+        legacy.join(".env"),
+        "AYX_TEST_DOTENV_ONLY=kept-out-of-the-yaml\n",
+    )
+    .expect("write .env");
+
+    let profile_arg = legacy.join("config.yaml");
+    let out = run_in(
+        &home,
+        &legacy,
+        &[
+            "profile",
+            "migrate",
+            "--profile",
+            profile_arg.to_str().expect("path"),
+        ],
+        None,
+        &[],
+    );
+    assert!(out.ok, "migrate should succeed\n{}", out.combined());
+
+    let text = profile_text(&home, "config");
+    assert!(
+        text.contains("client_secret_ref: env:AYX_TEST_DOTENV_ONLY"),
+        "the .env-backed reference must be preserved\n{text}"
+    );
+    assert!(
+        !text.contains("kept-out-of-the-yaml"),
+        "a credential held in .env must never be written into the profile\n{text}"
+    );
+    assert!(
+        !text.contains("inline:"),
+        "nothing should have been downgraded to inline storage\n{text}"
+    );
+}
+
+/// A write command must refuse a workspace document rather than flatten it.
+///
+/// The write path extracts the active environment and hands back a plain
+/// profile; serializing that over the file discarded `workspace_name`,
+/// `active_environment`, and every other environment — including credentials
+/// held only there — with exit 0 and no undo.
+#[test]
+fn write_commands_refuse_a_workspace_file_instead_of_flattening_it() {
+    let home = config_home(&[(
+        "wsp",
+        "workspace_name: wsp\n\
+         active_environment: dev\n\
+         environments:\n\
+        \x20 dev:\n\
+        \x20   profile_name: dev\n\
+        \x20   alteryx_one:\n\
+        \x20     account_email: dev@example.invalid\n\
+        \x20 prod:\n\
+        \x20   profile_name: prod\n\
+        \x20   alteryx_one:\n\
+        \x20     account_email: prod@example.invalid\n\
+        \x20     client_secret_ref: inline:prod-only-credential\n",
+    )]);
+    let before = profile_text(&home, "wsp");
+
+    for args in [
+        vec!["secret", "unset", "one.client-secret", "--profile", "wsp"],
+        vec!["secret", "migrate", "--profile", "wsp"],
+    ] {
+        let out = run(&home, &args);
+        assert!(
+            !out.ok,
+            "{args:?} must refuse a workspace file\n{}",
+            out.combined()
+        );
+        assert!(
+            out.combined().contains("workspace file"),
+            "the refusal should explain why\n{}",
+            out.combined()
+        );
+    }
+
+    assert_eq!(
+        profile_text(&home, "wsp"),
+        before,
+        "the workspace document must be byte-identical after a refused write"
+    );
+    assert!(
+        profile_text(&home, "wsp").contains("prod-only-credential"),
+        "the non-active environment's credential must survive"
+    );
+}

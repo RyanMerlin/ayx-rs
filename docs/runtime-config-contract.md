@@ -109,10 +109,19 @@ Use named secret slots rather than arbitrary YAML paths:
 - `ayx secret unset <slot>` detaches the reference and deletes only an
   AYX-created profile-scoped keyring account proven unreferenced by other
   profiles. Manually shared references are detached but never deleted.
-- `ayx secret migrate` moves every supported plaintext profile value, including
-  One login and workspace credentials, into the secure store and reports the
-  persisted field paths. It never writes plaintext; without a keyring it reports
-  an unfinished no-op naming what was left behind.
+- `ayx secret migrate` moves supported plaintext profile values, including One
+  login and workspace credentials and secrets held inside an `inline:`
+  reference, into the secure store and reports the persisted field paths. It
+  never writes plaintext; without a keyring it reports an unfinished no-op
+  naming what was left behind.
+
+  Known gap: a plaintext value sitting beside a *non-inline* reference that no
+  longer resolves — a `keyring:` account that was wiped, for instance — is not
+  detected, so migrate reports completion without moving it. The credential is
+  not at risk of loss (the write boundary preserves any value its reference
+  cannot reproduce) and `ayx doctor config` flags the profile, but the two
+  commands disagree. Do not read a clean `secret migrate` as proof that a
+  profile holds no plaintext; check `ayx doctor config` as well.
 
 Supported slots are `server.api.client-secret`, `mongo.managed.password`,
 `sql.controller.password`, `sql.server-ui.password`, `one.client-secret`, and
