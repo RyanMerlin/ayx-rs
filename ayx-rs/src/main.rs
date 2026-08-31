@@ -1686,7 +1686,9 @@ pub(crate) enum ToolsWorkspaceCommand {
         #[arg(long)]
         target: String,
     },
-    #[command(about = "Compare source and target workspace profiles")]
+    #[command(
+        about = "(preview) Resolve and summarize both workspace profiles — comparison not yet implemented"
+    )]
     Compare {
         #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
@@ -1695,7 +1697,9 @@ pub(crate) enum ToolsWorkspaceCommand {
         #[arg(long)]
         target: String,
     },
-    #[command(about = "Scaffold cross-environment workflow migration")]
+    #[command(
+        about = "(preview) Resolve and summarize both workspace profiles — workflow migration not yet implemented"
+    )]
     MigrateWorkflows {
         #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
@@ -1704,7 +1708,9 @@ pub(crate) enum ToolsWorkspaceCommand {
         #[arg(long)]
         target: String,
     },
-    #[command(about = "Scaffold cross-environment DCM connection checks")]
+    #[command(
+        about = "(preview) Resolve and summarize both workspace profiles — DCM connection checks not yet implemented"
+    )]
     CheckDcmConnections {
         #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
@@ -4135,6 +4141,7 @@ pub(crate) fn tools_workspace_compare_envelope(
         "workspace comparison scaffold",
         json!({
             "workspace": workspace.display().to_string(),
+            "preview": true,
             "source": summarize_profile(&source_config),
             "target": summarize_profile(&target_config),
             "notes": [
@@ -4158,6 +4165,7 @@ pub(crate) fn tools_workspace_migrate_envelope(
         json!({
             "workspace": workspace.display().to_string(),
             "operation": operation,
+            "preview": true,
             "source": summarize_profile(&source_config),
             "target": summarize_profile(&target_config),
             "notes": [

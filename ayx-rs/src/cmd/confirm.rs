@@ -103,4 +103,25 @@ mod tests {
         )
         .expect("explicit consent should bypass prompting");
     }
+
+    #[test]
+    fn tty_confirmation_refuses_when_ayx_no_input_env_is_set() {
+        // nextest (the workspace's test runner, see CONTRIBUTING.md) gives
+        // each test its own process, so mutating this process-global env var
+        // here doesn't race with other tests. This mirrors the convention in
+        // ayx-core's `install_test_keyring_store` for the same reason.
+        //
+        // SAFETY: single-threaded at this point in the test process; no
+        // other thread reads/writes env vars concurrently with this call.
+        unsafe {
+            std::env::set_var("AYX_NO_INPUT", "1");
+        }
+        let err = require_tty_confirmation(false, "delete the test resource")
+            .expect_err("AYX_NO_INPUT must refuse rather than auto-approve or prompt");
+        assert!(err.to_string().contains("--yes"));
+        // SAFETY: same single-threaded context as the set_var above.
+        unsafe {
+            std::env::remove_var("AYX_NO_INPUT");
+        }
+    }
 }

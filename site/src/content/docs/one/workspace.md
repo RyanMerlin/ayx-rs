@@ -124,9 +124,9 @@ ayx one workspace people
 ayx one workspace admins
 ```
 
-`people` queries `GET /v4/people` and `admins` queries `GET /v4/people?role=admin`. Both are scoped to the active workspace via the token — they no longer accept `--workspace-id`.
+`people` queries `GET /v4/people`, scoped to the active workspace via the token. `admins` queries the dedicated `GET /v4/workspaces/{workspaceId}/admins` route, where `workspaceId` is the *numeric* workspace id — the CLI resolves it from the active workspace with the same `/v4/workspaces/current` preflight the other path-scoped workspace commands use. Neither command accepts `--workspace-id`.
 
-The gateway currently accepts `role=admin` but ignores it, so `admins` additionally filters the response client-side on each record's `isAdmin` flag; a record without the flag is not treated as an admin. `data.admin_filter` in the envelope records that the filter ran and the before/after item counts.
+`admins` deliberately does not reuse `/v4/people?role=admin`: the gateway ignores `role=admin`, and `/v4/people` sets the `isAdmin` flag only on the calling user's own record, so the people list cannot be filtered down to admins on the client.
 
 ### Invite users
 

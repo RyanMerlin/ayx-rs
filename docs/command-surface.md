@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-08-31 20:46:09 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-08-31 20:59:34 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -479,10 +479,10 @@ cargo run -q -p xtask -- refresh-command-surface
 | --- | --- | --- | --- | --- |
 | tools | `tools` | unclassified |  | Cross-environment tools for environments.yaml source/target workflows |
 | tools workspace | `tools/workspace` | unclassified |  | Cross-environment workspace scaffolding and comparison |
-| tools workspace check-dcm-connections | `tools/workspace/check-dcm-connections` | unclassified |  | Scaffold cross-environment DCM connection checks |
-| tools workspace compare | `tools/workspace/compare` | unclassified |  | Compare source and target workspace profiles |
+| tools workspace check-dcm-connections | `tools/workspace/check-dcm-connections` | unclassified |  | (preview) Resolve and summarize both workspace profiles — DCM connection checks not yet implemented |
+| tools workspace compare | `tools/workspace/compare` | unclassified |  | (preview) Resolve and summarize both workspace profiles — comparison not yet implemented |
 | tools workspace init | `tools/workspace/init` | unclassified |  | Write an environments.yaml workspace template |
-| tools workspace migrate-workflows | `tools/workspace/migrate-workflows` | unclassified |  | Scaffold cross-environment workflow migration |
+| tools workspace migrate-workflows | `tools/workspace/migrate-workflows` | unclassified |  | (preview) Resolve and summarize both workspace profiles — workflow migration not yet implemented |
 | tools workspace resolve | `tools/workspace/resolve` | unclassified |  | Resolve source and target environments from a workspace |
 
 ### `tui`

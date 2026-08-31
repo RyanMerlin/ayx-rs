@@ -64,36 +64,59 @@ unfiltered people result.
 
 ### Root cause
 
-The endpoint and the query parameter were both correct — the One `/v4` gateway
-**accepts `role=admin` and ignores it**, returning HTTP 200 with the complete,
-unfiltered people list. The CLI passed that payload straight through, so
-`workspace admins` was an alias for `workspace people`. The payload does carry
-the admin flag (`isAdmin`, modeled as `PersonSummary::is_admin`); it was simply
-never consulted.
+Three compounding faults, the last of which only surfaced during live
+verification of a first (wrong) fix:
+
+1. **`role=admin` is ignored.** The One `/v4` gateway accepts the query
+   parameter and returns HTTP 200 with the complete, unfiltered people list, so
+   `workspace admins` was an alias for `workspace people`.
+2. **`isAdmin` only decorates the caller.** `GET /v4/people` sets `isAdmin` on
+   the *requesting user's own* record; every other person record carries only
+   `{ email, id, name }`. A client-side `isAdmin` filter therefore cannot
+   identify the admins at all — the first attempted fix filtered correctly
+   (`items_before: 18`, `items_after: 0`) and returned **zero** admins, which is
+   as wrong as returning all 18.
+3. **The "404" on the real endpoint was a probe error.** The tenant's live
+   OpenAPI spec (`ayx one api open-api-spec`) *does* declare
+   `GET /v4/workspaces/{workspaceId}/admins`, with `workspaceId` typed as an
+   **integer** — the numeric workspace id (e.g. `91946`), not the workspace GID
+   (`01KMGF85WTTEJZ397MW1RBD9ZB`). The earlier probe substituted the GID, got a
+   404, and that route was written off as non-existent — which is how the
+   command ended up on `/v4/people?role=admin` in the first place.
 
 ### Fix (2026-08-31)
 
-`ayx-rs/src/cmd/one_platform/workspace.rs` now applies a client-side admin
-filter to the `workspace admins` envelope (`filter_admins_envelope`):
+`ayx-rs/src/cmd/one_platform/workspace.rs` — the `Admins` arm now calls the
+dedicated, server-side-filtered endpoint:
 
-- The request still sends `GET /v4/people?role=admin`, so a future server-side
-  filter is harmless (it only removes work from the client filter).
-- Only records with a truthy `isAdmin` (or `is_admin`) survive; a record with
-  no admin flag is treated as **not** an admin (fails closed).
-- Per-person fields are untouched — the envelope and record shape are
-  unchanged apart from a new `data.admin_filter` note recording that the filter
-  was applied client-side and the before/after item counts.
-- Both `data.response` and the CLI-normalized `data.items` are filtered, so the
-  filter applies across every page if the fetch paginates.
-- Failed envelopes pass through unmodified — a failure is never rewritten into
-  a clean, empty admin list.
+- Endpoint template `WORKSPACE_ADMINS_ENDPOINT` =
+  `/v4/workspaces/{workspaceId}/admins`.
+- The numeric `workspaceId` comes from `resolve_workspace_path_id`, the same
+  preflight (`GET /v4/workspaces/current`, plus a profile-GID cross-check)
+  every other path-scoped workspace command uses. No new resolution logic.
+- The command stays argless; the id is resolved from the active workspace.
+- The spec's optional query params (`accountId`, `fields`, `includeStatus`) are
+  not wired up — the default response is the full admin list.
+- The client-side `isAdmin` filter from the first attempt (`person_is_admin`,
+  `retain_admins`, `filter_admins_envelope`) and its tests are **deleted**:
+  the server now filters, and the payload cannot support a client-side filter
+  anyway (see root cause 2). Nothing else referenced those helpers.
 
-Unit tests in the same module cover the 1-of-3 admin payload, the missing-flag
-case, the aggregated pagination shape, and the failure pass-through.
+Supporting updates: `ayx-one-api/src/inventory.rs` records the real endpoint
+template for `one workspace admins` (so `ayx one api coverage` stays truthful),
+`ayx-rs/src/cmd/catalog.rs` carries the corrected note, and
+`docs/one-endpoint-matrix.md`, `docs/one-backend-inventory.md`, and
+`docs/one-api-surface-audit.md` are amended.
 
-Live re-verification against the `alteryx-fde` workspace is still pending:
-confirm `ayx one workspace admins` now returns fewer records than
-`ayx one workspace people` and excludes the current (`isAdmin: false`) user.
+Unit tests in the same module assert the endpoint template is the numeric
+path-scoped admins route (never `/v4/people`), that the resolved path has no
+unsubstituted placeholders, and that the path-id preflight rejects a workspace
+GID where the numeric id is required.
+
+Live re-verification against the `alteryx-fde` workspace (numeric id `91946`)
+is still pending: confirm `ayx one workspace admins` returns HTTP 200 with a
+non-empty admin list that is a strict subset of `ayx one workspace people` and
+excludes the current (`isAdmin: false`) user.
 
 ## Testing notes
 

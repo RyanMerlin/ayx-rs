@@ -12,12 +12,58 @@
 //!   a sibling `*Raw` wrapper for callers that want both shapes.
 //! - Date fields stay as `String` for now (Alteryx One uses ISO 8601); promote
 //!   to `chrono::DateTime<Utc>` when callers actually need temporal logic.
+//! - Id-like fields are documented as `Option<String>`, but some live surfaces
+//!   (e.g. `/v4/jobLibrary`) return numeric ids instead of strings. Structs
+//!   that are actually wired to a live from-JSON parsing path should use
+//!   [`de_opt_string_or_number`] (with `#[serde(default)]`) on those fields
+//!   rather than assuming the server always sends a string.
 //!
 //! Start: flow surface. Adopt the pattern for plans, connections,
 //! workspaces, etc. in follow-up PRs.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+
+/// Lenient deserializer for id-like fields typed as `Option<String>`.
+///
+/// The documented Alteryx One schema types ids as strings, but live
+/// `/v4/jobLibrary` responses (observed 2026-08) return numeric ids (e.g.
+/// `"id": 4262626` instead of `"id": "4262626"`) for `id`, `flowId`,
+/// `planId`, and `ownerId`. Accept a JSON string, integer, float, or null
+/// and normalize to `Option<String>` so downstream code can keep treating
+/// ids uniformly as strings regardless of which shape the server sends.
+///
+/// Must be paired with `#[serde(default)]` on the field: `deserialize_with`
+/// bypasses serde's usual "missing `Option` field means `None`" handling, so
+/// without `default` a missing field becomes a hard deserialize error.
+fn de_opt_string_or_number<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrNumber {
+        String(String),
+        Number(serde_json::Number),
+        Null,
+    }
+
+    match Option::<StringOrNumber>::deserialize(deserializer)? {
+        None | Some(StringOrNumber::Null) => Ok(None),
+        Some(StringOrNumber::String(s)) => Ok(Some(s)),
+        Some(StringOrNumber::Number(n)) => {
+            // An id serialized as `4262626.0` is still the integer 4262626;
+            // strip the fractional-zero representation so ids compare stably.
+            let rendered = match n.as_f64() {
+                Some(f) if f.fract() == 0.0 && f.abs() < 9_007_199_254_740_992.0 => {
+                    format!("{}", f as i64)
+                }
+                _ => n.to_string(),
+            };
+            Ok(Some(rendered))
+        }
+    }
+}
 
 /// One row from `/v4/flows` (list endpoint).
 ///
@@ -318,13 +364,26 @@ impl FromItems for WorkspaceListPage {
 /// `finished_at`, and `flow_id` — anything else is parked in `extra`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct JobGroupSummary {
-    #[serde(default)]
+    /// `/v4/jobLibrary` returns numeric ids on some live tenants (observed
+    /// 2026-08) despite the documented schema being string-typed; see
+    /// [`de_opt_string_or_number`].
+    #[serde(default, deserialize_with = "de_opt_string_or_number")]
     pub id: Option<String>,
-    #[serde(default, alias = "flowId", alias = "flow_id")]
+    #[serde(
+        default,
+        alias = "flowId",
+        alias = "flow_id",
+        deserialize_with = "de_opt_string_or_number"
+    )]
     pub flow_id: Option<String>,
     #[serde(default, alias = "flowName", alias = "flow_name")]
     pub flow_name: Option<String>,
-    #[serde(default, alias = "planId", alias = "plan_id")]
+    #[serde(
+        default,
+        alias = "planId",
+        alias = "plan_id",
+        deserialize_with = "de_opt_string_or_number"
+    )]
     pub plan_id: Option<String>,
     /// Queued / Running / Succeeded / Failed / Cancelled (per One UI strings).
     #[serde(default)]
@@ -338,7 +397,12 @@ pub struct JobGroupSummary {
     /// Some surfaces return a duration in milliseconds directly.
     #[serde(default, alias = "durationMs", alias = "duration_ms")]
     pub duration_ms: Option<u64>,
-    #[serde(default, alias = "ownerId", alias = "owner_id")]
+    #[serde(
+        default,
+        alias = "ownerId",
+        alias = "owner_id",
+        deserialize_with = "de_opt_string_or_number"
+    )]
     pub owner_id: Option<String>,
     #[serde(default, alias = "ownerEmail", alias = "owner_email")]
     pub owner_email: Option<String>,
@@ -648,6 +712,68 @@ mod tests {
         let p = JobGroupListPage::from_value(&payload).expect("parses");
         assert_eq!(p.items.len(), 1);
         assert_eq!(p.items[0].status.as_deref(), Some("Running"));
+    }
+
+    /// Live `/v4/jobLibrary` responses (observed 2026-08) return numeric ids
+    /// for `id`, `flowId`, `planId`, and `ownerId` instead of the strings the
+    /// documented schema implies. This must still parse, coercing the
+    /// numbers into strings so downstream telemetry code keeps working with
+    /// `Option<String>`.
+    #[test]
+    fn job_group_list_accepts_numeric_ids() {
+        let payload = json!({
+            "items": [
+                {
+                    "id": 4262626,
+                    "flowId": 1001,
+                    "planId": 2002,
+                    "ownerId": 3003,
+                    "status": "Succeeded"
+                }
+            ]
+        });
+        let p = JobGroupListPage::from_value(&payload).expect("parses numeric ids");
+        assert_eq!(p.items.len(), 1);
+        assert_eq!(p.items[0].id.as_deref(), Some("4262626"));
+        assert_eq!(p.items[0].flow_id.as_deref(), Some("1001"));
+        assert_eq!(p.items[0].plan_id.as_deref(), Some("2002"));
+        assert_eq!(p.items[0].owner_id.as_deref(), Some("3003"));
+        assert_eq!(p.items[0].status.as_deref(), Some("Succeeded"));
+    }
+
+    #[test]
+    fn job_group_list_accepts_string_ids() {
+        let payload = json!({
+            "items": [
+                {"id": "jg1", "flowId": "f1", "planId": "p1", "ownerId": "u1"}
+            ]
+        });
+        let p = JobGroupListPage::from_value(&payload).expect("parses string ids");
+        assert_eq!(p.items[0].id.as_deref(), Some("jg1"));
+        assert_eq!(p.items[0].flow_id.as_deref(), Some("f1"));
+        assert_eq!(p.items[0].plan_id.as_deref(), Some("p1"));
+        assert_eq!(p.items[0].owner_id.as_deref(), Some("u1"));
+    }
+
+    #[test]
+    fn job_group_list_accepts_missing_ids() {
+        let payload = json!({
+            "items": [{"status": "Queued"}]
+        });
+        let p = JobGroupListPage::from_value(&payload).expect("parses missing ids");
+        assert_eq!(p.items[0].id, None);
+        assert_eq!(p.items[0].flow_id, None);
+        assert_eq!(p.items[0].plan_id, None);
+        assert_eq!(p.items[0].owner_id, None);
+    }
+
+    #[test]
+    fn job_group_list_accepts_float_id() {
+        let payload = json!({
+            "items": [{"id": 4262626.0}]
+        });
+        let p = JobGroupListPage::from_value(&payload).expect("parses float id");
+        assert_eq!(p.items[0].id.as_deref(), Some("4262626"));
     }
 
     #[test]
