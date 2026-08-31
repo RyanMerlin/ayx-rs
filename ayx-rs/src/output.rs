@@ -402,8 +402,16 @@ fn is_sensitive_key(key: &str) -> bool {
 }
 
 fn is_sensitive_value(value: &str) -> bool {
+    const NEEDLES: &[&str] = &[
+        "password=",
+        "pwd=",
+        "access_token=",
+        "refresh_token=",
+        "id_token=",
+        "client_secret=",
+    ];
     let lower = value.to_ascii_lowercase();
-    lower.starts_with("bearer ") || lower.contains("password=") || lower.contains("pwd=")
+    lower.starts_with("bearer ") || NEEDLES.iter().any(|needle| lower.contains(needle))
 }
 
 #[cfg(test)]
@@ -432,5 +440,33 @@ mod tests {
         assert_eq!(clean.data["authorization"], "[REDACTED]");
         assert_eq!(clean.data["nested"][0]["password"], "[REDACTED]");
         assert_eq!(clean.data["url"], "[REDACTED]");
+    }
+
+    #[test]
+    fn flags_oauth_bearing_values() {
+        for value in [
+            "access_token=xyz",
+            "https://h/p?access_token=xyz",
+            "refresh_token=xyz",
+            "ID_TOKEN=xyz",
+            "client_secret=xyz",
+            "Bearer abc",
+            "pwd=abc",
+        ] {
+            assert!(is_sensitive_value(value), "expected sensitive: {value}");
+        }
+        for value in ["hello world", "workspace-1", "token_count=5"] {
+            assert!(!is_sensitive_value(value), "unexpected sensitive: {value}");
+        }
+    }
+
+    #[test]
+    fn redacts_access_token_bearing_string_values() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({"detail": "GET https://h/p?access_token=abc123 failed"}),
+        );
+        let clean = redacted_envelope(&env);
+        assert_eq!(clean.data["detail"], "[REDACTED]");
     }
 }

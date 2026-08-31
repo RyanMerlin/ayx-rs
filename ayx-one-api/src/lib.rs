@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use ayx_core::auth::CredentialBinding;
 use ayx_core::envelope::Envelope;
 use ayx_core::observability::{
-    ApiEvent, record_api_event, redact_text, response_shape, transport_error_summary,
+    ApiEvent, is_secret_key, record_api_event, redact_text, response_shape, transport_error_summary,
 };
 use ayx_core::one_endpoint::OneEndpoint;
 use ayx_core::profile::Config;
@@ -786,22 +786,13 @@ fn redact_json_value(value: &Value) -> Value {
             object
                 .iter()
                 .map(|(key, value)| {
-                    let normalized = key.to_ascii_lowercase().replace(['_', '-'], "");
-                    let redacted = normalized.contains("password")
-                        || normalized.contains("secret")
-                        || normalized.contains("token")
-                        || normalized.contains("apikey")
-                        || normalized.contains("accesskey")
-                        || normalized.contains("accountkey")
-                        || normalized.contains("sharedkey")
-                        || normalized.contains("privatekey")
-                        || normalized.contains("credential")
-                        || normalized.contains("connectionstring")
-                        || normalized.contains("authorization")
-                        || normalized.contains("sas");
+                    // Key matching is delegated to the single canonical
+                    // matcher in ayx-core so every crate shares one list.
+                    // Only the placeholder differs (`[REDACTED]` here vs
+                    // `***` in `ayx_core::observability::redact_json`).
                     (
                         key.clone(),
-                        if redacted {
+                        if is_secret_key(key) {
                             Value::String("[REDACTED]".to_string())
                         } else {
                             redact_json_value(value)
