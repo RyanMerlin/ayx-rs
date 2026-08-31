@@ -1187,7 +1187,11 @@ pub fn one_api_live_request_with_body(
         })?;
         let key = one
             .active_workspace_id()
-            .ok_or_else(|| anyhow::anyhow!("no active verified workspace credential; authenticate or select a workspace before applying a mutation"))?;
+            // A legacy profile that only carries top-level tokens cannot be
+            // promoted here: it has no numeric workspace ID and no verified
+            // workspace name, so it can never satisfy `WorkspaceTarget`.
+            // Re-running login is the only way to obtain a verified credential.
+            .ok_or_else(|| anyhow::anyhow!("no active verified workspace credential; authenticate or select a workspace before applying a mutation (run `ayx one login`, or `ayx one login --workspace-id <numeric-id-or-gid>` to select among saved workspace credentials)"))?;
         let credential = one
             .workspace_credentials
             .get(key)
