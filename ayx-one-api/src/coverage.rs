@@ -615,7 +615,8 @@ mod tests {
     /// This replaces an allowlist of colliding canonical keys. Two points matter:
     ///   - Grouping is by RAW path, not canonical. `canonical_op` strips query strings,
     ///     so `/v4/people` and `/v4/people?role=admin` collapse together — but they are
-    ///     genuinely different requests (`one workspace admins` filters server-side).
+    ///     genuinely different requests (`one workspace admins` sends `role=admin`,
+    ///     then filters the response on `isAdmin` because the gateway ignores it).
     ///     Collapsing them is a coverage-matching artifact, not a wiring bug, and
     ///     forcing their command sets to match would be a lie.
     ///   - Now that a row carries every command that dispatches it, a true alias is

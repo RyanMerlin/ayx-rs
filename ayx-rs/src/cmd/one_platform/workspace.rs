@@ -51,6 +51,99 @@ fn resolve_workspace_path_id(
     validate_workspace_path_id(explicit.as_deref(), identity.workspace_id)
 }
 
+/// Is this person record flagged as a workspace admin?
+///
+/// The live `/v4/people` payload spells the flag `isAdmin`; `is_admin` is
+/// accepted for the snake_case normalization used elsewhere in the workspace.
+/// A record with no flag at all is **not** an admin — the filter fails closed
+/// so an unknown payload never widens the admin list.
+fn person_is_admin(person: &serde_json::Value) -> bool {
+    for key in ["isAdmin", "is_admin"] {
+        match person.get(key) {
+            Some(serde_json::Value::Bool(flag)) => return *flag,
+            Some(serde_json::Value::String(flag)) => return flag.eq_ignore_ascii_case("true"),
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Retain only admin records in a people collection, in place.
+///
+/// Accepts either a bare array or the list-object shapes the One gateway and
+/// the CLI's pagination aggregator produce. Returns `Some((before, after))`
+/// when a collection was actually found and filtered.
+fn retain_admins(value: &mut serde_json::Value) -> Option<(usize, usize)> {
+    match value {
+        serde_json::Value::Array(items) => {
+            let before = items.len();
+            items.retain(person_is_admin);
+            Some((before, items.len()))
+        }
+        serde_json::Value::Object(map) => {
+            for key in ["items", "results", "data", "records", "value"] {
+                if let Some(serde_json::Value::Array(items)) = map.get_mut(key) {
+                    let before = items.len();
+                    items.retain(person_is_admin);
+                    let after = items.len();
+                    // A payload-reported count would otherwise still describe
+                    // the unfiltered list and contradict the items beside it.
+                    if map.contains_key("total") {
+                        map.insert("total".to_string(), serde_json::Value::from(after as u64));
+                    }
+                    return Some((before, after));
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Apply the client-side admin filter to a `workspace admins` envelope.
+///
+/// `GET /v4/people?role=admin` returns HTTP 200 with the *complete* people
+/// list — the gateway ignores `role=admin` — so without this the command was
+/// an alias for `workspace people` (docs/ayx-cli-testing-issues.md Issue 1).
+/// Per-person fields are left exactly as the API returned them; only
+/// non-admins are dropped. Both `data.response` (single request) and
+/// `data.items` (CLI-normalized pagination, aggregated across every page) are
+/// filtered, so the filter cannot miss a page. A failed envelope is returned
+/// untouched — a failure must never be rewritten into an empty admin list.
+fn filter_admins_envelope(mut envelope: Envelope) -> Envelope {
+    if !envelope.ok {
+        return envelope;
+    }
+
+    let mut before = 0usize;
+    let mut after = 0usize;
+    let mut filtered = false;
+    for key in ["response", "items"] {
+        if let Some(target) = envelope.data.get_mut(key)
+            && let Some((page_before, page_after)) = retain_admins(target)
+        {
+            before += page_before;
+            after += page_after;
+            filtered = true;
+        }
+    }
+
+    if filtered && let serde_json::Value::Object(ref mut map) = envelope.data {
+        map.insert(
+            "admin_filter".to_string(),
+            json!({
+                "applied": "client_side",
+                "field": "isAdmin",
+                "items_before": before,
+                "items_after": after,
+                "reason": "GET /v4/people?role=admin returns the unfiltered people list",
+            }),
+        );
+    }
+
+    envelope
+}
+
 fn validate_workspace_path_id(explicit: Option<&str>, current_id: String) -> Result<String> {
     if let Some(explicit_id) = explicit
         && explicit_id != current_id
@@ -348,9 +441,11 @@ pub(crate) fn execute(
         }
         OneWorkspaceCommand::Admins => {
             let config = runtime.load_profile_lenient(None)?;
-            // Same: workspace context via header; filter admins with role query
-            // param. /v4/workspaces/{id}/admins returns 404.
-            one_api_live_request(
+            // Same: workspace context via header; /v4/workspaces/{id}/admins
+            // returns 404. `role=admin` is sent but the gateway accepts and
+            // ignores it — the response is the full people list — so the admin
+            // filter has to be applied client-side on `isAdmin`.
+            let envelope = one_api_live_request(
                 &config,
                 "workspace",
                 "workspace-admins",
@@ -358,7 +453,8 @@ pub(crate) fn execute(
                 "/v4/people?role=admin",
                 false,
                 &[],
-            )?
+            )?;
+            filter_admins_envelope(envelope)
         }
         OneWorkspaceCommand::Groups { workspace_id } => {
             let config = runtime.load_profile_lenient(None)?;
@@ -1064,7 +1160,144 @@ pub(crate) fn execute(
 
 #[cfg(test)]
 mod tests {
-    use super::{confirm_workspace_mutation, validate_workspace_gid, validate_workspace_path_id};
+    use super::{
+        confirm_workspace_mutation, filter_admins_envelope, validate_workspace_gid,
+        validate_workspace_path_id,
+    };
+    use ayx_core::envelope::Envelope;
+    use serde_json::json;
+
+    /// `GET /v4/people?role=admin` returns the full people list — the gateway
+    /// accepts `role=admin` and ignores it (docs/ayx-cli-testing-issues.md
+    /// Issue 1). `workspace admins` must therefore filter on the payload's
+    /// live-payload admin flag, spelled `isAdmin`.
+    #[test]
+    fn workspace_admins_filters_people_payload_on_is_admin() {
+        let envelope = Envelope::ok_with_data(
+            "workspace workspace-admins ok",
+            json!({
+                "surface": "workspace",
+                "operation": "workspace-admins",
+                "status_code": 200,
+                "response": {
+                    "items": [
+                        {
+                            "id": "u_1",
+                            "email": "admin@example.com",
+                            "fullName": "Ada Admin",
+                            "isAdmin": true,
+                            "isSuspended": false,
+                            "createdAt": "2026-01-02T03:04:05Z"
+                        },
+                        {
+                            "id": "u_2",
+                            "email": "member@example.com",
+                            "fullName": "Mel Member",
+                            "isAdmin": false,
+                            "isSuspended": false,
+                            "createdAt": "2026-02-02T03:04:05Z"
+                        },
+                        {
+                            "id": "u_3",
+                            "email": "other@example.com",
+                            "fullName": "Otto Other",
+                            "isAdmin": false,
+                            "isSuspended": true,
+                            "createdAt": "2026-03-02T03:04:05Z"
+                        }
+                    ],
+                    "total": 3
+                }
+            }),
+        );
+
+        let filtered = filter_admins_envelope(envelope);
+        let items = filtered.data["response"]["items"]
+            .as_array()
+            .expect("items array is preserved");
+        assert_eq!(
+            items.len(),
+            1,
+            "only the isAdmin person survives the filter"
+        );
+        assert_eq!(items[0]["id"], "u_1");
+        // The per-person shape is untouched by the filter.
+        assert_eq!(items[0]["email"], "admin@example.com");
+        assert_eq!(items[0]["fullName"], "Ada Admin");
+        assert_eq!(items[0]["isAdmin"], true);
+        assert_eq!(items[0]["createdAt"], "2026-01-02T03:04:05Z");
+        // A payload-reported total is re-stated for the filtered set.
+        assert_eq!(filtered.data["response"]["total"], 1);
+        assert_eq!(filtered.data["admin_filter"]["field"], "isAdmin");
+        assert_eq!(filtered.data["admin_filter"]["items_before"], 3);
+        assert_eq!(filtered.data["admin_filter"]["items_after"], 1);
+    }
+
+    /// A person record with no admin flag at all is not an admin.
+    #[test]
+    fn workspace_admins_treats_missing_admin_flag_as_not_admin() {
+        let envelope = Envelope::ok_with_data(
+            "workspace workspace-admins ok",
+            json!({
+                "response": {
+                    "items": [
+                        { "id": "u_1", "email": "nobody@example.com" },
+                        { "id": "u_2", "email": "admin@example.com", "is_admin": true }
+                    ]
+                }
+            }),
+        );
+
+        let filtered = filter_admins_envelope(envelope);
+        let items = filtered.data["response"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], "u_2");
+    }
+
+    /// The CLI-normalized pagination shape puts every page's records under a
+    /// top-level `data.items`; the filter must apply there too, so it covers
+    /// all pages rather than only the first.
+    #[test]
+    fn workspace_admins_filters_aggregated_pagination_items() {
+        let envelope = Envelope::ok_with_data(
+            "workspace workspace-admins ok",
+            json!({
+                "items": [
+                    { "id": "p1_a", "isAdmin": false },
+                    { "id": "p1_b", "isAdmin": true },
+                    { "id": "p2_a", "isAdmin": false },
+                    { "id": "p2_b", "isAdmin": true }
+                ],
+                "pages_fetched": 2
+            }),
+        );
+
+        let filtered = filter_admins_envelope(envelope);
+        let items = filtered.data["items"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["id"], "p1_b");
+        assert_eq!(items[1]["id"], "p2_b");
+        assert_eq!(filtered.data["pages_fetched"], 2);
+    }
+
+    /// A failed request is passed through untouched — never rewritten into a
+    /// clean, empty admin list.
+    #[test]
+    fn workspace_admins_filter_leaves_failures_untouched() {
+        let envelope = Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::PermissionDenied,
+            "workspace workspace-admins failed",
+            json!({ "response": { "items": [{ "id": "u_1", "isAdmin": false }] } }),
+        );
+
+        let filtered = filter_admins_envelope(envelope);
+        assert!(!filtered.ok);
+        assert_eq!(
+            filtered.data["response"]["items"].as_array().unwrap().len(),
+            1
+        );
+        assert!(filtered.data.get("admin_filter").is_none());
+    }
 
     #[test]
     fn workspace_mutation_confirmation_is_skipped_for_dry_run() {

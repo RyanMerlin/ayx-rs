@@ -14,7 +14,7 @@ readability.
 
 ## Issue 1 — `workspace admins` returns all workspace people
 
-Status: Open
+Status: Fixed 2026-08-31 (live re-verification pending)
 
 ### Reproduction
 
@@ -61,6 +61,39 @@ One API ignores `role=admin`, requires another filter, or returns insufficient
 role metadata for the CLI to validate the result. The command should gain a
 regression test asserting that its result is not silently identical to the
 unfiltered people result.
+
+### Root cause
+
+The endpoint and the query parameter were both correct — the One `/v4` gateway
+**accepts `role=admin` and ignores it**, returning HTTP 200 with the complete,
+unfiltered people list. The CLI passed that payload straight through, so
+`workspace admins` was an alias for `workspace people`. The payload does carry
+the admin flag (`isAdmin`, modeled as `PersonSummary::is_admin`); it was simply
+never consulted.
+
+### Fix (2026-08-31)
+
+`ayx-rs/src/cmd/one_platform/workspace.rs` now applies a client-side admin
+filter to the `workspace admins` envelope (`filter_admins_envelope`):
+
+- The request still sends `GET /v4/people?role=admin`, so a future server-side
+  filter is harmless (it only removes work from the client filter).
+- Only records with a truthy `isAdmin` (or `is_admin`) survive; a record with
+  no admin flag is treated as **not** an admin (fails closed).
+- Per-person fields are untouched — the envelope and record shape are
+  unchanged apart from a new `data.admin_filter` note recording that the filter
+  was applied client-side and the before/after item counts.
+- Both `data.response` and the CLI-normalized `data.items` are filtered, so the
+  filter applies across every page if the fetch paginates.
+- Failed envelopes pass through unmodified — a failure is never rewritten into
+  a clean, empty admin list.
+
+Unit tests in the same module cover the 1-of-3 admin payload, the missing-flag
+case, the aggregated pagination shape, and the failure pass-through.
+
+Live re-verification against the `alteryx-fde` workspace is still pending:
+confirm `ayx one workspace admins` now returns fewer records than
+`ayx one workspace people` and excludes the current (`isAdmin: false`) user.
 
 ## Testing notes
 
