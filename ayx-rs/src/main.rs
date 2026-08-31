@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::envelope::{Envelope, ErrorCode};
-use ayx_core::observability::transport_error_summary;
+use ayx_core::observability::{redact_text, transport_error_summary};
 use ayx_core::profile::{
     AyxState, Config, ServerProfile, ayx_config_home, ayx_profiles_dir, ayx_state_path,
     ayx_workspaces_dir, list_central_profiles, load_ayx_state, profile_resolution_detail,
@@ -4040,7 +4040,7 @@ pub(crate) enum UpgradeCommand {
         #[arg(long, default_value = "embedded-mongo")]
         deployment: String,
     },
-    #[command(about = "Run or simulate an upgrade manifest")]
+    #[command(about = "(preview) Simulate an upgrade apply — no changes are made")]
     Apply {
         #[arg(long)]
         manifest: PathBuf,
@@ -5943,7 +5943,9 @@ fn main() -> Result<()> {
             let code = classify_anyhow_error(&err);
             let hint = hint_for_error_code(code);
             let mut data = json!({
-                "error": err.to_string(),
+                // anyhow error strings routinely embed upstream URLs and
+                // response bodies; redact before they reach stderr.
+                "error": redact_text(&err.to_string()),
                 "error_code": code.as_str(),
             });
             // Only attach a transport diagnosis for genuine network/upstream
