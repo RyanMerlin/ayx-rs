@@ -387,6 +387,16 @@ fn redact_value(value: &Value, key: Option<&str>) -> Value {
 
 fn is_sensitive_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase().replace(['-', '_'], "");
+    // Keys that merely describe a credential (its presence, its claims
+    // summary, where it points) are diagnostics, not secrets — `ayx one
+    // doctor auth` depends on them surviving redaction. Secret VALUES that
+    // sneak into such fields are still caught by `is_sensitive_value`.
+    const METADATA_SUFFIXES: &[&str] = &[
+        "present", "claims", "url", "endpoint", "count", "fields", "mode", "enabled", "ref",
+    ];
+    if METADATA_SUFFIXES.iter().any(|suffix| key.ends_with(suffix)) {
+        return false;
+    }
     [
         "authorization",
         "token",
@@ -457,6 +467,24 @@ mod tests {
         }
         for value in ["hello world", "workspace-1", "token_count=5"] {
             assert!(!is_sensitive_value(value), "unexpected sensitive: {value}");
+        }
+    }
+
+    #[test]
+    fn credential_metadata_keys_survive_redaction() {
+        for key in [
+            "access_token_present",
+            "refresh_token_present",
+            "access_token_claims",
+            "token_endpoint_url",
+            "inline_secret_fields",
+            "access_token_ref",
+            "token_count",
+        ] {
+            assert!(!is_sensitive_key(key), "metadata key redacted: {key}");
+        }
+        for key in ["access_token", "client_secret", "x-api-key", "password"] {
+            assert!(is_sensitive_key(key), "secret key not redacted: {key}");
         }
     }
 
