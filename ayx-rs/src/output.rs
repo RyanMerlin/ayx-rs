@@ -394,11 +394,13 @@ fn is_sensitive_key(key: &str) -> bool {
     let key = lower.replace(['-', '_'], "");
     // Keys that merely describe a credential (its presence, its claims
     // summary, where it points) are diagnostics, not secrets — `ayx one
-    // doctor auth` depends on them surviving redaction. Secret VALUES that
-    // sneak into such fields are still caught by `is_sensitive_value`.
+    // doctor auth` depends on them surviving redaction. `is_sensitive_value`
+    // only catches a narrow set of `k=v`/bearer forms, not arbitrary secret
+    // values, so only add suffixes that real callers use for non-secret
+    // metadata (counts, booleans, lengths) — never widen speculatively.
     const METADATA_SUFFIXES: &[&str] = &[
         "present", "claims", "url", "endpoint", "count", "fields", "mode", "enabled", "ref",
-        "length", "attempts", "sends",
+        "length",
     ];
     if has_prefix || METADATA_SUFFIXES.iter().any(|suffix| key.ends_with(suffix)) {
         return false;
@@ -489,8 +491,6 @@ mod tests {
             "has_refresh_token",
             "has-refresh-token",
             "token_length",
-            "workspace_password_attempts",
-            "otp_sends",
         ] {
             assert!(!is_sensitive_key(key), "metadata key redacted: {key}");
         }
