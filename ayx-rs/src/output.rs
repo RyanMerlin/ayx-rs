@@ -386,15 +386,21 @@ fn redact_value(value: &Value, key: Option<&str>) -> Value {
 }
 
 fn is_sensitive_key(key: &str) -> bool {
-    let key = key.to_ascii_lowercase().replace(['-', '_'], "");
+    let lower = key.to_ascii_lowercase();
+    // A `has_`/`has-` prefix marks a boolean presence flag, not a secret
+    // itself; check it on the separator-aware form before word boundaries
+    // are lost below (e.g. `hashed_password` must not match).
+    let has_prefix = lower.starts_with("has_") || lower.starts_with("has-");
+    let key = lower.replace(['-', '_'], "");
     // Keys that merely describe a credential (its presence, its claims
     // summary, where it points) are diagnostics, not secrets — `ayx one
     // doctor auth` depends on them surviving redaction. Secret VALUES that
     // sneak into such fields are still caught by `is_sensitive_value`.
     const METADATA_SUFFIXES: &[&str] = &[
         "present", "claims", "url", "endpoint", "count", "fields", "mode", "enabled", "ref",
+        "length", "attempts", "sends",
     ];
-    if METADATA_SUFFIXES.iter().any(|suffix| key.ends_with(suffix)) {
+    if has_prefix || METADATA_SUFFIXES.iter().any(|suffix| key.ends_with(suffix)) {
         return false;
     }
     [
@@ -480,10 +486,21 @@ mod tests {
             "inline_secret_fields",
             "access_token_ref",
             "token_count",
+            "has_refresh_token",
+            "has-refresh-token",
+            "token_length",
+            "workspace_password_attempts",
+            "otp_sends",
         ] {
             assert!(!is_sensitive_key(key), "metadata key redacted: {key}");
         }
-        for key in ["access_token", "client_secret", "x-api-key", "password"] {
+        for key in [
+            "access_token",
+            "client_secret",
+            "x-api-key",
+            "password",
+            "hashed_password",
+        ] {
             assert!(is_sensitive_key(key), "secret key not redacted: {key}");
         }
     }
