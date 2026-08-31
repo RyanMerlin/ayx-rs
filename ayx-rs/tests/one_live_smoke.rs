@@ -2429,8 +2429,11 @@ fn one_workflows_copy_dry_run_shape_live() {
 
 /// `share` is mutating, so without --apply it must dry-run. Also proves the
 /// `--to-person` email was resolved to a numeric person id via `GET /v4/people`
-/// BEFORE the --apply gate: `would_send.toPersonIds` must already carry
-/// integers, not the raw email, so a later --apply sends byte-identical
+/// BEFORE the --apply gate: `would_send.toPersonIds` must already carry the
+/// resolved id — as a JSON *string* (live-verified 2026-08-31: the API
+/// rejects `toPersonIds`/`toGroupIds` sent as numbers with HTTP 400
+/// SchemaValidationError, "Invalid input: expected string, received
+/// number") — not the raw email, so a later --apply sends byte-identical
 /// content. `--include-dependencies` must additionally attach a
 /// `dependency_preview` so the blast radius is visible before commit.
 #[test]
@@ -2491,9 +2494,16 @@ fn one_workflows_share_dry_run_shape_live() {
     );
     for id in to_person_ids {
         assert!(
-            id.is_u64(),
-            "toPersonIds entries must already be resolved integers, not \
-             {id:?} — resolution must happen before the --apply gate"
+            id.is_string(),
+            "toPersonIds entries must be JSON strings of already-resolved \
+             person ids, not {id:?} — live-verified 2026-08-31, the API \
+             rejects numbers with HTTP 400 SchemaValidationError"
+        );
+        assert!(
+            id.as_str().unwrap().parse::<u64>().is_ok(),
+            "toPersonIds entries must be resolved to a numeric id (as a \
+             string), not {id:?} — resolution must happen before the \
+             --apply gate"
         );
     }
     assert_eq!(

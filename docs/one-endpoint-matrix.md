@@ -421,15 +421,18 @@ shapes are recorded; treat this section as load-bearing, not decorative.
 Wired to `one workflows share`. The shape below is not in any published spec — it was recovered from
 the service's own schema-validation errors. Every one of `includeDependencies`, `privileges`, and
 `sendEmail` is required even when its value is `false` or empty-looking, and `additionalInfoMsg` must
-be *omitted* rather than sent as `null` when there is no message.
+be *omitted* rather than sent as `null` when there is no message. `toPersonIds`/`toGroupIds` are
+arrays of **strings**, not numbers — live-verified 2026-08-31: sending them as JSON numbers gets
+HTTP 400 `SchemaValidationError` (`"Invalid input: expected string, received number"`, `"Missing
+field toPersonIds.0"`).
 
 ```
 {
   "includeDependencies": bool,
   "privileges": [ "create" | "delete" | "execute" | "read" | "share" | "update" ],  // >= 1 entry
   "sendEmail": bool,
-  "toPersonIds": [int],
-  "toGroupIds": [int],
+  "toPersonIds": [string],
+  "toGroupIds": [string],
   "additionalInfoMsg": string   // optional
 }
 ```

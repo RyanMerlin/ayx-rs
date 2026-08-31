@@ -36,12 +36,14 @@ Status: active
 - **Work the `missing` list by resource**, starting with `workspaces` (23
   operations, the largest single gap and admin-facing), then `plans` (9),
   `schedules` (9), and `accounts` (8).
-- **Settle whether `one connections share` sends person ids in the right JSON
-  type.** `build_connection_share_body` sends them as strings while its sibling
-  `build_workflow_share_body` sends numbers. Raised in review and never
-  confirmed either way; it needs one live `--apply` probe against a real
-  connection, not more code reading. If the connection form is wrong, a share
-  silently grants nobody access.
+- **RESOLVED (2026-08-31, live-verified):** `one workflows share` was sending
+  `toPersonIds`/`toGroupIds` as JSON numbers; `POST
+  /svc-workflow/api/v2/workflows/{id}/share` rejects that with HTTP 400
+  SchemaValidationError (`"Invalid input: expected string, received
+  number"`, `"Missing field toPersonIds.0"`). `build_connection_share_body`'s
+  string form was correct all along. `build_workflow_share_body` in
+  `ayx-rs/src/cmd/one_workflows.rs` now serializes both fields as strings,
+  matching `build_connection_share_body` in `one_connections.rs`.
 - **Add `ayx one workspace detail <id>`.** `GET /v4/workspaces/{id}` is wired
   and reachable today, but only from `ayx tui`'s legacy One browser — no `one`
   command dispatches it, so it sits in `NON_ONE_SURFACE_ENDPOINTS` in the drift
