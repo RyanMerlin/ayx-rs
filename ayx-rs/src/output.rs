@@ -428,8 +428,20 @@ fn is_sensitive_key(key: &str) -> bool {
 ///
 /// This is a rule rather than an enumeration so a newly added `*_source` or
 /// `*_present` field does not silently regress.
+///
+/// Every suffix below is justified by a field this repo actually emits — the
+/// list is deliberately not a union of guesses. `_ref` and `_refs` are both
+/// required and neither implies the other (`access_token_ref` vs
+/// `secret_refs`); `_url`, `_count`, `_mode` and `_enabled` cover
+/// `token_endpoint_url`, `token_count` and the credential-posture flags. Do not
+/// widen this speculatively: each entry disables key matching for every field
+/// ending that way, at any depth.
 fn is_metadata_key(key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
+    // Header-style keys spell the same field with hyphens (`has-refresh-token`,
+    // `token-count`). Normalise to one separator so a single rule covers both
+    // spellings; word boundaries are preserved, so `hashed_password` still
+    // fails the `has_` prefix test and stays redacted.
+    let key = key.to_ascii_lowercase().replace('-', "_");
     const EXACT: &[&str] = &["next_page_token", "secret_values_returned"];
     const SUFFIXES: &[&str] = &[
         "_present",
@@ -442,7 +454,12 @@ fn is_metadata_key(key: &str) -> bool {
         "_claims",
         "_endpoint",
         "_endpoint_url",
+        "_url",
+        "_ref",
         "_refs",
+        "_count",
+        "_mode",
+        "_enabled",
         "_env",
     ];
     EXACT.contains(&key.as_str())
@@ -451,6 +468,14 @@ fn is_metadata_key(key: &str) -> bool {
 }
 
 fn is_sensitive_value(value: &str) -> bool {
+    const NEEDLES: &[&str] = &[
+        "password=",
+        "pwd=",
+        "access_token=",
+        "refresh_token=",
+        "id_token=",
+        "client_secret=",
+    ];
     let lower = value.to_ascii_lowercase();
     lower.starts_with("bearer ")
         // An `inline:` reference *is* the plaintext. This is a value-level
@@ -461,8 +486,14 @@ fn is_sensitive_value(value: &str) -> bool {
         // prints reference *names*, so nothing leaks — this keeps that true
         // when one of them starts printing reference *values*.
         || lower.starts_with("inline:")
-        || has_populated_assignment(&lower, "password=")
-        || has_populated_assignment(&lower, "pwd=")
+        // Every needle goes through the populated-assignment test, not a bare
+        // `contains`. A bare contains flags `NAME=` template lines that carry
+        // no value; dropping the OAuth needles entirely would instead stop
+        // catching `?access_token=abc` embedded in a URL or error string.
+        // Both are regressions, and only routing all six here avoids both.
+        || NEEDLES
+            .iter()
+            .any(|needle| has_populated_assignment(&lower, needle))
 }
 
 /// True when `needle` appears with an actual value after the `=`.
@@ -741,5 +772,60 @@ mod tests {
         assert_eq!(value["fields"]["status"], "ok");
         assert_eq!(value["fields"].as_object().unwrap().len(), 1);
         assert_eq!(value["omitted_fields"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn flags_oauth_bearing_values() {
+        for value in [
+            "access_token=xyz",
+            "https://h/p?access_token=xyz",
+            "refresh_token=xyz",
+            "ID_TOKEN=xyz",
+            "client_secret=xyz",
+            "Bearer abc",
+            "pwd=abc",
+        ] {
+            assert!(is_sensitive_value(value), "expected sensitive: {value}");
+        }
+        for value in ["hello world", "workspace-1", "token_count=5"] {
+            assert!(!is_sensitive_value(value), "unexpected sensitive: {value}");
+        }
+    }
+
+    #[test]
+    fn credential_metadata_keys_survive_redaction() {
+        for key in [
+            "access_token_present",
+            "refresh_token_present",
+            "access_token_claims",
+            "token_endpoint_url",
+            "inline_secret_fields",
+            "access_token_ref",
+            "token_count",
+            "has_refresh_token",
+            "has-refresh-token",
+            "token_length",
+        ] {
+            assert!(!is_sensitive_key(key), "metadata key redacted: {key}");
+        }
+        for key in [
+            "access_token",
+            "client_secret",
+            "x-api-key",
+            "password",
+            "hashed_password",
+        ] {
+            assert!(is_sensitive_key(key), "secret key not redacted: {key}");
+        }
+    }
+
+    #[test]
+    fn redacts_access_token_bearing_string_values() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({"detail": "GET https://h/p?access_token=abc123 failed"}),
+        );
+        let clean = redacted_envelope(&env);
+        assert_eq!(clean.data["detail"], "[REDACTED]");
     }
 }

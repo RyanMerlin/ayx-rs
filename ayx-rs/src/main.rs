@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::envelope::{Envelope, ErrorCode};
-use ayx_core::observability::transport_error_summary;
+use ayx_core::observability::{redact_text, transport_error_summary};
 use ayx_core::profile::{
     AyxState, Config, ServerProfile, ayx_config_home, ayx_profiles_dir, ayx_state_path,
     ayx_workspaces_dir, list_central_profiles, load_ayx_state, profile_resolution_detail,
@@ -1686,7 +1686,9 @@ pub(crate) enum ToolsWorkspaceCommand {
         #[arg(long)]
         target: String,
     },
-    #[command(about = "Compare source and target workspace profiles")]
+    #[command(
+        about = "(preview) Resolve and summarize both workspace profiles — comparison not yet implemented"
+    )]
     Compare {
         #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
@@ -1695,7 +1697,9 @@ pub(crate) enum ToolsWorkspaceCommand {
         #[arg(long)]
         target: String,
     },
-    #[command(about = "Scaffold cross-environment workflow migration")]
+    #[command(
+        about = "(preview) Resolve and summarize both workspace profiles — workflow migration not yet implemented"
+    )]
     MigrateWorkflows {
         #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
@@ -1704,7 +1708,9 @@ pub(crate) enum ToolsWorkspaceCommand {
         #[arg(long)]
         target: String,
     },
-    #[command(about = "Scaffold cross-environment DCM connection checks")]
+    #[command(
+        about = "(preview) Resolve and summarize both workspace profiles — DCM connection checks not yet implemented"
+    )]
     CheckDcmConnections {
         #[arg(long, default_value = "environments.yaml")]
         workspace: PathBuf,
@@ -4040,7 +4046,7 @@ pub(crate) enum UpgradeCommand {
         #[arg(long, default_value = "embedded-mongo")]
         deployment: String,
     },
-    #[command(about = "Run or simulate an upgrade manifest")]
+    #[command(about = "(preview) Simulate an upgrade apply — no changes are made")]
     Apply {
         #[arg(long)]
         manifest: PathBuf,
@@ -4135,6 +4141,7 @@ pub(crate) fn tools_workspace_compare_envelope(
         "workspace comparison scaffold",
         json!({
             "workspace": workspace.display().to_string(),
+            "preview": true,
             "source": summarize_profile(&source_config),
             "target": summarize_profile(&target_config),
             "notes": [
@@ -4158,6 +4165,7 @@ pub(crate) fn tools_workspace_migrate_envelope(
         json!({
             "workspace": workspace.display().to_string(),
             "operation": operation,
+            "preview": true,
             "source": summarize_profile(&source_config),
             "target": summarize_profile(&target_config),
             "notes": [
@@ -5943,7 +5951,9 @@ fn main() -> Result<()> {
             let code = classify_anyhow_error(&err);
             let hint = hint_for_error_code(code);
             let mut data = json!({
-                "error": err.to_string(),
+                // anyhow error strings routinely embed upstream URLs and
+                // response bodies; redact before they reach stderr.
+                "error": redact_text(&err.to_string()),
                 "error_code": code.as_str(),
             });
             // Only attach a transport diagnosis for genuine network/upstream

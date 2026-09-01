@@ -13,6 +13,13 @@ use crate::{
     onboard::{InlineSecretPolicy, inline_secret_warning, write_config_with_policy},
 };
 
+/// `GET /v4/workspaces/{workspaceId}/admins` — the tenant's live OpenAPI spec
+/// declares `workspaceId` as an **integer** (the numeric workspace id, e.g.
+/// `91946`), not the workspace GID. Substituting the GID is what made this
+/// route look like a 404 and pushed `workspace admins` onto
+/// `/v4/people?role=admin`, which the gateway ignores.
+const WORKSPACE_ADMINS_ENDPOINT: &str = "/v4/workspaces/{workspaceId}/admins";
+
 /// Resolve and validate the numeric workspace id required by path-scoped
 /// `/v4/workspaces` operations. The profile's active workspace is a ULID/GID
 /// for header scope, so it cannot be substituted into these numeric path
@@ -348,16 +355,26 @@ pub(crate) fn execute(
         }
         OneWorkspaceCommand::Admins => {
             let config = runtime.load_profile_lenient(None)?;
-            // Same: workspace context via header; filter admins with role query
-            // param. /v4/workspaces/{id}/admins returns 404.
+            // The tenant's live OpenAPI spec declares this endpoint with a
+            // `workspaceId` path param of type *integer* — the numeric id
+            // (e.g. 91946), not the workspace GID. An earlier probe that used
+            // the GID 404'd and was mistaken for "the route does not exist",
+            // which is how this command ended up on `/v4/people?role=admin`.
+            // That was wrong twice over: the gateway ignores `role=admin`, and
+            // `/v4/people` only decorates the *caller's own* record with
+            // `isAdmin`, so no client-side filter can identify the other
+            // admins. `resolve_workspace_path_id` does the numeric-id
+            // preflight (and the GID cross-check) every other path-scoped
+            // workspace command uses.
+            let path_id = resolve_workspace_path_id(None, &config)?;
             one_api_live_request(
                 &config,
                 "workspace",
                 "workspace-admins",
                 "GET",
-                "/v4/people?role=admin",
+                WORKSPACE_ADMINS_ENDPOINT,
                 false,
-                &[],
+                &[("workspaceId", &path_id)],
             )?
         }
         OneWorkspaceCommand::Groups { workspace_id } => {
@@ -1064,7 +1081,51 @@ pub(crate) fn execute(
 
 #[cfg(test)]
 mod tests {
-    use super::{confirm_workspace_mutation, validate_workspace_gid, validate_workspace_path_id};
+    use super::{
+        WORKSPACE_ADMINS_ENDPOINT, confirm_workspace_mutation, validate_workspace_gid,
+        validate_workspace_path_id,
+    };
+
+    /// `workspace admins` must call the dedicated admins route, and its path
+    /// parameter must be the one `resolve_workspace_path_id` produces — the
+    /// *numeric* workspace id. Substituting the workspace GID here is what
+    /// made the route look like a 404 and put the command on
+    /// `/v4/people?role=admin`, which returns every person, admin or not
+    /// (docs/ayx-cli-testing-issues.md Issue 1).
+    #[test]
+    fn workspace_admins_endpoint_is_the_numeric_path_scoped_admins_route() {
+        assert_eq!(
+            WORKSPACE_ADMINS_ENDPOINT,
+            "/v4/workspaces/{workspaceId}/admins"
+        );
+        assert!(
+            !WORKSPACE_ADMINS_ENDPOINT.contains("/v4/people"),
+            "workspace admins must not fall back to the unfiltered people list"
+        );
+
+        // The `workspaceId` placeholder is the one the command substitutes,
+        // and the value it substitutes comes from the numeric-id preflight.
+        let numeric_id =
+            validate_workspace_path_id(None, "91946".to_string()).expect("current numeric id");
+        let resolved = WORKSPACE_ADMINS_ENDPOINT.replace("{workspaceId}", &numeric_id);
+        assert_eq!(resolved, "/v4/workspaces/91946/admins");
+        assert!(
+            !resolved.contains('{'),
+            "every path placeholder must be substituted: {resolved}"
+        );
+    }
+
+    /// The numeric-id preflight refuses to swap in a workspace GID: an
+    /// explicit id that is not the current numeric id is rejected outright,
+    /// which is exactly the guard that keeps a GID out of this integer path
+    /// parameter.
+    #[test]
+    fn workspace_admins_path_id_rejects_a_non_numeric_workspace_gid() {
+        let error =
+            validate_workspace_path_id(Some("01KMGF85WTTEJZ397MW1RBD9ZB"), "91946".to_string())
+                .expect_err("a GID must not be accepted as the numeric workspaceId");
+        assert!(error.to_string().contains("91946"));
+    }
 
     #[test]
     fn workspace_mutation_confirmation_is_skipped_for_dry_run() {

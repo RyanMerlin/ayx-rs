@@ -43,9 +43,13 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
             "one workflows share",
         ],
     },
+    // The tenant OpenAPI spec declares `workspaceId` as an integer — the
+    // numeric workspace id. An earlier probe used the workspace GID, 404'd,
+    // and this command was wrongly moved to `/v4/people?role=admin` (which the
+    // gateway ignores). See docs/ayx-cli-testing-issues.md Issue 1.
     EndpointSpec {
         method: "GET",
-        path: "/v4/people?role=admin",
+        path: "/v4/workspaces/{workspaceId}/admins",
         commands: &["one workspace admins"],
     },
     EndpointSpec {

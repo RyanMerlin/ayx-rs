@@ -33,3 +33,5 @@ If the repo changes direction, add a new ADR that supersedes the old one.
 ## Current ADRs
 
 - [ADR 0001: Docs Lifecycle And File Roles](0001-docs-lifecycle.md)
+- [ADR 0002: Production Authentication Boundary](0002-production-authentication-boundary.md)
+- [ADR 0003: Headless Alteryx MCP Integration Boundary](0003-headless-mcp-integration-boundary.md)

@@ -46,7 +46,8 @@ These require new subcommands or corrected endpoint targets.
 
 - [x] **`platform workspace people/admins` — fixed correct endpoints** — DONE v0.9.12  
   `people` → `GET /v4/people` (workspace context via `x-alteryx-workspace-gid` header — live-verified 200, 9 members returned).  
-  `admins` → `GET /v4/people?role=admin`. Both `/v4/workspaces/{id}/people` and `/v4/workspaces/{id}/admins` are confirmed non-existent routes.
+  `admins` → `GET /v4/people?role=admin`. Both `/v4/workspaces/{id}/people` and `/v4/workspaces/{id}/admins` are confirmed non-existent routes.  
+  **Superseded 2026-08-31:** the `/v4/workspaces/{workspaceId}/admins` "404" was a probe error — the spec declares `workspaceId` as an integer and the probe sent the workspace GID. `admins` now uses `GET /v4/workspaces/{workspaceId}/admins` with the numeric id. See `docs/ayx-cli-testing-issues.md` Issue 1.
 
 - [x] **`job-groups` — `name=None` on all entries** — DONE v0.9.13  
   `ayx one job-groups list` now post-processes the response: when `name` is null, synthesizes a display name from `flowRun.flowId` (`flow-{flowId}`) or falls back to `job-{id}`. The API returns no job-groups in the `example-workspace` workspace currently so this was implemented based on the known item shape from the prior audit session.

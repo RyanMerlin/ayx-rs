@@ -35,6 +35,17 @@ if (-not $SkipAudit) {
     Invoke-Checked cargo @("audit", "--deny", "warnings")
 }
 
+$cargoTomlMatch = Select-String -Path (Join-Path $repo "Cargo.toml") -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
+if (-not $cargoTomlMatch) {
+    throw "unable to find workspace version in Cargo.toml"
+}
+$workspaceVersion = $cargoTomlMatch.Matches[0].Groups[1].Value
+$releaseNotesName = "v$workspaceVersion-internal.1.md"
+$releaseNotes = Join-Path $repo "docs\releases\$releaseNotesName"
+if (-not (Test-Path -LiteralPath $releaseNotes)) {
+    throw "release notes not found: docs/releases/$releaseNotesName -- create it before cutting an internal release"
+}
+
 $dist = Join-Path $repo "dist\internal"
 $stage = Join-Path $dist "ayx-x86_64-pc-windows-msvc"
 $archive = Join-Path $dist "ayx-x86_64-pc-windows-msvc-internal.zip"
@@ -45,7 +56,7 @@ if (Test-Path -LiteralPath $stage) {
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 Copy-Item (Join-Path $repo "target\release\ayx.exe") (Join-Path $stage "ayx.exe")
 Copy-Item (Join-Path $repo "README.md") $stage
-Copy-Item (Join-Path $repo "docs\releases\v0.17.0-internal.1.md") $stage
+Copy-Item $releaseNotes $stage
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $archive -Force
 
 $verify = Join-Path $dist "archive-smoke-windows"
