@@ -452,6 +452,16 @@ fn env_truthy(name: &str) -> bool {
 /// session on a headless host — we leave the default unset; subsequent `Entry`
 /// operations then return `NoDefaultStore`, which callers already treat as
 /// "keyring unavailable" (inline fallback where permitted).
+///
+/// Constructing a store is not proof that it works. On macOS,
+/// `apple-native-keyring-store` builds successfully with no login keychain
+/// available (an SSH session, a locked keychain, a CI runner); every later
+/// operation then fails with `PlatformFailure: A default keychain could not be
+/// found`. That surfaced as a hard error from `ayx secret set` instead of the
+/// documented plaintext fallback, because only `NoDefaultStore` is classified
+/// as "unavailable". Probing here keeps that classification honest: a store
+/// that cannot answer a read is not registered, so the rest of the codebase
+/// sees exactly the headless-Linux behaviour it already handles.
 pub fn ensure_keyring_store() {
     static REGISTERED: OnceLock<()> = OnceLock::new();
     if keyring_core::get_default_store().is_some() || REGISTERED.get().is_some() {
@@ -469,8 +479,28 @@ pub fn ensure_keyring_store() {
     if let Ok(store) = windows_native_keyring_store::Store::new() {
         keyring_core::set_default_store(store);
     }
+    if keyring_core::get_default_store().is_some() && !default_store_answers_a_read() {
+        keyring_core::unset_default_store();
+    }
     if keyring_core::get_default_store().is_some() {
         let _ = REGISTERED.set(());
+    }
+}
+
+/// Whether the registered store can actually service a read.
+///
+/// Read-only and side-effect free: it looks up an account that is never
+/// written. A healthy store reports the entry as missing; an unusable one
+/// fails at the platform layer, which is the case this exists to detect.
+fn default_store_answers_a_read() -> bool {
+    const PROBE_ACCOUNT: &str = "__ayx_keyring_probe__";
+    match Entry::new(SECRET_SERVICE, PROBE_ACCOUNT) {
+        // A missing entry is the expected answer and proves the store responds.
+        Ok(entry) => !matches!(entry.get_password(), Err(Error::PlatformFailure(_))),
+        Err(Error::PlatformFailure(_)) | Err(Error::NoDefaultStore) => false,
+        // Any other construction error is about this one account, not the
+        // store's health — do not disable the keyring over it.
+        Err(_) => true,
     }
 }
 
@@ -1069,6 +1099,23 @@ mod tests {
 
         let other = ProfileError::Invalid("something else".to_string());
         assert!(!is_keyring_storage_error(&other) && !is_keyring_read_error(&other));
+    }
+
+    /// A working store must survive the health probe.
+    ///
+    /// The probe exists to reject a store that constructs but cannot answer a
+    /// read (macOS with no usable login keychain). The failure mode that would
+    /// be worse than the bug it fixes is a false negative: silently disabling a
+    /// perfectly good keyring would push real credentials into plaintext
+    /// fallback. A missing entry is the expected answer and must read as
+    /// healthy.
+    #[test]
+    fn a_healthy_store_passes_the_health_probe() {
+        install_test_keyring_store();
+        assert!(
+            default_store_answers_a_read(),
+            "a functioning store must not be disabled by the probe"
+        );
     }
 
     /// The distinction is by cause, so the operator-facing text must not change.
