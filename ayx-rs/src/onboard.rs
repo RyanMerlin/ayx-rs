@@ -11,14 +11,14 @@ use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
 use ayx_core::profile::{
     AlteryxOneProfile, Config, MongoDatabases, MongoEmbedded, MongoManaged, MongoMode,
     MongoProfile, ServerProfile, SqlServerConnectionProfile, SqlServerProfile, TlsConfig,
-    WorkspaceConfig, canonical_profile_value, canonical_workspace_value,
+    WorkspaceConfig, canonical_profile_value_with_env, canonical_workspace_value,
     default_profile_storage_path, default_workspace_storage_path, detect_secret_conflict,
     load_ayx_state, normalize_alteryx_base_url, profile_storage_path, save_ayx_state,
 };
 use ayx_core::secrets::{
     KeyringTransaction, bound_keyring_account_in_namespace, delete_keyring_secret, keyring_account,
-    recover_keyring_transaction_locked, resolve_secret_ref, store_keyring_secret,
-    store_secret_with_fallback,
+    recover_keyring_transaction_locked, resolve_secret_ref, resolve_secret_ref_with,
+    store_keyring_secret, store_secret_with_fallback,
 };
 use ayx_core::sensitive::{SensitiveFileLock, write_sensitive_file};
 use ayx_server::util::runtime_settings_summary;
@@ -418,6 +418,9 @@ pub(crate) fn write_workspace_config(
     let transaction = KeyringTransaction::begin(&lock);
     let mut secured = workspace.clone();
     let mut merged = SecretizeOutput::default();
+    // Same `.env` view the loader used, so an `env:`-referenced credential is
+    // recognised as covered instead of being re-stored into the file.
+    let workspace_env_files = ayx_core::profile::env_file_values(path);
     for (env_key, config) in secured.environments.iter_mut() {
         let scope = format!("{}.{env_key}", workspace.workspace_name);
         let out = match secretize_config_with_binding(
@@ -427,6 +430,7 @@ pub(crate) fn write_workspace_config(
             None,
             None,
             Some(&transaction),
+            &workspace_env_files,
         ) {
             Ok(out) => out,
             Err(err) => {
@@ -597,12 +601,44 @@ fn store(
             // Do not call `store_secret_with_fallback` here: its global
             // AYX_ALLOW_INLINE_SECRETS escape hatch is intentionally ignored
             // for explicitly protected writes such as workspace passwords.
+            //
+            // `store_keyring_secret`'s error text advertises that variable,
+            // which is true for `Allow` callers and false here. Replace the
+            // remediation rather than send the operator after a flag this path
+            // deliberately ignores.
             ayx_core::secrets::store_keyring_secret(account, value)
                 .map(|reference| (reference, false))
+                .map_err(|err| match err {
+                    // Rebuild from the inner message, not `to_string()`, so the
+                    // variant's own "invalid config: " prefix is not doubled.
+                    // Keep the variant: this *is* a keyring-store failure, and
+                    // callers classify the plaintext fallback by that variant.
+                    ayx_core::profile::ProfileError::KeyringUnavailable(message) => {
+                        match message.split_once(". Set AYX_ALLOW_INLINE_SECRETS=1") {
+                            Some((cause, _)) => {
+                                ayx_core::profile::ProfileError::KeyringUnavailable(format!(
+                                    "{cause}. This write requires secure storage and cannot fall \
+                                     back to plaintext; configure a keyring backend and retry."
+                                ))
+                            }
+                            None => ayx_core::profile::ProfileError::KeyringUnavailable(message),
+                        }
+                    }
+                    other => other,
+                })
         }
         InlineSecretPolicy::Allow => store_secret_with_fallback(account, value, true),
     };
-    let (reference, was_inline) = result.map_err(|err| anyhow::anyhow!("{field}: {err}"))?;
+    // Render the message first, then attach it as context over the *typed*
+    // error. `anyhow!("{field}: {err}")` produced an identical string but threw
+    // the `ProfileError` away, which forced callers to re-classify the failure
+    // by substring-matching this prose — and "keyring entry"/"keyring secret"
+    // appear equally in read and rollback failures, where a plaintext fallback
+    // is wrong. The rendered text is unchanged; the cause now survives.
+    let (reference, was_inline) = result.map_err(|err| {
+        let message = format!("{field}: {err}");
+        anyhow::Error::new(err).context(message)
+    })?;
     if was_inline {
         out.inline_fields.push(field.to_string());
     } else if reference.starts_with("keyring:") {
@@ -622,34 +658,59 @@ fn store(
 /// resolves to the unchanged value, keep it as-is and store nothing. A changed
 /// value (e.g. a fresh `auth login` token) no longer matches the env ref and is
 /// secretized normally.
+/// The parts of a secretize pass that every field write shares.
+///
+/// Bundled rather than passed individually because they travel together and
+/// always have: the policy decides whether a plaintext fallback is permitted,
+/// the transaction lets a failed write roll the keyring back, and the `.env`
+/// view is what makes an existing `env:` reference recognisable as already
+/// covering the value.
+struct SecretWriteContext<'a> {
+    policy: InlineSecretPolicy,
+    transaction: Option<&'a KeyringTransaction<'a>>,
+    env_files: &'a HashMap<String, String>,
+}
+
 fn persist_secret_field(
     existing_ref: Option<&str>,
     account: &str,
     value: &str,
     field: &str,
-    policy: InlineSecretPolicy,
+    ctx: &SecretWriteContext<'_>,
     out: &mut SecretizeOutput,
-    transaction: Option<&KeyringTransaction<'_>>,
 ) -> Result<String> {
     if let Some(reference) = existing_ref
         && reference.starts_with("env:")
-        // The `env:` gate makes `.ok()` lossless: `resolve_secret_ref` is infallible
-        // for the `env:` branch (it returns `Ok(env::var(..).ok())`), so `.ok()` can
-        // never hide a real error here. If the value differs or the env var is unset,
-        // we fall through and secretize the live value — the safe direction.
-        && resolve_secret_ref(reference).ok().flatten().as_deref() == Some(value)
+        // Resolve against the same `.env` view the loader used. With the
+        // process-environment-only resolver, a credential supplied through the
+        // profile-adjacent `.env` never matched here, so the reference was
+        // treated as stale and the live value was re-stored — which, under
+        // `InlineSecretPolicy::Allow` on a keyring-less host, wrote the secret
+        // straight into the profile as `inline:<plaintext>`. A credential the
+        // operator deliberately kept out of the YAML ended up in it.
+        //
+        // The `env:` gate makes `.ok()` lossless: resolution is infallible for
+        // that branch, so `.ok()` can never hide a real error. If the value
+        // genuinely differs, we fall through and secretize it — the safe
+        // direction.
+        && resolve_secret_ref_with(reference, ctx.env_files)
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some(value)
     {
         return Ok(reference.to_string());
     }
-    store(account, value, field, policy, out, transaction)
+    store(account, value, field, ctx.policy, out, ctx.transaction)
 }
 
 pub(crate) fn secretize_config(
     config: &mut Config,
     scope: &str,
     policy: InlineSecretPolicy,
+    env_files: &HashMap<String, String>,
 ) -> Result<SecretizeOutput> {
-    secretize_config_with_binding(config, scope, policy, None, None, None)
+    secretize_config_with_binding(config, scope, policy, None, None, None, env_files)
 }
 
 /// Secretize a profile using a binding-derived keyring namespace.
@@ -665,8 +726,14 @@ pub(crate) fn secretize_config_with_binding(
     binding: Option<&CredentialBinding>,
     namespace: Option<&str>,
     transaction: Option<&KeyringTransaction<'_>>,
+    env_files: &HashMap<String, String>,
 ) -> Result<SecretizeOutput> {
     let mut out = SecretizeOutput::default();
+    let ctx = SecretWriteContext {
+        policy,
+        transaction,
+        env_files,
+    };
     let result: Result<()> = (|| {
         out.scopes_used.push(scope.to_string());
 
@@ -680,9 +747,8 @@ pub(crate) fn secretize_config_with_binding(
                     &account,
                     &value,
                     "alteryx_one.access_token",
-                    policy,
+                    &ctx,
                     &mut out,
-                    transaction,
                 )?;
                 one.access_token_ref = Some(reference.clone());
                 out.refs
@@ -701,9 +767,8 @@ pub(crate) fn secretize_config_with_binding(
                     &account,
                     &value,
                     "alteryx_one.refresh_token",
-                    policy,
+                    &ctx,
                     &mut out,
-                    transaction,
                 )?;
                 one.refresh_token_ref = Some(reference.clone());
                 out.refs
@@ -722,9 +787,8 @@ pub(crate) fn secretize_config_with_binding(
                     &account,
                     &value,
                     "alteryx_one.workspace_password",
-                    policy,
+                    &ctx,
                     &mut out,
-                    transaction,
                 )?;
                 one.workspace_password_ref = Some(reference.clone());
                 out.refs
@@ -743,9 +807,8 @@ pub(crate) fn secretize_config_with_binding(
                     &account,
                     &value,
                     "alteryx_one.client_secret",
-                    policy,
+                    &ctx,
                     &mut out,
-                    transaction,
                 )?;
                 one.client_secret_ref = Some(reference.clone());
                 out.refs
@@ -764,9 +827,8 @@ pub(crate) fn secretize_config_with_binding(
                     &account,
                     &value,
                     "alteryx_one.sp_client_secret",
-                    policy,
+                    &ctx,
                     &mut out,
-                    transaction,
                 )?;
                 one.sp_client_secret_ref = Some(reference.clone());
                 out.refs
@@ -797,9 +859,8 @@ pub(crate) fn secretize_config_with_binding(
                         &account,
                         &value,
                         &field,
-                        policy,
+                        &ctx,
                         &mut out,
-                        transaction,
                     )?;
                     credential.access_token_ref = Some(reference.clone());
                     out.refs.insert(field, reference);
@@ -820,9 +881,8 @@ pub(crate) fn secretize_config_with_binding(
                         &account,
                         &value,
                         &field,
-                        policy,
+                        &ctx,
                         &mut out,
-                        transaction,
                     )?;
                     credential.refresh_token_ref = Some(reference.clone());
                     out.refs.insert(field, reference);
@@ -843,9 +903,8 @@ pub(crate) fn secretize_config_with_binding(
                         &account,
                         &value,
                         &field,
-                        policy,
+                        &ctx,
                         &mut out,
-                        transaction,
                     )?;
                     credential.workspace_password_ref = Some(reference.clone());
                     out.refs.insert(field, reference);
@@ -866,9 +925,8 @@ pub(crate) fn secretize_config_with_binding(
                         &account,
                         &value,
                         &field,
-                        policy,
+                        &ctx,
                         &mut out,
-                        transaction,
                     )?;
                     credential.client_secret_ref = Some(reference.clone());
                     out.refs.insert(field, reference);
@@ -889,9 +947,8 @@ pub(crate) fn secretize_config_with_binding(
                         &account,
                         &value,
                         &field,
-                        policy,
+                        &ctx,
                         &mut out,
-                        transaction,
                     )?;
                     credential.sp_client_secret_ref = Some(reference.clone());
                     out.refs.insert(field, reference);
@@ -914,9 +971,8 @@ pub(crate) fn secretize_config_with_binding(
                 &account,
                 &value,
                 "server.api.client_secret",
-                policy,
+                &ctx,
                 &mut out,
-                transaction,
             )?;
             api.auth.client_secret_ref = Some(reference.clone());
             out.refs
@@ -934,9 +990,8 @@ pub(crate) fn secretize_config_with_binding(
                 &account,
                 &value,
                 "server.api.client_secret",
-                policy,
+                &ctx,
                 &mut out,
-                transaction,
             )?;
             server_api.client_secret_ref = Some(reference.clone());
             out.refs
@@ -955,9 +1010,8 @@ pub(crate) fn secretize_config_with_binding(
                 &account,
                 &value,
                 "server.curator_api_secret",
-                policy,
+                &ctx,
                 &mut out,
-                transaction,
             )?;
             server.curator_api_secret_ref = Some(reference.clone());
             out.refs
@@ -974,9 +1028,8 @@ pub(crate) fn secretize_config_with_binding(
                 &account,
                 &value,
                 "server.storage.mongo.managed.password",
-                policy,
+                &ctx,
                 &mut out,
-                transaction,
             )?;
             mongo.password_ref = Some(reference.clone());
             out.refs.insert(
@@ -1006,9 +1059,8 @@ pub(crate) fn secretize_config_with_binding(
                         &account,
                         &value,
                         label,
-                        policy,
+                        &ctx,
                         &mut out,
-                        transaction,
                     )?;
                     conn.password_ref = Some(reference.clone());
                     out.refs.insert(label.to_string(), reference);
@@ -1555,7 +1607,11 @@ pub(crate) fn write_config_exact(
         }
         delete_keyring_accounts(&transaction, delete_accounts)?;
         detect_secret_conflict(config).map_err(anyhow::Error::from)?;
-        let canonical = canonical_profile_value(config)?;
+        // Resolve `env:` references against the same `.env` view the loader
+        // used, so a value that reference genuinely covers is recognised as
+        // covered rather than written back out as plaintext beside it.
+        let canonical =
+            canonical_profile_value_with_env(config, &ayx_core::profile::env_file_values(path))?;
         let body = serde_yaml::to_string(&canonical)?;
         transaction.set_target_digest(body.as_bytes())?;
         lock.write(body.as_bytes()).map_err(anyhow::Error::from)?;
@@ -1600,6 +1656,7 @@ fn write_config_with_binding_for_rollout_and_delete_keyring_accounts(
         .and_then(|s| s.to_str())
         .unwrap_or(&config.profile_name);
     let mut export = config.clone();
+    let export_env_files = ayx_core::profile::env_file_values(path);
     let out = match secretize_config_with_binding(
         &mut export,
         file_stem,
@@ -1607,6 +1664,7 @@ fn write_config_with_binding_for_rollout_and_delete_keyring_accounts(
         binding,
         auth_keyring_namespace(rollout)?,
         Some(&transaction),
+        &export_env_files,
     ) {
         Ok(out) => out,
         Err(err) => {
@@ -1616,7 +1674,7 @@ fn write_config_with_binding_for_rollout_and_delete_keyring_accounts(
             return Err(err);
         }
     };
-    let canonical = match canonical_profile_value(&export) {
+    let canonical = match canonical_profile_value_with_env(&export, &export_env_files) {
         Ok(value) => value,
         Err(err) => {
             if let Err(rollback) = rollback_keyring_accounts(&out) {
@@ -2916,7 +2974,13 @@ server_api:
         .unwrap();
         // load triggers with_server_api_overrides: api and server are synthesized (derived)
         let mut cfg = Config::load_from_path_with_environment(&path, None).unwrap();
-        let out = secretize_config(&mut cfg, "wsenv", InlineSecretPolicy::Allow).unwrap();
+        let out = secretize_config(
+            &mut cfg,
+            "wsenv",
+            InlineSecretPolicy::Allow,
+            &HashMap::new(),
+        )
+        .unwrap();
         // one logical secret -> one ref key; NO server.curator_api_secret orphan
         assert_eq!(
             out.refs.len(),

@@ -255,7 +255,8 @@ fn restore_keyring_changes(changes: &[KeyringTransactionChange]) -> Result<(), P
         if let Some(backup_account) = change.backup_account.as_deref() {
             match resolve_secret_ref(&format!("keyring:{backup_account}"))? {
                 Some(previous) => {
-                    store_keyring_secret(&change.account, &previous)?;
+                    store_keyring_secret(&change.account, &previous)
+                        .map_err(demote_keyring_store_error)?;
                 }
                 None if change.backup_ready => {
                     return Err(ProfileError::Invalid(format!(
@@ -388,7 +389,8 @@ fn recover_legacy_transaction(
         for change in journal.changes.iter().rev() {
             match change.previous.as_deref() {
                 Some(secret) => {
-                    store_keyring_secret(&change.account, secret)?;
+                    store_keyring_secret(&change.account, secret)
+                        .map_err(demote_keyring_store_error)?;
                 }
                 None => {
                     delete_keyring_secret(&change.account)?;
@@ -450,6 +452,16 @@ fn env_truthy(name: &str) -> bool {
 /// session on a headless host — we leave the default unset; subsequent `Entry`
 /// operations then return `NoDefaultStore`, which callers already treat as
 /// "keyring unavailable" (inline fallback where permitted).
+///
+/// Constructing a store is not proof that it works. On macOS,
+/// `apple-native-keyring-store` builds successfully with no login keychain
+/// available (an SSH session, a locked keychain, a CI runner); every later
+/// operation then fails with `PlatformFailure: A default keychain could not be
+/// found`. That surfaced as a hard error from `ayx secret set` instead of the
+/// documented plaintext fallback, because only `NoDefaultStore` is classified
+/// as "unavailable". Probing here keeps that classification honest: a store
+/// that cannot answer a read is not registered, so the rest of the codebase
+/// sees exactly the headless-Linux behaviour it already handles.
 pub fn ensure_keyring_store() {
     static REGISTERED: OnceLock<()> = OnceLock::new();
     if keyring_core::get_default_store().is_some() || REGISTERED.get().is_some() {
@@ -467,8 +479,28 @@ pub fn ensure_keyring_store() {
     if let Ok(store) = windows_native_keyring_store::Store::new() {
         keyring_core::set_default_store(store);
     }
+    if keyring_core::get_default_store().is_some() && !default_store_answers_a_read() {
+        keyring_core::unset_default_store();
+    }
     if keyring_core::get_default_store().is_some() {
         let _ = REGISTERED.set(());
+    }
+}
+
+/// Whether the registered store can actually service a read.
+///
+/// Read-only and side-effect free: it looks up an account that is never
+/// written. A healthy store reports the entry as missing; an unusable one
+/// fails at the platform layer, which is the case this exists to detect.
+fn default_store_answers_a_read() -> bool {
+    const PROBE_ACCOUNT: &str = "__ayx_keyring_probe__";
+    match Entry::new(SECRET_SERVICE, PROBE_ACCOUNT) {
+        // A missing entry is the expected answer and proves the store responds.
+        Ok(entry) => !matches!(entry.get_password(), Err(Error::PlatformFailure(_))),
+        Err(Error::PlatformFailure(_)) | Err(Error::NoDefaultStore) => false,
+        // Any other construction error is about this one account, not the
+        // store's health — do not disable the keyring over it.
+        Err(_) => true,
     }
 }
 
@@ -553,11 +585,19 @@ pub fn resolve_secret_ref_with(
         return Ok(Some(value.to_string()));
     }
     if let Some(name) = reference.strip_prefix("env:") {
+        // Both sources are filtered identically. Treating an empty `.env` entry
+        // as absent but an empty process variable as present made `FOO=""`
+        // resolve to `Some("")`, which `secret status` then reported as
+        // `resolved: true, validation: passed` — an all-clear over a credential
+        // that is not actually set.
+        // Each source is filtered on its own, so an empty `.env` entry still
+        // falls through to the process variable, as the precedence note above
+        // describes.
         return Ok(env_files
             .get(name)
             .cloned()
             .filter(|value| !value.trim().is_empty())
-            .or_else(|| env::var(name).ok()));
+            .or_else(|| env::var(name).ok().filter(|value| !value.trim().is_empty())));
     }
     if let Some(account) = reference.strip_prefix("keyring:") {
         ensure_keyring_store();
@@ -567,7 +607,7 @@ pub fn resolve_secret_ref_with(
             // Treat as "keyring unavailable" per the documented contract.
             Err(Error::NoDefaultStore) => return Ok(None),
             Err(source) => {
-                return Err(ProfileError::Invalid(format!(
+                return Err(ProfileError::KeyringUnreadable(format!(
                     "unable to open keyring entry '{}': {}",
                     account, source
                 )));
@@ -576,7 +616,7 @@ pub fn resolve_secret_ref_with(
         return match entry.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(Error::NoEntry) => Ok(None),
-            Err(err) => Err(ProfileError::Invalid(format!(
+            Err(err) => Err(ProfileError::KeyringUnreadable(format!(
                 "unable to load keyring secret '{}': {}",
                 account, err
             ))),
@@ -615,7 +655,7 @@ pub fn store_keyring_secret(account: &str, secret: &str) -> Result<String, Profi
     // thread-local so parallel tests cannot affect one another.
     #[cfg(feature = "test-inline-forcing")]
     if keyring_unavailable_is_forced() {
-        return Err(ProfileError::Invalid(format!(
+        return Err(ProfileError::KeyringUnavailable(format!(
             "unable to open keyring entry '{}': keyring unavailable (forced by \
              AYX_FORCE_INLINE_SECRETS). Set AYX_ALLOW_INLINE_SECRETS=1 to store in YAML instead.",
             account
@@ -623,18 +663,99 @@ pub fn store_keyring_secret(account: &str, secret: &str) -> Result<String, Profi
     }
     ensure_keyring_store();
     let entry = Entry::new(SECRET_SERVICE, account).map_err(|source| {
-        ProfileError::Invalid(format!(
+        ProfileError::KeyringUnavailable(format!(
             "unable to open keyring entry '{}': {}. Set AYX_ALLOW_INLINE_SECRETS=1 to store in YAML instead, or configure a keyring backend.",
             account, source
         ))
     })?;
     entry.set_password(secret).map_err(|source| {
-        ProfileError::Invalid(format!(
+        ProfileError::KeyringUnavailable(format!(
             "unable to write keyring secret '{}': {}. Set AYX_ALLOW_INLINE_SECRETS=1 to store in YAML instead, or configure a keyring backend.",
             account, source
         ))
     })?;
     Ok(keyring_secret_ref(account))
+}
+
+/// Whether `error` reports a failure to **store** into the OS keyring, as
+/// opposed to any other failure during a profile write.
+///
+/// Callers that offer an inline (plaintext) fallback use this to decide whether
+/// retrying without the keyring is meaningful, so it must mean exactly "the
+/// keyring could not be written to" and nothing else. Only
+/// [`store_keyring_secret`] produces [`ProfileError::KeyringUnavailable`];
+/// reads, deletes and rollbacks produce [`ProfileError::Invalid`] and are
+/// deliberately *not* matched here. A read denial on a locked keychain means
+/// the keyring works and the operator must unlock it — not that the credential
+/// should be rewritten to disk in cleartext.
+///
+/// Probing writability up front is not reliable: on macOS with no default
+/// keychain `Entry::new` succeeds and only the password operation fails, so the
+/// failure has to be observed rather than predicted.
+pub fn is_keyring_storage_error(error: &ProfileError) -> bool {
+    matches!(error, ProfileError::KeyringUnavailable(_))
+}
+
+/// Re-type a keyring-store failure that happened during rollback or journal
+/// recovery, not during the caller's own write.
+///
+/// `restore_keyring_changes` and `recover_legacy_transaction` reuse
+/// [`store_keyring_secret`], so without this their failures carry
+/// [`ProfileError::KeyringUnavailable`] and would tell a caller "this host has
+/// no keyring to write to" — authorising a plaintext downgrade off the back of
+/// a *recovery* failure. They are ordinary write failures to their callers.
+fn demote_keyring_store_error(error: ProfileError) -> ProfileError {
+    match error {
+        ProfileError::KeyringUnavailable(message) => ProfileError::Invalid(message),
+        other => other,
+    }
+}
+
+/// Whether `error` reports a failure to **read** an existing keyring entry.
+///
+/// The counterpart to [`is_keyring_storage_error`], and deliberately a separate
+/// predicate rather than a shared "something about the keyring went wrong": the
+/// two callers want opposite things from it.
+///
+/// A read failure means the profile names a keyring account this host cannot
+/// read right now — a locked keychain, a denied Secret Service prompt, or on
+/// macOS a registered Keychain store with no default keychain. That must
+/// *degrade the load* (report the slot as unresolved and carry on, so
+/// `secret status` and `doctor` can still explain it) and must **never**
+/// authorise writing the credential to disk in cleartext, which is what
+/// [`is_keyring_storage_error`] gates. Collapsing the two into one predicate
+/// silently disabled one of them.
+pub fn is_keyring_read_error(error: &ProfileError) -> bool {
+    matches!(error, ProfileError::KeyringUnreadable(_))
+}
+
+// `inline_secrets_allowed_by_env` was introduced alongside the warned inline
+// fallback and never called. Left in place it read as though `secret set`
+// consults `AYX_ALLOW_INLINE_SECRETS` before downgrading to plaintext — it does
+// not, deliberately: a bootstrap on a keyring-less host must not be blocked
+// behind a flag the operator has not heard of. An accessor that documents a
+// gate which does not exist is worse than no accessor, so it is gone.
+// `store_secret_with_fallback` still honours the variable for its own callers.
+
+/// Whether a secret slot holds plaintext that belongs in secure storage.
+///
+/// Two shapes count, and every caller must test both:
+///
+///   * a bare value with no reference — the classic case, and
+///   * an `inline:` reference, which **is** the plaintext:
+///     `store_secret_with_fallback` returns `inline:<secret>` verbatim.
+///
+/// Testing only the first is why `ayx secret migrate` reported "migration
+/// completed" over a profile whose credential was cleartext in an `inline:`
+/// reference — precisely the state the keyring-unavailable bootstrap path
+/// writes, and the state migrate exists to unwind. This is one rule, so it
+/// lives in one place rather than being restated at each call site.
+pub fn holds_plaintext_secret(value: Option<&str>, reference: Option<&str>) -> bool {
+    let bare_value = value.is_some_and(|value| !value.trim().is_empty());
+    let inline_reference = reference
+        .and_then(|reference| reference.strip_prefix("inline:"))
+        .is_some_and(|secret| !secret.trim().is_empty());
+    (bare_value && reference.is_none()) || inline_reference
 }
 
 /// Store a secret, preferring the OS keyring and falling back to an inline
@@ -907,5 +1028,106 @@ mod tests {
             Some("second-old-secret".to_string())
         );
         assert!(!journal_path.exists());
+    }
+
+    /// Only a *store* failure may authorise the plaintext fallback.
+    ///
+    /// Classification used to substring-match the rendered message, but reads,
+    /// deletes and rollbacks all say "keyring entry"/"keyring secret" too. That
+    /// meant a locked keychain (a read denial on a perfectly writable keyring),
+    /// or an unrelated write failure whose keyring rollback also failed, was
+    /// read as "this host has no keyring" and offered to rewrite the credential
+    /// as cleartext.
+    #[test]
+    fn only_a_store_failure_counts_as_a_keyring_storage_error() {
+        let store = ProfileError::KeyringUnavailable(
+            "unable to write keyring secret 'acct': backend refused".to_string(),
+        );
+        assert!(
+            is_keyring_storage_error(&store),
+            "a failure to write the keyring is the one case a plaintext fallback addresses"
+        );
+
+        // Every one of these mentions the keyring and none of them means the
+        // keyring is unavailable for writing.
+        for (label, message) in [
+            ("read denial", "unable to open keyring entry 'acct': locked"),
+            (
+                "read failure",
+                "unable to load keyring secret 'acct': denied",
+            ),
+            (
+                "failed rollback",
+                "permission denied; unable to delete keyring entry 'acct': backend refused",
+            ),
+        ] {
+            let error = ProfileError::Invalid(message.to_string());
+            assert!(
+                !is_keyring_storage_error(&error),
+                "a {label} must not authorise writing the secret as plaintext"
+            );
+        }
+    }
+
+    /// Store and read failures must not answer to the same predicate.
+    ///
+    /// They were briefly collapsed into one, which silently disabled the
+    /// keyring-read degradation: `resolve_ref_for_load`'s guard could never
+    /// fire, so an unreadable `keyring:` reference failed the whole profile
+    /// load again — including `secret status` and `doctor`, the commands whose
+    /// job is to report it. The two callers want opposite things, so they get
+    /// two predicates.
+    #[test]
+    fn store_and_read_failures_are_classified_separately() {
+        let store = ProfileError::KeyringUnavailable("cannot write".to_string());
+        let read = ProfileError::KeyringUnreadable("cannot read".to_string());
+
+        assert!(is_keyring_storage_error(&store));
+        assert!(
+            !is_keyring_read_error(&store),
+            "a store failure must not be treated as a read failure"
+        );
+
+        assert!(
+            is_keyring_read_error(&read),
+            "a read failure must degrade the load, so it has to be recognised"
+        );
+        assert!(
+            !is_keyring_storage_error(&read),
+            "a read failure must never authorise writing the secret as plaintext"
+        );
+
+        let other = ProfileError::Invalid("something else".to_string());
+        assert!(!is_keyring_storage_error(&other) && !is_keyring_read_error(&other));
+    }
+
+    /// A working store must survive the health probe.
+    ///
+    /// The probe exists to reject a store that constructs but cannot answer a
+    /// read (macOS with no usable login keychain). The failure mode that would
+    /// be worse than the bug it fixes is a false negative: silently disabling a
+    /// perfectly good keyring would push real credentials into plaintext
+    /// fallback. A missing entry is the expected answer and must read as
+    /// healthy.
+    #[test]
+    fn a_healthy_store_passes_the_health_probe() {
+        install_test_keyring_store();
+        assert!(
+            default_store_answers_a_read(),
+            "a functioning store must not be disabled by the probe"
+        );
+    }
+
+    /// The distinction is by cause, so the operator-facing text must not change.
+    #[test]
+    fn keyring_unavailable_renders_like_invalid() {
+        assert_eq!(
+            ProfileError::KeyringUnavailable("boom".to_string()).to_string(),
+            ProfileError::Invalid("boom".to_string()).to_string()
+        );
+        assert_eq!(
+            ProfileError::KeyringUnreadable("boom".to_string()).to_string(),
+            ProfileError::Invalid("boom".to_string()).to_string()
+        );
     }
 }

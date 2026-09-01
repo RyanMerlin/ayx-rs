@@ -67,6 +67,29 @@ profile that uses that exact reference, including both `default` and
 `keyring:local-dev/server.storage.mongo.managed.password` when the profiles
 must have separate secrets.
 
+### When no keyring is available
+
+Secure storage is preferred but never required. On a host without an OS keyring
+— a container, a CI runner, WSL without Secret Service — `ayx secret set` stores
+the value as plaintext in the profile YAML so setup can proceed, and warns:
+
+```text
+[ayx WARN] Stored 'one.client-secret' as plaintext in the profile YAML because
+no OS keyring was available. Anyone who can read the file can read the secret.
+```
+
+The warning is also returned as a `warning` field in the envelope, so agents and
+CI steps can act on it. The posture keeps being reported afterwards by
+`ayx doctor config` (`status: warn`, with each affected field named) and
+`ayx secret status` (`validation: warning`, with remediation).
+
+`ayx secret migrate` is the exception: its purpose is moving plaintext *into*
+secure storage, so it never rewrites a secret as plaintext. Without a keyring it
+reports an unfinished no-op naming what was left behind and changes nothing.
+
+To skip plaintext entirely, reference an environment variable instead —
+`ayx secret set <slot> --from-env NAME` stores `env:NAME` and needs no keyring.
+
 ## Secret lifecycle
 
 Use named secret slots rather than arbitrary YAML paths:
@@ -75,8 +98,9 @@ Use named secret slots rather than arbitrary YAML paths:
   AYX-managed secret, including One login and workspace credentials, without
   returning values or reference names.
 - `ayx secret set <slot>` securely prompts and stores the value in the OS
-  keyring. `--from-stdin` is the non-interactive input path; secret values are
-  never accepted as command-line arguments.
+  keyring, falling back to warned plaintext when no keyring is available (see
+  "When no keyring is available"). `--from-stdin` is the non-interactive input
+  path; secret values are never accepted as command-line arguments.
 - `ayx secret set <slot> --from-env NAME` stores `env:NAME` without reading the
   value. This is the preferred CI configuration; the CI provider injects `NAME`.
 - `ayx secret validate` performs offline configuration and resolution checks
@@ -85,9 +109,19 @@ Use named secret slots rather than arbitrary YAML paths:
 - `ayx secret unset <slot>` detaches the reference and deletes only an
   AYX-created profile-scoped keyring account proven unreferenced by other
   profiles. Manually shared references are detached but never deleted.
-- `ayx secret migrate` moves every supported plaintext profile value, including
-  One login and workspace credentials, into the secure store and reports the
-  persisted field paths.
+- `ayx secret migrate` moves supported plaintext profile values, including One
+  login and workspace credentials and secrets held inside an `inline:`
+  reference, into the secure store and reports the persisted field paths. It
+  never writes plaintext; without a keyring it reports an unfinished no-op
+  naming what was left behind.
+
+  Known gap: a plaintext value sitting beside a *non-inline* reference that no
+  longer resolves — a `keyring:` account that was wiped, for instance — is not
+  detected, so migrate reports completion without moving it. The credential is
+  not at risk of loss (the write boundary preserves any value its reference
+  cannot reproduce) and `ayx doctor config` flags the profile, but the two
+  commands disagree. Do not read a clean `secret migrate` as proof that a
+  profile holds no plaintext; check `ayx doctor config` as well.
 
 Supported slots are `server.api.client-secret`, `mongo.managed.password`,
 `sql.controller.password`, `sql.server-ui.password`, `one.client-secret`, and

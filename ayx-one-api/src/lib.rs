@@ -282,45 +282,6 @@ fn workspace_context_header_value(config: &Config) -> Option<String> {
         .or_else(|| workspace_context_from_token(one.resolved_refresh_token()))
 }
 
-fn env_file_value(name: &str) -> Option<String> {
-    if let Ok(value) = std::env::var(name) {
-        let value = value.trim().to_string();
-        if !value.is_empty() {
-            return Some(value);
-        }
-    }
-
-    let cwd = std::env::current_dir().ok()?;
-    let mut candidates = vec![cwd.join(".env")];
-    if let Some(parent) = cwd.parent() {
-        candidates.push(parent.join(".env"));
-    }
-    for candidate in candidates {
-        let content = std::fs::read_to_string(&candidate).ok()?;
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') || !trimmed.contains('=') {
-                continue;
-            }
-            let mut parts = trimmed.splitn(2, '=');
-            let key = parts.next().unwrap_or("").trim();
-            let value = parts.next().unwrap_or("").trim();
-            if key == name {
-                let value = value
-                    .trim_matches('"')
-                    .trim_matches('\'')
-                    .trim()
-                    .to_string();
-                if !value.is_empty() {
-                    return Some(value);
-                }
-            }
-        }
-    }
-
-    None
-}
-
 /// Set the One API apply gate for the current thread.
 ///
 /// When `false` (the default), mutating One API calls (POST/PUT/PATCH/DELETE)
@@ -2398,23 +2359,16 @@ pub fn client_credentials_one_access_token(
 fn service_principal_credentials(
     config: &Config,
 ) -> Option<(String, String, String, Option<String>)> {
-    let fde_client_id = env_file_value("AYX_ONE_ALTERYX_FDE_SP007_CLIENT_ID");
-    let fde_client_secret = env_file_value("AYX_ONE_ALTERYX_FDE_SA007_SECRET");
-    let fde_token_endpoint = env_file_value("AYX_ONE_ALTERYX_FDE_TOKEN_ENDPOINT");
-
-    if let (Some(client_id), Some(client_secret), Some(token_endpoint_url)) =
-        (fde_client_id, fde_client_secret, fde_token_endpoint)
-    {
-        trace_one("service principal credentials resolved from process env");
-        return Some((client_id, client_secret, token_endpoint_url, None));
-    }
-
+    // Environment-supplied SP credentials arrive through the profile loader
+    // (`AYX_ONE_SP_CLIENT_ID` / `AYX_ONE_SP_CLIENT_SECRET` /
+    // `AYX_ONE_SP_TOKEN_ENDPOINT_URL` in `apply_env_fallbacks`), which honours
+    // AYX_CONFIG_HOME isolation and records secrets as `env:` references.
+    // Reading them again here would bypass both.
     let one = config.alteryx_one.as_ref()?;
     // Use the SP-specific client_id, NOT the user oauth_client_id.
     let client_id = one.resolved_sp_client_id()?.to_string();
     let client_secret = one.resolved_sp_client_secret()?.to_string();
-    // SP has its own regional token endpoint (pingauth-us1-4), separate from
-    // the user flow endpoint.
+    // SP has its own regional token endpoint, separate from the user flow one.
     let token_endpoint_url = one.effective_sp_token_endpoint_url()?;
     let workspace_gid = one.resolved_workspace_gid().map(str::to_string);
     trace_one("service principal credentials resolved from config");
@@ -2426,7 +2380,7 @@ fn service_principal_access_token(config: &Config, client: &Client) -> Result<St
     let (client_id, client_secret, token_endpoint_url, workspace_gid) =
         service_principal_credentials(config).ok_or_else(|| {
             anyhow::anyhow!(
-                "service-principal auth requires alteryx_one.sp_client_id (or AYX_ONE_SP_CLIENT_ID / AYX_ONE_ALTERYX_FDE_SP007_CLIENT_ID), client_secret, and sp_token_endpoint_url"
+                "service-principal auth requires alteryx_one.sp_client_id (or AYX_ONE_SP_CLIENT_ID), client_secret, and sp_token_endpoint_url"
             )
         })?;
     trace_one(format!(

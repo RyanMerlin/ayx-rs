@@ -204,6 +204,31 @@ pub enum ProfileError {
     },
     #[error("invalid config: {0}")]
     Invalid(String),
+    /// The OS keyring could not be written to.
+    ///
+    /// Distinct from [`ProfileError::Invalid`] purely so callers can classify
+    /// by cause. Reading, writing and deleting a keyring entry all produce
+    /// prose containing "keyring entry" or "keyring secret", so a substring
+    /// test could not tell a *store* failure — where offering a plaintext
+    /// fallback is meaningful — from a *read* denial or a failed rollback,
+    /// where it is not. That ambiguity offered to rewrite every credential as
+    /// cleartext on hosts whose keyring was present and working but merely
+    /// locked, or when an unrelated write failed and its keyring rollback
+    /// failed too.
+    ///
+    /// Renders identically to `Invalid`, so operator-facing text is unchanged.
+    #[error("invalid config: {0}")]
+    KeyringUnavailable(String),
+    /// An existing OS keyring entry could not be read.
+    ///
+    /// The counterpart to [`ProfileError::KeyringUnavailable`], and separate
+    /// from it on purpose: a *read* failure must degrade the profile load so
+    /// the diagnostics can report the unresolved slot, and must never authorise
+    /// the plaintext fallback, which only a *store* failure does.
+    ///
+    /// Renders identically to `Invalid`, so operator-facing text is unchanged.
+    #[error("invalid config: {0}")]
+    KeyringUnreadable(String),
     #[error("failed to write config file '{path}': {source}")]
     Write {
         path: String,
@@ -1136,6 +1161,41 @@ impl Config {
         Self::load_from_resolved_path_lenient_without_active_overlay(&resolved)
     }
 
+    /// Load a profile for a write that still needs its references resolved.
+    ///
+    /// `secret migrate` has to *read* the credential behind an `inline:` or
+    /// `keyring:` reference in order to move it, so it cannot use
+    /// [`Config::load_from_path_for_write`]. It must still avoid
+    /// `apply_env_fallbacks` and `with_server_api_overrides`, which inject
+    /// configuration derived from whatever the environment happens to export;
+    /// writing that back binds slots the operator never named.
+    ///
+    /// So: references resolve, ambient environment does not leak into the file.
+    pub fn load_from_path_resolving_without_env_fallbacks(
+        path: &Path,
+    ) -> Result<Self, ProfileError> {
+        let resolved = resolve_profile_path(path)?;
+        let (path_str, env_values, value) = Self::read_profile_value(&resolved)?;
+        if is_workspace_value(&value) {
+            // Fail closed. Flattening a workspace to its active environment and
+            // handing that back to a caller that writes the file would discard
+            // `workspace_name`, `active_environment`, and every other
+            // environment — including credentials held only there — with exit 0
+            // and no warning. A write path must never be the thing that decides
+            // to drop them.
+            return Err(ProfileError::Invalid(format!(
+                "'{path_str}' is a workspace file, not a single profile. Writing one \
+                 environment back would discard the other environments and the workspace \
+                 metadata. Target the environment's own profile instead."
+            )));
+        }
+        let config: Self = serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+            path: path_str,
+            source,
+        })?;
+        config.resolve_secret_refs(&env_values)
+    }
+
     /// Load a profile exactly as it is written on disk: no environment
     /// fallbacks applied, no secret references resolved.
     ///
@@ -1153,24 +1213,22 @@ impl Config {
         let resolved = resolve_profile_path(path)?;
         let (path_str, _env_values, value) = Self::read_profile_value(&resolved)?;
         if is_workspace_value(&value) {
-            let workspace: WorkspaceConfig =
-                serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
-                    path: path_str.clone(),
-                    source,
-                })?;
-            let active = workspace.active_environment.clone();
-            workspace.environments.get(&active).cloned().ok_or_else(|| {
-                ProfileError::Invalid(format!(
-                    "workspace '{}' does not contain environment '{}'",
-                    workspace.workspace_name, active
-                ))
-            })
-        } else {
-            serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
-                path: path_str,
-                source,
-            })
+            // Fail closed. Flattening a workspace to its active environment and
+            // handing that back to a caller that writes the file would discard
+            // `workspace_name`, `active_environment`, and every other
+            // environment — including credentials held only there — with exit 0
+            // and no warning. A write path must never be the thing that decides
+            // to drop them.
+            return Err(ProfileError::Invalid(format!(
+                "'{path_str}' is a workspace file, not a single profile. Writing one \
+                 environment back would discard the other environments and the workspace \
+                 metadata. Target the environment's own profile instead."
+            )));
         }
+        serde_yaml::from_value(value).map_err(|source| ProfileError::Parse {
+            path: path_str,
+            source,
+        })
     }
 
     pub fn load_from_path_with_environment_lenient(
@@ -1373,7 +1431,7 @@ impl Config {
         if let Some(shared) = self.server_api.as_mut()
             && shared.client_secret.is_empty()
             && let Some(reference) = shared.client_secret_ref.as_deref()
-            && let Some(secret) = resolve_secret_ref_with(reference, env_files)?
+            && let Some(secret) = resolve_ref_for_load(reference, env_files)?
         {
             shared.client_secret = secret;
         }
@@ -1417,53 +1475,53 @@ impl Config {
             if one.access_token.is_none()
                 && let Some(reference) = one.access_token_ref.as_deref()
             {
-                one.access_token = resolve_secret_ref_with(reference, env_files)?;
+                one.access_token = resolve_ref_for_load(reference, env_files)?;
             }
             if one.refresh_token.is_none()
                 && let Some(reference) = one.refresh_token_ref.as_deref()
             {
-                one.refresh_token = resolve_secret_ref_with(reference, env_files)?;
+                one.refresh_token = resolve_ref_for_load(reference, env_files)?;
             }
             if one.workspace_password.is_none()
                 && let Some(reference) = one.workspace_password_ref.as_deref()
             {
-                one.workspace_password = resolve_secret_ref_with(reference, env_files)?;
+                one.workspace_password = resolve_ref_for_load(reference, env_files)?;
             }
             if one.client_secret.is_none()
                 && let Some(reference) = one.client_secret_ref.as_deref()
             {
-                one.client_secret = resolve_secret_ref_with(reference, env_files)?;
+                one.client_secret = resolve_ref_for_load(reference, env_files)?;
             }
             if one.sp_client_secret.is_none()
                 && let Some(reference) = one.sp_client_secret_ref.as_deref()
             {
-                one.sp_client_secret = resolve_secret_ref_with(reference, env_files)?;
+                one.sp_client_secret = resolve_ref_for_load(reference, env_files)?;
             }
             for credential in one.workspace_credentials.values_mut() {
                 if credential.access_token.is_none()
                     && let Some(reference) = credential.access_token_ref.as_deref()
                 {
-                    credential.access_token = resolve_secret_ref_with(reference, env_files)?;
+                    credential.access_token = resolve_ref_for_load(reference, env_files)?;
                 }
                 if credential.refresh_token.is_none()
                     && let Some(reference) = credential.refresh_token_ref.as_deref()
                 {
-                    credential.refresh_token = resolve_secret_ref_with(reference, env_files)?;
+                    credential.refresh_token = resolve_ref_for_load(reference, env_files)?;
                 }
                 if credential.workspace_password.is_none()
                     && let Some(reference) = credential.workspace_password_ref.as_deref()
                 {
-                    credential.workspace_password = resolve_secret_ref_with(reference, env_files)?;
+                    credential.workspace_password = resolve_ref_for_load(reference, env_files)?;
                 }
                 if credential.client_secret.is_none()
                     && let Some(reference) = credential.client_secret_ref.as_deref()
                 {
-                    credential.client_secret = resolve_secret_ref_with(reference, env_files)?;
+                    credential.client_secret = resolve_ref_for_load(reference, env_files)?;
                 }
                 if credential.sp_client_secret.is_none()
                     && let Some(reference) = credential.sp_client_secret_ref.as_deref()
                 {
-                    credential.sp_client_secret = resolve_secret_ref_with(reference, env_files)?;
+                    credential.sp_client_secret = resolve_ref_for_load(reference, env_files)?;
                 }
             }
             one.canonicalize();
@@ -1473,13 +1531,13 @@ impl Config {
             && api.auth.client_secret.is_none()
             && let Some(reference) = api.auth.client_secret_ref.as_deref()
         {
-            api.auth.client_secret = resolve_secret_ref_with(reference, env_files)?;
+            api.auth.client_secret = resolve_ref_for_load(reference, env_files)?;
         }
 
         if let Some(server) = self.server.as_mut()
             && server.curator_api_secret.is_empty()
             && let Some(reference) = server.curator_api_secret_ref.as_deref()
-            && let Some(secret) = resolve_secret_ref_with(reference, env_files)?
+            && let Some(secret) = resolve_ref_for_load(reference, env_files)?
         {
             server.curator_api_secret = secret;
         }
@@ -1492,7 +1550,7 @@ impl Config {
                 if conn.password.is_none()
                     && let Some(reference) = conn.password_ref.as_deref()
                 {
-                    conn.password = resolve_secret_ref_with(reference, env_files)?;
+                    conn.password = resolve_ref_for_load(reference, env_files)?;
                 }
             }
         }
@@ -1501,7 +1559,7 @@ impl Config {
             && mongo.password.is_none()
             && let Some(reference) = mongo.password_ref.as_deref()
         {
-            mongo.password = resolve_secret_ref_with(reference, env_files)?;
+            mongo.password = resolve_ref_for_load(reference, env_files)?;
         }
 
         Ok(self)
@@ -1985,21 +2043,12 @@ fn apply_env_fallbacks(mut config: Config, env_values: &HashMap<String, String>)
         env_secret_name(env_values, &["AYX_ONE_API_REFRESH_TOKEN"]).map(|n| env_secret_ref(&n));
     let client_secret_ref =
         env_secret_name(env_values, &["AYX_ONE_CLIENT_SECRET"]).map(|n| env_secret_ref(&n));
-    // SP creds: canonical names first, then the workspace-namespaced variants
-    // already present in the user's .env (AYX_ONE_ALTERYX_FDE_*). The SP
-    // client secret now has its own dedicated field.
-    let sp_client_id = env_value(env_values, "AYX_ONE_SP_CLIENT_ID")
-        .or_else(|| env_value(env_values, "AYX_ONE_ALTERYX_FDE_SP007_CLIENT_ID"));
-    let sp_client_secret_ref = env_secret_name(
-        env_values,
-        &[
-            "AYX_ONE_SP_CLIENT_SECRET",
-            "AYX_ONE_ALTERYX_FDE_SA007_SECRET",
-        ],
-    )
-    .map(|n| env_secret_ref(&n));
-    let sp_token_endpoint_url = env_value(env_values, "AYX_ONE_SP_TOKEN_ENDPOINT_URL")
-        .or_else(|| env_value(env_values, "AYX_ONE_ALTERYX_FDE_TOKEN_ENDPOINT"));
+    // The SP client secret has its own dedicated field, separate from the user
+    // flow's `client_secret`.
+    let sp_client_id = env_value(env_values, "AYX_ONE_SP_CLIENT_ID");
+    let sp_client_secret_ref =
+        env_secret_name(env_values, &["AYX_ONE_SP_CLIENT_SECRET"]).map(|n| env_secret_ref(&n));
+    let sp_token_endpoint_url = env_value(env_values, "AYX_ONE_SP_TOKEN_ENDPOINT_URL");
     let workspace_gid = env_value(env_values, "AYX_ONE_WORKSPACE_GID");
 
     if account_email.is_some()
@@ -2178,6 +2227,33 @@ fn load_active_profile_one_from_state(current_path: &Path) -> Option<AlteryxOneP
             one.canonicalize();
             one
         })
+}
+
+/// Resolve a secret reference during profile load, degrading an unreadable
+/// keyring entry to "unresolved" instead of failing the load.
+///
+/// A profile that names a keyring account the OS cannot read is a condition the
+/// operator needs *reported*, not one that should make every command fail —
+/// including `ayx secret status` and `ayx doctor`, the diagnostics whose job is
+/// to report it. Which failure a host produces is platform-dependent: a machine
+/// with no store at all already yielded `Ok(None)` and degraded gracefully,
+/// while macOS with no default keychain returns a hard error, so the same
+/// profile worked on one and broke every command on the other.
+///
+/// The credential is left unset and the reference is preserved, so
+/// `secret status` reports the slot as unresolved with its remediation. Only
+/// keyring read failures degrade; a malformed reference is still an error.
+fn resolve_ref_for_load(
+    reference: &str,
+    env_files: &HashMap<String, String>,
+) -> Result<Option<String>, ProfileError> {
+    match resolve_secret_ref_with(reference, env_files) {
+        Err(err) if crate::secrets::is_keyring_read_error(&err) => {
+            eprintln!("[ayx WARN] {err} — continuing without this credential");
+            Ok(None)
+        }
+        other => other,
+    }
 }
 
 fn merge_one_profiles(
@@ -2464,7 +2540,149 @@ fn normalize_canonical_server_block(
     Ok(serde_yaml::Value::Mapping(merged))
 }
 
+/// Drop credential values that a `_ref` already accounts for, before the
+/// profile is serialized.
+///
+/// Loading a profile *hydrates* every `keyring:`/`env:`/`inline:` reference into
+/// its plaintext value field so the rest of the process can use the credential
+/// (`resolve_secret_refs`). Those value fields are serializable, so any command
+/// that loads a profile and writes it back — `ayx secret set`, `ayx secret
+/// unset`, and anything else round-tripping through `write_config_exact` — used
+/// to persist the resolved plaintext next to the reference it came from. A
+/// keyring- or env-backed credential silently became cleartext on disk as a
+/// side effect of touching an unrelated slot.
+///
+/// This is the exact inverse of `resolve_secret_refs`, and it is deliberately
+/// narrow: a value is dropped only when its reference **actually produces that
+/// same value**. Presence of a reference is not enough.
+///
+/// The difference is not academic. `resolve_secret_refs` hydrates a reference
+/// only when the value is absent, so a profile carrying both a hand-written
+/// plaintext value *and* a stale or dead reference reaches serialization with
+/// the plaintext as the only working copy of the credential. Clearing on mere
+/// presence deleted it — during an unrelated `ayx secret set`, with exit 0 and
+/// no warning, and with no undo because `write_config_exact` replaces the file.
+/// A mixed-state profile is exactly what a copied profile, a restored backup, a
+/// wiped keyring, or the very write-back bug above produces, and the loader
+/// tolerates it on purpose (`detect_secret_conflict` is warn-only) so the
+/// operator can repair it.
+///
+/// So: an unresolvable reference, or one resolving to something different,
+/// leaves the value alone. Values with no reference at all are genuine
+/// plaintext the user put there and are likewise preserved.
+fn strip_values_covered_by_refs(config: &Config, env_files: &HashMap<String, String>) -> Config {
+    fn covers(
+        reference: Option<&String>,
+        value: Option<&str>,
+        env_files: &HashMap<String, String>,
+    ) -> bool {
+        let Some(reference) = reference.filter(|r| !r.trim().is_empty()) else {
+            return false;
+        };
+        // A keyring read failure lands in the `Err` arm and resolves to
+        // "not covered", so the credential survives. Preserving a secret we
+        // cannot re-derive is the only safe direction here.
+        match resolve_secret_ref_with(reference, env_files) {
+            Ok(Some(resolved)) => Some(resolved.as_str()) == value,
+            _ => false,
+        }
+    }
+
+    let clear = |value: &mut Option<String>, reference: Option<&String>| {
+        if covers(reference, value.as_deref(), env_files) {
+            *value = None;
+        }
+    };
+
+    let mut config = config.clone();
+    if let Some(one) = config.alteryx_one.as_mut() {
+        clear(&mut one.access_token, one.access_token_ref.as_ref());
+        clear(&mut one.refresh_token, one.refresh_token_ref.as_ref());
+        clear(
+            &mut one.workspace_password,
+            one.workspace_password_ref.as_ref(),
+        );
+        clear(&mut one.client_secret, one.client_secret_ref.as_ref());
+        clear(&mut one.sp_client_secret, one.sp_client_secret_ref.as_ref());
+        for credential in one.workspace_credentials.values_mut() {
+            clear(
+                &mut credential.access_token,
+                credential.access_token_ref.as_ref(),
+            );
+            clear(
+                &mut credential.refresh_token,
+                credential.refresh_token_ref.as_ref(),
+            );
+            clear(
+                &mut credential.workspace_password,
+                credential.workspace_password_ref.as_ref(),
+            );
+            clear(
+                &mut credential.client_secret,
+                credential.client_secret_ref.as_ref(),
+            );
+            clear(
+                &mut credential.sp_client_secret,
+                credential.sp_client_secret_ref.as_ref(),
+            );
+        }
+    }
+    if let Some(api) = config.api.as_mut() {
+        clear(
+            &mut api.auth.client_secret,
+            api.auth.client_secret_ref.as_ref(),
+        );
+    }
+    if let Some(server) = config.server.as_mut()
+        && covers(
+            server.curator_api_secret_ref.as_ref(),
+            Some(server.curator_api_secret.as_str()),
+            env_files,
+        )
+    {
+        server.curator_api_secret = String::new();
+    }
+    if let Some(server_api) = config.server_api.as_mut()
+        && covers(
+            server_api.client_secret_ref.as_ref(),
+            Some(server_api.client_secret.as_str()),
+            env_files,
+        )
+    {
+        server_api.client_secret = String::new();
+    }
+    if let Some(sqlserver) = config.sqlserver.as_mut() {
+        for conn in [sqlserver.controller.as_mut(), sqlserver.server_ui.as_mut()]
+            .into_iter()
+            .flatten()
+        {
+            clear(&mut conn.password, conn.password_ref.as_ref());
+        }
+    }
+    if let Some(mongo) = config.mongo.managed.as_mut() {
+        clear(&mut mongo.password, mongo.password_ref.as_ref());
+    }
+    config
+}
+
+/// Serialize a profile, dropping values their references demonstrably cover.
+///
+/// Prefer [`canonical_profile_value_with_env`] wherever the profile path is in
+/// hand: without the profile-adjacent `.env`, an `env:NAME` reference supplied
+/// through that file cannot be resolved, so its value is treated as uncovered
+/// and preserved. That is the safe direction — a credential is never destroyed
+/// — but it can leave plaintext beside a reference that did in fact cover it.
 pub fn canonical_profile_value(config: &Config) -> Result<serde_yaml::Value, ProfileError> {
+    canonical_profile_value_with_env(config, &HashMap::new())
+}
+
+/// [`canonical_profile_value`], resolving `env:` references against the same
+/// `.env` view the loader used.
+pub fn canonical_profile_value_with_env(
+    config: &Config,
+    env_files: &HashMap<String, String>,
+) -> Result<serde_yaml::Value, ProfileError> {
+    let config = &strip_values_covered_by_refs(config, env_files);
     let mut root = serde_yaml::Mapping::new();
     root.insert(
         serde_yaml::Value::String("profile_name".to_string()),
@@ -4439,7 +4657,7 @@ server:
             "AYX_ONE_API_ACCESS_TOKEN=access-sentinel-a1\n\
              AYX_ONE_API_REFRESH_TOKEN=refresh-sentinel-b2\n\
              AYX_ONE_CLIENT_SECRET=client-sentinel-c3\n\
-             AYX_ONE_ALTERYX_FDE_SA007_SECRET=sp-sentinel-d4\n",
+             AYX_ONE_SP_CLIENT_SECRET=sp-sentinel-d4\n",
         )
         .unwrap();
 
@@ -4467,7 +4685,7 @@ server:
         );
         assert_eq!(
             one.sp_client_secret_ref.as_deref(),
-            Some("env:AYX_ONE_ALTERYX_FDE_SA007_SECRET")
+            Some("env:AYX_ONE_SP_CLIENT_SECRET")
         );
 
         // The reference must still resolve, or the credential is unusable.

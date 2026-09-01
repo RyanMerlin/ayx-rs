@@ -515,12 +515,15 @@ fn has_populated_assignment(haystack: &str, needle: &str) -> bool {
         // Padding between `=` and the value is legal in connection strings, but
         // a line break ends the assignment — so skip blanks, not newlines.
         let rest = haystack[index + needle.len()..].trim_start_matches([' ', '\t']);
-        let mut chars = rest.chars();
-        match chars.next() {
-            Some(quote @ ('"' | '\'')) => chars.next().is_some_and(|next| next != quote),
-            Some(next) => !matches!(next, '&' | ';' | ',' | '\n' | '\r'),
-            None => false,
-        }
+        // Take the assignment's own value: everything up to the next field
+        // delimiter or end of line. Peeking a single character past the opening
+        // quote was not enough — `password=""hunter2"` reads as an immediately
+        // closed quote and slipped through with the secret still in the string.
+        let value = rest
+            .split(['&', ';', ',', '\n', '\r'])
+            .next()
+            .unwrap_or_default();
+        !value.trim().trim_matches(['"', '\'']).is_empty()
     })
 }
 
@@ -653,13 +656,23 @@ mod tests {
                 "mongo": "mongodb://sa:x@h/?password=\"s3cr3t\"",
                 "padded": "Server=db;Password= hunter2",
                 "pwd_quoted": "PWD='hunter2'",
+                // Peeking one character past the opening quote read this as an
+                // immediately-closed quote and let the secret through.
+                "doubled_quote": "Server=db;Password=\"\"hunter2\"",
                 // Still empty: the quote closes immediately, or the line ends.
                 "empty_quoted": "AYX_ONE_WS_PASSWORD=\"\"",
                 "empty_template": "AYX_ONE_WS_PASSWORD=\nAYX_SERVER_API_SECRET=",
             }),
         );
         let clean = redacted_envelope(&env);
-        for key in ["double", "single", "mongo", "padded", "pwd_quoted"] {
+        for key in [
+            "double",
+            "single",
+            "mongo",
+            "padded",
+            "pwd_quoted",
+            "doubled_quote",
+        ] {
             assert_eq!(
                 clean.data[key], "[REDACTED]",
                 "{key} carries a populated password and must be redacted"
