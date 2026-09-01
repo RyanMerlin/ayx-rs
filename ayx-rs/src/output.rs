@@ -386,7 +386,25 @@ fn redact_value(value: &Value, key: Option<&str>) -> Value {
 }
 
 fn is_sensitive_key(key: &str) -> bool {
-    let key = key.to_ascii_lowercase().replace(['-', '_'], "");
+    let lower = key.to_ascii_lowercase();
+    // A `has_`/`has-` prefix marks a boolean presence flag, not a secret
+    // itself; check it on the separator-aware form before word boundaries
+    // are lost below (e.g. `hashed_password` must not match).
+    let has_prefix = lower.starts_with("has_") || lower.starts_with("has-");
+    let key = lower.replace(['-', '_'], "");
+    // Keys that merely describe a credential (its presence, its claims
+    // summary, where it points) are diagnostics, not secrets — `ayx one
+    // doctor auth` depends on them surviving redaction. `is_sensitive_value`
+    // only catches a narrow set of `k=v`/bearer forms, not arbitrary secret
+    // values, so only add suffixes that real callers use for non-secret
+    // metadata (counts, booleans, lengths) — never widen speculatively.
+    const METADATA_SUFFIXES: &[&str] = &[
+        "present", "claims", "url", "endpoint", "count", "fields", "mode", "enabled", "ref",
+        "length",
+    ];
+    if has_prefix || METADATA_SUFFIXES.iter().any(|suffix| key.ends_with(suffix)) {
+        return false;
+    }
     [
         "authorization",
         "token",
@@ -402,8 +420,16 @@ fn is_sensitive_key(key: &str) -> bool {
 }
 
 fn is_sensitive_value(value: &str) -> bool {
+    const NEEDLES: &[&str] = &[
+        "password=",
+        "pwd=",
+        "access_token=",
+        "refresh_token=",
+        "id_token=",
+        "client_secret=",
+    ];
     let lower = value.to_ascii_lowercase();
-    lower.starts_with("bearer ") || lower.contains("password=") || lower.contains("pwd=")
+    lower.starts_with("bearer ") || NEEDLES.iter().any(|needle| lower.contains(needle))
 }
 
 #[cfg(test)]
@@ -432,5 +458,60 @@ mod tests {
         assert_eq!(clean.data["authorization"], "[REDACTED]");
         assert_eq!(clean.data["nested"][0]["password"], "[REDACTED]");
         assert_eq!(clean.data["url"], "[REDACTED]");
+    }
+
+    #[test]
+    fn flags_oauth_bearing_values() {
+        for value in [
+            "access_token=xyz",
+            "https://h/p?access_token=xyz",
+            "refresh_token=xyz",
+            "ID_TOKEN=xyz",
+            "client_secret=xyz",
+            "Bearer abc",
+            "pwd=abc",
+        ] {
+            assert!(is_sensitive_value(value), "expected sensitive: {value}");
+        }
+        for value in ["hello world", "workspace-1", "token_count=5"] {
+            assert!(!is_sensitive_value(value), "unexpected sensitive: {value}");
+        }
+    }
+
+    #[test]
+    fn credential_metadata_keys_survive_redaction() {
+        for key in [
+            "access_token_present",
+            "refresh_token_present",
+            "access_token_claims",
+            "token_endpoint_url",
+            "inline_secret_fields",
+            "access_token_ref",
+            "token_count",
+            "has_refresh_token",
+            "has-refresh-token",
+            "token_length",
+        ] {
+            assert!(!is_sensitive_key(key), "metadata key redacted: {key}");
+        }
+        for key in [
+            "access_token",
+            "client_secret",
+            "x-api-key",
+            "password",
+            "hashed_password",
+        ] {
+            assert!(is_sensitive_key(key), "secret key not redacted: {key}");
+        }
+    }
+
+    #[test]
+    fn redacts_access_token_bearing_string_values() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({"detail": "GET https://h/p?access_token=abc123 failed"}),
+        );
+        let clean = redacted_envelope(&env);
+        assert_eq!(clean.data["detail"], "[REDACTED]");
     }
 }

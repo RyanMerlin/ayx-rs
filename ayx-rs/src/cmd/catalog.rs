@@ -714,7 +714,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         mutating: false,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &[
-            "Maps to GET /v4/people?role=admin in the One API docs. Workspace context comes from the x-alteryx-workspace-gid header; /v4/workspaces/{workspaceId}/admins returns 404.",
+            "Maps to GET /v4/workspaces/{workspaceId}/admins. workspaceId is the NUMERIC workspace id (resolved by a /v4/workspaces/current preflight), not the workspace GID — probing this route with the GID is what previously made it look like a 404. GET /v4/people?role=admin is not a substitute: the gateway ignores role=admin and only decorates the caller's own record with isAdmin.",
         ],
     },
     CatalogMetadata {

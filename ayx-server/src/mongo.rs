@@ -3190,9 +3190,11 @@ fn ensure_tool_available(tool: &str) -> Result<()> {
 /// Holds a temporary `--config` file for `mongodump`/`mongorestore`/`mongosh`
 /// so the password is not visible in argv (`ps`, `/proc/<pid>/cmdline`).
 ///
-/// The file is created with `0o600` permissions on Unix and is deleted when
-/// the returned `TempDir` is dropped. Callers must keep the `TempDir` alive
-/// until after `run_command_capture` returns.
+/// The file is written via [`ayx_core::sensitive::write_sensitive_file`],
+/// which restricts it to the current user on every platform: `0o600`
+/// permissions on Unix, and an owner-only DACL (via `SetNamedSecurityInfoW`)
+/// on Windows. It is deleted when the returned `TempDir` is dropped. Callers
+/// must keep the `TempDir` alive until after `run_command_capture` returns.
 struct MongoPasswordFile {
     _dir: tempfile::TempDir,
     path: PathBuf,
@@ -3207,27 +3209,8 @@ fn write_password_config(password: &str) -> Result<MongoPasswordFile> {
     // mongodump/mongorestore (mongo-tools) accept a YAML --config file with
     // `password: "..."`. mongosh accepts the same shape via `--config`.
     let body = serde_yaml::to_string(&json!({ "password": password }))?;
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut f = fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&path)
-            .with_context(|| {
-                format!("failed to open mongo password config '{}'", path.display())
-            })?;
-        f.write_all(body.as_bytes())?;
-    }
-    #[cfg(not(unix))]
-    {
-        fs::write(&path, body.as_bytes()).with_context(|| {
-            format!("failed to write mongo password config '{}'", path.display())
-        })?;
-    }
+    ayx_core::sensitive::write_sensitive_file(&path, body.as_bytes())
+        .with_context(|| format!("failed to write mongo password config '{}'", path.display()))?;
     Ok(MongoPasswordFile { _dir: dir, path })
 }
 

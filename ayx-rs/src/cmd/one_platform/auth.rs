@@ -603,25 +603,14 @@ pub(crate) fn login(
 
     // Store the tokens only after verification succeeds.
     let one = config.alteryx_one.as_mut().unwrap();
-    if let Some(password) = workspace_password_to_save {
-        one.workspace_credentials
-            .entry(authenticated_workspace_id.clone())
-            .or_default()
-            .workspace_password = Some(password);
-    }
-    let cred = one
-        .workspace_credentials
-        .entry(authenticated_workspace_id.clone())
-        .or_default();
-    cred.workspace_id = Some(authenticated_workspace_id.clone());
-    cred.workspace_gid = authenticated_workspace.gid.clone();
-    cred.workspace_name = authenticated_workspace.name.clone();
-    cred.credential_health = Some("verified".to_string());
-    cred.access_token = Some(final_access_token.clone());
-    if let Some(rt) = final_refresh_token.clone() {
-        cred.refresh_token = Some(rt);
-    }
-    one.active_workspace_id = Some(authenticated_workspace_id.clone());
+    persist_verified_workspace_credential(
+        one,
+        &authenticated_workspace_id,
+        &authenticated_workspace,
+        &final_access_token,
+        final_refresh_token.as_deref(),
+        workspace_password_to_save,
+    );
 
     let email = one.account_email.clone();
     let endpoint = one.normalized_base_url().unwrap_or_default();
@@ -1164,6 +1153,66 @@ fn auth_credential_binding(
     crate::onboard::binding_for_auth_config(config, workspace_id)
 }
 
+/// Persist a verified login as a workspace-scoped credential.
+///
+/// A completed login is the only event that may mark a workspace credential
+/// verified, so this is also the only writer of `active_workspace_id`. Without
+/// that entry `AlteryxOneProfile::active_workspace_id()` returns `None` and
+/// every applied One mutation fails closed.
+///
+/// The map key is the server's **numeric** workspace ID, never the GID:
+/// `WorkspaceTarget::from_credential` requires `credential_key == workspace_id`
+/// and rejects any other key form, and the mutation gate resolves its target
+/// through that constructor.
+///
+/// Re-authenticating the same workspace updates the existing entry in place;
+/// authenticating a different workspace adds a second entry and moves the
+/// active selector to it.
+fn persist_verified_workspace_credential(
+    one: &mut ayx_core::profile::AlteryxOneProfile,
+    workspace_id: &str,
+    workspace: &AuthenticatedWorkspace,
+    access_token: &str,
+    refresh_token: Option<&str>,
+    workspace_password: Option<String>,
+) {
+    // Resolve the profile-level client ID before taking the mutable borrow on
+    // the credential entry.
+    let profile_oauth_client_id = one
+        .oauth_client_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let credential = one
+        .workspace_credentials
+        .entry(workspace_id.to_string())
+        .or_default();
+    if let Some(password) = workspace_password {
+        credential.workspace_password = Some(password);
+    }
+    credential.workspace_id = Some(workspace_id.to_string());
+    credential.workspace_gid = workspace.gid.clone();
+    credential.workspace_name = workspace.name.clone();
+    credential.credential_health = Some("verified".to_string());
+    credential.access_token = Some(access_token.to_string());
+    if let Some(refresh_token) = refresh_token {
+        credential.refresh_token = Some(refresh_token.to_string());
+        // `Config::validate` rejects a credential that carries a refresh token
+        // without its own `oauth_client_id`, and the refresh grant must reuse
+        // the client ID that minted the token. Copying the profile-level value
+        // keeps the profile this login just wrote loadable on the next command.
+        if credential
+            .oauth_client_id
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            credential.oauth_client_id = profile_oauth_client_id;
+        }
+    }
+    one.active_workspace_id = Some(workspace_id.to_string());
+}
+
 /// Resolve the password for the workspace the login will actually target.
 ///
 /// An explicit workspace ID is a hard boundary: do not fall back to the
@@ -1189,10 +1238,13 @@ mod tests {
     use super::{
         AuthenticatedWorkspace, BrowserCallback, accepts_plaintext_fallback,
         accepts_workspace_password_save, authenticated_workspace_from_value,
-        parse_browser_callback, persistence_policy_to_remember,
-        should_offer_workspace_password_save, workspace_password_for_login,
+        parse_browser_callback, persist_verified_workspace_credential,
+        persistence_policy_to_remember, should_offer_workspace_password_save,
+        workspace_password_for_login,
     };
-    use ayx_core::profile::{AlteryxOneProfile, WorkspaceCredential};
+    use ayx_core::profile::{
+        AlteryxOneProfile, WorkspaceCredential, WorkspaceResolutionSource, WorkspaceTarget,
+    };
     use httpmock::prelude::*;
     use std::io::Write;
     use std::net::{TcpListener, TcpStream};
@@ -1217,6 +1269,265 @@ mod tests {
         let mut response = String::new();
         std::io::Read::read_to_string(&mut client, &mut response).expect("read callback response");
         (server.join().expect("callback fixture thread"), response)
+    }
+
+    fn verified_workspace(id: &str, gid: &str, name: &str) -> AuthenticatedWorkspace {
+        AuthenticatedWorkspace {
+            id: Some(id.to_string()),
+            gid: Some(gid.to_string()),
+            name: Some(name.to_string()),
+        }
+    }
+
+    /// The mutation gate resolves its target through `active_workspace_id()`
+    /// plus `WorkspaceTarget::from_credential`. A successful login must leave
+    /// the profile satisfying both, otherwise every applied mutation fails
+    /// closed with "no active verified workspace credential".
+    #[test]
+    fn successful_login_persistence_makes_the_workspace_mutation_capable() {
+        let mut one = AlteryxOneProfile {
+            account_email: "user@example.com".to_string(),
+            ..AlteryxOneProfile::default()
+        };
+
+        persist_verified_workspace_credential(
+            &mut one,
+            "91946",
+            &verified_workspace("91946", "01KMGF85WTTEJZ397MW1RBD9ZB", "alteryx-fde"),
+            "access-token-value",
+            None,
+            None,
+        );
+
+        assert_eq!(
+            one.active_workspace_id(),
+            Some("91946"),
+            "login must leave an active verified workspace credential"
+        );
+        let credential = one
+            .active_workspace_credential()
+            .expect("active credential must be present");
+        assert_eq!(credential.workspace_id.as_deref(), Some("91946"));
+        assert_eq!(credential.credential_health.as_deref(), Some("verified"));
+        assert_eq!(
+            credential.access_token.as_deref(),
+            Some("access-token-value")
+        );
+        let target = WorkspaceTarget::from_credential(
+            "91946",
+            credential,
+            WorkspaceResolutionSource::ActiveProfile,
+        )
+        .expect("the mutation gate must be able to build a workspace target");
+        assert_eq!(target.workspace_gid, "01KMGF85WTTEJZ397MW1RBD9ZB");
+        assert_eq!(target.display_name, "alteryx-fde");
+        one.validate_workspace_identities()
+            .expect("persisted identity must validate");
+    }
+
+    /// The credential map is keyed by the numeric workspace ID. Keying by GID
+    /// would make `WorkspaceTarget::from_credential` reject the entry, because
+    /// it requires `credential_key == workspace_id`.
+    #[test]
+    fn login_persistence_keys_the_credential_by_numeric_workspace_id() {
+        let mut one = AlteryxOneProfile::default();
+        persist_verified_workspace_credential(
+            &mut one,
+            "91946",
+            &verified_workspace("91946", "01KMGF85WTTEJZ397MW1RBD9ZB", "alteryx-fde"),
+            "access-token-value",
+            None,
+            None,
+        );
+
+        assert!(one.workspace_credentials.contains_key("91946"));
+        assert!(
+            !one.workspace_credentials
+                .contains_key("01KMGF85WTTEJZ397MW1RBD9ZB"),
+            "the GID must never become a credential map key"
+        );
+        assert_eq!(
+            one.resolve_workspace_selector("01KMGF85WTTEJZ397MW1RBD9ZB")
+                .as_deref(),
+            Ok("91946"),
+            "the GID must still resolve to the numeric credential key"
+        );
+    }
+
+    /// `Config::validate` requires a credential-level `oauth_client_id` when the
+    /// credential carries a refresh token. Without this the profile written by a
+    /// `--browser` / `--device` / `--refresh-token` login fails to load again.
+    #[test]
+    fn login_persistence_binds_the_client_id_when_a_refresh_token_is_stored() {
+        let mut one = AlteryxOneProfile {
+            oauth_client_id: Some("af1b5321-afe0-48c2-966a-c77d74e98085".to_string()),
+            ..AlteryxOneProfile::default()
+        };
+
+        persist_verified_workspace_credential(
+            &mut one,
+            "91946",
+            &verified_workspace("91946", "01KMGF85WTTEJZ397MW1RBD9ZB", "alteryx-fde"),
+            "access-token-value",
+            Some("refresh-token-value"),
+            None,
+        );
+
+        let credential = one
+            .active_workspace_credential()
+            .expect("active credential must be present");
+        assert_eq!(
+            credential.refresh_token.as_deref(),
+            Some("refresh-token-value")
+        );
+        assert_eq!(
+            credential.oauth_client_id.as_deref(),
+            Some("af1b5321-afe0-48c2-966a-c77d74e98085"),
+            "a stored refresh token must carry the client ID that can redeem it"
+        );
+    }
+
+    /// An existing credential-level client ID belongs to that workspace and must
+    /// not be overwritten by the profile-level default.
+    #[test]
+    fn login_persistence_keeps_an_existing_workspace_client_id() {
+        let mut one = AlteryxOneProfile {
+            oauth_client_id: Some("profile-client".to_string()),
+            ..AlteryxOneProfile::default()
+        };
+        one.workspace_credentials.insert(
+            "91946".to_string(),
+            WorkspaceCredential {
+                oauth_client_id: Some("workspace-client".to_string()),
+                ..WorkspaceCredential::default()
+            },
+        );
+
+        persist_verified_workspace_credential(
+            &mut one,
+            "91946",
+            &verified_workspace("91946", "01KMGF85WTTEJZ397MW1RBD9ZB", "alteryx-fde"),
+            "access-token-value",
+            Some("refresh-token-value"),
+            None,
+        );
+
+        assert_eq!(
+            one.workspace_credentials["91946"]
+                .oauth_client_id
+                .as_deref(),
+            Some("workspace-client")
+        );
+    }
+
+    /// Re-authenticating the same workspace refreshes the stored tokens in place
+    /// and must not leave a second entry behind.
+    #[test]
+    fn repeated_login_to_the_same_workspace_updates_the_entry_in_place() {
+        let mut one = AlteryxOneProfile::default();
+        let workspace = verified_workspace("91946", "01KMGF85WTTEJZ397MW1RBD9ZB", "alteryx-fde");
+
+        persist_verified_workspace_credential(
+            &mut one,
+            "91946",
+            &workspace,
+            "first-access-token",
+            None,
+            Some("workspace-password".to_string()),
+        );
+        persist_verified_workspace_credential(
+            &mut one,
+            "91946",
+            &workspace,
+            "second-access-token",
+            None,
+            None,
+        );
+
+        assert_eq!(
+            one.workspace_credentials.len(),
+            1,
+            "a repeated login must not duplicate the credential"
+        );
+        let credential = &one.workspace_credentials["91946"];
+        assert_eq!(
+            credential.access_token.as_deref(),
+            Some("second-access-token")
+        );
+        assert_eq!(
+            credential.workspace_password.as_deref(),
+            Some("workspace-password"),
+            "a login that did not capture a password must not erase the saved one"
+        );
+        assert_eq!(one.active_workspace_id(), Some("91946"));
+    }
+
+    /// Logging into a different workspace adds a credential and moves the active
+    /// selector, leaving the previous workspace's credential intact.
+    #[test]
+    fn login_to_a_second_workspace_adds_a_credential_and_switches_the_active_one() {
+        let mut one = AlteryxOneProfile::default();
+        persist_verified_workspace_credential(
+            &mut one,
+            "91946",
+            &verified_workspace("91946", "01KMGF85WTTEJZ397MW1RBD9ZB", "alteryx-fde"),
+            "first-access-token",
+            None,
+            None,
+        );
+        persist_verified_workspace_credential(
+            &mut one,
+            "50021",
+            &verified_workspace("50021", "01KMGF85WTTEJZ397MW1RBD9ZC", "alteryx-prod"),
+            "second-access-token",
+            None,
+            None,
+        );
+
+        assert_eq!(one.workspace_credentials.len(), 2);
+        assert_eq!(
+            one.active_workspace_id(),
+            Some("50021"),
+            "the most recent login owns the active selector"
+        );
+        assert_eq!(
+            one.workspace_credentials["91946"].access_token.as_deref(),
+            Some("first-access-token"),
+            "the previous workspace credential must survive"
+        );
+        one.validate_workspace_identities()
+            .expect("two distinct workspaces must validate");
+    }
+
+    /// A stale `expected_workspace_id` pointing at another workspace must not
+    /// win over the workspace the user just authenticated.
+    #[test]
+    fn login_active_selector_wins_over_a_stale_expected_workspace_id() {
+        let mut one = AlteryxOneProfile {
+            expected_workspace_id: Some("50021".to_string()),
+            ..AlteryxOneProfile::default()
+        };
+        one.workspace_credentials.insert(
+            "50021".to_string(),
+            WorkspaceCredential {
+                workspace_id: Some("50021".to_string()),
+                workspace_gid: Some("01KMGF85WTTEJZ397MW1RBD9ZC".to_string()),
+                workspace_name: Some("alteryx-prod".to_string()),
+                access_token: Some("other-token".to_string()),
+                ..WorkspaceCredential::default()
+            },
+        );
+
+        persist_verified_workspace_credential(
+            &mut one,
+            "91946",
+            &verified_workspace("91946", "01KMGF85WTTEJZ397MW1RBD9ZB", "alteryx-fde"),
+            "access-token-value",
+            None,
+            None,
+        );
+
+        assert_eq!(one.active_workspace_id(), Some("91946"));
     }
 
     #[test]

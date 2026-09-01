@@ -332,9 +332,12 @@ fn resolve_workflow_detail(assets_envelope: Envelope, id: &str) -> Envelope {
 /// Recovered live from the service's own schema-validation errors — this shape
 /// is not in any published spec. `includeDependencies`, `privileges`, and
 /// `sendEmail` are all REQUIRED, even when their value is `false`/empty-looking;
-/// `toPersonIds`/`toGroupIds` need at least one entry between them;
-/// `additionalInfoMsg` must be omitted (not `null`) when the caller supplies no
-/// message.
+/// `toPersonIds`/`toGroupIds` need at least one entry between them; both are
+/// arrays of JSON *strings* (live-verified 2026-08-31: sending them as JSON
+/// numbers gets HTTP 400 SchemaValidationError, "Invalid input: expected
+/// string, received number"), matching `build_connection_share_body`'s
+/// `person_ids`/`group_ids` handling; `additionalInfoMsg` must be omitted
+/// (not `null`) when the caller supplies no message.
 ///
 /// Pure data transformation, no I/O, so it is unit-tested without a live call.
 /// Person/group ids must already be resolved to integers by the caller (see
@@ -362,14 +365,23 @@ pub(crate) fn build_workflow_share_body(
     privilege_strs.sort_unstable();
     privilege_strs.dedup();
 
+    // toPersonIds/toGroupIds must be JSON strings, not numbers: live-verified
+    // 2026-08-31, the service returns HTTP 400
+    // `{"schemaErrorCode":"MissingInputError","title":"Missing field toPersonIds.0"}`
+    // (`"Invalid input: expected string, received number"`) when these are
+    // sent as numbers. Do NOT change this back to bare `to_person_ids`/
+    // `to_group_ids` (which serde_json renders as JSON numbers).
+    let to_person_id_strs: Vec<String> = to_person_ids.iter().map(u64::to_string).collect();
+    let to_group_id_strs: Vec<String> = to_group_ids.iter().map(u64::to_string).collect();
+
     let mut body = json!({
         // Present even when false/empty: the service's schema validator
         // rejects the request outright if any of these three keys is absent.
         "includeDependencies": include_dependencies,
         "privileges": privilege_strs,
         "sendEmail": send_email,
-        "toPersonIds": to_person_ids,
-        "toGroupIds": to_group_ids,
+        "toPersonIds": to_person_id_strs,
+        "toGroupIds": to_group_id_strs,
     });
     if let Some(msg) = additional_info_msg {
         body["additionalInfoMsg"] = json!(msg);
@@ -1048,8 +1060,40 @@ mod share_tests {
         assert_eq!(body["includeDependencies"], json!(false));
         assert_eq!(body["sendEmail"], json!(false));
         assert_eq!(body["privileges"], json!(["read"]));
-        assert_eq!(body["toPersonIds"], json!([113168]));
+        // toPersonIds/toGroupIds are JSON strings, not numbers: see
+        // `share_body_serializes_person_and_group_ids_as_strings` below for the
+        // live-verified reason.
+        assert_eq!(body["toPersonIds"], json!(["113168"]));
         assert_eq!(body["toGroupIds"], json!([]));
+    }
+
+    #[test]
+    fn share_body_serializes_person_and_group_ids_as_strings() {
+        // Live-verified 2026-08-31: POST /svc-workflow/api/v2/workflows/{id}/share
+        // returns HTTP 400 SchemaValidationError ("Invalid input: expected
+        // string, received number", "Missing field toPersonIds.0") when
+        // toPersonIds/toGroupIds are sent as JSON numbers. The API requires
+        // them as strings, matching `build_connection_share_body`'s
+        // `person_ids`/`group_ids` handling in one_connections.rs. Do not
+        // "fix" this back to numbers.
+        let body = build_workflow_share_body(
+            false,
+            &[WorkflowPrivilege::Read],
+            false,
+            &[646, 900],
+            &[42],
+            None,
+        )
+        .expect("valid share");
+
+        assert_eq!(body["toPersonIds"], json!(["646", "900"]));
+        assert_eq!(body["toGroupIds"], json!(["42"]));
+        for id in body["toPersonIds"].as_array().unwrap() {
+            assert!(id.is_string(), "toPersonIds entries must be strings: {id}");
+        }
+        for id in body["toGroupIds"].as_array().unwrap() {
+            assert!(id.is_string(), "toGroupIds entries must be strings: {id}");
+        }
     }
 
     #[test]

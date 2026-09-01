@@ -67,8 +67,8 @@ pub fn run_onboarding(
         }));
     }
 
-    println!("AYX onboarding");
-    println!(
+    eprintln!("AYX onboarding");
+    eprintln!(
         "Press Enter to accept a default. Existing values are reused unless you choose to change them."
     );
 
@@ -94,16 +94,16 @@ pub fn run_onboarding(
         .alteryx_one
         .as_ref()
         .and_then(|one| one.workspace_gid.as_deref());
-    println!("Paste your Alteryx One workspace URL (from your browser's address bar),");
-    println!("e.g. https://us1.alteryxcloud.com/auth-portal/workspaces/01ABC…  — or just the");
-    println!("workspace id. Leave blank to skip (you can set it later at login).");
+    eprintln!("Paste your Alteryx One workspace URL (from your browser's address bar),");
+    eprintln!("e.g. https://us1.alteryxcloud.com/auth-portal/workspaces/01ABC…  — or just the");
+    eprintln!("workspace id. Leave blank to skip (you can set it later at login).");
     let workspace_input = prompt_text("Workspace URL or id", gid_default, None, false)?;
     if !workspace_input.trim().is_empty() {
         let parsed = parse_workspace_url(&workspace_input);
         if let Some(one) = config.alteryx_one.as_mut() {
             match &parsed.workspace_gid {
                 Some(gid) => one.workspace_gid = Some(gid.clone()),
-                None => println!(
+                None => eprintln!(
                     "Note: no workspace id found in that input. Set it later with \
                      `ayx one login --workspace-gid <id>`."
                 ),
@@ -118,8 +118,8 @@ pub fn run_onboarding(
     if configure_server {
         let local_server = prompt_yes_no("Is the Server localhost", true)?;
         let mut server = config.server.take().unwrap_or_else(default_server);
-        println!("Enter the bare Server base URL only.");
-        println!("Do not include /webapi or /gallery. Example: http://10.1.1.1");
+        eprintln!("Enter the bare Server base URL only.");
+        eprintln!("Do not include /webapi or /gallery. Example: http://10.1.1.1");
         let server_base_default = if server.webapi_url.trim().is_empty() {
             if local_server {
                 Some("http://10.1.1.1")
@@ -177,8 +177,8 @@ pub fn run_onboarding(
                 if let Some(runtime_settings_path) = runtime_settings_path.as_ref() {
                     if runtime_settings_path.exists() {
                         let summary = runtime_settings_summary(runtime_settings_path)?;
-                        println!("Detected runtime settings:");
-                        println!("{}", serde_yaml::to_string(&summary)?);
+                        eprintln!("Detected runtime settings:");
+                        eprintln!("{}", serde_yaml::to_string(&summary)?);
                     }
                     embedded.runtime_settings_path =
                         Some(runtime_settings_path.display().to_string());
@@ -188,7 +188,7 @@ pub fn run_onboarding(
                 let detected_service_path =
                     detect_alteryx_service_path(runtime_settings_path.as_deref());
                 if let Some(path) = &detected_service_path {
-                    println!("Detected AlteryxService.exe: {}", path.display());
+                    eprintln!("Detected AlteryxService.exe: {}", path.display());
                 }
                 embedded.alteryx_service_path = prompt_optional_path(
                     "AlteryxService.exe path",
@@ -323,12 +323,12 @@ pub fn run_onboarding(
     }
 
     if central {
-        println!(
+        eprintln!(
             "\nProfile '{}' saved and set as active.",
             config.profile_name
         );
     } else {
-        println!("\nProfile '{}' saved.", config.profile_name);
+        eprintln!("\nProfile '{}' saved.", config.profile_name);
     }
     let login = offer_login_now(&config, &save_path, environment)?;
 
@@ -1266,43 +1266,43 @@ fn offer_login_now(config: &Config, saved_path: &Path, environment: Option<&str>
     // would split the profile, so we point at the next step instead.
     let login_target = profile_storage_path(&config.profile_name).ok();
     if login_target.as_deref() != Some(saved_path) {
-        println!("Next: activate this profile, then connect with `{NEXT_STEP}`.");
+        eprintln!("Next: activate this profile, then connect with `{NEXT_STEP}`.");
         return Ok(json!({ "offered": false, "reason": "profile not in central store" }));
     }
     if one.workspace_gid.as_deref().unwrap_or("").is_empty() {
-        println!(
+        eprintln!(
             "Next: add your workspace URL/id to this profile, then run `{NEXT_STEP}`.\n\
              (The workspace id is required to complete sign-in.)"
         );
         return Ok(json!({ "offered": false, "reason": "missing workspace_gid" }));
     }
 
-    println!(
+    eprintln!(
         "\nReady to connect. A one-time passcode will be emailed to {},",
         one.account_email
     );
-    println!("and you'll be asked for your workspace password.");
-    println!(
+    eprintln!("and you'll be asked for your workspace password.");
+    eprintln!(
         "Authentication flow: Wizard by default (use `ayx one login --auth-flow legacy` for rollback)."
     );
-    println!(
+    eprintln!(
         "Credentials use the operating-system secure store by default; use `--secret-policy session` on a temporary or constrained host."
     );
     if !prompt_yes_no("Log in now", false)? {
-        println!("Skipped. Connect any time with `{NEXT_STEP}`.");
+        eprintln!("Skipped. Connect any time with `{NEXT_STEP}`.");
         return Ok(json!({ "offered": true, "ran": false }));
     }
 
     match crate::cmd::one::run_otp_login(environment, Some(config.profile_name.clone())) {
         Ok(_) => {
-            println!("\nConnected. Verify any time with:");
-            println!("  ayx one auth status");
-            println!("  ayx one workspace current");
+            eprintln!("\nConnected. Verify any time with:");
+            eprintln!("  ayx one auth status");
+            eprintln!("  ayx one workspace current");
             Ok(json!({ "offered": true, "ran": true, "ok": true }))
         }
         Err(err) => {
-            println!("\nLogin didn't complete: {err}");
-            println!("Your profile is saved — retry with `{NEXT_STEP}`.");
+            eprintln!("\nLogin didn't complete: {err}");
+            eprintln!("Your profile is saved — retry with `{NEXT_STEP}`.");
             Ok(json!({ "offered": true, "ran": true, "ok": false, "error": err.to_string() }))
         }
     }
@@ -1342,10 +1342,10 @@ fn update_or_create_one(
 }
 
 fn prompt_backend(current: MongoMode) -> Result<BackendChoice> {
-    println!("Storage backend:");
-    println!("  1) Embedded Mongo");
-    println!("  2) User-managed Mongo");
-    println!("  3) SQL Server");
+    eprintln!("Storage backend:");
+    eprintln!("  1) Embedded Mongo");
+    eprintln!("  2) User-managed Mongo");
+    eprintln!("  3) SQL Server");
     let default = match current {
         MongoMode::Embedded => 1,
         MongoMode::Managed => 2,
@@ -1361,7 +1361,7 @@ fn prompt_backend(current: MongoMode) -> Result<BackendChoice> {
             1 => return Ok(BackendChoice::Embedded),
             2 => return Ok(BackendChoice::ManagedMongo),
             3 => return Ok(BackendChoice::SqlServer),
-            _ => println!("Enter 1, 2, or 3."),
+            _ => eprintln!("Enter 1, 2, or 3."),
         }
     }
 }
@@ -2004,7 +2004,7 @@ fn prompt_u16(prompt: &str, current: u16, default: u16) -> Result<u16> {
         )?;
         match input.trim().parse::<u16>() {
             Ok(value) if value > 0 => return Ok(value),
-            _ => println!("Enter a number between 1 and 65535."),
+            _ => eprintln!("Enter a number between 1 and 65535."),
         }
     }
 }
@@ -2025,7 +2025,7 @@ fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
         match trimmed.as_str() {
             "y" | "yes" => return Ok(true),
             "n" | "no" => return Ok(false),
-            _ => println!("Enter yes or no."),
+            _ => eprintln!("Enter yes or no."),
         }
     }
 }
@@ -2060,13 +2060,13 @@ fn prompt_text(
         } else {
             return Ok(trimmed.to_string());
         }
-        println!("A value is required.");
+        eprintln!("A value is required.");
     }
 }
 
 fn prompt_raw(prompt: &str) -> Result<String> {
-    print!("{prompt}: ");
-    io::stdout().flush().ok();
+    eprint!("{prompt}: ");
+    io::stderr().flush().ok();
     let mut buf = String::new();
     io::stdin()
         .read_line(&mut buf)

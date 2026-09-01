@@ -556,6 +556,12 @@ pub fn run_apply(manifest_path: &Path, apply: bool, yes: bool) -> Result<Value> 
     )?;
     Ok(json!({
         "ok": true,
+        // This build has no real execution path: every step is recorded as
+        // `SIMULATED_APPLY` above and nothing is installed, stopped, or
+        // migrated. The flag is what lets the command layer refuse to report
+        // success for an operator who passed `--apply --yes` and believes an
+        // upgrade actually ran.
+        "simulated": true,
         "artifacts": [audit_path.display().to_string(), run_manifest.display().to_string()],
         "step_count": audit_rows.len(),
     }))
@@ -679,4 +685,55 @@ pub fn run_bundle(input_dir: &Path, out_zip: &Path) -> Result<Value> {
     Ok(
         json!({"ok": true, "bundle": out_zip.display().to_string(), "source": source.display().to_string()}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `run_apply` never executes anything — it writes an audit row of
+    /// `SIMULATED_APPLY` per step. The payload must say so explicitly, because
+    /// the command layer keys off `simulated` to refuse a success envelope for
+    /// `--apply --yes`. If a real execution path ever lands, this flag (and the
+    /// test) must go with it.
+    #[test]
+    fn run_apply_reports_that_it_only_simulated() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plan = json!({
+            "source": "2021.4",
+            "target": "2022.1",
+            "steps": [{"id": "hop_1", "action": "Upgrade 2021.4 -> 2022.1"}],
+        });
+        let manifest_path = manifest::write_plan_manifest(dir.path(), &plan).expect("manifest");
+
+        let payload = run_apply(&manifest_path, true, true).expect("apply");
+
+        assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            payload.get("simulated").and_then(Value::as_bool),
+            Some(true),
+            "run_apply applies nothing; the payload must admit it: {payload}"
+        );
+        assert_eq!(payload.get("step_count").and_then(Value::as_u64), Some(1));
+    }
+
+    /// Missing `--apply`/`--yes` is a refusal, and the payload carries the
+    /// `ok: false` + `error` shape the command layer maps to an error envelope.
+    #[test]
+    fn run_apply_refuses_without_both_flags() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let manifest_path = dir.path().join("plan_manifest.json");
+
+        for (apply, yes) in [(false, false), (true, false), (false, true)] {
+            let payload = run_apply(&manifest_path, apply, yes).expect("refusal is not an error");
+            assert_eq!(payload.get("ok").and_then(Value::as_bool), Some(false));
+            assert!(
+                payload
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .is_some_and(|e| e.contains("--apply")),
+                "refusal must name the missing flags: {payload}"
+            );
+        }
+    }
 }

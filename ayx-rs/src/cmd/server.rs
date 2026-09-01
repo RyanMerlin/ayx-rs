@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 use ayx_core::definitions::DEFAULT_RUNTIME_SETTINGS_PATH;
-use ayx_core::envelope::Envelope;
+use ayx_core::envelope::{Envelope, ErrorCode};
 use ayx_server::logs::{
     discover_log_inventory, extract_context, parse_gallery_csv, parse_gallery_events,
     parse_service_events, recent_log_candidates, summarize_log_file, tail_log_file,
@@ -23,7 +23,7 @@ use ayx_server::util::{
     write_runtime_settings_json,
 };
 use ayx_server::{call_operation, diagnose_api, import_swagger};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use anyhow::Context;
 
@@ -33,6 +33,50 @@ use crate::{
     build_auth_status, load_payload, parse_key_value_params, parse_saml_metadata_source,
     server_profile,
 };
+
+/// Map an `ayx_server::upgrade` payload onto the envelope contract.
+///
+/// The upgrade service returns structured `Value` artifacts and deliberately
+/// knows nothing about `Envelope`; it signals failure as an inner
+/// `{"ok": false, "error": "..."}`. Wrapping those in `Envelope::ok_with_data`
+/// — which this dispatch used to do for every arm — produced a top-level
+/// `ok: true` and exit code 0 for an unsupported upgrade route, a refused
+/// apply, or a tampered plan manifest, so automation read a hard failure as
+/// success. Every failure the service reports this way is a caller-side input
+/// problem (bad version pair, missing flag, bad/edited manifest), which is
+/// exactly `ErrorCode::Validation`.
+fn upgrade_envelope(ok_msg: &str, detail: Value) -> Envelope {
+    if detail.get("ok").and_then(Value::as_bool) == Some(false) {
+        let message = detail
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("upgrade command failed")
+            .to_string();
+        return Envelope::err_coded(ErrorCode::Validation, message, detail);
+    }
+    Envelope::ok_with_data(ok_msg, detail)
+}
+
+/// Envelope for `ayx server upgrade apply`.
+///
+/// `run_apply` has no real execution path — it writes `SIMULATED_APPLY` audit
+/// rows and marks the payload `simulated`. Reporting that as success to an
+/// operator who typed `--apply --yes` in a maintenance window is the worst
+/// possible outcome: they get `ok: true`, exit 0, and a server that was never
+/// upgraded. So a *requested* apply that came back simulated is an error
+/// envelope. The artifacts stay in `data`, so the plan and audit trail are
+/// still available to the caller.
+fn upgrade_apply_envelope(apply_requested: bool, detail: Value) -> Envelope {
+    let simulated = detail.get("simulated").and_then(Value::as_bool) == Some(true);
+    if apply_requested && simulated {
+        return Envelope::err_coded(
+            ErrorCode::Validation,
+            "upgrade apply is simulation-only in this build; NO changes were applied",
+            detail,
+        );
+    }
+    upgrade_envelope("upgrade apply simulated: no changes were made", detail)
+}
 
 #[allow(clippy::too_many_lines)]
 pub fn execute(environment: Option<&str>, command: ServerCommand) -> Result<Envelope> {
@@ -749,7 +793,7 @@ pub fn execute(environment: Option<&str>, command: ServerCommand) -> Result<Enve
                 deployment,
             } => {
                 let detail = compute_path(&from, &to, &deployment);
-                Envelope::ok_with_data("upgrade path computed", detail)
+                upgrade_envelope("upgrade path computed", detail)
             }
             UpgradeCommand::Precheck {
                 profile,
@@ -759,7 +803,7 @@ pub fn execute(environment: Option<&str>, command: ServerCommand) -> Result<Enve
             } => {
                 let config = load_profile!(profile.as_deref(), environment)?;
                 let detail = run_precheck(&config, &target, &out, &deployment)?;
-                Envelope::ok_with_data("upgrade precheck completed", detail)
+                upgrade_envelope("upgrade precheck completed", detail)
             }
             UpgradeCommand::Backup {
                 profile,
@@ -768,7 +812,7 @@ pub fn execute(environment: Option<&str>, command: ServerCommand) -> Result<Enve
             } => {
                 let config = load_profile!(profile.as_deref(), environment)?;
                 let detail = run_backup(&config, &r#type, &out)?;
-                Envelope::ok_with_data("upgrade backup completed", detail)
+                upgrade_envelope("upgrade backup completed", detail)
             }
             UpgradeCommand::Plan {
                 from,
@@ -777,7 +821,7 @@ pub fn execute(environment: Option<&str>, command: ServerCommand) -> Result<Enve
                 deployment,
             } => {
                 let detail = run_plan(&from, &to, &deployment, &out)?;
-                Envelope::ok_with_data("upgrade plan generated", detail)
+                upgrade_envelope("upgrade plan generated", detail)
             }
             UpgradeCommand::Apply {
                 manifest,
@@ -785,7 +829,7 @@ pub fn execute(environment: Option<&str>, command: ServerCommand) -> Result<Enve
                 yes,
             } => {
                 let detail = run_apply(&manifest, apply, yes)?;
-                Envelope::ok_with_data("upgrade apply simulated", detail)
+                upgrade_apply_envelope(apply, detail)
             }
             UpgradeCommand::Postcheck {
                 profile,
@@ -794,11 +838,11 @@ pub fn execute(environment: Option<&str>, command: ServerCommand) -> Result<Enve
             } => {
                 let config = load_profile!(profile.as_deref(), environment)?;
                 let detail = run_postcheck(&config, &manifest, &out)?;
-                Envelope::ok_with_data("upgrade postcheck completed", detail)
+                upgrade_envelope("upgrade postcheck completed", detail)
             }
             UpgradeCommand::Bundle { input, out } => {
                 let detail = run_bundle(&input, &out)?;
-                Envelope::ok_with_data("upgrade bundle created", detail)
+                upgrade_envelope("upgrade bundle created", detail)
             }
         },
         ServerCommand::BackupPlan { backup_dir } => {
@@ -823,4 +867,120 @@ pub fn execute(environment: Option<&str>, command: ServerCommand) -> Result<Enve
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The regression this exists for: `compute_path` reports an unsupported
+    /// upgrade route as an inner `ok: false`, and the dispatch used to wrap it
+    /// in a success envelope, so `ayx server upgrade path` exited 0 for a route
+    /// it could not build.
+    #[test]
+    fn an_inner_failure_becomes_an_error_envelope() {
+        let detail = json!({"ok": false, "error": "no supported upgrade route", "route": []});
+
+        let env = upgrade_envelope("upgrade path computed", detail);
+
+        assert!(
+            !env.ok,
+            "inner ok:false must not produce a success envelope"
+        );
+        assert_eq!(env.error_code, Some(ErrorCode::Validation));
+        assert_eq!(env.message, "no supported upgrade route");
+        // The payload survives so callers still see the route/diagnostics.
+        assert_eq!(
+            env.data.get("ok").and_then(Value::as_bool),
+            Some(false),
+            "detail must be preserved in data"
+        );
+    }
+
+    /// A failure payload without an `error` key still has to fail, with a
+    /// generic message rather than a panic or a silent success.
+    #[test]
+    fn an_inner_failure_without_a_message_still_fails() {
+        let env = upgrade_envelope("upgrade plan generated", json!({"ok": false}));
+
+        assert!(!env.ok);
+        assert_eq!(env.error_code, Some(ErrorCode::Validation));
+        assert_eq!(env.message, "upgrade command failed");
+    }
+
+    #[test]
+    fn a_successful_payload_passes_through_unchanged() {
+        let detail = json!({"ok": true, "hop_count": 2});
+
+        let env = upgrade_envelope("upgrade path computed", detail.clone());
+
+        assert!(env.ok);
+        assert!(env.error_code.is_none());
+        assert_eq!(env.message, "upgrade path computed");
+        assert_eq!(env.data, detail);
+    }
+
+    /// A payload with no `ok` key at all is not a reported failure; only an
+    /// explicit `ok: false` is.
+    #[test]
+    fn a_payload_without_an_ok_key_is_treated_as_success() {
+        let env = upgrade_envelope("upgrade bundle created", json!({"bundle": "out.zip"}));
+
+        assert!(env.ok);
+        assert!(env.error_code.is_none());
+    }
+
+    /// The silent no-op: `--apply --yes` runs nothing but used to return
+    /// `ok: true` / exit 0, so an admin in a maintenance window believed the
+    /// upgrade had run. A requested apply that comes back simulated must fail.
+    #[test]
+    fn a_requested_apply_that_only_simulated_is_an_error() {
+        let detail = json!({
+            "ok": true,
+            "simulated": true,
+            "artifacts": ["execution_audit.csv"],
+            "step_count": 3,
+        });
+
+        let env = upgrade_apply_envelope(true, detail);
+
+        assert!(!env.ok, "a simulated --apply must not report success");
+        assert_eq!(env.error_code, Some(ErrorCode::Validation));
+        assert!(
+            env.message.contains("NO changes were applied"),
+            "message must be unmistakable: {}",
+            env.message
+        );
+        // Artifacts stay reachable so the audit trail is not lost.
+        assert!(env.data.get("artifacts").is_some());
+    }
+
+    /// Without `--apply` the caller asked for a simulation and got one; that is
+    /// a success, but the message must say plainly that nothing was applied.
+    #[test]
+    fn an_unrequested_apply_reports_success_and_says_it_simulated() {
+        let env = upgrade_apply_envelope(false, json!({"ok": true, "simulated": true}));
+
+        assert!(env.ok);
+        assert!(env.error_code.is_none());
+        assert!(
+            env.message.contains("simulated") && env.message.contains("no changes"),
+            "message must state that nothing was applied: {}",
+            env.message
+        );
+    }
+
+    /// `run_apply` refuses a missing-flag combination before it reaches the
+    /// simulation, and that refusal must map to a non-zero exit too.
+    #[test]
+    fn an_apply_refused_for_missing_flags_is_an_error() {
+        let env = upgrade_apply_envelope(
+            true,
+            json!({"ok": false, "error": "apply requires both --apply and --yes"}),
+        );
+
+        assert!(!env.ok);
+        assert_eq!(env.error_code, Some(ErrorCode::Validation));
+        assert_eq!(env.message, "apply requires both --apply and --yes");
+    }
 }
