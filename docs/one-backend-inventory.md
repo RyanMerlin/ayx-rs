@@ -27,8 +27,8 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `GET /v4/workspaces/{id}/configuration`
   - `GET /v4/people` (workspace context via the `x-alteryx-workspace-gid` header;
     `/v4/workspaces/{id}/people` 404s)
-  - `GET /v4/people?role=admin` (same header-scoped workspace context;
-    `/v4/workspaces/{workspaceId}/admins` 404s)
+  - `GET /v4/workspaces/{workspaceId}/admins` (`workspaceId` is the numeric
+    workspace id, not the GID; the earlier "404" was a GID probe)
   - `GET /v4/workspaces/{id}/groups`
   - `GET /v4/groups`
   - `GET /v4/workspaces/{id}/invitationLink` (required `personId` query parameter)

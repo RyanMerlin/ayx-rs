@@ -141,8 +141,17 @@ pub fn response_shape(value: &Value) -> &'static str {
 }
 
 pub fn transport_error_summary(error: &dyn StdError) -> Value {
-    let chain = error_chain(error);
-    let error_text = chain.first().cloned().unwrap_or_else(|| error.to_string());
+    // Transport errors (reqwest in particular) stringify the offending URL,
+    // which may carry `?access_token=...`. Redact every chain entry before it
+    // is embedded in a log line or a user-facing stderr envelope.
+    let chain: Vec<String> = error_chain(error)
+        .iter()
+        .map(|entry| redact_text(entry.as_str()))
+        .collect();
+    let error_text = chain
+        .first()
+        .cloned()
+        .unwrap_or_else(|| redact_text(&error.to_string()));
     let error_text_lower = error_text.to_lowercase();
     let error_kind = if error_text_lower.contains("timeout") {
         "timeout"
@@ -324,14 +333,23 @@ fn is_base64url(b: u8) -> bool {
 }
 
 fn redact_query_params(input: &str) -> String {
+    // Matched case-insensitively as a whole `key=` token at a delimiter
+    // boundary, so both the snake_case and squashed spellings are listed.
     const SECRET_KEYS: &[&str] = &[
         "token",
         "access_token",
+        "accesstoken",
         "refresh_token",
+        "refreshtoken",
+        "id_token",
+        "idtoken",
         "password",
+        "passwd",
+        "pwd",
         "api_key",
         "apikey",
         "client_secret",
+        "clientsecret",
         "tokenvalue",
         "local-auth-workspace",
         "x-csrf-token",
@@ -339,8 +357,14 @@ fn redact_query_params(input: &str) -> String {
         "passcodereferenceid",
         "secret",
     ];
+    // Keys whose bare word is common in prose (`... status=500 code=http_error
+    // ...`), so they are only redacted inside an actual query string -- i.e.
+    // directly after `?` or `&`. This still catches the OAuth authorization
+    // code in `/callback?code=<secret>`.
+    const QUERY_ONLY_KEYS: &[&str] = &["code", "sig"];
     const VALUE_TERMINATORS: &[char] = &['&', ' ', '"', '\'', '\n', '\r', '\t', ','];
     const DELIMITERS: &[char] = &['&', '?', ' ', '"', '\''];
+    const QUERY_DELIMITERS: &[char] = &['&', '?'];
 
     let mut out = String::with_capacity(input.len());
     let bytes = input.as_bytes();
@@ -360,7 +384,12 @@ fn redact_query_params(input: &str) -> String {
             // the key begins at i itself.
             let key_start = if at_delim { i + 1 } else { i };
             let mut matched = None;
-            for key in SECRET_KEYS {
+            let candidates = SECRET_KEYS.iter().chain(
+                QUERY_ONLY_KEYS
+                    .iter()
+                    .filter(|_| at_delim && QUERY_DELIMITERS.contains(&ch)),
+            );
+            for key in candidates {
                 let key_end = key_start + key.len();
                 // key must be followed by `=` and there must be at least
                 // one byte at key_end (the `=` itself).
@@ -404,32 +433,53 @@ pub fn redact_url(url: &str) -> String {
     redact_query_params(url)
 }
 
+/// The canonical secret-key matcher for the whole workspace.
+///
+/// A key is considered secret-bearing when its *normalized* form (lowercased
+/// with `_` and `-` removed) **contains** one of the needles below. Substring
+/// matching — rather than exact equality — is what makes `clientSecret`,
+/// `x-api-key`, `apiToken` and `connectionString` all redact correctly.
+///
+/// Needles are deliberately compound where a bare word would over-redact
+/// (`accesskey`/`privatekey`, never a bare `key`).
+///
+/// Every crate must route key-based redaction through this function so a new
+/// needle is picked up everywhere at once.
+pub fn is_secret_key(key: &str) -> bool {
+    const SECRET_KEY_NEEDLES: &[&str] = &[
+        "password",
+        "passwd",
+        "pwd",
+        "passcode",
+        "secret",
+        "token",
+        "apikey",
+        "accesskey",
+        "accountkey",
+        "sharedkey",
+        "privatekey",
+        "credential",
+        "connectionstring",
+        "authorization",
+        "localauthworkspace",
+        "csrf",
+        "sas",
+    ];
+    let normalized = key.to_ascii_lowercase().replace(['_', '-'], "");
+    SECRET_KEY_NEEDLES
+        .iter()
+        .any(|needle| normalized.contains(needle))
+}
+
 /// Redact a JSON value tree in place by key heuristic. Returns a redacted
 /// clone (caller controls whether to feed it to the logger). Top-level
 /// strings that look like Bearer tokens are masked too.
 pub fn redact_json(value: &Value) -> Value {
-    const SECRET_KEYS: &[&str] = &[
-        "token",
-        "access_token",
-        "refresh_token",
-        "password",
-        "api_key",
-        "apikey",
-        "client_secret",
-        "authorization",
-        "tokenvalue",
-        "local-auth-workspace",
-        "x-csrf-token",
-        "passcode",
-        "passcodereferenceid",
-        "secret",
-    ];
     match value {
         Value::Object(map) => {
             let mut out = serde_json::Map::with_capacity(map.len());
             for (k, v) in map {
-                let lower = k.to_ascii_lowercase();
-                if SECRET_KEYS.iter().any(|s| lower == *s) {
+                if is_secret_key(k) {
                     out.insert(k.clone(), Value::String("***".to_string()));
                 } else {
                     out.insert(k.clone(), redact_json(v));
@@ -521,7 +571,118 @@ mod tests {
         assert!(!s.contains("p@ssw0rd"));
         assert!(!s.contains("rt-xyz"));
         assert!(!s.contains("at-1"));
-        assert!(s.contains("\"foo\":\"bar\""));
+        // "tokens" itself matches the `token` needle, so the whole container is
+        // wiped — over-redaction is the safe failure mode for a key that names
+        // a credential collection.
+        assert!(!s.contains("\"foo\":\"bar\""));
+        assert!(s.contains("\"user\":\"ada\""));
+    }
+
+    #[test]
+    fn redacts_json_camel_case_and_header_style_secret_keys() {
+        let v = json!({
+            "clientId": "safe-to-show",
+            "clientSecret": "do-not-show",
+            "x-api-key": "hdr-key",
+            "apiToken": "api-tok",
+            "connectionString": "Server=x;Password=y",
+            "accountKey": "acct",
+            "sharedKey": "shared",
+            "nested": {"access_key": "ak-1", "privateKey": "pk-1"},
+            "items": [{"connectionString": "secret-connection"}],
+            "displayName": "keep me",
+        });
+        let r = redact_json(&v);
+        assert_eq!(r["clientId"], "safe-to-show");
+        assert_eq!(r["displayName"], "keep me");
+        assert_eq!(r["clientSecret"], "***");
+        assert_eq!(r["x-api-key"], "***");
+        assert_eq!(r["apiToken"], "***");
+        assert_eq!(r["connectionString"], "***");
+        assert_eq!(r["accountKey"], "***");
+        assert_eq!(r["sharedKey"], "***");
+        assert_eq!(r["nested"]["access_key"], "***");
+        assert_eq!(r["nested"]["privateKey"], "***");
+        assert_eq!(r["items"][0]["connectionString"], "***");
+        let s = serde_json::to_string(&r).unwrap();
+        assert!(!s.contains("do-not-show"), "leaked: {s}");
+        assert!(!s.contains("secret-connection"), "leaked: {s}");
+    }
+
+    #[test]
+    fn is_secret_key_matches_normalized_substrings() {
+        for key in [
+            "clientSecret",
+            "x-api-key",
+            "apiToken",
+            "connectionString",
+            "Authorization",
+            "PASSWORD",
+            "user_pwd",
+            "sharedKey",
+            "accountKey",
+            "privateKey",
+            "credentials",
+            "x-csrf-token",
+            "passcodeReferenceId",
+            "sasUrl",
+        ] {
+            assert!(is_secret_key(key), "expected secret: {key}");
+        }
+        for key in [
+            "id",
+            "name",
+            "displayName",
+            "keyboard_layout",
+            "workspaceId",
+        ] {
+            assert!(!is_secret_key(key), "unexpected secret: {key}");
+        }
+    }
+
+    #[test]
+    fn transport_summary_redacts_tokens_in_error_text_and_chain() {
+        #[derive(Debug)]
+        struct Inner;
+        impl std::fmt::Display for Inner {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "connect error for https://h/p?access_token=abc123")
+            }
+        }
+        impl StdError for Inner {}
+
+        #[derive(Debug)]
+        struct Outer(Inner);
+        impl std::fmt::Display for Outer {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(
+                    f,
+                    "error sending request for url https://h/p?access_token=abc123"
+                )
+            }
+        }
+        impl StdError for Outer {
+            fn source(&self) -> Option<&(dyn StdError + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        let summary = transport_error_summary(&Outer(Inner));
+        let s = serde_json::to_string(&summary).unwrap();
+        assert!(!s.contains("abc123"), "token leaked: {s}");
+        assert!(s.contains("access_token=***"), "got: {s}");
+    }
+
+    #[test]
+    fn masks_additional_oauth_query_params() {
+        for (input, leaked) in [
+            ("?id_token=idtok123", "idtok123"),
+            ("?code=authcode123", "authcode123"),
+            ("?clientSecret=cs123", "cs123"),
+        ] {
+            let r = redact_text(input);
+            assert!(!r.contains(leaked), "leaked in {input}: {r}");
+        }
     }
 
     #[test]

@@ -107,7 +107,7 @@ Endpoints the CLI fully dispatches for this surface (`inventory.rs` `SURFACES`).
 | GET | `/v4/workspaces/current` | live 200 | 2026-08-14T16:06Z | `one workspace current` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | `one workspace current` returned 200. Phase 2 `one doctor discover` also completed; its nested checks are recorded on the underlying endpoint rows. |
 | GET | `/v4/workspaces/{id}/configuration` | live 200 | 2026-07-27T00:55Z | `one workspace configuration`<br>`one workspace configuration-v4` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Probed both as `one workspace configuration-v4 <workspace-id>` and `one workspace configuration <workspace-id>`. |
 | GET | `/v4/people` | live 200 | 2026-08-18T17:55Z | `one person list`<br>`one workspace people` | paginated list: `{ items[], next_page_token, pages_fetched, page_envelopes[] }` (CLI-normalized) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Current live probe returned 18 people. Both commands, and telemetry's `permissions workflows/summary --source one`, use this header-scoped route with `x-alteryx-workspace-gid`; the old `/v4/workspaces/{id}/people` route returns 404. |
-| GET | `/v4/people?role=admin` | live 200 | 2026-07-27T00:55Z | `one workspace admins` | paginated list: `{ items[], next_page_token, pages_fetched, page_envelopes[] }` (CLI-normalized) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | `one workspace admins`. |
+| GET | `/v4/workspaces/{workspaceId}/admins` | declared in the tenant OpenAPI spec; live re-verification pending | 2026-08-31 | `one workspace admins` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | `workspaceId` is the **numeric** workspace id (integer in the spec), not the workspace GID — an earlier GID probe 404'd and was misread as "route does not exist", which put this command on `/v4/people?role=admin`. That route is not a substitute: the gateway ignores `role=admin` and `/v4/people` only sets `isAdmin` on the caller's own record. Optional query params: `accountId`, `fields`, `includeStatus`. |
 | GET | `/v4/workspaces/{id}/groups` | live 200 | 2026-08-18T18:08Z | `one workspace groups` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Numeric disposable workspace returned 200. |
 | GET | `/v4/groups` | live 200 | 2026-08-18T18:08Z | `one workspace groups-global` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Live read-only probe returned 200. |
 | GET | `/v4/workspaces/{id}/invitationLink` | live 200 | 2026-08-18T18:08Z | `one workspace invitation-link` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | The command supplies required query `personId`; synthetic workspace and person fixtures returned 200. |
@@ -421,15 +421,18 @@ shapes are recorded; treat this section as load-bearing, not decorative.
 Wired to `one workflows share`. The shape below is not in any published spec — it was recovered from
 the service's own schema-validation errors. Every one of `includeDependencies`, `privileges`, and
 `sendEmail` is required even when its value is `false` or empty-looking, and `additionalInfoMsg` must
-be *omitted* rather than sent as `null` when there is no message.
+be *omitted* rather than sent as `null` when there is no message. `toPersonIds`/`toGroupIds` are
+arrays of **strings**, not numbers — live-verified 2026-08-31: sending them as JSON numbers gets
+HTTP 400 `SchemaValidationError` (`"Invalid input: expected string, received number"`, `"Missing
+field toPersonIds.0"`).
 
 ```
 {
   "includeDependencies": bool,
   "privileges": [ "create" | "delete" | "execute" | "read" | "share" | "update" ],  // >= 1 entry
   "sendEmail": bool,
-  "toPersonIds": [int],
-  "toGroupIds": [int],
+  "toPersonIds": [string],
+  "toGroupIds": [string],
   "additionalInfoMsg": string   // optional
 }
 ```
