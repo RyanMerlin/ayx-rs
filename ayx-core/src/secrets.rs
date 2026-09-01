@@ -1,6 +1,7 @@
 #[cfg(feature = "test-inline-forcing")]
 use std::cell::Cell;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 #[cfg(test)]
@@ -530,11 +531,33 @@ pub fn env_secret_ref(name: &str) -> String {
 }
 
 pub fn resolve_secret_ref(reference: &str) -> Result<Option<String>, ProfileError> {
+    resolve_secret_ref_with(reference, &HashMap::new())
+}
+
+/// Resolve a secret reference, additionally consulting values loaded from the
+/// `.env` files that the profile loader reads.
+///
+/// An `env:NAME` reference means "this credential lives in the environment",
+/// and `ayx` treats a discovered `.env` file as part of that environment when
+/// it loads a profile.  Resolution has to use the same view, otherwise a
+/// credential supplied through `.env` is recorded as `env:NAME` and then fails
+/// to resolve on the very next command.
+///
+/// Precedence matches the loader's `env_value`: the `.env` file wins over a
+/// process variable of the same name.
+pub fn resolve_secret_ref_with(
+    reference: &str,
+    env_files: &HashMap<String, String>,
+) -> Result<Option<String>, ProfileError> {
     if let Some(value) = reference.strip_prefix("inline:") {
         return Ok(Some(value.to_string()));
     }
     if let Some(name) = reference.strip_prefix("env:") {
-        return Ok(env::var(name).ok());
+        return Ok(env_files
+            .get(name)
+            .cloned()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| env::var(name).ok()));
     }
     if let Some(account) = reference.strip_prefix("keyring:") {
         ensure_keyring_store();

@@ -38,6 +38,26 @@ references:
   secret. It must use `keyring:<account>`, `env:<variable>`, or
   `inline:<value>`.
 
+### Environment-sourced credentials
+
+`ayx` reads `.env` files when it loads a profile: the one beside the profile
+file always, and the one in the current working directory only when
+`AYX_CONFIG_HOME` is unset.
+
+`AYX_CONFIG_HOME` is the isolation boundary. Setting it suppresses the
+working-directory `.env`, so a scratch config home cannot silently inherit
+credentials from whichever checkout the process happens to be standing in.
+Real process environment variables still apply either way. Point
+`AYX_CONFIG_HOME` at a temporary directory for tests, CI, and scripted runs.
+
+A credential picked up from the environment is recorded as an `env:<variable>`
+reference, never as a literal value. The reference names a location, so it is
+safe to serialize: the profile keeps no copy of the secret, `ayx secret status`
+reports `source: env` instead of the `plaintext` warning posture, and `ayx
+secret migrate` leaves it alone. `env:` references resolve against the same
+`.env` view the loader used, so a credential supplied through a file still
+resolves on the next command.
+
 Keyring accounts are exact operating-system account names; the keyring does
 not know which YAML profile referred to an account. For example,
 `keyring:default/server.storage.mongo.managed.password` is shared by every
