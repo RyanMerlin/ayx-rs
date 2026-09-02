@@ -1,6 +1,6 @@
 # Headless Alteryx Integration
 
-Status: active — initial inventory and sequencing pass
+Status: active — integration foundation documented; product MCP client next
 
 This is the AYX-RS roadmap for integrating with Alteryx's product-owned
 Headless Alteryx MCP capabilities while keeping AYX-RS independent from the
@@ -62,6 +62,30 @@ Milestone 2 and footnoted as after Milestone 2; LiveQuery is promised in the
 Milestone 3 narrative but marked unavailable in the capability matrix; trust
 signals and Orchestrator plans remain unresolved.
 
+## Progress snapshot — 2026-09-02
+
+The initial AYX-RS integration foundation is complete and release-validated:
+
+- The accepted integration boundary, backend provenance model, credential
+  separation, and non-proxying decision are recorded in ADR 0003.
+- Secure profiles, keyring-backed credentials, token refresh, redaction,
+  structured agent envelopes, dry-run/apply gates, audit, and recovery are
+  implemented and covered by the Terra hostile review gates.
+- Direct One API coverage includes cloud-native workflow discovery and the
+  `one workflows run` / `cancel` path. Run validation succeeded; cancellation
+  reached the provider but is blocked in the validation workspace because WFS
+  Jobs is not enabled there. This is a provider capability issue, not evidence
+  of an alternate legacy route.
+- The `docs/headless-integration-foundation` branch is already contained in
+  `main`; its documentation work does not require a second merge.
+- The v0.19.0 release artifacts and the reusable cross-platform release
+  workflow are in place. A follow-up binary rebuild is operationally routine
+  once a feature slice passes its host canary and CI gates.
+
+This does not mean the product-owned Headless Alteryx MCP implementation is
+complete. The MCP client, product-server discovery, protocol session, and
+cloud Gateway remain future work below.
+
 ## Current AYX-RS position
 
 ### Existing strengths to reuse
@@ -100,6 +124,38 @@ signals and Orchestrator plans remain unresolved.
   product-compatible funnel reporting.
 - Capability execution through `catalog run` does not yet have the same explicit
   apply/approval posture as normal mutating CLI commands.
+
+## Recommended follow-up: demo-first vertical slice
+
+The highest-value next increment is a local, read-only-to-controlled-mutation
+vertical slice rather than attempting every roadmap item in one release:
+
+1. Implement a bounded internal `McpSession` with STDIO JSON-RPC handshake,
+   tool listing, tool invocation, cancellation, timeout, and child cleanup.
+2. Add a fake-server protocol harness plus redacted contract fixtures, then
+   add secure AOA/product-server discovery and `ayx headless doctor`.
+3. Expose `ayx mcp tools list`, `describe`, and an explicit raw `call` path with
+   backend/provenance fields, result-size limits, redaction, and approval gates.
+4. Demonstrate one harmless product-owned local workflow path—inspect,
+   validate, and either a fixture-backed mutation or an isolated run—while
+   keeping direct XML/EngineCmd behavior visibly labeled as a separate backend.
+5. Run the Windows installed-host canary, then use the existing release matrix
+   to rebuild the binaries and publish a tagged internal release.
+
+These are planning estimates, not release commitments:
+
+| Slice | Expected lift | Main dependency |
+| --- | --- | --- |
+| Demo-grade local MCP discovery, read-only tools, one controlled workflow path | 2–4 engineer-weeks | Access to a supported AOA/Designer host and a stable redacted tool contract |
+| Production-grade local P1/P2 coverage, compatibility fixtures, host setup, and power-lane parity | 5–8 additional engineer-weeks | Product schema stability, Windows canaries, and security review |
+| Cloud MCP Gateway, agent-oriented discovery, planning, and semantic/lineage capability negotiation | 4–8+ additional engineer-weeks | Published regional Gateway contract and authentication details |
+| Remaining operational composition and broader product capabilities | Separate follow-on work | Product availability of LiveQuery, plans, sharing, and orchestration contracts |
+
+The first slice is strong demo material and can ship in a follow-up internal
+release without waiting for cloud MCP or full product parity. “Finish all
+headless gaps” is a multi-phase effort: the hard parts are protocol and
+product-contract validation, compatibility/security behavior, and installed
+host canaries—not compiling and packaging the binaries.
 
 ## Initial sequencing and priority
 
