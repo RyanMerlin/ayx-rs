@@ -69,6 +69,26 @@ Use named secret slots rather than arbitrary YAML paths:
   One login and workspace credentials, into the secure store and reports the
   persisted field paths.
 
+For One OAuth API-token credentials, prefer the secret-free login input paths:
+
+- `ayx one login --auth-method oauth-refresh --refresh-token-env NAME`
+- `printf '%s' "$TOKEN" | ayx one login --auth-method oauth-refresh --refresh-token-stdin`
+- `ayx one login --access-token-env NAME`
+- `printf '%s' "$TOKEN" | ayx one login --access-token-stdin`
+
+These paths keep the token out of command arguments and shell history. The
+legacy `--refresh-token <value>` and `--access-token <value>` flags remain for
+compatibility but should not be used in shared terminals or automation logs.
+The selected workspace stores `credential_kind: oauth_refresh`; email OTP uses
+`credential_kind: email_otp`. `auth_rollout` continues to select only the
+Wizard/Legacy OTP implementation, while `auth_mode` continues to select
+user/service-principal authentication.
+
+Refresh-token exchange and local keyring persistence are not an atomic
+transaction. If a process or keyring failure occurs after the provider accepts
+a rotating exchange, the CLI fails closed and tells the operator not to retry
+the old pair blindly; re-import a fresh provider-issued pair.
+
 Supported slots are `server.api.client-secret`, `mongo.managed.password`,
 `sql.controller.password`, `sql.server-ui.password`, `one.client-secret`, and
 `one.service-principal-client-secret`. Login-managed and workspace credentials

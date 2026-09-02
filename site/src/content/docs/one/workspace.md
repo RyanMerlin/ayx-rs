@@ -9,7 +9,7 @@ sidebar:
 
 ## Workspaces are token-bound
 
-The Alteryx One PAT you authenticated with determines your active workspace. The `x-alteryx-workspace-gid` header that some API clients send is ignored server-side — the token rules. You cannot change the active workspace by editing a workspace GID in your profile. Instead, use `workspace switch` to re-point to any workspace credential you have already authenticated, or run `ayx one login` for a new workspace if you haven't authenticated there yet.
+The Alteryx One access credential you authenticated with determines your active workspace. This may be an OAuth access token or the token produced by the email-OTP flow. The `x-alteryx-workspace-gid` header that some API clients send is ignored server-side — the credential rules. You cannot change the active workspace by editing a workspace GID in your profile. Instead, use `workspace switch` to re-point to any workspace credential you have already authenticated, or run `ayx one login` for a new workspace if you haven't authenticated there yet.
 
 ## Quick reference
 

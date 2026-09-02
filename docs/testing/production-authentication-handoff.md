@@ -7,6 +7,14 @@ orchestration is the default rollout for `ayx one login`. The legacy email-OTP
 adapter remains present as the explicit rollback path through
 `--auth-flow legacy` or `AYX_AUTH_ROLLOUT=legacy`.
 
+OAuth2.0 API access/refresh credentials are also supported as a separate,
+workspace-scoped user-credential method. They are the recommended path for
+unattended CLI, CI, and agent use: import the pair once with
+`--auth-method oauth-refresh` and `--refresh-token-env NAME` or
+`--refresh-token-stdin`, then let secure keyring persistence and automatic
+refresh handle subsequent runs. OAuth credentials never silently fall back to
+email OTP.
+
 ## What is included
 
 - A shared authentication state machine with bounded OTP, workspace-password,
@@ -34,6 +42,10 @@ adapter remains present as the explicit rollback path through
   secure-keyring save decision after the first successful interactive login
   (defaulting to save; `n` declines). It does not silently switch to Legacy
   after an operation may have committed.
+- OAuth refresh rotation preserves provider-issued replacement refresh tokens
+  in the canonical workspace keyring slot, pre-refreshes before an applied
+  mutation when the access token is expired or near expiry, and never replays a
+  mutation after an uncertain 401 response.
 
 ## Verification completed
 
@@ -73,6 +85,15 @@ interactive login Wizard offers to save the workspace password securely with
 `[Y/n]` (Enter saves it). A later login reuses that keyring value; `n` keeps
 the password session-only, while `--save-workspace-password` is the explicit
 automation shorthand.
+
+For a machine-oriented login, use the OAuth method explicitly and avoid secret
+arguments:
+
+```powershell
+$env:AYX_ONE_API_REFRESH_TOKEN |
+  ayx one login --profile local-dev --auth-method oauth-refresh `
+    --refresh-token-stdin --secret-policy secure
+```
 
 ## Rollout and rollback
 

@@ -43,6 +43,26 @@ Confirm it's installed:
 ayx --version
 ```
 
+## The very short version
+
+If you are new to command-line tools, follow these four steps:
+
+1. Open **PowerShell** on Windows, or **Terminal** on macOS/Linux.
+2. Type `ayx onboard` and press Enter.
+3. Say **y** when it asks whether to log in. Type the 6-digit code sent to
+   your email, then type your Alteryx One workspace password.
+4. When it asks whether to save the password, press Enter to choose **Yes**.
+
+You are connected. Try this to see your workspace:
+
+```bash
+ayx one workspace current
+```
+
+If you were given an OAuth2.0 API access/refresh pair for a computer, CI job,
+or agent, use the [automation checklist](#using-an-api-token-for-automation)
+instead of the email-code step. You only need to do that setup once.
+
 ## Connect
 
 Run the setup wizard:
@@ -75,6 +95,42 @@ Press Enter to save it in your operating system's secure keyring, or answer `n` 
 For a normal human login, no auth flags are needed: `ayx one login` uses the active profile, the Wizard email-OTP flow, and secure persistence by default. Use `--profile <name>` when you want a different profile.
 
 You won't need another passcode until the stored token expires (about 30 days); it's reused for every command in between.
+
+For unattended automation, CI, or agents, use an OAuth2.0 API access/refresh
+pair instead of OTP. Create the API-token credential in Alteryx One, configure
+its client ID and token endpoint in the profile, and import the refresh token
+without putting its value in command arguments:
+
+### Using an API token for automation
+
+This is the simple machine-login checklist:
+
+1. Get the OAuth **client ID**, **token endpoint**, and **refresh token** from
+   your Alteryx One administrator. Keep the token private, like a house key.
+2. Put the refresh token in the environment variable named
+   `AYX_ONE_API_REFRESH_TOKEN`, or ask your administrator to configure that
+   variable for you. The client ID and token endpoint go in the selected
+   profile.
+3. Run the command below. It reads the token without showing it in the
+   command itself:
+
+```bash
+ayx one login --auth-method oauth-refresh \
+  --refresh-token-env AYX_ONE_API_REFRESH_TOKEN
+```
+
+4. Check that it worked:
+
+```bash
+ayx one workspace current
+```
+
+With secure persistence, the CLI stores the pair in the operating-system
+keyring, refreshes short-lived access tokens automatically, and keeps the OAuth
+method attached to the selected workspace. It does not silently fall back to
+OTP when the refresh credential is unavailable. You can also pipe the token
+with `--refresh-token-stdin`; see [Connecting](/connecting/#oauth-api-accessrefresh-credentials)
+for PowerShell, macOS, and Linux examples.
 
 ## Verify
 

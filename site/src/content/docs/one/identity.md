@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-`ayx one` handles authentication and identity through a small set of commands: `login` and `logout` manage credentials, `whoami` shows who you're signed in as, `auth status` / `auth diagnose` check token posture, `doctor identity` runs a deeper identity health check, and `inventory` summarizes the current One API surface registry. The Wizard email-OTP flow is the default; if a fresh login needs the compatibility lane, use `ayx one login --auth-flow legacy`.
+`ayx one` handles authentication and identity through a small set of commands: `login` and `logout` manage credentials, `whoami` shows who you're signed in as, `auth status` / `auth diagnose` check token posture, `doctor identity` runs a deeper identity health check, and `inventory` summarizes the current One API surface registry. OAuth2.0 API access/refresh credentials are the recommended method for automation, CI, and agents; email OTP remains the default interactive method. Both are selected per workspace and secure persistence uses the operating-system keyring.
 
 All mutating commands (anything that creates, updates, suspends, removes, or deletes) are dry-run by default. Add `--apply` to commit the change. Add `--yes` to skip the TTY confirmation in scripts.
 
@@ -13,7 +13,7 @@ All mutating commands (anything that creates, updates, suspends, removes, or del
 
 | Area | Command | What you do |
 |---|---|---|
-| Sign in | `ayx one login` | Authenticate and store credentials (email OTP by default; `--device` / `--browser` / token flags also available) |
+| Sign in | `ayx one login` | Authenticate and store credentials (OAuth API access/refresh for automation; email OTP by default for interactive use) |
 | Sign out | `ayx one logout` | Clear stored credentials from the active profile |
 | Identity | `ayx one whoami` | Show the current One user profile |
 | Auth status | `ayx one auth status` | Summarize One API token posture for managed IAM |
@@ -25,9 +25,26 @@ Workspace, user, token, and role administration all build on the identity establ
 
 ## Signing in
 
+Choose the credential method deliberately. For unattended use, prefer the
+OAuth API access/refresh method below. It is a one-time import of a pair issued
+by Alteryx One; subsequent access-token renewal is automatic while the refresh
+credential remains valid. Use email OTP when a human is available for the
+passcode and workspace-password prompts.
+
 ```bash
-# Default: email OTP flow
+# Email OTP flow
 ayx one login
+
+# Persist OAuth API-token policy for the selected workspace
+ayx one login --auth-method oauth-refresh --refresh-token-env AYX_ONE_API_REFRESH_TOKEN
+
+# Safe non-interactive import from stdin (POSIX shell)
+printf '%s' "$AYX_ONE_API_REFRESH_TOKEN" |
+  ayx one login --auth-method oauth-refresh --refresh-token-stdin
+
+# PowerShell equivalent
+$env:AYX_ONE_API_REFRESH_TOKEN |
+  ayx one login --auth-method oauth-refresh --refresh-token-stdin
 
 # Device-code grant
 ayx one login --device
@@ -35,15 +52,43 @@ ayx one login --device
 # Browser PKCE flow
 ayx one login --browser
 
-# Store a token you already have (CI)
+# Compatibility path; prefer --refresh-token-env or --refresh-token-stdin
 ayx one login --refresh-token <t>
 ayx one login --access-token <t>
+ayx one login --access-token-env AYX_ONE_API_ACCESS_TOKEN
 
 # Bind credentials to a specific workspace
 ayx one login --workspace-id <id> --workspace-gid <gid>
 ```
 
 `--client-id` overrides the profile's `oauth_client_id` for the `--browser` / `--device` flows. See [Connecting](/connecting/) for the full sign-in walkthrough.
+
+### Choosing the credential method
+
+`--auth-method email-otp` and `--auth-method oauth-refresh` set the user credential policy on the selected workspace credential. `oauth-refresh` requires a refresh token and never falls back to OTP or a service principal. A workspace with no `credential_kind` keeps legacy behavior; existing workspaces with a refresh credential are treated as OAuth for compatibility.
+
+The OAuth pair normally consists of a client ID, token endpoint, access token,
+and refresh token from Alteryx One's OAuth2.0 API-token administration flow.
+Configure the client ID and endpoint in the profile (or use the documented
+environment overrides), then import the refresh token through
+`--refresh-token-env NAME` or `--refresh-token-stdin`. The CLI verifies the
+workspace before persisting the pair. It stores only secure references in the
+profile when secure persistence is selected, preserves provider-issued
+refresh-token replacements, and does not print token values.
+
+`--access-token-env NAME` and `--access-token-stdin` avoid placing an access
+token in process arguments or shell history. An access-token-only import cannot
+be used with `oauth-refresh`, because it cannot support refresh-token rotation.
+
+`auth_rollout` is separate: it selects the Wizard or Legacy implementation of the email-OTP flow and has no meaning for OAuth credentials. `auth_mode: service-principal` is also separate and selects client-credentials authentication for machine identities; it cannot be combined with a workspace user-credential policy.
+
+OAuth access tokens are short-lived. The CLI stores the rotating refresh token and refreshes before an applied mutation when its access token is expired or within the safety window. It never replays a mutation after an uncertain response.
+
+Refresh-token exchange and provider-side rotation cannot be one atomic
+transaction with local keyring storage. If the process or keyring fails after
+the provider accepts an exchange, local state may be temporarily in doubt. The
+CLI reports that condition and does not blindly retry the exchange; obtain or
+re-enter a fresh provider-issued pair if recovery is required.
 
 ### Saving the workspace password
 

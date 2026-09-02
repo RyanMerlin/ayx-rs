@@ -387,6 +387,13 @@ fn redact_value(value: &Value, key: Option<&str>) -> Value {
 
 fn is_sensitive_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
+    // Token ids and the metadata wrapper are identifiers/expiry metadata, not
+    // bearer secrets. Keep them visible so a caller can inspect and revoke a
+    // token returned by `one token create`; nested tokenValue fields still
+    // pass through this function and remain redacted.
+    if matches!(lower.as_str(), "tokenid" | "token_info" | "tokeninfo") {
+        return false;
+    }
     // A `has_`/`has-` prefix marks a boolean presence flag, not a secret
     // itself; check it on the separator-aware form before word boundaries
     // are lost below (e.g. `hashed_password` must not match).
@@ -503,6 +510,22 @@ mod tests {
         ] {
             assert!(is_sensitive_key(key), "secret key not redacted: {key}");
         }
+        assert!(!is_sensitive_key("tokenId"));
+        assert!(!is_sensitive_key("tokenInfo"));
+    }
+
+    #[test]
+    fn token_metadata_survives_while_token_value_is_redacted() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({
+                "tokenInfo": {"tokenId": "12345", "expiredAt": "2030-01-01T00:00:00Z"},
+                "tokenValue": "bearer-secret"
+            }),
+        );
+        let clean = redacted_envelope(&env);
+        assert_eq!(clean.data["tokenInfo"]["tokenId"], "12345");
+        assert_eq!(clean.data["tokenValue"], "[REDACTED]");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-08-31 20:59:34 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-02 19:48:11 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 

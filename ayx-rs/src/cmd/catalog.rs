@@ -943,7 +943,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         mutating: true,
         prerequisites: &["central runtime profile", "alteryx_one.access_token"],
         notes: &[
-            "Maps to PUT /v4/authorization/roles/{id}/people with an `items` array containing the subject id.",
+            "Maps to PUT /v4/authorization/roles/{id}/people with a bare JSON array containing the subject id.",
         ],
     },
     CatalogMetadata {
@@ -2889,6 +2889,6 @@ mod tests {
             "access_token": "fresh-token"
         }))
         .expect("response should format");
-        assert_eq!(token, "Bearer fresh-token");
+        assert_eq!(token, "fresh-token");
     }
 }

@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::auth::AuthRollout;
-use crate::secrets::{recover_keyring_transaction, resolve_secret_ref};
-use crate::sensitive::{recover_sensitive_file, write_sensitive_file};
+use crate::secrets::{
+    recover_keyring_transaction, recover_keyring_transaction_locked, resolve_secret_ref,
+};
+use crate::sensitive::{SensitiveFileLock, recover_sensitive_file, write_sensitive_file};
 
 // ---------------------------------------------------------------------------
 // Task 4: mixed-state secret conflict detection
@@ -420,6 +422,40 @@ pub enum AuthMode {
     ServicePrincipal,
 }
 
+/// How a user credential for a workspace is acquired or renewed.
+///
+/// This is intentionally separate from [`AuthMode`], which selects user versus
+/// service-principal authentication, and from `AuthRollout`, which selects the
+/// implementation lane for email OTP. The field is optional on persisted
+/// credentials so older profiles retain their existing behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OneCredentialKind {
+    #[serde(rename = "email_otp")]
+    EmailOtp,
+    #[serde(rename = "oauth_refresh")]
+    OAuthRefresh,
+}
+
+impl OneCredentialKind {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "email-otp" | "email_otp" | "otp" => Some(Self::EmailOtp),
+            "oauth-refresh" | "oauth_refresh" | "oauth-api-token" | "oauth_api_token" | "oauth" => {
+                Some(Self::OAuthRefresh)
+            }
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::EmailOtp => "email_otp",
+            Self::OAuthRefresh => "oauth_refresh",
+        }
+    }
+}
+
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct WorkspaceCredential {
     /// Numeric workspace id. The map key remains a backward-compatible lookup
@@ -442,6 +478,13 @@ pub struct WorkspaceCredential {
     pub workspace_password_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oauth_client_id: Option<String>,
+    /// Optional acquisition policy for this workspace's user credential.
+    /// Missing preserves legacy behavior and does not trigger a migration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_kind: Option<OneCredentialKind>,
+    /// Non-secret expiry metadata for the current access token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_token_expires_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_secret: Option<String>,
     #[serde(default)]
@@ -644,6 +687,8 @@ impl std::fmt::Debug for WorkspaceCredential {
             .field("has_refresh_token", &self.refresh_token.is_some())
             .field("has_workspace_password", &self.workspace_password.is_some())
             .field("oauth_client_id", &self.oauth_client_id)
+            .field("credential_kind", &self.credential_kind)
+            .field("access_token_expires_at", &self.access_token_expires_at)
             .field("has_client_secret", &self.client_secret.is_some())
             .field("has_sp_client_secret", &self.sp_client_secret.is_some())
             .field("token_endpoint_url", &self.token_endpoint_url)
@@ -865,6 +910,18 @@ impl AlteryxOneProfile {
     pub fn active_workspace_credential(&self) -> Option<&WorkspaceCredential> {
         self.active_workspace_id()
             .and_then(|workspace_id| self.workspace_credential_for(Some(workspace_id)))
+    }
+
+    /// Return the explicit user-credential policy for the active workspace.
+    /// An absent value is meaningful: it preserves legacy profile behavior.
+    pub fn resolved_credential_kind(&self) -> Option<OneCredentialKind> {
+        self.active_workspace_credential()
+            .and_then(|credential| credential.credential_kind)
+    }
+
+    pub fn resolved_access_token_expires_at(&self) -> Option<u64> {
+        self.active_workspace_credential()
+            .and_then(|credential| credential.access_token_expires_at)
     }
 
     pub fn resolved_access_token(&self) -> Option<&str> {
@@ -1127,6 +1184,18 @@ impl Config {
         Self::load_from_resolved_path_lenient(&resolved)
     }
 
+    /// Load a profile while the caller already holds its stable sensitive-file
+    /// lock. This is used by credential rotation so another CLI process cannot
+    /// consume the same rotating refresh token between reload and replacement.
+    pub fn load_from_path_lenient_locked(
+        path: &Path,
+        lock: &SensitiveFileLock,
+    ) -> Result<Self, ProfileError> {
+        let resolved = resolve_profile_path(path)?;
+        let (path_str, env_values, value) = Self::read_profile_value_locked(&resolved, lock)?;
+        Self::load_config_from_value(&resolved, path_str, value, env_values, None)
+    }
+
     pub fn load_from_path_lenient_without_active_overlay(
         path: &Path,
     ) -> Result<Self, ProfileError> {
@@ -1208,6 +1277,38 @@ impl Config {
             path: path_str.clone(),
             source: std::io::Error::other(err.to_string()),
         })?;
+        let content = fs::read_to_string(path).map_err(|source| ProfileError::Read {
+            path: path_str.clone(),
+            source,
+        })?;
+        let env_path = path
+            .parent()
+            .map(|parent| parent.join(".env"))
+            .unwrap_or_else(|| Path::new(".env").to_path_buf());
+        let env_values = collect_env_overrides(path).map_err(|source| ProfileError::Read {
+            path: env_path.display().to_string(),
+            source,
+        })?;
+        let expanded = expand_env_placeholders(&content, &env_values);
+        let value: serde_yaml::Value =
+            serde_yaml::from_str(&expanded).map_err(|source| ProfileError::Parse {
+                path: path_str.clone(),
+                source,
+            })?;
+        Ok((path_str, env_values, normalize_profile_value(value)?))
+    }
+
+    fn read_profile_value_locked(
+        path: &Path,
+        lock: &SensitiveFileLock,
+    ) -> Result<(String, HashMap<String, String>, serde_yaml::Value), ProfileError> {
+        let path_str = path.display().to_string();
+        recover_keyring_transaction_locked(path, lock)?;
+        lock.remove_sibling(".tmp")
+            .map_err(|err| ProfileError::Read {
+                path: path_str.clone(),
+                source: std::io::Error::other(err.to_string()),
+            })?;
         let content = fs::read_to_string(path).map_err(|source| ProfileError::Read {
             path: path_str.clone(),
             source,
@@ -1553,6 +1654,16 @@ impl Config {
                     "alteryx_one.base_url is required".to_string(),
                 ));
             }
+            if one.auth_mode == AuthMode::ServicePrincipal
+                && let Some((workspace_id, _)) = one
+                    .workspace_credentials
+                    .iter()
+                    .find(|(_, credential)| credential.credential_kind.is_some())
+            {
+                return Err(ProfileError::Invalid(format!(
+                    "alteryx_one.auth_mode=service-principal cannot be combined with workspace_credentials['{workspace_id}'].credential_kind; use auth_mode=user for email-OTP or OAuth refresh credentials"
+                )));
+            }
             if let Some(client_id) = &one.oauth_client_id
                 && client_id.trim().is_empty()
             {
@@ -1636,6 +1747,16 @@ impl Config {
                 {
                     return Err(ProfileError::Invalid(format!(
                         "alteryx_one.workspace_credentials['{workspace_id}'].oauth_client_id is required when refresh_token is set"
+                    )));
+                }
+                if credential.credential_kind == Some(OneCredentialKind::OAuthRefresh)
+                    && !credential
+                        .refresh_token
+                        .as_ref()
+                        .is_some_and(|token| !token.trim().is_empty())
+                {
+                    return Err(ProfileError::Invalid(format!(
+                        "alteryx_one.workspace_credentials['{workspace_id}'].refresh_token is required when credential_kind is oauth_refresh"
                     )));
                 }
                 if credential
@@ -2931,6 +3052,61 @@ mod tests {
         }
     }
 
+    #[test]
+    fn one_credential_kind_is_workspace_scoped_and_backward_compatible() {
+        let config: Config = serde_yaml::from_str(
+            r#"profile_name: test
+alteryx_one:
+  account_email: user@example.com
+  workspace_credentials:
+    '42':
+      workspace_id: '42'
+      credential_kind: oauth_refresh
+      access_token: access
+      refresh_token: refresh
+      oauth_client_id: client
+  active_workspace_id: '42'
+"#,
+        )
+        .expect("credential kind should deserialize");
+        let one = config.alteryx_one.expect("one profile");
+        assert_eq!(
+            one.resolved_credential_kind(),
+            Some(OneCredentialKind::OAuthRefresh)
+        );
+        assert_eq!(
+            OneCredentialKind::parse("email-otp"),
+            Some(OneCredentialKind::EmailOtp)
+        );
+        assert_eq!(
+            OneCredentialKind::parse("oauth-api-token"),
+            Some(OneCredentialKind::OAuthRefresh)
+        );
+        assert!(OneCredentialKind::parse("service-principal").is_none());
+    }
+
+    #[test]
+    fn service_principal_mode_rejects_a_workspace_user_credential_policy() {
+        let mut config = base_config("sp-conflict", "ServiceDb");
+        let one = config.alteryx_one.as_mut().expect("One profile");
+        one.auth_mode = AuthMode::ServicePrincipal;
+        one.workspace_credentials.insert(
+            "91946".to_string(),
+            WorkspaceCredential {
+                workspace_id: Some("91946".to_string()),
+                credential_kind: Some(OneCredentialKind::OAuthRefresh),
+                access_token: Some("access".to_string()),
+                refresh_token: Some("refresh".to_string()),
+                ..WorkspaceCredential::default()
+            },
+        );
+
+        let error = config
+            .validate()
+            .expect_err("service-principal/user credential mixing must fail");
+        assert!(error.to_string().contains("cannot be combined"));
+    }
+
     struct CurrentDirGuard {
         old: PathBuf,
     }
@@ -3336,6 +3512,8 @@ mod tests {
                 access_token_ref: None,
                 refresh_token: Some("workspace-refresh".to_string()),
                 refresh_token_ref: None,
+                credential_kind: None,
+                access_token_expires_at: None,
                 workspace_password: None,
                 workspace_password_ref: None,
                 oauth_client_id: Some("workspace-client".to_string()),
@@ -3401,6 +3579,8 @@ mod tests {
                 access_token_ref: None,
                 refresh_token: Some("single-refresh".to_string()),
                 refresh_token_ref: None,
+                credential_kind: None,
+                access_token_expires_at: None,
                 workspace_password: None,
                 workspace_password_ref: None,
                 oauth_client_id: Some("single-client".to_string()),
@@ -3572,6 +3752,8 @@ mod tests {
                 access_token_ref: None,
                 refresh_token: None,
                 refresh_token_ref: None,
+                credential_kind: None,
+                access_token_expires_at: None,
                 workspace_password: Some("workspace-password".to_string()),
                 workspace_password_ref: None,
                 oauth_client_id: None,
@@ -3631,6 +3813,8 @@ mod tests {
                 access_token_ref: None,
                 refresh_token: None,
                 refresh_token_ref: None,
+                credential_kind: None,
+                access_token_expires_at: None,
                 workspace_password: None,
                 workspace_password_ref: None,
                 oauth_client_id: None,
@@ -3809,6 +3993,8 @@ mod tests {
                 access_token_ref: None,
                 refresh_token: None,
                 refresh_token_ref: None,
+                credential_kind: None,
+                access_token_expires_at: None,
                 workspace_password: None,
                 workspace_password_ref: Some("keyring:test/workspace.password".to_string()),
                 oauth_client_id: None,
@@ -3851,6 +4037,8 @@ mod tests {
                 access_token_ref: None,
                 refresh_token: None,
                 refresh_token_ref: None,
+                credential_kind: None,
+                access_token_expires_at: None,
                 workspace_password: None,
                 workspace_password_ref: None,
                 oauth_client_id: None,

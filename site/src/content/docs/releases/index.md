@@ -7,6 +7,17 @@ sidebar:
 
 Release notes for each tagged version of `ayx`. For current behavior, use the live docs above; for a specific binary, read the notes for that version.
 
+## Current authentication guidance
+
+For unattended CLI, CI, and agent use, prefer an OAuth2.0 API access/refresh
+pair. Import it once with `ayx one login --auth-method oauth-refresh` using
+`--refresh-token-env NAME` or `--refresh-token-stdin`; secure persistence keeps
+the pair in the operating-system keyring, automatically refreshes short-lived
+access tokens, and never silently falls back to email OTP. Email OTP remains
+the default for interactive onboarding and normal human sign-in. See
+[Connecting](/connecting/) and [Identity & auth](/one/identity/) for the full
+setup and recovery rules.
+
 ## v0.17.0
 
 First stable release of the `0.17.0` authentication rollout. The Wizard

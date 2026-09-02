@@ -40,6 +40,13 @@ Start here when commands return 401 or credential errors:
 ayx one doctor auth
 ```
 
+The result reports the selected workspace credential method without printing
+token values. OAuth credentials are normally renewed automatically; email-OTP
+credentials require an interactive login when their stored token expires. If
+an OAuth refresh token is expired or revoked, re-import a newly issued pair
+with `ayx one login --auth-method oauth-refresh` using the env/stdin input
+options described in [Identity & auth](/one/identity/).
+
 Add `--profile <name>` to test a specific profile:
 
 ```bash

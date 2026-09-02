@@ -119,7 +119,7 @@ Classification source of truth: the `Safety`/`Mutating` columns in `docs/command
 | Tier | Rule |
 |---|---|
 | **GREEN** | Any read-only leaf, or any mutating leaf **without** `--apply`. Safe by construction — `ayx-one-api/src/lib.rs:883` returns the dry-run envelope *before* any network call. Run freely. |
-| **YELLOW** | `one login --profile <name>` (rewrites local token state, not `--apply`-gated). If used, use a **named** profile (`rc-check`), never `default`. |
+| **YELLOW** | `one login --profile <name>` (rewrites local credential state, not `--apply`-gated). Prefer a named profile (`rc-check`), never `default`; use secret-safe OAuth env/stdin input for unattended runs. |
 | **ORANGE** | `one flows create/update/delete` — per-command go, but pre-approved in this plan (Phase 5). Tenant baseline is zero flows/folders, so cleanup is verifiable. |
 | **RED** | `workflows copy`/`share`, `person password-reset-request`, `workspace invite-users`, `webhook-flow-tasks test`, `plans share`, `connections permissions create`, `token create`. Default skip. **`workflows copy` is pre-approved for exactly one deliberate demo-asset creation (Phase 5b)** — nothing else in this tier runs without naming the specific command first. |
 | **BLACK** | `workspace delete-configuration`, `workspace delete-current-configuration`. Never, no exceptions. |
@@ -188,7 +188,10 @@ grep -i "no .* found\|returning None\|skip" /tmp/live-smoke.log
 Anything that skipped is `unverified` in the matrix, not `live 200` — do not let a green run imply
 coverage it didn't have.
 
-If `live_smoke_requires_a_live_token` panics: stop, rotate via `ayx one login`, restart Phase 1.
+If `live_smoke_requires_a_live_token` panics: stop. For an OAuth profile,
+re-import a newly issued access/refresh pair through the secret-safe env/stdin
+path; for an OTP profile, use the interactive `ayx one login` flow. Do not put
+token values in the command line or captured logs.
 
 ## Phase 2 — Read-only re-verify sweep, release binary (~15 min)
 
@@ -251,13 +254,12 @@ determines how many Phase 1 skips were legitimate.
 
 ```bash
 set -a && source .env && set +a
-TOKEN=$(command grep '^AYX_ONE_API_ACCESS_TOKEN=' .env | cut -d= -f2-)
 # a well-formed but certainly-nonexistent ULID, both plausible route shapes:
 curl -s -o /dev/stderr -w "\nHTTP %{http_code}\n" -X DELETE \
-  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Authorization: Bearer ${AYX_ONE_API_ACCESS_TOKEN}" \
   "${AYX_ONE_BASE_URL:-https://us1.alteryxcloud.com}/svc-workflow/api/v1/assets/01AAAAAAAAAAAAAAAAAAAAAAAA"
 curl -s -o /dev/stderr -w "\nHTTP %{http_code}\n" -X DELETE \
-  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Authorization: Bearer ${AYX_ONE_API_ACCESS_TOKEN}" \
   "${AYX_ONE_BASE_URL:-https://us1.alteryxcloud.com}/svc-workflow/api/v2/workflows/01AAAAAAAAAAAAAAAAAAAAAAAA"
 ```
 

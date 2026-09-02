@@ -47,11 +47,18 @@ profile_name: my-profile
 alteryx_one:
   account_email: admin@example.com
   base_url: https://us1.alteryxcloud.com
-  workspace_gid: 01ARZ3NDEKTSV4RRFFQ69G5FAV
-  access_token_ref: keyring:my-profile/alteryx_one.access_token
+  oauth_client_id: <oauth-client-id>
+  token_endpoint_url: https://pingauth.alteryxcloud.com/as/token
+  workspace_credentials:
+    '91946':
+      workspace_id: '91946'
+      workspace_gid: 01ARZ3NDEKTSV4RRFFQ69G5FAV
+      credential_kind: oauth_refresh
+      access_token_ref: keyring:v1/<workspace-access-account>
+      refresh_token_ref: keyring:v1/<workspace-refresh-account>
 ```
 
-You don't write the token in by hand — `ayx one login` obtains it and stores it for you (in your OS keyring where available; see [Connecting](/connecting/)). `base_url` and `workspace_gid` come from the workspace URL you paste during onboarding.
+You don't write token values in by hand — `ayx one login` obtains or imports them and stores them for you (in your OS keyring where available; see [Connecting](/connecting/)). The `credential_kind` is workspace-scoped: `oauth_refresh` selects durable OAuth API access/refresh authentication, while `email_otp` selects the interactive OTP flow. `base_url` and `workspace_gid` come from the workspace URL you paste during onboarding.
 
 ### Secret references
 
@@ -64,8 +71,16 @@ Any secret can be a **reference** instead of a literal, so nothing sensitive sit
 alteryx_one:
   account_email: admin@example.com
   base_url: https://us1.alteryxcloud.com
-  access_token_ref: env:AYX_ONE_API_ACCESS_TOKEN
+  oauth_client_id: <oauth-client-id>
+  token_endpoint_url: https://pingauth.alteryxcloud.com/as/token
+  workspace_credentials:
+    '91946':
+      credential_kind: oauth_refresh
+      access_token_ref: env:AYX_ONE_API_ACCESS_TOKEN
+      refresh_token_ref: env:AYX_ONE_API_REFRESH_TOKEN
 ```
+
+For OAuth automation, prefer the one-time import command in [Connecting](/connecting/#oauth-api-accessrefresh-credentials) and secure keyring persistence. An environment-backed pair is useful when the runtime intentionally supplies credentials on every process start; it is not a local rotation store.
 
 ## Multiple workspaces in one profile
 
@@ -94,9 +109,10 @@ Credentials can come from environment variables instead of the profile — handy
 
 | Variable | Sets |
 |----------|------|
-| `AYX_ONE_API_ACCESS_TOKEN` | Access token |
-| `AYX_ONE_API_REFRESH_TOKEN` | Refresh token |
-| `AYX_ONE_OAUTH_CLIENT_ID` | OAuth client ID for the `--browser`/`--device` flows (alias: `AYX_ONE_CLIENT_ID`) |
+| `AYX_ONE_API_ACCESS_TOKEN` | Profile-level access-token fallback; for a workspace-bound import prefer `--access-token-env` or `--access-token-stdin` |
+| `AYX_ONE_API_REFRESH_TOKEN` | Profile-level refresh-token fallback or secret-safe one-time import source |
+| `AYX_ONE_OAUTH_CLIENT_ID` | OAuth client ID for OAuth refresh, `--browser`, and `--device` flows (alias: `AYX_ONE_CLIENT_ID`) |
+| `AYX_ONE_TOKEN_ENDPOINT_URL` | OAuth token endpoint |
 | `AYX_ONE_CLIENT_SECRET` | OAuth client secret (advanced flows) |
 
 The full resolution order — flags, then environment, then profile, then defaults — is in the [runtime config contract](/reference/runtime-config-contract/).

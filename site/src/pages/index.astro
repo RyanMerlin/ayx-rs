@@ -104,9 +104,10 @@ const steps = [
             <a class="btn primary" href="/getting-started/">Get started</a>
             <a class="btn ghost" href="/reference/command-surface/">Browse the commands</a>
           </div>
-          <div class="install">
+          <div class="install" data-copy-command={install}>
             <span class="install-prompt">$</span>
-            <code>{install}</code>
+            <code class="install-command">{install}</code>
+            <button class="copy-command" type="button" aria-label="Copy install command">Copy</button>
           </div>
         </div>
 
@@ -209,6 +210,58 @@ const steps = [
         trademarks of Alteryx, Inc.
       </div>
     </footer>
+
+    <script>
+      const installBlock = document.querySelector('[data-copy-command]');
+      const copyButton = installBlock?.querySelector('.copy-command');
+      const installCommand = installBlock?.getAttribute('data-copy-command');
+
+      const copyText = async (value) => {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(value);
+          return;
+        }
+
+        const helper = document.createElement('textarea');
+        helper.value = value;
+        helper.setAttribute('readonly', '');
+        helper.style.position = 'fixed';
+        helper.style.opacity = '0';
+        document.body.appendChild(helper);
+        helper.select();
+        const copied = document.execCommand('copy');
+        helper.remove();
+        if (!copied) throw new Error('Clipboard copy was not available');
+      };
+
+      const selectInstallCommand = () => {
+        const commandNode = installBlock?.querySelector('.install-command');
+        const selection = window.getSelection();
+        if (!commandNode || !selection) return;
+        const range = document.createRange();
+        range.selectNodeContents(commandNode);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      };
+
+      copyButton?.addEventListener('click', async () => {
+        if (!installCommand) return;
+        const originalLabel = copyButton.textContent;
+        try {
+          await copyText(installCommand);
+          copyButton.textContent = 'Copied';
+          copyButton.setAttribute('aria-label', 'Install command copied');
+        } catch {
+          selectInstallCommand();
+          copyButton.textContent = 'Select & copy';
+          copyButton.setAttribute('aria-label', 'Clipboard unavailable; select the command to copy');
+        }
+        window.setTimeout(() => {
+          copyButton.textContent = originalLabel;
+          copyButton.setAttribute('aria-label', 'Copy install command');
+        }, 2200);
+      });
+    </script>
 
     <style>
       :root {
@@ -403,7 +456,7 @@ const steps = [
         border-radius: 0.5rem;
         padding: 0.7rem 0.95rem;
         max-width: 100%;
-        overflow-x: auto;
+        min-width: 0;
       }
       .install-prompt {
         color: var(--cyan);
@@ -411,9 +464,28 @@ const steps = [
         font-weight: 600;
       }
       .install code {
+        flex: 1 1 auto;
+        min-width: 0;
         font-size: 0.82rem;
         color: var(--muted);
-        white-space: nowrap;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+      }
+      .copy-command {
+        flex: 0 0 auto;
+        border: 1px solid #2a4d6b;
+        border-radius: 0.35rem;
+        padding: 0.35rem 0.55rem;
+        color: var(--text);
+        background: #142b42;
+        font: 500 0.76rem var(--font);
+        cursor: pointer;
+      }
+      .copy-command:hover,
+      .copy-command:focus-visible {
+        border-color: var(--cyan);
+        background: #193956;
+        outline: none;
       }
 
       /* terminal */

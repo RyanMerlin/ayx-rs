@@ -74,19 +74,35 @@ pub(crate) fn login(
     auth_flow_arg: Option<String>,
     save_workspace_password: bool,
     secret_policy_arg: Option<String>,
+    auth_method_arg: Option<String>,
+    refresh_token_env: Option<String>,
+    refresh_token_stdin: bool,
+    access_token_env: Option<String>,
+    access_token_stdin: bool,
 ) -> Result<Envelope> {
     use ayx_core::auth::{AuthRollout, SecretPersistencePolicy};
-    use ayx_core::profile::{normalize_alteryx_one_token_endpoint, profile_storage_path};
+    use ayx_core::profile::{
+        OneCredentialKind, normalize_alteryx_one_token_endpoint, profile_storage_path,
+    };
     use ayx_one_api::{
         exchange_auth_code, generate_pkce_challenge, generate_random_state, initiate_device_auth,
-        poll_device_token, refresh_one_access_token,
+        poll_device_token, refresh_one_tokens,
     };
     use serde_json::json;
 
-    if runtime.no_input && refresh_token_arg.is_none() && access_token_arg.is_none() {
-        bail!(
-            "--no-input requires --access-token or --refresh-token; interactive login flows are disabled"
-        );
+    let refresh_token_arg = read_refresh_token_source(
+        refresh_token_arg,
+        refresh_token_env.as_deref(),
+        refresh_token_stdin,
+    )?;
+    let access_token_arg = read_secret_source(
+        access_token_arg,
+        access_token_env.as_deref(),
+        access_token_stdin,
+        "access token",
+    )?;
+    if refresh_token_arg.is_some() && access_token_arg.is_some() {
+        bail!("use only one of --refresh-token or --access-token");
     }
 
     // Parse rollout before reading credentials or starting the OTP transport.
@@ -123,6 +139,7 @@ pub(crate) fn login(
     // saved GID/name resolves to its canonical numeric key; an unsaved target
     // may only be an explicit decimal ID because login has not discovered it
     // yet.
+    let workspace_selector_supplied = workspace_id.is_some();
     let workspace_id = if let Some(selector) = workspace_id {
         if let Some(one) = config.alteryx_one.as_ref()
             && let Ok(target) = one.resolve_workspace_target(
@@ -155,6 +172,109 @@ pub(crate) fn login(
     } else {
         None
     };
+
+    let requested_credential_kind = auth_method_arg
+        .as_deref()
+        .map(|value| {
+            OneCredentialKind::parse(value).ok_or_else(|| {
+                anyhow::anyhow!("invalid --auth-method; use email-otp or oauth-refresh")
+            })
+        })
+        .transpose()?;
+    let stored_credential_kind = config.alteryx_one.as_ref().and_then(|one| {
+        if workspace_selector_supplied {
+            workspace_id
+                .as_deref()
+                .and_then(|id| one.workspace_credentials.get(id))
+                .and_then(|credential| credential.credential_kind)
+                .or_else(|| {
+                    workspace_id
+                        .as_deref()
+                        .and_then(|id| one.workspace_credentials.get(id))
+                        .and_then(|credential| credential.refresh_token.as_deref())
+                        .map(|_| OneCredentialKind::OAuthRefresh)
+                })
+        } else {
+            one.resolved_credential_kind().or_else(|| {
+                one.resolved_refresh_token()
+                    .map(|_| OneCredentialKind::OAuthRefresh)
+            })
+        }
+    });
+    let has_explicit_oauth_flow = refresh_token_arg.is_some() || browser || device;
+    let has_explicit_token_input = refresh_token_arg.is_some() || access_token_arg.is_some();
+    let credential_kind = requested_credential_kind
+        .or_else(|| has_explicit_oauth_flow.then_some(OneCredentialKind::OAuthRefresh))
+        .or(stored_credential_kind)
+        .or_else(|| {
+            (!has_explicit_token_input && !browser && !device)
+                .then_some(OneCredentialKind::EmailOtp)
+        });
+    if config
+        .alteryx_one
+        .as_ref()
+        .is_some_and(|one| one.auth_mode == ayx_core::profile::AuthMode::ServicePrincipal)
+        && (credential_kind.is_some() || has_explicit_token_input || browser || device)
+    {
+        bail!(
+            "alteryx_one.auth_mode=service-principal selects service-principal authentication; use auth_mode=user before configuring email-OTP or OAuth refresh credentials"
+        );
+    }
+    if credential_kind == Some(OneCredentialKind::EmailOtp)
+        && (has_explicit_oauth_flow || access_token_arg.is_some())
+    {
+        bail!(
+            "--auth-method email-otp cannot be combined with --refresh-token, --access-token, --browser, or --device"
+        );
+    }
+    if credential_kind == Some(OneCredentialKind::OAuthRefresh) && auth_flow_arg.is_some() {
+        bail!(
+            "--auth-flow applies only to the email-OTP method; use --auth-method email-otp for OTP login"
+        );
+    }
+
+    let mut refresh_token_arg = refresh_token_arg;
+    if credential_kind == Some(OneCredentialKind::OAuthRefresh)
+        && !browser
+        && !device
+        && access_token_arg.is_none()
+        && refresh_token_arg.is_none()
+    {
+        refresh_token_arg = config
+            .alteryx_one
+            .as_ref()
+            .and_then(|one| {
+                if workspace_selector_supplied {
+                    workspace_id
+                        .as_deref()
+                        .and_then(|id| one.workspace_credentials.get(id))
+                        .and_then(|credential| credential.refresh_token.as_deref())
+                } else {
+                    one.resolved_refresh_token()
+                }
+            })
+            .map(str::to_string);
+        if refresh_token_arg.is_none() {
+            bail!(
+                "OAuth refresh authentication is selected for the active workspace, but no refresh token is configured; import one with --refresh-token-env NAME or --refresh-token-stdin"
+            );
+        }
+    }
+    if credential_kind == Some(OneCredentialKind::OAuthRefresh)
+        && access_token_arg.is_some()
+        && refresh_token_arg.is_none()
+        && !browser
+        && !device
+    {
+        bail!(
+            "OAuth refresh authentication requires a refresh token for durable rotation; use --refresh-token-env NAME or --refresh-token-stdin"
+        );
+    }
+    if runtime.no_input && refresh_token_arg.is_none() && access_token_arg.is_none() {
+        bail!(
+            "--no-input requires --access-token, --refresh-token, --refresh-token-env NAME, or --refresh-token-stdin; interactive login flows are disabled"
+        );
+    }
     let profile_name = config.profile_name.clone();
     let path = profile_storage_path(&profile_name)?;
     let requested_policy = secret_policy_arg
@@ -257,6 +377,22 @@ pub(crate) fn login(
         }
     }
 
+    // An explicit refresh-token login replaces the access credential. Clear
+    // stale access references before the preflight binding check below; if we
+    // wait until the exchange branch, an old binding can reject the new token
+    // before it gets a chance to be exchanged.
+    if refresh_token_arg.is_some() {
+        let refresh_workspace_id = workspace_id
+            .clone()
+            .or_else(|| one.active_workspace_id().map(str::to_string));
+        one.access_token_ref = None;
+        if let Some(ws_id) = refresh_workspace_id
+            && let Some(credential) = one.workspace_credentials.get_mut(&ws_id)
+        {
+            credential.access_token_ref = None;
+        }
+    }
+
     let password_workspace_id = workspace_id.clone().or_else(|| {
         config
             .alteryx_one
@@ -276,22 +412,41 @@ pub(crate) fn login(
     )?;
 
     let mut workspace_password_to_save = None;
-    let mut token_expires_at = None;
+    let mut token_expires_at: Option<u64> = None;
 
     let (final_access_token, final_refresh_token) = if let Some(rt) = refresh_token_arg {
         // --- bypass: exchange a refresh token the caller already has ---
+        let original_refresh_token = rt.clone();
         let one = config.alteryx_one.as_mut().unwrap();
-        if let Some(ws_id) = &workspace_id {
-            one.workspace_credentials
-                .entry(ws_id.clone())
-                .or_default()
-                .refresh_token = Some(rt);
+        // Refresh credentials are workspace-scoped whenever the profile has
+        // an active workspace, even when the user did not repeat --workspace.
+        // Writing an explicitly supplied token to the legacy top-level slot in
+        // that case makes the exchange resolver ignore it.
+        let refresh_workspace_id = workspace_id
+            .clone()
+            .or_else(|| one.active_workspace_id().map(str::to_string));
+        if let Some(ws_id) = refresh_workspace_id {
+            let credential = one.workspace_credentials.entry(ws_id).or_default();
+            // An explicitly supplied refresh token is the replacement source
+            // of truth. Do not let a stale access-token reference from an
+            // earlier workspace binding fail validation before this token can
+            // be exchanged and securely persisted.
+            credential.access_token_ref = None;
+            one.access_token_ref = None;
+            credential.refresh_token = Some(rt);
         } else {
+            // The same rule applies to the profile-level compatibility slot
+            // when there is no workspace context to bind.
+            one.access_token_ref = None;
             one.refresh_token = Some(rt);
         }
-        let access = refresh_one_access_token(&config, &http)
+        let refreshed = refresh_one_tokens(&config, &http)
             .context("token exchange failed — check --client-id and --refresh-token")?;
-        (access, None)
+        token_expires_at = refreshed.expires_in.and_then(expiry_from_seconds);
+        (
+            refreshed.access_token,
+            refreshed.refresh_token.or(Some(original_refresh_token)),
+        )
     } else if let Some(at) = access_token_arg {
         // --- bypass: store a token the caller already has ---
         (at, None)
@@ -503,7 +658,10 @@ pub(crate) fn login(
             machine.apply(event).map_err(|err| anyhow::anyhow!(err))?;
         }
         auth_machine = Some(machine);
-        token_expires_at = result.token_expires_at;
+        token_expires_at = result
+            .token_expires_at
+            .as_deref()
+            .and_then(expiry_from_rfc3339);
 
         (result.access_token, None)
     } else {
@@ -563,6 +721,12 @@ pub(crate) fn login(
         }
     };
 
+    if credential_kind == Some(OneCredentialKind::OAuthRefresh) && final_refresh_token.is_none() {
+        bail!(
+            "OAuth refresh authentication did not return a refresh token; refusing to persist an access-token-only credential"
+        );
+    }
+
     // A token is not safe to persist until the authoritative current-workspace
     // probe confirms its identity. This also prevents a successful token
     // exchange for the wrong workspace from poisoning a saved credential.
@@ -611,6 +775,13 @@ pub(crate) fn login(
         final_refresh_token.as_deref(),
         workspace_password_to_save,
     );
+    if let Some(credential) = one
+        .workspace_credentials
+        .get_mut(&authenticated_workspace_id)
+    {
+        credential.credential_kind = credential_kind;
+        credential.access_token_expires_at = token_expires_at;
+    }
 
     let email = one.account_email.clone();
     let endpoint = one.normalized_base_url().unwrap_or_default();
@@ -626,7 +797,9 @@ pub(crate) fn login(
         &binding,
         Some(rollout),
     )?;
-    if let Some(one) = config.alteryx_one.as_mut() {
+    if credential_kind == Some(OneCredentialKind::EmailOtp)
+        && let Some(one) = config.alteryx_one.as_mut()
+    {
         one.auth_rollout = Some(rollout);
     }
     let explicit_plaintext = requested_policy == Some(SecretPersistencePolicy::PlaintextFallback);
@@ -719,12 +892,72 @@ pub(crate) fn login(
             "workspace_name": authenticated_workspace.name.as_deref(),
             "token_length": final_access_token.len(),
             "has_refresh_token": final_refresh_token.is_some(),
+            "credential_kind": credential_kind.map(OneCredentialKind::as_str),
+            "access_token_expires_at": token_expires_at,
             "inline_secret_fields": secretize.inline_fields,
             "persistence": format!("{effective_persistence_policy:?}").to_ascii_lowercase(),
-            "rollout": format!("{rollout:?}").to_ascii_lowercase(),
+            "rollout": (credential_kind == Some(OneCredentialKind::EmailOtp))
+                .then(|| format!("{rollout:?}").to_ascii_lowercase()),
             "auth_state": auth_machine.as_ref().map(|machine| machine.state()),
         }),
     ))
+}
+
+fn read_refresh_token_source(
+    direct: Option<String>,
+    environment_name: Option<&str>,
+    from_stdin: bool,
+) -> Result<Option<String>> {
+    read_secret_source(direct, environment_name, from_stdin, "refresh token")
+}
+
+fn read_secret_source(
+    direct: Option<String>,
+    environment_name: Option<&str>,
+    from_stdin: bool,
+    label: &str,
+) -> Result<Option<String>> {
+    if direct.is_some() && (environment_name.is_some() || from_stdin) {
+        bail!("use only one source for {label}");
+    }
+    if environment_name.is_some() && from_stdin {
+        bail!("use only one source for {label}");
+    }
+    if let Some(name) = environment_name {
+        let value = std::env::var(name)
+            .with_context(|| format!("{label} environment variable '{name}' is not set"))?;
+        return nonempty_secret(value, &format!("{label} environment variable")).map(Some);
+    }
+    if from_stdin {
+        use std::io::Read as _;
+        let mut value = String::new();
+        std::io::stdin()
+            .read_to_string(&mut value)
+            .with_context(|| format!("failed to read {label} from stdin"))?;
+        return nonempty_secret(value, &format!("{label} from stdin")).map(Some);
+    }
+    Ok(direct)
+}
+
+fn nonempty_secret(value: String, source: &str) -> Result<String> {
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        bail!("{source} is empty")
+    }
+    Ok(value)
+}
+
+fn expiry_from_seconds(expires_in: u64) -> Option<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|now| now.as_secs().saturating_add(expires_in))
+}
+
+fn expiry_from_rfc3339(value: &str) -> Option<u64> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .and_then(|timestamp| u64::try_from(timestamp.timestamp()).ok())
 }
 
 pub(crate) fn logout(runtime: &RuntimeCtx<'_>, profile: Option<&str>) -> Result<Envelope> {
@@ -1239,8 +1472,8 @@ mod tests {
         AuthenticatedWorkspace, BrowserCallback, accepts_plaintext_fallback,
         accepts_workspace_password_save, authenticated_workspace_from_value,
         parse_browser_callback, persist_verified_workspace_credential,
-        persistence_policy_to_remember, should_offer_workspace_password_save,
-        workspace_password_for_login,
+        persistence_policy_to_remember, read_refresh_token_source,
+        should_offer_workspace_password_save, workspace_password_for_login,
     };
     use ayx_core::profile::{
         AlteryxOneProfile, WorkspaceCredential, WorkspaceResolutionSource, WorkspaceTarget,
@@ -1648,6 +1881,13 @@ mod tests {
             Some(PlaintextFallback)
         );
         assert_eq!(persistence_policy_to_remember(None, Secure), None);
+    }
+
+    #[test]
+    fn refresh_token_input_rejects_ambiguous_sources() {
+        let error = read_refresh_token_source(Some("direct".to_string()), Some("TOKEN"), false)
+            .expect_err("ambiguous token sources must fail");
+        assert!(error.to_string().contains("use only one"));
     }
 
     #[test]

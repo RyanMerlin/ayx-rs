@@ -7,6 +7,11 @@ sidebar:
 
 `ayx one` is the primary command surface for Alteryx One. It gives you programmatic access to every major area of the platform: browsing and sharing cloud-native canvas workflows, managing data connections and datasets, running and inspecting jobs, orchestrating schedules and plans, and administering users and workspaces.
 
+For authentication, choose the method that matches the runtime: OAuth2.0 API
+access/refresh credentials are the recommended path for automation and agents,
+while email OTP remains the default interactive path. Both are workspace-scoped
+and documented in [Identity & auth](/one/identity/) and [Connecting](/connecting/).
+
 ## Three workflow surfaces, deliberately kept separate
 
 This CLI reaches three different workflow-like surfaces. They are built on different underlying technologies, they do not share resources, and they are not interchangeable:

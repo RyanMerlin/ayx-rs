@@ -88,7 +88,7 @@ pub fn probe_current_workspace(
         .context("could not create workspace verification client")?;
     let response = client
         .get(&endpoint)
-        .header(AUTHORIZATION, format!("Bearer {access_token}"))
+        .header(AUTHORIZATION, bearer_authorization_value(access_token))
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .context("workspace verification request failed")?;
@@ -225,6 +225,20 @@ fn trace_one(message: impl AsRef<str>) {
     if debug_trace() {
         eprintln!("[one-debug] {}", redact_text(message.as_ref()));
     }
+}
+
+/// Build the Authorization header from either a raw access token or a token
+/// persisted by an older CLI version that already contains the Bearer scheme.
+/// Keeping this normalization at the request boundary prevents a stale saved
+/// value from becoming `Bearer Bearer <token>`.
+fn bearer_authorization_value(access_token: &str) -> String {
+    let token = access_token.trim();
+    let token = token
+        .strip_prefix("Bearer ")
+        .or_else(|| token.strip_prefix("bearer "))
+        .unwrap_or(token)
+        .trim();
+    format!("Bearer {token}")
 }
 
 fn decode_jwt_claims(token: &str) -> Option<Value> {
@@ -1177,6 +1191,7 @@ pub fn one_api_live_request_with_body(
         return Ok(envelope);
     }
 
+    let mut preflight_access_token = None;
     // Every applied One mutation must have a complete selected workspace
     // identity. The old guard was conditional on the legacy
     // `expected_workspace_id` field and could therefore send a mutation with
@@ -1206,6 +1221,13 @@ pub fn one_api_live_request_with_body(
                 "active workspace credential lacks complete verified ID, GID, or name metadata"
             )
         })?;
+        if one_access_token_needs_refresh(config) {
+            let refresh_client = build_client()?;
+            preflight_access_token = Some(refresh_one_access_token_for_request(
+                config,
+                &refresh_client,
+            )?);
+        }
         verify_workspace_identity(
             config,
             surface,
@@ -1213,6 +1235,7 @@ pub fn one_api_live_request_with_body(
             &url,
             &target.workspace_id,
             &target.workspace_gid,
+            preflight_access_token.as_deref(),
         )?;
     }
 
@@ -1220,7 +1243,10 @@ pub fn one_api_live_request_with_body(
     trace_one(format!(
         "{surface} {operation}: resolving access token for {url}"
     ));
-    let mut access_token = resolve_one_access_token(config, &client)?;
+    let mut access_token = match preflight_access_token {
+        Some(token) => token,
+        None => resolve_one_access_token(config, &client)?,
+    };
     trace_one(format!("{surface} {operation}: access token resolved"));
     let workspace_context = workspace_context_header_value(config);
     if let Some(ref workspace_context) = workspace_context {
@@ -1252,7 +1278,7 @@ pub fn one_api_live_request_with_body(
         attempt += 1;
         let mut request = client
             .request(method.clone(), &url)
-            .header(AUTHORIZATION, format!("Bearer {}", access_token))
+            .header(AUTHORIZATION, bearer_authorization_value(&access_token))
             .header(reqwest::header::ACCEPT, "application/json");
         if let Some(ref gid) = workspace_gid {
             request = request.header("x-alteryx-workspace-gid", gid);
@@ -1277,27 +1303,20 @@ pub fn one_api_live_request_with_body(
                 let status = response.status();
                 last_status = Some(status);
                 retry_after_seconds = parse_retry_after(response.headers().get(RETRY_AFTER));
-                if status == StatusCode::UNAUTHORIZED && !refreshed_once {
-                    match refresh_one_access_token(config, &client) {
-                        Ok(token) => {
-                            access_token = token;
-                            refreshed_once = true;
-                            continue;
-                        }
-                        Err(refresh_err) => {
-                            trace_one(
-                                "401 refresh failed; trying service principal fallback for live request",
-                            );
-                            match service_principal_access_token(config, &client) {
-                                Ok(token) => {
-                                    access_token = token;
-                                    refreshed_once = true;
-                                    continue;
-                                }
-                                Err(_) => return Err(refresh_err),
-                            }
-                        }
-                    }
+                if status == StatusCode::UNAUTHORIZED && !mutating && !refreshed_once {
+                    let auth_mode = config
+                        .alteryx_one
+                        .as_ref()
+                        .map(|one| one.auth_mode.clone())
+                        .unwrap_or_default();
+                    let refreshed = if auth_mode == ayx_core::profile::AuthMode::ServicePrincipal {
+                        service_principal_access_token(config, &client)
+                    } else {
+                        refresh_one_access_token_for_request(config, &client)
+                    };
+                    access_token = refreshed?;
+                    refreshed_once = true;
+                    continue;
                 }
                 if status.is_success()
                     || !should_retry_status(status, mutating)
@@ -1611,7 +1630,7 @@ pub fn flow_import_package_envelope(
 
     let response = client
         .post(&url)
-        .header(AUTHORIZATION, format!("Bearer {}", access_token))
+        .header(AUTHORIZATION, bearer_authorization_value(&access_token))
         .multipart(form)
         .send()
         .with_context(|| format!("flow package request to '{}' failed", url))?;
@@ -1733,7 +1752,7 @@ pub fn flow_export_package_envelope(
 
     let response = client
         .get(&url)
-        .header(AUTHORIZATION, format!("Bearer {}", access_token))
+        .header(AUTHORIZATION, bearer_authorization_value(&access_token))
         .header(reqwest::header::ACCEPT, "*/*")
         .send()
         .with_context(|| format!("flow package request to '{}' failed", url))?;
@@ -2030,6 +2049,16 @@ fn resolve_one_access_token(config: &Config, client: &Client) -> Result<String> 
 
     // Service-principal mode: skip user/refresh flow entirely.
     if auth_mode == AuthMode::ServicePrincipal {
+        if config
+            .alteryx_one
+            .as_ref()
+            .and_then(|one| one.resolved_credential_kind())
+            .is_some()
+        {
+            bail!(
+                "alteryx_one.auth_mode=service-principal conflicts with the selected workspace user credential method; use auth_mode=user for email-OTP or OAuth refresh authentication"
+            );
+        }
         return service_principal_access_token(config, client);
     }
 
@@ -2048,16 +2077,7 @@ fn resolve_one_access_token(config: &Config, client: &Client) -> Result<String> 
         .and_then(|one| one.resolved_refresh_token())
         .is_some()
     {
-        match refresh_one_access_token(config, client) {
-            Ok(token) => return Ok(token),
-            Err(refresh_err) => {
-                trace_one("refresh token flow failed; trying service principal fallback");
-                if let Ok(token) = service_principal_access_token(config, client) {
-                    return Ok(token);
-                }
-                return Err(refresh_err);
-            }
-        }
+        return refresh_one_access_token_for_request(config, client);
     }
 
     Err(anyhow::anyhow!(
@@ -2078,13 +2098,17 @@ fn verify_workspace_identity(
     mutation_url: &str,
     expected: &str,
     expected_gid: &str,
+    token_override: Option<&str>,
 ) -> Result<()> {
     let client = build_client()?;
-    let token = resolve_one_access_token(config, &client)?;
+    let token = match token_override {
+        Some(token) => token.to_string(),
+        None => resolve_one_access_token(config, &client)?,
+    };
     let url = format!("{}/v4/workspaces/current", resolve_one_base_url(config));
     let response = client
         .get(&url)
-        .header(AUTHORIZATION, format!("Bearer {}", token))
+        .header(AUTHORIZATION, bearer_authorization_value(&token))
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .with_context(|| format!("workspace preflight failed for {surface} {operation}"))?;
@@ -2128,7 +2152,48 @@ fn verify_workspace_identity(
     Ok(())
 }
 
+const ACCESS_TOKEN_REFRESH_SKEW_SECONDS: u64 = 30;
+
+fn one_access_token_needs_refresh(config: &Config) -> bool {
+    let Some(one) = config.alteryx_one.as_ref() else {
+        return false;
+    };
+    if one.auth_mode == ayx_core::profile::AuthMode::ServicePrincipal
+        || one.resolved_access_token().is_none()
+    {
+        return false;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map_or(0, |duration| duration.as_secs());
+    let deadline = now.saturating_add(ACCESS_TOKEN_REFRESH_SKEW_SECONDS);
+    if let Some(exp) = decode_jwt_claims(one.resolved_access_token().unwrap_or(""))
+        .and_then(|claims| claims.get("exp").and_then(Value::as_u64))
+    {
+        return exp <= deadline;
+    }
+    one.resolved_access_token_expires_at()
+        .is_some_and(|expires_at| expires_at <= deadline)
+}
+
 pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<String> {
+    Ok(refresh_one_tokens(config, client)?.access_token)
+}
+
+/// The result of a One token-endpoint exchange. The access token is kept raw;
+/// callers add the Authorization scheme when constructing an API request.
+/// This type intentionally has no `Debug` implementation.
+pub struct RefreshedOneTokens {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_in: Option<u64>,
+    pub token_type: String,
+}
+
+/// Exchange the configured refresh token and preserve any replacement refresh
+/// token returned by the provider. Persistence belongs to the CLI/core layer.
+pub fn refresh_one_tokens(config: &Config, client: &Client) -> Result<RefreshedOneTokens> {
     validate_active_credential_bindings(config)?;
     let one = config
         .alteryx_one
@@ -2197,7 +2262,37 @@ pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<Stri
             response_body_preview(&text)
         )
     })?;
-    format_refresh_token_response(&token_json)
+    parse_one_token_response(&token_json)
+}
+
+/// Refresh a token for an API request and persist a provider-issued
+/// replacement when the credential is backed by a canonical keyring entry.
+/// Environment, inline, and legacy references are intentionally not mutated.
+fn refresh_one_access_token_for_request(config: &Config, client: &Client) -> Result<String> {
+    let store = ayx_core::one_credential_store::OneCredentialStore::from_config(config)
+        .map_err(|err| anyhow::anyhow!(err))?;
+    if let Some(store) = store {
+        let lease = store
+            .acquire_refresh()
+            .map_err(|err| anyhow::anyhow!(err))?;
+        let refreshed = refresh_one_tokens(lease.config(), client)?;
+        lease
+            .commit_rotation(&refreshed.access_token, refreshed.refresh_token.as_deref())
+            .map_err(|err| {
+                anyhow::anyhow!(
+                    "refresh exchange succeeded but local credential persistence failed; the provider may have rotated the refresh token, so do not retry this exchange blindly: {err}"
+                )
+            })?;
+        return Ok(refreshed.access_token);
+    }
+
+    let refreshed = refresh_one_tokens(config, client)?;
+    if refreshed.refresh_token.is_some() {
+        bail!(
+            "refresh token rotation cannot be persisted for this credential source; import the OAuth token into secure keyring storage with `ayx one login --auth-method oauth-refresh --refresh-token-env NAME --secret-policy secure`"
+        );
+    }
+    Ok(refreshed.access_token)
 }
 
 fn auth_binding_for_workspace(
@@ -2443,17 +2538,41 @@ fn service_principal_access_token(config: &Config, client: &Client) -> Result<St
     )
 }
 
-pub fn format_refresh_token_response(token_json: &Value) -> Result<String> {
+pub fn parse_one_token_response(token_json: &Value) -> Result<RefreshedOneTokens> {
     let token_type = token_json
         .get("token_type")
         .and_then(Value::as_str)
-        .unwrap_or("Bearer");
+        .unwrap_or("Bearer")
+        .trim();
+    if !token_type.eq_ignore_ascii_case("bearer") {
+        bail!("token response used unsupported token type")
+    }
     let access_token = token_json
         .get("access_token")
         .and_then(Value::as_str)
-        .ok_or_else(|| anyhow::anyhow!("refresh token response missing access_token"))?;
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("token response missing access_token"))?;
+    let refresh_token = token_json
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    Ok(RefreshedOneTokens {
+        access_token: access_token.to_string(),
+        refresh_token,
+        expires_in: token_json.get("expires_in").and_then(Value::as_u64),
+        token_type: "Bearer".to_string(),
+    })
+}
 
-    Ok(format!("{token_type} {access_token}"))
+/// Compatibility projection for callers that need only the raw access token.
+pub fn format_refresh_token_response(token_json: &Value) -> Result<String> {
+    // Callers add the Authorization scheme when constructing an API request.
+    // Keep this helper's result raw; returning "Bearer ..." would produce
+    // "Bearer Bearer ..." on the wire.
+    Ok(parse_one_token_response(token_json)?.access_token)
 }
 
 // ---------------------------------------------------------------------------
@@ -2889,7 +3008,52 @@ mongo:
             "access_token": "fresh-token"
         }))
         .expect("response should format");
-        assert_eq!(token, "Bearer fresh-token");
+        assert_eq!(token, "fresh-token");
+    }
+
+    #[test]
+    fn token_response_preserves_rotation_metadata_without_debug_secrets() {
+        let refreshed = parse_one_token_response(&serde_json::json!({
+            "token_type": "bearer",
+            "access_token": " fresh-access ",
+            "refresh_token": " fresh-refresh ",
+            "expires_in": 300
+        }))
+        .expect("response should parse");
+
+        assert_eq!(refreshed.access_token, "fresh-access");
+        assert_eq!(refreshed.refresh_token.as_deref(), Some("fresh-refresh"));
+        assert_eq!(refreshed.expires_in, Some(300));
+        assert_eq!(refreshed.token_type, "Bearer");
+    }
+
+    #[test]
+    fn token_response_rejects_non_bearer_tokens() {
+        let error = match parse_one_token_response(&serde_json::json!({
+            "token_type": "mac",
+            "access_token": "fresh-access"
+        })) {
+            Ok(_) => panic!("unsupported token types must fail closed"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("unsupported token type"));
+    }
+
+    #[test]
+    fn bearer_authorization_value_normalizes_persisted_scheme() {
+        assert_eq!(
+            bearer_authorization_value("fresh-token"),
+            "Bearer fresh-token"
+        );
+        assert_eq!(
+            bearer_authorization_value("Bearer fresh-token"),
+            "Bearer fresh-token"
+        );
+        assert_eq!(
+            bearer_authorization_value("bearer fresh-token"),
+            "Bearer fresh-token"
+        );
     }
 
     // Characterization tests for the CSPRNG helpers. They lock the observable
@@ -3001,7 +3165,7 @@ mongo:
         let token = refresh_one_access_token(&config, &client).expect("refresh succeeds");
 
         mock.assert();
-        assert_eq!(token, "Bearer fresh");
+        assert_eq!(token, "fresh");
     }
 
     #[test]
@@ -3052,6 +3216,8 @@ mongo:
                 access_token_ref: None,
                 refresh_token: Some("workspace-refresh".to_string()),
                 refresh_token_ref: None,
+                credential_kind: None,
+                access_token_expires_at: None,
                 workspace_password: None,
                 workspace_password_ref: None,
                 oauth_client_id: Some("workspace-client".to_string()),
@@ -3095,7 +3261,7 @@ mongo:
         let token = refresh_one_access_token(&config, &client).expect("workspace refresh succeeds");
 
         mock.assert();
-        assert_eq!(token, "Bearer fresh");
+        assert_eq!(token, "fresh");
     }
 
     #[test]
@@ -3123,7 +3289,7 @@ mongo:
         .expect("client credentials succeeds");
 
         mock.assert();
-        assert_eq!(token, "Bearer fresh-sp");
+        assert_eq!(token, "fresh-sp");
     }
 
     #[test]
@@ -3580,7 +3746,7 @@ mongo:
         let token = resolve_one_access_token(&config, &client).expect("service principal token");
 
         mock.assert();
-        assert_eq!(token, "Bearer fresh-sp");
+        assert_eq!(token, "fresh-sp");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use ayx_core::envelope::Envelope;
 use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::{
     OneRoleCommand,
@@ -66,7 +66,7 @@ pub(crate) fn execute(
                     ),
                 )?;
             }
-            let payload = json!({"items": [subject_id]});
+            let payload = role_assignment_body(&subject_id);
             one_api_live_request_with_body(
                 &config,
                 "role",
@@ -104,4 +104,25 @@ pub(crate) fn execute(
             )?
         }
     })
+}
+
+/// The live authorization API expects the request body itself to be an array
+/// of subject ids. It does not accept the otherwise common `{ "items": [...] }`
+/// pagination envelope shape.
+fn role_assignment_body(subject_id: &str) -> Value {
+    json!([subject_id])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::role_assignment_body;
+    use serde_json::json;
+
+    #[test]
+    fn assignment_body_is_a_bare_subject_id_array() {
+        assert_eq!(
+            role_assignment_body("01CANARYGROUP"),
+            json!(["01CANARYGROUP"])
+        );
+    }
 }

@@ -39,6 +39,30 @@ fn config_home_without_client_id() -> TempDir {
     temp
 }
 
+fn config_home_with_oauth_policy_without_refresh() -> TempDir {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let profiles = temp.path().join("profiles");
+    fs::create_dir_all(&profiles).expect("profiles dir");
+    fs::write(
+        profiles.join("gate.yaml"),
+        "profile_name: gate\n\
+         alteryx_one:\n\
+           account_email: user@example.com\n\
+           base_url: https://us1.alteryxcloud.com\n\
+           oauth_client_id: client\n\
+           active_workspace_id: '42'\n\
+           workspace_credentials:\n\
+             '42':\n\
+               workspace_id: '42'\n\
+               workspace_gid: gid-42\n\
+               workspace_name: test\n\
+               credential_kind: oauth_refresh\n\
+               access_token: expired\n",
+    )
+    .expect("write profile");
+    temp
+}
+
 /// Run `ayx one login --profile gate <extra>` against the
 /// isolated home. Returns (success, combined stdout+stderr). stdin is closed so
 /// the default OTP path can never block waiting for a passcode — it must bail
@@ -158,6 +182,25 @@ fn device_login_still_requires_oauth_client_id() {
     assert!(
         out.contains("oauth_client_id is required for the --device flow"),
         "the --device flow must still require oauth_client_id; output:\n{out}"
+    );
+}
+
+#[test]
+fn configured_oauth_method_never_falls_back_to_otp() {
+    let home = config_home_with_oauth_policy_without_refresh();
+    let (ok, out) = run_login(&home, &["--no-input", "--auth-method", "oauth-refresh"]);
+    assert!(
+        !ok,
+        "OAuth login without a refresh token must fail closed\noutput:\n{out}"
+    );
+    assert!(
+        out.contains("OAuth refresh authentication is selected")
+            && out.contains("--refresh-token-env NAME"),
+        "the missing OAuth credential should be actionable; output:\n{out}"
+    );
+    assert!(
+        !out.contains("Sending one-time passcode"),
+        "configured OAuth auth must never silently send an OTP; output:\n{out}"
     );
 }
 

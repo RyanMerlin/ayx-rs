@@ -55,6 +55,23 @@ default. If an internal rollout needs the compatibility path, use
 does not silently retry an ambiguous OTP or PAT operation through Legacy;
 preserve the profile and choose the rollback explicitly.
 
+For unattended CLI, CI, or agent use, prefer an OAuth2.0 API access/refresh
+pair. Import it once through a secret-safe path, for example:
+
+```bash
+ayx one login --auth-method oauth-refresh \
+  --refresh-token-env AYX_ONE_API_REFRESH_TOKEN
+```
+
+or pipe it through `--refresh-token-stdin`. Secure persistence stores the pair
+in the operating-system keyring, refreshes short-lived access tokens, and never
+silently falls back to OTP. See the [site authentication guide](site/src/content/docs/connecting.md)
+for the full setup and cross-platform instructions.
+
+If you are new to the CLI, the beginner path is simply: run `ayx onboard`,
+answer **y**, enter the emailed code and workspace password, then run
+`ayx one workspace current`.
+
 Login defaults are designed for the normal interactive case: the profile is
 selected by `--profile`, then `AYX_PROFILE`, then the active profile pointer,
 then `default`; the authentication rollout is Wizard; and credential
@@ -121,7 +138,7 @@ Minimum expectations:
 - `profile_name`
 - `alteryx_one.base_url` for the One API host
 - `alteryx_one.account_email` when using ownership-transfer and related automation
-- `alteryx_one.oauth_client_id` and `alteryx_one.token_endpoint_url` for One OAuth token posture
+- `alteryx_one.oauth_client_id` and `alteryx_one.token_endpoint_url` for One OAuth refresh, browser, or device token posture
 - `alteryx_one.access_token` when using One API commands
 - `alteryx_one.refresh_token` when you want to keep the token pair together locally
 - `alteryx_one.client_secret` or `alteryx_one.client_secret_ref` when you use service-principal

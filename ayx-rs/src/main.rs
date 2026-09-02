@@ -1737,8 +1737,10 @@ pub(crate) enum OneCommand {
     /// With --browser: PKCE authorization-code flow — opens your default
     /// browser and captures tokens via a local redirect.
     ///
-    /// With --refresh-token / --access-token: store tokens you already have
-    /// (for scripted / CI use).
+    /// With --auth-method oauth-refresh: use the workspace's OAuth API
+    /// access/refresh credential and never fall back to OTP.
+    /// With --auth-method email-otp: use the email OTP login flow.
+    /// With --refresh-token / --access-token: import tokens you already have.
     Login {
         #[arg(long)]
         profile: Option<String>,
@@ -1751,12 +1753,34 @@ pub(crate) enum OneCommand {
         /// Use device-code grant instead of email OTP.
         #[arg(long)]
         device: bool,
+        /// Select the user credential method: email-otp or oauth-refresh.
+        /// The setting is persisted on the selected workspace credential.
+        #[arg(long, value_name = "METHOD", value_parser = ["email-otp", "oauth-refresh"])]
+        auth_method: Option<String>,
         /// Refresh token to store and exchange (bypasses interactive flow).
-        #[arg(long)]
+        /// Prefer --refresh-token-env or --refresh-token-stdin so the secret
+        /// is not exposed in process arguments or shell history.
+        #[arg(long, conflicts_with_all = ["refresh_token_env", "refresh_token_stdin", "access_token", "access_token_env", "access_token_stdin"])]
         refresh_token: Option<String>,
+        /// Read a refresh token from the named environment variable without
+        /// placing the secret in command arguments or shell history.
+        #[arg(long, value_name = "NAME", conflicts_with_all = ["refresh_token", "refresh_token_stdin", "access_token", "access_token_env", "access_token_stdin"])]
+        refresh_token_env: Option<String>,
+        /// Read a refresh token from stdin without placing it in command
+        /// arguments or shell history.
+        #[arg(long, conflicts_with_all = ["refresh_token", "refresh_token_env", "access_token", "access_token_env", "access_token_stdin"])]
+        refresh_token_stdin: bool,
         /// Access token to store directly (no exchange; bypasses interactive flow).
-        #[arg(long)]
+        /// Prefer --access-token-env or --access-token-stdin so the secret is
+        /// not exposed in process arguments or shell history.
+        #[arg(long, conflicts_with_all = ["refresh_token", "refresh_token_env", "refresh_token_stdin", "access_token_env", "access_token_stdin"])]
         access_token: Option<String>,
+        /// Read an access token from the named environment variable.
+        #[arg(long, value_name = "NAME", conflicts_with_all = ["refresh_token", "refresh_token_env", "refresh_token_stdin", "access_token", "access_token_stdin"])]
+        access_token_env: Option<String>,
+        /// Read an access token from stdin.
+        #[arg(long, conflicts_with_all = ["refresh_token", "refresh_token_env", "refresh_token_stdin", "access_token", "access_token_env"])]
+        access_token_stdin: bool,
         /// Token endpoint URL (defaults to the profile's configured endpoint).
         #[arg(long)]
         token_endpoint: Option<String>,
@@ -5655,6 +5679,10 @@ pub(crate) fn one_platform_auth_status_envelope(config: &Config) -> Result<Envel
     let access_token = one.resolved_access_token();
     let refresh_token = one.resolved_refresh_token();
     let oauth_client_id = one.resolved_oauth_client_id();
+    let credential_kind = one
+        .resolved_credential_kind()
+        .map(ayx_core::profile::OneCredentialKind::as_str);
+    let access_token_expires_at = one.resolved_access_token_expires_at();
     let workspace_access_token_present =
         one.active_workspace_credential().is_some_and(|credential| {
             credential
@@ -5699,6 +5727,8 @@ pub(crate) fn one_platform_auth_status_envelope(config: &Config) -> Result<Envel
             "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
             "access_token_present": access_token.is_some(),
             "refresh_token_present": refresh_token.is_some(),
+            "credential_kind": credential_kind,
+            "access_token_expires_at": access_token_expires_at,
             "observability": api_logging,
             "token_source": if workspace_access_token_present {
                 "workspace"
@@ -5730,6 +5760,10 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
     let access_token = one.resolved_access_token();
     let refresh_token = one.resolved_refresh_token();
     let oauth_client_id = one.resolved_oauth_client_id();
+    let credential_kind = one
+        .resolved_credential_kind()
+        .map(ayx_core::profile::OneCredentialKind::as_str);
+    let access_token_expires_at = one.resolved_access_token_expires_at();
     let has_token = access_token.is_some();
     let has_refresh_token = refresh_token.is_some();
     if !has_token {
@@ -5745,6 +5779,8 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                 "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
                 "access_token_present": false,
                 "refresh_token_present": has_refresh_token,
+                "credential_kind": credential_kind,
+                "access_token_expires_at": access_token_expires_at,
                 "diagnosis": "alteryx_one.access_token is missing",
                 "recommendations": [
                     "Set AYX_ONE_BASE_URL to the API host, not the auth issuer",
@@ -5779,6 +5815,8 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                     "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
                     "access_token_present": true,
                     "refresh_token_present": has_refresh_token,
+                    "credential_kind": credential_kind,
+                    "access_token_expires_at": access_token_expires_at,
                     "access_token_claims": access_token_claim_summary(access_token),
                     "credential_health": auth_token_health(access_token),
                     "diagnosis": "token present but workspace probe failed",
@@ -5808,6 +5846,8 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
                 "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
                 "access_token_present": true,
                 "refresh_token_present": has_refresh_token,
+                "credential_kind": credential_kind,
+                "access_token_expires_at": access_token_expires_at,
                 "access_token_claims": access_token_claim_summary(access_token),
                 "credential_health": auth_token_health(access_token),
                 "diagnosis": "token present but workspace probe was not executed",
@@ -5831,6 +5871,8 @@ pub(crate) fn one_platform_auth_diagnose_envelope(config: &Config) -> Result<Env
             "token_endpoint_url": one.effective_token_endpoint_url_for_workspace(workspace_id),
             "access_token_present": true,
             "refresh_token_present": has_refresh_token,
+            "credential_kind": credential_kind,
+            "access_token_expires_at": access_token_expires_at,
             "access_token_claims": access_token_claim_summary(access_token),
             "credential_health": auth_token_health(access_token),
             "diagnosis": "token present and workspace probe executed",

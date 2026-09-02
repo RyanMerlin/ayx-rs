@@ -17,11 +17,19 @@ ayx doctor network  # just connectivity
 
 ## When an Alteryx One command fails
 
-If a One command fails, it's almost always the **token**, not the endpoint — the `/v4` API is reached directly, and an expired or stale bearer token is the usual cause. Refresh your token with `ayx one login`, then confirm:
+If a One command fails, it's often the **credential**, not the endpoint — the `/v4` API is reached directly, and an expired or stale bearer token is a common cause. First inspect the selected method without printing secrets:
 
 ```bash
+ayx one auth status
+ayx one auth diagnose
 ayx doctor auth
 ```
+
+For an email-OTP credential, run `ayx one login` interactively. For an
+`oauth_refresh` credential, the CLI normally refreshes automatically. If the
+refresh token was revoked or expired, import a newly issued pair with
+`--auth-method oauth-refresh` and `--refresh-token-env NAME` or
+`--refresh-token-stdin`; it will not silently fall back to OTP.
 
 ## Where to look things up
 
