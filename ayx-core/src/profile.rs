@@ -3015,7 +3015,6 @@ fn load_workspace_config_from_resolved(path: &Path) -> Result<WorkspaceConfig, P
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     use std::sync::{Mutex, OnceLock};
 
     static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -3216,8 +3215,11 @@ alteryx_one:
 
     #[test]
     fn loads_active_workspace_environment() {
-        let temp = tempfile::NamedTempFile::new().unwrap();
-        let mut file = temp.reopen().unwrap();
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _cwd = CurrentDirGuard::set(temp.path());
+        let _config_home = EnvGuard::set("AYX_CONFIG_HOME", temp.path().to_str().unwrap());
+        let profile_path = temp.path().join("environments.yaml");
         let workspace = serde_yaml::to_string(&serde_yaml::Value::Mapping(
             [("workspace_name", "lab"), ("active_environment", "dev")]
                 .into_iter()
@@ -3244,9 +3246,9 @@ alteryx_one:
                 .collect(),
         ))
         .unwrap();
-        file.write_all(workspace.as_bytes()).unwrap();
+        fs::write(&profile_path, workspace).unwrap();
 
-        let cfg = Config::load_from_path_with_environment(temp.path(), None).unwrap();
+        let cfg = Config::load_from_path_with_environment(&profile_path, None).unwrap();
         assert_eq!(cfg.profile_name, "dev");
         assert_eq!(
             cfg.sqlserver
@@ -3263,8 +3265,11 @@ alteryx_one:
 
     #[test]
     fn loads_named_workspace_environment_override() {
-        let temp = tempfile::NamedTempFile::new().unwrap();
-        let mut file = temp.reopen().unwrap();
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _cwd = CurrentDirGuard::set(temp.path());
+        let _config_home = EnvGuard::set("AYX_CONFIG_HOME", temp.path().to_str().unwrap());
+        let profile_path = temp.path().join("environments.yaml");
         let workspace = serde_yaml::to_string(&serde_yaml::Value::Mapping(
             [("workspace_name", "lab"), ("active_environment", "dev")]
                 .into_iter()
@@ -3291,9 +3296,9 @@ alteryx_one:
                 .collect(),
         ))
         .unwrap();
-        file.write_all(workspace.as_bytes()).unwrap();
+        fs::write(&profile_path, workspace).unwrap();
 
-        let cfg = Config::load_from_path_with_environment(temp.path(), Some("prod")).unwrap();
+        let cfg = Config::load_from_path_with_environment(&profile_path, Some("prod")).unwrap();
         assert_eq!(cfg.profile_name, "prod");
         assert_eq!(
             cfg.sqlserver
@@ -4280,7 +4285,11 @@ sqlserver:
 
     #[test]
     fn loads_canonical_server_shape() {
-        let temp = tempfile::NamedTempFile::new().unwrap();
+        let _lock = test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _cwd = CurrentDirGuard::set(temp.path());
+        let _config_home = EnvGuard::set("AYX_CONFIG_HOME", temp.path().to_str().unwrap());
+        let profile_path = temp.path().join("profile.yaml");
         let canonical = r#"
 profile_name: canonical
 alteryx_one:
@@ -4301,8 +4310,8 @@ server:
       embedded:
         runtime_settings_path: RuntimeSettings.xml
 "#;
-        std::fs::write(temp.path(), canonical).unwrap();
-        let cfg = Config::load_from_path(temp.path()).unwrap();
+        std::fs::write(&profile_path, canonical).unwrap();
+        let cfg = Config::load_from_path(&profile_path).unwrap();
         assert_eq!(cfg.profile_name, "canonical");
         assert_eq!(cfg.server.as_ref().unwrap().webapi_url, "http://localhost");
         assert_eq!(

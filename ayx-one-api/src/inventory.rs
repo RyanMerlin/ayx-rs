@@ -250,7 +250,9 @@ const PLAN_ENDPOINTS: &[EndpointSpec] = &[
 /// exposes and is absent from the published `/v4/open-api-spec`, so `one api coverage`
 /// will report it as stale — correctly, since the spec does not describe it.
 /// There is no `GET /v4/workflows/{id}` and no `/v4/workflows/count`.
-/// All rows live-verified 2026-07-26.
+/// Read and management rows live-verified 2026-07-26 through 2026-09-01;
+/// execution and cancellation were verified against the Workflow Service on
+/// 2026-09-02, with cancellation capability-blocked on the target workspace.
 const WORKFLOW_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
@@ -287,6 +289,16 @@ const WORKFLOW_ENDPOINTS: &[EndpointSpec] = &[
         method: "GET",
         path: "/svc-workflow/api/v1/tools",
         commands: &["one workflows tools"],
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/svc-workflow/api/v1/workflows/{id}/run",
+        commands: &["one workflows run"],
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/svc-workflow/api/v1/jobs/{id}/cancel",
+        commands: &["one workflows cancel"],
     },
     EndpointSpec {
         method: "POST",

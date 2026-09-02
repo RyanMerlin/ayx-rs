@@ -32,7 +32,7 @@ All mutating commands are dry-run by default. Nothing changes on the server unti
 
 | Area | Command prefix | What you do |
 |---|---|---|
-| Workflows | `ayx one workflows` | List, inspect, copy, share, and delete cloud-native canvas workflows |
+| Workflows | `ayx one workflows` | List, inspect, run, cancel, copy, share, and delete cloud-native canvas workflows |
 | Connections | `ayx one connections` | Manage data connections and connector metadata |
 | Datasets | `ayx one datasets` | Browse the One dataset library and inspect dataset details |
 | Job groups | `ayx one job-groups` | Run, cancel, inspect, and retrieve results for job groups |

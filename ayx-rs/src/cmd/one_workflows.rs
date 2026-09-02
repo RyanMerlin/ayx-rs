@@ -36,6 +36,8 @@ use crate::{
 /// richer `assets` view lives on the workflow service itself.
 const WORKFLOWS_LIST_ENDPOINT: &str = "/v4/workflows";
 const ASSETS_LIST_ENDPOINT: &str = "/svc-workflow/api/v1/assets";
+const WORKFLOW_RUN_ENDPOINT: &str = "/svc-workflow/api/v1/workflows/{id}/run";
+const WORKFLOW_CANCEL_ENDPOINT: &str = "/svc-workflow/api/v1/jobs/{id}/cancel";
 
 /// Why a synthesized leaf is synthesized. Emitted as `detail_source` so an agent
 /// parsing the envelope can distinguish this from a real server-side route.
@@ -643,6 +645,52 @@ pub(crate) fn execute(
                 None,
             )?
         }
+        OneWorkflowsCommand::Run { profile, id, body } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let payload = body.map(|path| load_payload(&path)).transpose()?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::destructive_action_message(
+                        "queue a run for",
+                        &format!("cloud-native workflow '{id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            one_api_live_request_with_body(
+                &config,
+                "workflow",
+                "run",
+                "POST",
+                WORKFLOW_RUN_ENDPOINT,
+                true,
+                &[("id", id.as_str())],
+                payload,
+            )?
+        }
+        OneWorkflowsCommand::Cancel { profile, run_id } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::destructive_action_message(
+                        "cancel",
+                        &format!("cloud-native workflow run '{run_id}'"),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            one_api_live_request(
+                &config,
+                "workflow",
+                "cancel",
+                "POST",
+                WORKFLOW_CANCEL_ENDPOINT,
+                true,
+                &[("id", run_id.as_str())],
+            )?
+        }
         OneWorkflowsCommand::Tools { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request_with_body(
@@ -863,8 +911,9 @@ fn resolve_workflow_version(config: &ayx_core::profile::Config, id: &str) -> Res
 #[cfg(test)]
 mod tests {
     use super::{
-        add_workflow_completeness, enrich_workflows_with_governance, find_workflow_asset,
-        resolve_workflow_detail, synthesize_workflow_count,
+        WORKFLOW_CANCEL_ENDPOINT, WORKFLOW_RUN_ENDPOINT, add_workflow_completeness,
+        enrich_workflows_with_governance, find_workflow_asset, resolve_workflow_detail,
+        synthesize_workflow_count,
     };
     use ayx_core::envelope::{Envelope, ErrorCode};
     use serde_json::json;
@@ -889,6 +938,19 @@ mod tests {
     fn workflow_lookup_tolerates_items_without_an_id() {
         let items = vec![json!({ "name": "no id here" }), json!("not even an object")];
         assert!(find_workflow_asset(&items, "x").is_none());
+    }
+
+    #[test]
+    fn execution_controls_stay_on_the_cloud_native_workflow_service() {
+        assert_eq!(
+            WORKFLOW_RUN_ENDPOINT,
+            "/svc-workflow/api/v1/workflows/{id}/run"
+        );
+        assert_eq!(
+            WORKFLOW_CANCEL_ENDPOINT,
+            "/svc-workflow/api/v1/jobs/{id}/cancel"
+        );
+        assert!(!WORKFLOW_CANCEL_ENDPOINT.contains("/v4/jobGroups"));
     }
 
     /// The bug this guards against: `one_api_list_request` failing (404/403/500/

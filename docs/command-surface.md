@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-02 19:48:11 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-02 20:36:46 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 384
+- Commands: 386
 - Capabilities: 6
 
 ## Commands
@@ -291,8 +291,9 @@ cargo run -q -p xtask -- refresh-command-surface
 | one webhook-flow-tasks detail | `one/webhook-flow-tasks/detail` | read-only | no | Inspect a webhook flow task |
 | one webhook-flow-tasks test | `one/webhook-flow-tasks/test` | mutating | yes | Send a test webhook from JSON payload |
 | one whoami | `one/whoami` | read-only | no | Show the current One user profile |
-| one workflows | `one/workflows` | read-only | no | Alteryx One cloud-native workflows — list, inspect, copy, share, and delete |
+| one workflows | `one/workflows` | read-only | no | Alteryx One cloud-native workflows — inspect, run, cancel, copy, share, and delete |
 | one workflows assets | `one/workflows/assets` | read-only | no | List workflow assets with the richer svc-workflow projection |
+| one workflows cancel | `one/workflows/cancel` | mutating | yes | Cancel a queued or running cloud-native workflow run |
 | one workflows copy | `one/workflows/copy` | mutating | yes | Duplicate a cloud-native workflow |
 | one workflows count | `one/workflows/count` | read-only | no | Count cloud-native workflows in the workspace |
 | one workflows delete | `one/workflows/delete` | mutating | yes | Delete a cloud-native workflow. Irreversible — no known restore/trash endpoint exists |
@@ -300,6 +301,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one workflows detail | `one/workflows/detail` | read-only | no | Inspect one cloud-native workflow |
 | one workflows engines | `one/workflows/engines` | read-only | no | Show which execution engines a workflow can run on |
 | one workflows list | `one/workflows/list` | read-only | no | List Alteryx One cloud-native workflows |
+| one workflows run | `one/workflows/run` | mutating | yes | Queue a cloud-native workflow run |
 | one workflows share | `one/workflows/share` | mutating | yes | Share a cloud-native workflow with people or groups |
 | one workflows tools | `one/workflows/tools` | read-only | no | List the tools available to cloud-native workflows |
 | one workspace | `one/workspace` | unclassified |  | Alteryx One workspace inspection and administration |

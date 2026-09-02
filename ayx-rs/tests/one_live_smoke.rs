@@ -2382,6 +2382,87 @@ fn one_workflows_detail_not_found_live() {
     panic!("expected an unknown workflow id to fail\nstdout:\n{stdout}\nstderr:\n{stderr}");
 }
 
+/// Workflow execution is mutating, so the default command must stop at the
+/// CLI apply gate and show the real cloud-native run route without contacting
+/// the provider.
+#[test]
+fn one_workflows_run_dry_run_shape_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(workflow_id) = require_live_workflow_id(&live) else {
+        return;
+    };
+
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json-full",
+            "one",
+            "workflows",
+            "run",
+            &workflow_id,
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: one workflows run {workflow_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"workflow\"");
+    assert_contains(&stdout, "\"operation\": \"run\"");
+    assert_contains(
+        &stdout,
+        "\"endpoint_template\": \"/svc-workflow/api/v1/workflows/{id}/run\"",
+    );
+    assert_contains(&stdout, "\"mutating\": true");
+    assert_contains(&stdout, "\"dry_run\": true");
+}
+
+/// Cancellation accepts the provider job id returned by `run`, not a workflow
+/// definition ULID, and is dry-run by default.
+#[test]
+fn one_workflows_cancel_dry_run_shape_live() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let (success, stdout, stderr) = run_ayx_result(
+        &[
+            "--output",
+            "json-full",
+            "one",
+            "workflows",
+            "cancel",
+            "123456789",
+        ],
+        &live,
+    );
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!("command failed: one workflows cancel\nstdout:\n{stdout}\nstderr:\n{stderr}");
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"workflow\"");
+    assert_contains(&stdout, "\"operation\": \"cancel\"");
+    assert_contains(
+        &stdout,
+        "\"endpoint_template\": \"/svc-workflow/api/v1/jobs/{id}/cancel\"",
+    );
+    assert_contains(&stdout, "\"mutating\": true");
+    assert_contains(&stdout, "\"dry_run\": true");
+}
+
 /// `copy` is mutating, so without --apply it must dry-run. Also proves --version
 /// is resolved to the workflow's current version before the gate, so the body
 /// shown in would_send is exactly what --apply would send.

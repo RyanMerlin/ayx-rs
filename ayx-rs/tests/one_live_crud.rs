@@ -21,6 +21,13 @@ fn enabled() -> bool {
     )
 }
 
+fn workflow_run_enabled() -> bool {
+    matches!(
+        std::env::var("AYX_ONE_LIVE_WORKFLOW_RUN").ok().as_deref(),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+    )
+}
+
 fn run(args: &[String]) -> (bool, String, String) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_ayx"));
     command
@@ -149,6 +156,14 @@ fn id_from(value: &Value) -> Option<String> {
     id_from_object(object).or_else(|| object.get("tokenInfo").and_then(id_from_object))
 }
 
+fn job_id_from(value: &Value) -> Option<String> {
+    response(value).and_then(|object| match object.get("jobId") {
+        Some(Value::String(id)) => Some(id.clone()),
+        Some(Value::Number(id)) => Some(id.to_string()),
+        _ => None,
+    })
+}
+
 fn collection_ids(value: &Value) -> Vec<String> {
     collection_items(value)
         .into_iter()
@@ -183,6 +198,11 @@ fn is_scope_blocked(stdout: &str, stderr: &str) -> bool {
     text.contains("\"error_code\": \"permission_denied\"")
         || text.contains("\"status_code\": 403")
         || text.contains("AccessControlException")
+}
+
+fn is_wfs_jobs_disabled(stdout: &str, stderr: &str) -> bool {
+    let text = format!("{stdout}\n{stderr}");
+    text.contains("WFS Jobs is not enabled in this environment")
 }
 
 struct Cleanup {
@@ -557,7 +577,17 @@ fn one_live_crud_canary_matrix() {
     assert!(collection_ids(&tokens_after_create).contains(&token_id));
     live_read_silent(&["one", "token", "detail", &token_id], "token detail");
 
-    if let Some(source_id) = first_id(&workflows_before) {
+    let requested_workflow_id = std::env::var("AYX_ONE_LIVE_WORKFLOW_ID")
+        .ok()
+        .filter(|id| !id.trim().is_empty());
+    if workflow_run_enabled() {
+        assert!(
+            requested_workflow_id.is_some(),
+            "AYX_ONE_LIVE_WORKFLOW_RUN requires AYX_ONE_LIVE_WORKFLOW_ID"
+        );
+    }
+    let source_id = requested_workflow_id.or_else(|| first_id(&workflows_before));
+    if let Some(source_id) = source_id {
         live_read_silent(
             &["one", "workflows", "detail", &source_id],
             "workflow detail",
@@ -597,6 +627,37 @@ fn one_live_crud_canary_matrix() {
             &["one", "workflows", "detail", &copy_id],
             "workflow copy detail",
         );
+
+        if workflow_run_enabled() {
+            let dry = live_read(
+                &["one", "workflows", "run", &copy_id],
+                "workflow run dry-run",
+            );
+            assert_eq!(dry["data"]["dry_run"], true);
+            let (success, stdout, stderr) =
+                run(&with_apply(&["one", "workflows", "run", &copy_id]));
+            assert!(success, "workflow run failed: {stderr}");
+            let run_result = require_ok(&stdout, &stderr, "workflow run");
+            let run_id =
+                job_id_from(&run_result).expect("workflow run must return a provider jobId");
+
+            let dry = live_read(
+                &["one", "workflows", "cancel", &run_id],
+                "workflow cancellation dry-run",
+            );
+            assert_eq!(dry["data"]["dry_run"], true);
+            let (success, stdout, stderr) =
+                run(&with_apply(&["one", "workflows", "cancel", &run_id]));
+            if success {
+                require_ok(&stdout, &stderr, "workflow cancellation");
+            } else if is_wfs_jobs_disabled(&stdout, &stderr) {
+                eprintln!(
+                    "one_live_crud: workflow cancellation blocked_by_capability (WFS Jobs disabled)"
+                );
+            } else {
+                panic!("workflow cancellation failed: {stderr}");
+            }
+        }
     } else {
         eprintln!("one_live_crud: workflow copy blocked_by_fixture (no source workflow)");
     }

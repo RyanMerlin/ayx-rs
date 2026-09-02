@@ -287,6 +287,8 @@ fn workflows_descriptor(command: &OneWorkflowsCommand) -> OutputDescriptor {
         OneWorkflowsCommand::Count { .. } => detail("one.workflows.count"),
         OneWorkflowsCommand::Detail { .. } => detail("one.workflows.detail"),
         OneWorkflowsCommand::Engines { .. } => detail("one.workflows.engines"),
+        OneWorkflowsCommand::Run { .. } => result("one.workflows.run"),
+        OneWorkflowsCommand::Cancel { .. } => result("one.workflows.cancel"),
         OneWorkflowsCommand::Delete { .. } => result("one.workflows.delete"),
         OneWorkflowsCommand::Copy { .. } => result("one.workflows.copy"),
         OneWorkflowsCommand::Share { .. } => result("one.workflows.share"),

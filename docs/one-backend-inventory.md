@@ -79,6 +79,8 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `GET /svc-workflow/api/v1/assets/{id}/dependencies`
   - `GET /svc-workflow/api/v0/workflows/{id}/availableEngines`
   - `GET /svc-workflow/api/v1/tools`
+  - `POST /svc-workflow/api/v1/workflows/{id}/run`
+  - `POST /svc-workflow/api/v1/jobs/{id}/cancel` (run/job id)
   - `POST /svc-workflow/api/v2/workflows/{id}/duplicate`
   - `POST /svc-workflow/api/v2/workflows/{id}/share`
   - `DELETE /svc-workflow/api/v2/workflows/{id}`

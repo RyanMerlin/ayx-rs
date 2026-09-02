@@ -1905,8 +1905,8 @@ pub(crate) enum OneCommand {
         command: OneConnectionsCommand,
     },
     #[command(
-        about = "Alteryx One cloud-native workflows — list, inspect, copy, share, and delete",
-        long_about = "Alteryx One cloud-native workflows — list, inspect, copy, share, and delete.\n\n\
+        about = "Alteryx One cloud-native workflows — inspect, run, cancel, copy, share, and delete",
+        long_about = "Alteryx One cloud-native workflows — inspect, run, cancel, copy, share, and delete.\n\n\
                       These are the Alteryx One canvas workflows (the \
                       cloud-native/workflows/{id} web path), identified by ULIDs and served \
                       by /svc-workflow. They are NOT `one flows`, which is the Designer \
@@ -3186,6 +3186,27 @@ pub(crate) enum OneWorkflowsCommand {
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
+    },
+    /// Queue a cloud-native workflow run.
+    Run {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "WORKFLOW-ID")]
+        id: String,
+        /// Optional JSON body containing runtime overrides or input parameters.
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: Option<PathBuf>,
+    },
+    /// Cancel a queued or running cloud-native workflow run.
+    ///
+    /// Pass the run/job id returned by `workflows run`, not the workflow's
+    /// definition ULID. This uses the Workflow Service cancellation surface,
+    /// not the legacy /v4/jobGroups API.
+    Cancel {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "RUN-ID")]
+        run_id: String,
     },
     /// List the tools available to cloud-native workflows.
     Tools {

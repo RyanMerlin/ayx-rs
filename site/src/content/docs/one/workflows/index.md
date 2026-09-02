@@ -1,6 +1,6 @@
 ---
 title: Workflows
-description: List, count, inspect, copy, share, and delete Alteryx One cloud-native canvas workflows from the CLI.
+description: List, inspect, run, cancel, copy, share, and delete Alteryx One cloud-native canvas workflows from the CLI.
 sidebar:
   order: 1
 ---
@@ -12,7 +12,7 @@ Two other surfaces in this CLI are also called workflows or flows, and none of t
 - `ayx one flows` is the older Designer Cloud family at `/v4/flows`, keyed by integer ids. A workspace can hold dozens of cloud-native workflows while `ayx one flows list` returns zero items. See [Flows (DC Legacy)](/one/flows/).
 - `ayx designer workflow` operates on on-prem Designer/Server packages (`.yxmd`, `.yxzp`) — a different technology entirely, reached by migration rather than configuration. See [Workflows & packages](/server/workflow/).
 
-The workflows surface is for browsing and managing existing canvas workflows. Authoring arbitrary visual workflow logic is out of scope: no public endpoint accepts it.
+The workflows surface is for inspecting, running, and managing existing canvas workflows. Authoring arbitrary visual workflow logic is out of scope: no public endpoint accepts it.
 
 Mutating commands are dry-run by default — add `--apply` to commit.
 
@@ -27,6 +27,8 @@ Mutating commands are dry-run by default — add `--apply` to commit.
 | `ayx one workflows engines <id>` | `--profile`, `--env` | Show available execution engines — see [Inspect](/one/workflows/inspect/) |
 | `ayx one workflows tools` | `--env` | List tools available to cloud-native workflows — see [Inspect](/one/workflows/inspect/) |
 | `ayx one workflows assets` | `--profile`, `--env`, `--limit`, `--page-token`, `--all`, `--max-pages` | List the richer workflow-asset projection — see [Inspect](/one/workflows/inspect/) |
+| `ayx one workflows run <id>` | `--profile`, `--env`, `--body` | Queue a workflow run; returns the run/job id |
+| `ayx one workflows cancel <run-id>` | `--profile`, `--env` | Cancel a queued or running run using its returned run/job id |
 | `ayx one workflows copy <id>` | `--profile`, `--env`, `--name`, `--version` | Duplicate a workflow — see [Copy & share](/one/workflows/share/) |
 | `ayx one workflows share <id>` | `--profile`, `--env`, `--to-person`, `--to-group`, `--privilege`, `--include-dependencies`, `--send-email`, `--message`, `--body`, `--no-resolve-emails` | Share a workflow with people or groups — see [Copy & share](/one/workflows/share/) |
 | `ayx one workflows delete <id>` | `--profile`, `--env` | Permanently delete a workflow — see [Delete](/one/workflows/delete/) |
@@ -75,10 +77,33 @@ ayx --output json one workflows list --all | jq '.data.complete'
 ayx --output json one workflows count | jq '{count: .data.count, source: .data.count_source}'
 ```
 
+## Run and cancel
+
+Run a saved cloud-native workflow by its workflow ULID. The first command is a
+dry-run; add `--apply` only when you are ready to queue the job:
+
+```bash
+ayx --output json one workflows run <workflow-ulid>
+ayx --output json one workflows run <workflow-ulid> --apply --yes
+```
+
+The applied response contains the provider's run/job identifier. Save that
+identifier and use it to cancel the run if needed:
+
+```bash
+ayx --output json one workflows cancel <run-id>
+ayx --output json one workflows cancel <run-id> --apply --yes
+```
+
+`cancel` takes a run/job id, not the workflow definition ULID. Both commands
+use `/svc-workflow/api/v1`; they do not route through the legacy
+`/v4/jobGroups` or recipe APIs. If the workflow accepts runtime overrides or
+input parameters, pass the documented JSON body with `--body <file>` on `run`.
+
 ## Honesty notes
 
 - `count` is a client-side synthesis, not a real server route. Its envelope includes `count_source`. The same applies to `detail` — see [Inspect](/one/workflows/inspect/).
-- This command family manages existing cloud-native workflows; it does not author arbitrary canvas logic because no endpoint accepts it.
+- This command family runs and manages existing cloud-native workflows; it does not author arbitrary canvas logic because no endpoint accepts it.
 
 ## Known limitations
 
@@ -88,6 +113,7 @@ ayx --output json one workflows count | jq '{count: .data.count, source: .data.c
 ## Related
 
 - [Inspect](/one/workflows/inspect/) — detail, dependencies, engines, tools, and assets
+- [Run and cancel](/one/workflows/run/) — queue a workflow and stop its run safely
 - [Copy & share](/one/workflows/share/) — duplicate a workflow or grant access
 - [Delete](/one/workflows/delete/) — permanently remove a workflow; no restore endpoint exists
 - [Flows](/one/flows/) — the separate integer-id-keyed Designer Cloud `/v4/flows` family

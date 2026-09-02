@@ -146,6 +146,37 @@ must match it.
 
 Run the full suite, not a filtered subset — a partial run understates what's actually covered.
 
+### Cloud-native workflow run/cancel canary
+
+The opt-in workflow canary copies a known runnable cloud-native workflow, runs
+the disposable copy, attempts cancellation using the returned provider job id,
+and deletes the copy. It never sends a workflow ULID to the legacy
+`/v4/jobGroups` API. Set `AYX_ONE_LIVE_WORKFLOW_ID` to a workflow that is safe to
+run in the validation workspace:
+
+```bash
+export AYX_ONE_LIVE_CRUD=1
+export AYX_ONE_LIVE_WORKFLOW_RUN=1
+export AYX_ONE_LIVE_PROFILE=local-dev
+export AYX_ONE_LIVE_WORKFLOW_ID='<known-runnable-workflow-ulid>'
+cargo test -p ayx-rs --test one_live_crud --locked -- --nocapture
+```
+
+On PowerShell:
+
+```powershell
+$env:AYX_ONE_LIVE_CRUD = '1'
+$env:AYX_ONE_LIVE_WORKFLOW_RUN = '1'
+$env:AYX_ONE_LIVE_PROFILE = 'local-dev'
+$env:AYX_ONE_LIVE_WORKFLOW_ID = '<known-runnable-workflow-ulid>'
+cargo test -p ayx-rs --test one_live_crud --locked -- --nocapture
+```
+
+The test requires a successful dry-run before each mutation and cleans up the
+copied workflow by its captured id. If the provider reports `WFS Jobs is not
+enabled in this environment`, cancellation is recorded as a workspace
+capability block; the disposable workflow is still deleted.
+
 ```bash
 cd /path/to/ayx-rs
 set -a && source .env && set +a

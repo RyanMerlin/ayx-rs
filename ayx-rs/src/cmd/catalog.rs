@@ -2058,6 +2058,36 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         notes: &["Maps to GET /svc-workflow/api/v1/tools; workspace-scoped, not per-workflow."],
     },
     CatalogMetadata {
+        path: "one/workflows/run",
+        output: "one workflows run envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &[
+            "central runtime profile",
+            "server_api",
+            "workflow execute permission",
+        ],
+        notes: &[
+            "Maps to POST /svc-workflow/api/v1/workflows/{id}/run. Requires --apply and confirmation.",
+            "The applied response returns the provider jobId; use that id with `one workflows cancel`.",
+        ],
+    },
+    CatalogMetadata {
+        path: "one/workflows/cancel",
+        output: "one workflows cancel envelope",
+        safety: "mutating",
+        mutating: true,
+        prerequisites: &[
+            "central runtime profile",
+            "server_api",
+            "workflow run/job id",
+        ],
+        notes: &[
+            "Maps to POST /svc-workflow/api/v1/jobs/{id}/cancel. Requires --apply and confirmation.",
+            "Some workspaces may return WFS Jobs is not enabled in this environment.",
+        ],
+    },
+    CatalogMetadata {
         path: "one/workflows/copy",
         output: "one workflows copy envelope",
         safety: "mutating",
