@@ -261,6 +261,11 @@ ayx one auth status
 ayx one auth diagnose
 ayx one plans list
 ayx one scheduling list
+ayx headless doctor --server <path-to-alteryx-mcp-server.exe>
+ayx mcp tools list --server <path-to-alteryx-mcp-server.exe>
+ayx mcp gateway abilities --endpoint https://<gateway>/mcp
+ayx mcp gateway tools list --endpoint https://<gateway>/mcp --family workflow
+ayx mcp gateway tools list --endpoint https://<gateway>/mcp --family dataset
 ayx license api status
 ayx server diagnose startup --error "Failed to register Service URL"
 ayx server auth status
@@ -317,6 +322,8 @@ The repository includes a `docs/fixtures/RuntimeSettings.xml` fixture for offlin
 
 - `profile` — central profile registry and active profile management
 - `one` — Alteryx One platform branch and API surface
+- `headless` — local product-owned Headless MCP diagnostics
+- `mcp` — product MCP discovery/calls plus explicit authenticated Gateway discovery/calls
 - `tools` — cross-environment tools for `environments.yaml` source/target workflows (`compare` and the migration helpers are preview / not yet implemented)
 - `secret` — keyring secret inspection and maintenance
 - `designer` — Alteryx Designer / Server artifact tooling; `designer workflow` handles `.yxmd`, `.yxmc`, `.yxzp`, and `.yxdb`

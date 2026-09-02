@@ -4,6 +4,18 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.19.1 — 2026-09-02
+
+### Added
+
+- Added bounded local Headless MCP discovery and guarded raw tool calls through
+  `ayx headless doctor` and `ayx mcp`.
+- Added explicit Streamable HTTP MCP Gateway discovery and guarded calls through
+  `ayx mcp gateway`, including negotiated abilities and workflow/dataset/
+  analytic-app metadata-family views.
+- Added JSON/SSE response handling, pagination limits, session-header reuse,
+  redacted diagnostics, and mutation confirmation for the demo MCP clients.
+
 ## 0.18.1 — 2026-08-27
 
 This is the first published release of the 0.18 output-contract and

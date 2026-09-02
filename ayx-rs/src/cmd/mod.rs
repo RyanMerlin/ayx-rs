@@ -16,6 +16,7 @@ pub mod catalog;
 pub(crate) mod command_surface;
 pub mod confirm;
 pub mod discover;
+pub(crate) mod headless;
 pub mod mongo;
 pub mod one;
 mod one_api;

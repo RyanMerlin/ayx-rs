@@ -1,6 +1,6 @@
 # Headless MCP Client Contract
 
-Status: implementation design
+Status: demo client implemented; product contract integration remains active
 Date: 2026-08-28
 
 This is the contract between AYX-RS and any compatible product-owned Headless
@@ -15,7 +15,7 @@ internal interfaces similar to:
 ```text
 McpConnectionSpec
   Local { executable, args, cwd, env_allowlist }
-  Http  { endpoint, profile_ref }
+  Http  { endpoint, bearer_token_source }
 
 McpSession
   initialize(client_info) -> ServerInfo
@@ -37,7 +37,8 @@ The client must:
 - send `initialize` before any tool operation
 - negotiate a supported protocol version
 - record server name, version, capabilities, and transport
-- reject incompatible versions with an actionable diagnostic
+- report the negotiated version and leave product compatibility decisions to
+  the observed contract until supported product versions are published
 - send the protocol initialization notification before listing tools
 
 Initialization output is diagnostic metadata, not a credential or a product
@@ -94,13 +95,18 @@ ayx headless doctor
 ayx mcp tools list
 ayx mcp tools describe <tool>
 ayx mcp call <tool> --input <json-or-file>
+ayx mcp gateway abilities
+ayx mcp gateway tools list --family workflow
+ayx mcp gateway tools list --family dataset
+ayx mcp gateway call <tool> --input <json-or-file> --apply --yes
 ```
 
-JSON output must include transport, product-server provenance, negotiated
-protocol, tool name, backend, correlation ID, and redacted errors. Human output
-should explain the next corrective action, such as installing .NET 8 Desktop
-Runtime, restarting an agent after an AOA update, or selecting an explicit
-power-lane backend.
+JSON output should include transport, server provenance, negotiated protocol,
+tool name, backend, and redacted errors. Correlation IDs, schema validation,
+and product-specific corrective guidance remain follow-up contract work. Human
+output should explain the next corrective action, such as installing .NET 8
+Desktop Runtime, restarting an agent after an AOA update, or selecting an
+explicit power-lane backend.
 
 ## Contract fixtures and tests
 
@@ -117,5 +123,13 @@ These remain compatibility inputs rather than assumptions:
 - exact local executable discovery and supported launch arguments
 - published tool schemas for workflow creation, execution, and anchor data
 - whether product fast-follow organization/documentation tools are available
-- cloud Gateway endpoint/authentication and Streamable HTTP details
+- the product cloud Gateway endpoint, regional routing, authentication scope,
+  and published workflow/dataset/ability tool names
 - cancellation behavior and run-result artifact semantics
+
+The generic Gateway client uses an explicit `--endpoint` (or
+`AYX_MCP_GATEWAY_ENDPOINT`) and a bearer token from `--token-env` (or
+`AYX_MCP_GATEWAY_TOKEN`) / `--token-stdin`. It does not claim product feature
+availability until the Gateway reports the corresponding capabilities or tool
+metadata. `abilities` is therefore a discovery view, not a replacement for
+product entitlements or authorization.

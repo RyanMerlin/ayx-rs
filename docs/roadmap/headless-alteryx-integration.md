@@ -1,6 +1,6 @@
 # Headless Alteryx Integration
 
-Status: active — integration foundation documented; product MCP client next
+Status: active — demo-grade local and generic Gateway MCP discovery implemented
 
 This is the AYX-RS roadmap for integrating with Alteryx's product-owned
 Headless Alteryx MCP capabilities while keeping AYX-RS independent from the
@@ -64,7 +64,8 @@ signals and Orchestrator plans remain unresolved.
 
 ## Progress snapshot — 2026-09-02
 
-The initial AYX-RS integration foundation is complete and release-validated:
+The initial AYX-RS integration foundation is complete and release-validated;
+the demo client slice is now implemented in the working release candidate:
 
 - The accepted integration boundary, backend provenance model, credential
   separation, and non-proxying decision are recorded in ADR 0003.
@@ -81,10 +82,18 @@ The initial AYX-RS integration foundation is complete and release-validated:
 - The v0.19.0 release artifacts and the reusable cross-platform release
   workflow are in place. A follow-up binary rebuild is operationally routine
   once a feature slice passes its host canary and CI gates.
+- A bounded local STDIO MCP session now performs initialize, tool pagination,
+  schema discovery, guarded raw calls, safe child cleanup, and redacted error
+  handling through `ayx headless doctor` and `ayx mcp`.
+- A bounded Streamable HTTP MCP Gateway session now performs initialize,
+  session-header reuse, JSON/SSE response handling, tool discovery, workflow/
+  dataset/ability metadata-family filtering, and guarded raw calls through
+  `ayx mcp gateway`.
 
 This does not mean the product-owned Headless Alteryx MCP implementation is
-complete. The MCP client, product-server discovery, protocol session, and
-cloud Gateway remain future work below.
+complete. Product executable discovery/signature validation, stable tool
+fixtures, curated workflow/dataset facades, DesignerCore parity, and the
+published Gateway endpoint/authentication contract remain future work below.
 
 ## Current AYX-RS position
 
@@ -104,7 +113,8 @@ cloud Gateway remain future work below.
 
 ### Gaps that matter to Headless
 
-- No MCP client or STDIO/Streamable HTTP lifecycle implementation.
+- No secure product installation discovery, publisher/signature validation, or
+  version compatibility report for the local MCP executable.
 - No product MCP installation discovery, compatibility report, tool snapshot,
   agent configuration generator, or `alteryx-mcp-server.exe` integration.
 - No local Designer bridge/CoreCLR integration and no real local workflow run;
@@ -116,8 +126,10 @@ cloud Gateway remain future work below.
   configuration generation, workflow condensation).
 - No complete `alteryx_local.*` tool facade, including data-at-anchor and the
   Phase 1 fast-follow organization/documentation tools.
-- No cloud MCP Gateway client, solution-planning layer, semantic/lineage asset
-  search, ranking/trust selection, or cloud workflow authoring facade.
+- No product-specific Gateway endpoint/authentication profile, solution-planning
+  layer, semantic/lineage asset search, ranking/trust selection, or cloud
+  workflow authoring facade. The current Gateway client is deliberately
+  contract-generic and exposes observed tool metadata.
 - Dataset support is read-oriented; cloud-native workflow commands do not yet
   expose the product's build/run/repair lifecycle through MCP.
 - No MCP-specific lifecycle telemetry, provider/skill/session correlation, or
@@ -130,17 +142,15 @@ cloud Gateway remain future work below.
 The highest-value next increment is a local, read-only-to-controlled-mutation
 vertical slice rather than attempting every roadmap item in one release:
 
-1. Implement a bounded internal `McpSession` with STDIO JSON-RPC handshake,
-   tool listing, tool invocation, cancellation, timeout, and child cleanup.
-2. Add a fake-server protocol harness plus redacted contract fixtures, then
-   add secure AOA/product-server discovery and `ayx headless doctor`.
-3. Expose `ayx mcp tools list`, `describe`, and an explicit raw `call` path with
-   backend/provenance fields, result-size limits, redaction, and approval gates.
-4. Demonstrate one harmless product-owned local workflow path—inspect,
+1. Add secure AOA/product-server discovery, publisher/signature provenance,
+   compatibility fixtures, and cancellation behavior to the bounded session.
+2. Obtain redacted product and regional Gateway contracts, then add curated
+   workflow, dataset, and ability facades over observed tool schemas.
+3. Demonstrate one harmless product-owned local workflow path—inspect,
    validate, and either a fixture-backed mutation or an isolated run—while
    keeping direct XML/EngineCmd behavior visibly labeled as a separate backend.
-5. Run the Windows installed-host canary, then use the existing release matrix
-   to rebuild the binaries and publish a tagged internal release.
+4. Run the Windows installed-host canary and Gateway canary, then use the
+   existing release matrix to rebuild the binaries and publish the tagged demo.
 
 These are planning estimates, not release commitments:
 

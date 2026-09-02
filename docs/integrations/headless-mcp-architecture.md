@@ -133,4 +133,7 @@ clear explanation of the missing tool/schema.
 3. Read-only tools list/describe/call.
 4. Curated local workflow operations.
 5. Explicit XML/EngineCmd comparison and power-lane controls.
-6. Streamable HTTP client for the cloud Gateway.
+6. Streamable HTTP client for the cloud Gateway. The demo implementation now
+   covers initialize, session headers, JSON/SSE responses, tool pagination,
+   metadata-family discovery, and guarded raw calls; product endpoint and
+   curated workflow/dataset facades remain contract-dependent.

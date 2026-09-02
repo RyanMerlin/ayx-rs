@@ -36,6 +36,7 @@ use self_update::backends::github::Update as GitHubUpdate;
 
 mod capability;
 mod cmd;
+mod headless;
 mod onboard;
 mod output;
 mod render;
@@ -369,6 +370,8 @@ fn output_descriptor(command: &Command) -> output::OutputDescriptor {
         Command::Sqlserver { .. } => OutputDescriptor::new("sqlserver", ViewKind::Raw),
         Command::Designer { .. } => OutputDescriptor::new("designer", ViewKind::Raw),
         Command::Tools { .. } => OutputDescriptor::new("tools", ViewKind::Result),
+        Command::Headless { .. } => OutputDescriptor::new("headless", ViewKind::Diagnostic),
+        Command::Mcp { .. } => OutputDescriptor::new("mcp", ViewKind::Result),
         Command::Profile { .. } => OutputDescriptor::new("profile", ViewKind::Result),
         Command::Secret { .. } => OutputDescriptor::new("secret", ViewKind::Result),
         Command::License { .. } => OutputDescriptor::new("license", ViewKind::Raw),
@@ -390,6 +393,22 @@ enum Command {
     One {
         #[command(subcommand)]
         command: OneCommand,
+    },
+    #[command(
+        about = "Local product-owned Headless Alteryx diagnostics",
+        arg_required_else_help = true
+    )]
+    Headless {
+        #[command(subcommand)]
+        command: cmd::headless::HeadlessCommand,
+    },
+    #[command(
+        about = "Product-owned Model Context Protocol tools",
+        arg_required_else_help = true
+    )]
+    Mcp {
+        #[command(subcommand)]
+        command: cmd::headless::McpCommand,
     },
     #[command(
         about = "Cross-environment tools for environments.yaml source/target workflows",
@@ -4364,6 +4383,8 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
             environment.as_deref(),
         )?,
         Command::Discover { deep, path } => cmd::discover::execute(path, deep)?,
+        Command::Headless { command } => cmd::headless::execute_headless(command)?,
+        Command::Mcp { command } => cmd::headless::execute_mcp(cli.apply, cli.yes, command)?,
         Command::One { command } => cmd::one::execute(
             cmd::one::Ctx {
                 apply: cli.apply,

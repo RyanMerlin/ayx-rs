@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-02 21:02:11 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-02 22:06:20 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 386
+- Commands: 399
 - Capabilities: 6
 
 ## Commands
@@ -95,6 +95,13 @@ cargo run -q -p xtask -- refresh-command-surface
 | doctor one | `doctor/one` | unclassified |  | Check One auth and workspace probe posture |
 | doctor server | `doctor/server` | unclassified |  | Check Server configuration posture and next-step guidance |
 
+### `headless`
+
+| Name | Path | Safety | Mutating | Summary |
+| --- | --- | --- | --- | --- |
+| headless | `headless` | unclassified |  | Local product-owned Headless Alteryx diagnostics |
+| headless doctor | `headless/doctor` | unclassified |  | Check the local product MCP server, protocol handshake, and tool inventory |
+
 ### `license`
 
 | Name | Path | Safety | Mutating | Summary |
@@ -105,6 +112,22 @@ cargo run -q -p xtask -- refresh-command-surface
 | license api status | `license/api/status` | read-only | no | Summarize the Licensing portal API posture. |
 | license inventory | `license/inventory` | read-only | no | Summarize Licensing branch inventory candidates. |
 | license status | `license/status` | read-only | no | Summarize the Licensing branch posture. |
+
+### `mcp`
+
+| Name | Path | Safety | Mutating | Summary |
+| --- | --- | --- | --- | --- |
+| mcp | `mcp` | unclassified |  | Product-owned Model Context Protocol tools |
+| mcp call | `mcp/call` | unclassified |  | Invoke one product MCP tool. Execution is dry-run unless --apply is set |
+| mcp gateway | `mcp/gateway` | unclassified |  | Use an authenticated Streamable HTTP MCP Gateway endpoint |
+| mcp gateway abilities | `mcp/gateway/abilities` | unclassified |  | Show negotiated protocol abilities and workflow/dataset tool families |
+| mcp gateway call | `mcp/gateway/call` | unclassified |  | Invoke one Gateway MCP tool. Execution is dry-run unless --apply is set |
+| mcp gateway tools | `mcp/gateway/tools` | unclassified |  | Discover the Gateway's published MCP tools |
+| mcp gateway tools describe | `mcp/gateway/tools/describe` | unclassified |  | Show one published Gateway tool schema |
+| mcp gateway tools list | `mcp/gateway/tools/list` | unclassified |  | List all tools published by the Gateway |
+| mcp tools | `mcp/tools` | unclassified |  | Discover the published product MCP tool contract |
+| mcp tools describe | `mcp/tools/describe` | unclassified |  | Show one published product MCP tool schema |
+| mcp tools list | `mcp/tools/list` | unclassified |  | List all published product MCP tools |
 
 ### `mongo`
 
