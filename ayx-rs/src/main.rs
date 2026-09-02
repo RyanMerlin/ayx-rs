@@ -4605,9 +4605,18 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
                 };
                 let result =
                     secret::set_slot(Path::new(&resolution.resolved_profile_path), &slot, input)?;
+                if let Some(warning) = result.warning.as_deref() {
+                    eprintln!("[ayx WARN] {warning}");
+                }
                 Envelope::ok_with_data(
                     "secret stored",
-                    json!({ "profile": resolution.selected_profile, "slot": result.slot, "source": result.source, "reference_changed": true }),
+                    json!({
+                        "profile": resolution.selected_profile,
+                        "slot": result.slot,
+                        "source": result.source,
+                        "reference_changed": true,
+                        "warning": result.warning,
+                    }),
                 )
             }
             SecretCommand::Unset { slot, profile } => {
@@ -4624,16 +4633,31 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
             }
             SecretCommand::Migrate { profile } => {
                 let resolution = resolve_runtime_profile(profile.as_deref())?;
-                let output = secret::migrate_profile(Path::new(&resolution.resolved_profile_path))?;
-                let migrated_slots = secret::migrated_slot_names(&output);
+                let result = secret::migrate_profile(Path::new(&resolution.resolved_profile_path))?;
+                let migrated_slots = secret::migrated_slot_names(&result.migrated);
+                if let Some(warning) = result.warning.as_deref() {
+                    eprintln!("[ayx WARN] {warning}");
+                }
+                // Stay `ok` — a keyring-less host is a warned no-op by design,
+                // not a failure — but never say "completed" over plaintext that
+                // is still on disk. An operator reading only the message, or a
+                // CI step keying on it, would take that as an all-clear.
+                let message = if result.warning.is_some() && result.migrated.is_empty() {
+                    "secret migration incomplete: plaintext remains in the profile"
+                } else if result.warning.is_some() {
+                    "secret migration partially completed"
+                } else {
+                    "secret migration completed"
+                };
                 Envelope::ok_with_data(
-                    "secret migration completed",
+                    message,
                     json!({
                         "profile": resolution.selected_profile,
-                        "migrated_fields": output,
+                        "migrated_fields": result.migrated,
                         // Compatibility alias retained for scripts introduced
                         // with the initial secret lifecycle release.
                         "migrated_slots": migrated_slots,
+                        "warning": result.warning,
                     }),
                 )
             }
@@ -5033,12 +5057,21 @@ fn profile_migrate_envelope(profile: &Path, name: Option<&str>) -> Result<Envelo
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or(&target_name);
+    // The `.env` that resolved these values sits beside the *source* profile,
+    // so that is the view the "does this env: ref already cover the value"
+    // check must use. Without it a `.env`-supplied credential is treated as
+    // uncovered and re-stored — as `inline:<plaintext>` on a keyring-less host.
+    let migrate_env_files = ayx_core::profile::env_file_values(profile);
     let secretize = onboard::secretize_config(
         &mut config,
         migrate_scope,
         onboard::InlineSecretPolicy::Allow,
+        &migrate_env_files,
     )?;
-    let body = serde_yaml::to_string(&ayx_core::profile::canonical_profile_value(&config)?)?;
+    let body = serde_yaml::to_string(&ayx_core::profile::canonical_profile_value_with_env(
+        &config,
+        &migrate_env_files,
+    )?)?;
     onboard::write_restricted(&target, body.as_bytes())?;
     let mut state = load_ayx_state()?;
     // Use the same normalized stem that write_config_with_policy uses for scope so
@@ -5130,7 +5163,7 @@ fn doctor_config_envelope(profile: Option<&str>, fix: bool) -> Result<Envelope> 
         let value: serde_yaml::Value = serde_yaml::from_str(&raw)?;
         (
             profile_shape_label(&value),
-            collect_inline_secret_warnings(&raw),
+            collect_inline_secret_warnings(&raw, &value),
         )
     } else {
         ("missing", Vec::new())
@@ -5178,7 +5211,7 @@ pub(crate) fn doctor_config_envelope_from_path(profile: &Path, fix: bool) -> Res
         let value: serde_yaml::Value = serde_yaml::from_str(&raw)?;
         (
             profile_shape_label(&value),
-            collect_inline_secret_warnings(&raw),
+            collect_inline_secret_warnings(&raw, &value),
         )
     } else {
         ("missing", Vec::new())
@@ -5653,7 +5686,12 @@ fn doctor_rollup_status(statuses: [&str; 6]) -> &'static str {
     }
 }
 
-fn collect_inline_secret_warnings(raw: &str) -> Vec<String> {
+/// `raw` feeds the bare-field scan; `parsed` is the same document already
+/// parsed by the caller. Taking the parsed value rather than re-parsing keeps
+/// this honest: an earlier version carried a text-scan "fallback for an
+/// unparseable profile" that could never run, because both callers parse with
+/// `?` first and fail before reaching here.
+fn collect_inline_secret_warnings(raw: &str, parsed: &serde_yaml::Value) -> Vec<String> {
     let mut warnings = Vec::new();
     for key in [
         "access_token:",
@@ -5672,7 +5710,80 @@ fn collect_inline_secret_warnings(raw: &str) -> Vec<String> {
             ));
         }
     }
+
+    // An `inline:` reference *is* the plaintext — `store_secret_with_fallback`
+    // returns `inline:<secret>` verbatim. The bare-field scan above misses it,
+    // because the line reads `client_secret_ref: inline:...`, not
+    // `client_secret:`. Without this, `doctor config` reported "no inline
+    // secrets" for a profile whose credentials were entirely cleartext, which
+    // is exactly the state the keyring-unavailable bootstrap path produces.
+    //
+    // Parse rather than pattern-match the text: `serde_yaml` quotes any scalar
+    // whose content requires it, so a secret containing `: `, or a leading
+    // `*`/`&`/`%`/`@`, serializes as `client_secret_ref: 'inline:...'`. Testing
+    // the raw line for a leading `inline:` misses every one of those and
+    // reports the profile clean — reintroducing this exact bug for precisely
+    // the awkward, high-entropy secrets most likely to need quoting. Parsing
+    // also finds references nested under workspace credentials, which a flat
+    // line scan cannot attribute.
+    let mut fields = Vec::new();
+    collect_inline_reference_fields(parsed, &mut fields);
+    for field in fields {
+        warnings.push(format!("inline secret detected for {field}"));
+    }
+    warnings.sort();
+    warnings.dedup();
     warnings
+}
+
+/// Every mapping key whose value is an `inline:` reference, at any depth.
+///
+/// An `inline:` reference *is* the plaintext — `store_secret_with_fallback`
+/// returns `inline:<secret>` verbatim — so these are cleartext credentials on
+/// disk regardless of which key happens to hold them.
+fn collect_inline_reference_fields(value: &serde_yaml::Value, out: &mut Vec<String>) {
+    collect_inline_reference_fields_at(value, "", out);
+}
+
+/// Walk with the enclosing path, so two credentials in different workspace
+/// credential blocks are reported as two risks rather than deduplicated into
+/// one. Reporting `client_secret` three times for three distinct inline secrets
+/// collapses to a single warning and understates the exposure.
+fn collect_inline_reference_fields_at(
+    value: &serde_yaml::Value,
+    prefix: &str,
+    out: &mut Vec<String>,
+) {
+    match value {
+        serde_yaml::Value::Mapping(mapping) => {
+            for (key, child) in mapping {
+                let Some(key) = key.as_str() else { continue };
+                if child.as_str().is_some_and(|text| {
+                    text.strip_prefix("inline:")
+                        .is_some_and(|secret| !secret.trim().is_empty())
+                }) {
+                    let field = key.trim_end_matches("_ref");
+                    out.push(if prefix.is_empty() {
+                        field.to_string()
+                    } else {
+                        format!("{prefix}.{field}")
+                    });
+                }
+                let child_prefix = if prefix.is_empty() {
+                    key.to_string()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                collect_inline_reference_fields_at(child, &child_prefix, out);
+            }
+        }
+        serde_yaml::Value::Sequence(items) => {
+            for item in items {
+                collect_inline_reference_fields_at(item, prefix, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn secret_source(reference: Option<&String>, value: Option<&str>) -> &'static str {
