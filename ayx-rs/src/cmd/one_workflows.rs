@@ -22,6 +22,7 @@ use anyhow::{Result, bail};
 use ayx_core::envelope::{Envelope, ErrorCode};
 use ayx_one_api::{
     OneListParams, one_api_list_request, one_api_live_request, one_api_live_request_with_body,
+    one_api_multipart_file_request,
 };
 use serde_json::{Value, json};
 use url::form_urlencoded::Serializer;
@@ -702,6 +703,27 @@ pub(crate) fn execute(
                 false,
                 &[],
                 None,
+            )?
+        }
+        OneWorkflowsCommand::Upload { profile, file } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            if apply {
+                cmd::confirm::require_tty_confirmation(
+                    yes,
+                    &cmd::confirm::destructive_action_message(
+                        "upload",
+                        &format!("cloud-native workflow file '{}'", file.display()),
+                        &config.profile_name,
+                    ),
+                )?;
+            }
+            one_api_multipart_file_request(
+                &config,
+                "workflow",
+                "upload",
+                "/svc-workflow/api/v1/workflows",
+                &file,
+                true,
             )?
         }
         OneWorkflowsCommand::Delete { profile, id } => {

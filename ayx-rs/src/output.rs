@@ -113,12 +113,14 @@ pub fn render_envelope(
             // Text/table retain their established renderer, but list views use
             // the same bounded projection as compact JSON so --output-limit
             // has one predictable cross-format meaning.
-            if clean.ok && descriptor.kind == ViewKind::List {
-                let projected = Envelope {
-                    ok: clean.ok,
-                    message: clean.message.clone(),
-                    timestamp_utc: clean.timestamp_utc,
-                    data: compact_data(
+            if clean.ok
+                && matches!(
+                    descriptor.kind,
+                    ViewKind::List | ViewKind::Detail | ViewKind::Result
+                )
+            {
+                let data = match descriptor.kind {
+                    ViewKind::List => compact_data(
                         &clean.data,
                         descriptor.kind,
                         descriptor.fields,
@@ -126,6 +128,16 @@ pub fn render_envelope(
                         output_limit,
                         false,
                     ),
+                    ViewKind::Detail | ViewKind::Result => {
+                        human_resource_data(&clean.data, descriptor.fields)
+                    }
+                    _ => unreachable!("the match above restricts presentation view kinds"),
+                };
+                let projected = Envelope {
+                    ok: clean.ok,
+                    message: clean.message.clone(),
+                    timestamp_utc: clean.timestamp_utc,
+                    data,
                     error_code: clean.error_code,
                 };
                 Ok(render::render_text(&projected))
@@ -197,6 +209,9 @@ fn compact_list(
     limit: usize,
 ) -> Value {
     let Some((items, source_key, collection_data)) = list_items(data, collection_keys) else {
+        // An unknown gateway wrapper is a CLI compatibility problem, not proof
+        // that the server returned an empty collection. Do not turn it into a
+        // deceptively reassuring "(no items)" message.
         return json!({
             "kind": "list",
             "unrecognized_collection": true,
@@ -244,8 +259,12 @@ fn compact_list(
         "total_count": total,
         "shown_count": shown,
         "truncated": truncated,
+        // Prefer the token carried by the same envelope level as the items;
+        // fall back to a nested search so a gateway that hoists the token above
+        // its collection wrapper still paginates.
         "next_page_token": collection_data
             .get("next_page_token")
+            .or_else(|| next_page_token(data))
             .cloned()
             .unwrap_or(Value::Null),
         "omitted_fields": omitted,
@@ -253,6 +272,7 @@ fn compact_list(
 }
 
 fn compact_object(kind: &str, data: &Value, descriptor_fields: &[&str]) -> Value {
+    let data = presentation_body(data);
     match data.as_object() {
         Some(object) => {
             // A descriptor that declares no fields projects every key the object
@@ -275,6 +295,46 @@ fn compact_object(kind: &str, data: &Value, descriptor_fields: &[&str]) -> Value
         None => {
             json!({ "kind": kind, "fields": { "value": scalar_projection(data) }, "omitted_fields": [] })
         }
+    }
+}
+
+/// The transport layer deliberately preserves server bodies under `response`
+/// alongside timing, retry, and request-id diagnostics. Human and compact
+/// output operate on that resource body; `json-full` is the explicit escape
+/// hatch for the complete transport envelope.
+fn presentation_body(data: &Value) -> &Value {
+    data.get("response")
+        .filter(|response| !response.is_null())
+        .unwrap_or(data)
+}
+
+/// Shape concise terminal output from the fields the command intentionally
+/// declared. Never stringify a nested raw response into a terminal line. An
+/// adapter/descriptor that names no fields is surfaced as an honest cue to use
+/// the diagnostic format instead of pretending the server returned no data.
+fn human_resource_data(data: &Value, descriptor_fields: &[&str]) -> Value {
+    // Preserve native command envelopes (login, logout, dry-run results, etc.)
+    // that do not originate from the generic One transport wrapper.
+    if data.get("response").is_none_or(Value::is_null) {
+        return data.clone();
+    }
+    let body = presentation_body(data);
+    let Some(object) = body.as_object() else {
+        return scalar_projection(body);
+    };
+    let fields = if descriptor_fields.is_empty() {
+        Vec::new()
+    } else {
+        descriptor_fields.to_vec()
+    };
+    let projected = project_object(Some(object), &fields);
+    if projected.is_empty() {
+        json!({
+            "response_available": true,
+            "hint": "use --output json-full for the complete API response",
+        })
+    } else {
+        Value::Object(projected)
     }
 }
 
@@ -320,6 +380,14 @@ fn list_projection(items: &[Value]) -> Vec<&'static str> {
         .collect()
 }
 
+/// Locate a collection in either a normalized CLI list envelope or the raw
+/// body nested by `one_api_live_request`. The latter is intentional in the
+/// lossless `json-full` contract, but human/compact list views must not claim
+/// it is empty merely because a gateway uses `{ "data": [...] }`.
+///
+/// Returns the items, the key they were found under, and the object that
+/// carried them, so pagination metadata is read from the same envelope level
+/// as the collection itself.
 fn list_items<'a>(
     data: &'a Value,
     collection_keys: &[&'static str],
@@ -356,10 +424,25 @@ fn list_items<'a>(
 }
 
 fn known_total(data: &Value) -> Option<usize> {
-    ["total_count", "total", "count"].iter().find_map(|key| {
-        data.get(*key)
-            .and_then(Value::as_u64)
-            .and_then(|n| usize::try_from(n).ok())
+    ["total_count", "total", "count"]
+        .iter()
+        .find_map(|key| {
+            data.get(*key)
+                .and_then(Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok())
+        })
+        .or_else(|| {
+            data.get("response")
+                .filter(|response| !response.is_null())
+                .and_then(known_total)
+        })
+}
+
+fn next_page_token(data: &Value) -> Option<&Value> {
+    data.get("next_page_token").or_else(|| {
+        data.get("response")
+            .filter(|response| !response.is_null())
+            .and_then(next_page_token)
     })
 }
 
@@ -703,6 +786,111 @@ mod tests {
             assert!(rendered.contains("connection_count"));
             assert!(rendered.contains("11"));
         }
+    }
+
+    #[test]
+    fn compact_list_projects_gateway_data_nested_in_a_live_response() {
+        let env = Envelope::ok_with_data(
+            "workspace people ok",
+            json!({
+                "operation": "workspace-people",
+                "response": {
+                    "data": [
+                        {"id": 646, "name": "Ryan Merlin", "email": "ryan@example.com"},
+                        {"id": 34, "name": "Nitin Grewal", "email": "nitin@example.com"}
+                    ],
+                    "count": 2
+                }
+            }),
+        );
+
+        let rendered = render_envelope(
+            &env,
+            OutputMode::Text,
+            OutputDescriptor::new("one.workspace.people", ViewKind::List),
+            DEFAULT_OUTPUT_LIMIT,
+        )
+        .expect("nested gateway list should render");
+
+        assert!(rendered.contains("Ryan Merlin"));
+        assert!(rendered.contains("Nitin Grewal"));
+        assert!(!rendered.contains("no items"));
+
+        let compact = compact_data(
+            &env.data,
+            ViewKind::List,
+            &[],
+            &[],
+            DEFAULT_OUTPUT_LIMIT,
+            false,
+        );
+        assert_eq!(compact["total_count"], 2);
+        assert_eq!(compact["shown_count"], 2);
+    }
+
+    #[test]
+    fn unknown_list_wrapper_is_not_reported_as_empty() {
+        let env = Envelope::ok_with_data(
+            "workspace people ok",
+            json!({"response": {"members": [{"id": 1}]}}),
+        );
+        let descriptor = OutputDescriptor::new("one.workspace.people", ViewKind::List);
+
+        let text = render_envelope(&env, OutputMode::Text, descriptor, DEFAULT_OUTPUT_LIMIT)
+            .expect("unknown list shape should render an actionable cue");
+        assert!(text.contains("does not recognize"));
+        assert!(!text.contains("no items"));
+
+        let compact: Value = serde_json::from_str(
+            &render_envelope(&env, OutputMode::Json, descriptor, DEFAULT_OUTPUT_LIMIT)
+                .expect("compact JSON should render"),
+        )
+        .expect("compact JSON should parse");
+        assert_eq!(compact["data"]["unrecognized_collection"], true);
+    }
+
+    #[test]
+    fn detail_text_and_compact_json_project_the_resource_not_transport_metadata() {
+        let env = Envelope::ok_with_data(
+            "workspace current ok",
+            json!({
+                "attempts": 1,
+                "elapsed_ms": 357,
+                "request_id": "request-123",
+                "response": {
+                    "id": 91946,
+                    "name": "alteryx-fde",
+                    "state": "active",
+                    "workspace_member_count": 14,
+                    "workspacetiers": {"data": [{"name": "platform_packaging"}]}
+                }
+            }),
+        );
+        let descriptor = OutputDescriptor::new("one.workspace.current", ViewKind::Detail)
+            .with_fields(&["id", "name", "state", "workspace_member_count"]);
+
+        let text = render_envelope(&env, OutputMode::Text, descriptor, DEFAULT_OUTPUT_LIMIT)
+            .expect("detail text should render");
+        assert!(text.contains("id: 91946"));
+        assert!(text.contains("workspace_member_count: 14"));
+        assert!(!text.contains("attempts:"));
+        assert!(!text.contains("request-123"));
+        assert!(!text.contains("workspacetiers"));
+
+        let compact: Value = serde_json::from_str(
+            &render_envelope(&env, OutputMode::Json, descriptor, DEFAULT_OUTPUT_LIMIT)
+                .expect("compact JSON should render"),
+        )
+        .expect("compact JSON should parse");
+        assert_eq!(compact["data"]["fields"]["name"], "alteryx-fde");
+        assert_eq!(compact["data"]["fields"]["workspace_member_count"], 14);
+        assert!(
+            compact["data"]["omitted_fields"]
+                .as_array()
+                .expect("omitted fields list")
+                .iter()
+                .any(|field| field == "workspacetiers")
+        );
     }
 
     #[test]

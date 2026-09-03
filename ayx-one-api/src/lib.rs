@@ -379,6 +379,54 @@ fn token_failure_prefix(status: StatusCode) -> &'static str {
     }
 }
 
+/// Return an allowlisted, bounded summary of a failed OAuth token exchange.
+///
+/// Token endpoints commonly return an OAuth error object for a 400 response.
+/// The raw body must never be surfaced because proxies and providers are free
+/// to include request data in it. Keep only the fields that identify the
+/// failure class, and redact their values before attaching them to an error.
+fn oauth_token_error_summary(body: &str, request_id: Option<&str>) -> String {
+    const MAX_FIELD_CHARS: usize = 200;
+
+    let bounded = |value: &str| {
+        redact_text(
+            &value
+                .trim()
+                .chars()
+                .take(MAX_FIELD_CHARS)
+                .collect::<String>(),
+        )
+    };
+    let field = |json: &Value, name: &str| {
+        json.get(name)
+            .and_then(Value::as_str)
+            .map(&bounded)
+            .filter(|value| !value.is_empty())
+    };
+
+    let mut fields = Vec::new();
+    if let Ok(json) = serde_json::from_str::<Value>(body) {
+        if let Some(error) = field(&json, "error") {
+            fields.push(format!("oauth_error={error}"));
+        }
+        if let Some(code) = field(&json, "error_code") {
+            fields.push(format!("provider_error_code={code}"));
+        }
+        if let Some(description) = field(&json, "error_description") {
+            fields.push(format!("oauth_error_description={description}"));
+        }
+    }
+    if let Some(request_id) = request_id.map(bounded).filter(|value| !value.is_empty()) {
+        fields.push(format!("request_id={request_id}"));
+    }
+
+    if fields.is_empty() {
+        "provider did not return a recognized OAuth error".to_string()
+    } else {
+        fields.join("; ")
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn one_response_metadata(
     surface: &str,
@@ -1692,6 +1740,171 @@ pub fn flow_import_package_envelope(
     Ok(envelope)
 }
 
+/// Upload one file as a multipart `file` field to a One sibling service.
+///
+/// Agent Studio's workflow shortcut source uses the documented
+/// `/svc-workflow/api/v1/workflows` upload route.  Keep this transport helper
+/// separate from the legacy `/v4/flows/package` importer because the two
+/// services use different multipart field names and represent different asset
+/// families.
+pub fn one_api_multipart_file_request(
+    config: &Config,
+    surface: &str,
+    operation: &str,
+    endpoint: &str,
+    input_path: &Path,
+    mutating: bool,
+) -> Result<Envelope> {
+    let file_bytes = fs::read(input_path)
+        .with_context(|| format!("failed to read upload file '{}'", input_path.display()))?;
+    let file_name = input_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "upload.bin".to_string());
+    let url = format!("{}{}", resolve_one_base_url(config), endpoint);
+
+    if mutating && !one_apply() {
+        return Ok(one_dry_run_envelope(
+            surface,
+            operation,
+            "POST",
+            &url,
+            endpoint,
+            Some(&json!({
+                "field": "file",
+                "file_name": file_name,
+                "bytes": file_bytes.len(),
+                "input_path": input_path.display().to_string(),
+            })),
+        ));
+    }
+
+    let client = build_client()?;
+    let access_token = resolve_one_access_token(config, &client)?;
+    let workspace_context = workspace_context_header_value(config);
+    let workspace_gid = config
+        .alteryx_one
+        .as_ref()
+        .and_then(|one| one.resolved_workspace_gid())
+        .map(str::to_string);
+    let started = Instant::now();
+    let form = Form::new().part(
+        "file",
+        Part::bytes(file_bytes)
+            .file_name(file_name)
+            .mime_str("application/octet-stream")
+            .expect("mime literal is valid"),
+    );
+    let mut request = client
+        .post(&url)
+        .header(AUTHORIZATION, bearer_authorization_value(&access_token))
+        .header(reqwest::header::ACCEPT, "application/json");
+    if let Some(gid) = workspace_gid {
+        request = request.header("x-alteryx-workspace-gid", gid);
+    }
+    if let Some(workspace_context) = workspace_context {
+        request = request.header("x-trifacta-person-workspace-id", workspace_context);
+    }
+    let response = request
+        .multipart(form)
+        .send()
+        .with_context(|| format!("{surface} upload request to '{url}' failed"))?;
+
+    let status = response.status();
+    let request_id = response
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned);
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let text = response.text().unwrap_or_default();
+    let parsed = parse_one_response(&content_type, &text);
+    let parsed_response_shape = match &parsed {
+        ParsedOneResponse::Json { response_shape, .. } => *response_shape,
+        ParsedOneResponse::NonJson { response_kind, .. } => *response_kind,
+    };
+    let envelope = match parsed {
+        ParsedOneResponse::Json {
+            body: response_body,
+            response_shape: body_shape,
+        } => one_http_envelope(
+            status,
+            format!(
+                "{surface} {operation} {}",
+                if status.is_success() { "ok" } else { "failed" }
+            ),
+            Value::Object({
+                let mut data = one_response_metadata(
+                    surface,
+                    operation,
+                    "POST",
+                    &url,
+                    endpoint,
+                    1,
+                    Some(status.as_u16()),
+                    request_id.clone(),
+                    status.is_success(),
+                    body_shape,
+                    None,
+                    mutating,
+                    false,
+                );
+                data.insert(
+                    "elapsed_ms".to_string(),
+                    Value::from(started.elapsed().as_millis() as u64),
+                );
+                data.insert("response".to_string(), response_body);
+                data.insert(
+                    "error_code".to_string(),
+                    ayx_core::envelope::ErrorCode::from_http_status(status.as_u16())
+                        .map_or(Value::Null, |code| Value::String(code.as_str().to_string())),
+                );
+                data
+            }),
+        ),
+        ParsedOneResponse::NonJson { .. } => one_transport_failure_envelope(
+            Some(status),
+            surface,
+            operation,
+            "POST",
+            &url,
+            endpoint,
+            1,
+            None,
+            &parsed,
+            mutating,
+            false,
+        ),
+    };
+    let _ = record_api_event(
+        config.observability.as_ref(),
+        ApiEvent {
+            product: "one",
+            surface,
+            operation,
+            method: "POST",
+            endpoint_template: endpoint,
+            resolved_url: &url,
+            status_code: Some(status.as_u16()),
+            duration_ms: started.elapsed().as_millis(),
+            attempt: 1,
+            retry_after_seconds: None,
+            request_id: request_id.as_deref(),
+            ok: status.is_success(),
+            error_class: None,
+            response_shape: Some(parsed_response_shape),
+            mutating,
+            dry_run: false,
+        },
+    );
+    Ok(envelope)
+}
+
 pub fn flow_export_package_envelope(
     config: &Config,
     flow_id: &str,
@@ -2199,23 +2412,29 @@ pub fn refresh_one_tokens(config: &Config, client: &Client) -> Result<RefreshedO
         .send()
         .with_context(|| format!("refresh token request to '{}' failed", token_endpoint))?;
     let status = response.status();
+    let request_id = response
+        .headers()
+        .get("x-request-id")
+        .or_else(|| response.headers().get("x-correlation-id"))
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
     trace_one(format!(
         "refresh token request to {} returned {}",
         token_endpoint_url,
         status.as_u16()
     ));
-    if !status.is_success() {
-        std::mem::forget(response);
-        bail!(
-            "{}: refresh token request to '{}' returned {}",
-            token_failure_prefix(status),
-            token_endpoint_url,
-            status.as_u16()
-        );
-    }
     let text = response
         .text()
         .context("failed to read refresh token response body")?;
+    if !status.is_success() {
+        bail!(
+            "{}: refresh token request to '{}' returned {} ({})",
+            token_failure_prefix(status),
+            token_endpoint_url,
+            status.as_u16(),
+            oauth_token_error_summary(&text, request_id.as_deref())
+        );
+    }
     let token_json: Value = serde_json::from_str(&text).with_context(|| {
         format!(
             "auth failed: refresh token response from '{}' was not valid JSON. Body preview: '{}'",
@@ -2979,6 +3198,47 @@ mongo:
         assert_eq!(refreshed.refresh_token.as_deref(), Some("fresh-refresh"));
         assert_eq!(refreshed.expires_in, Some(300));
         assert_eq!(refreshed.token_type, "Bearer");
+    }
+
+    #[test]
+    fn oauth_token_error_summary_keeps_only_allowlisted_redacted_fields() {
+        let summary = oauth_token_error_summary(
+            r#"{
+                "error":"invalid_grant",
+                "error_code":"internal",
+                "error_description":"refresh_token=provider-refresh-secret",
+                "access_token":"provider-access-secret",
+                "refresh_token":"provider-refresh-secret",
+                "client_secret":"provider-client-secret"
+            }"#,
+            Some("request-42"),
+        );
+
+        assert!(summary.contains("oauth_error=invalid_grant"), "{summary}");
+        assert!(
+            summary.contains("provider_error_code=internal"),
+            "{summary}"
+        );
+        assert!(summary.contains("request_id=request-42"), "{summary}");
+        assert!(summary.contains("refresh_token=***"), "{summary}");
+        for secret in [
+            "provider-access-secret",
+            "provider-refresh-secret",
+            "provider-client-secret",
+        ] {
+            assert!(!summary.contains(secret), "secret leaked in {summary}");
+        }
+    }
+
+    #[test]
+    fn oauth_token_error_summary_never_includes_unrecognized_body_content() {
+        let summary = oauth_token_error_summary(
+            "token endpoint copied request refresh_token=provider-refresh-secret",
+            None,
+        );
+
+        assert_eq!(summary, "provider did not return a recognized OAuth error");
+        assert!(!summary.contains("provider-refresh-secret"));
     }
 
     #[test]

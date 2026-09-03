@@ -865,6 +865,36 @@ mongo:
     }
 
     #[test]
+    fn oauth_api_token_is_a_clear_login_mode_and_excludes_auth_method() {
+        let cli = Cli::try_parse_from(["ayx", "one", "login", "--oauth-api-token"])
+            .expect("friendly OAuth API-token mode should parse");
+        let Command::One {
+            command:
+                OneCommand::Login {
+                    oauth_api_token,
+                    auth_method,
+                    ..
+                },
+        } = cli.command
+        else {
+            panic!("expected one login");
+        };
+        assert!(oauth_api_token);
+        assert!(auth_method.is_none());
+
+        let error = Cli::try_parse_from([
+            "ayx",
+            "one",
+            "login",
+            "--oauth-api-token",
+            "--auth-method",
+            "oauth-refresh",
+        ])
+        .expect_err("the user should not have to choose between equivalent modes");
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
     fn datasets_list_rejects_unknown_filter_values() {
         let err = Cli::try_parse_from([
             "ayx",
@@ -1774,8 +1804,10 @@ pub(crate) enum OneCommand {
     /// With --browser: PKCE authorization-code flow — opens your default
     /// browser and captures tokens via a local redirect.
     ///
-    /// With --auth-method oauth-refresh: use the workspace's OAuth API
-    /// access/refresh credential and never fall back to OTP.
+    /// With --oauth-api-token: set up the long-lived OAuth API-token path,
+    /// not the email OTP path. Paste the visible Client ID and hidden Refresh
+    /// Token once; the CLI verifies them, stores them securely, and renews
+    /// access tokens.
     /// With --auth-method email-otp: use the email OTP login flow.
     /// With --refresh-token / --access-token: import tokens you already have.
     Login {
@@ -1790,8 +1822,14 @@ pub(crate) enum OneCommand {
         /// Use device-code grant instead of email OTP.
         #[arg(long)]
         device: bool,
+        /// Set up a long-lived OAuth API token, not email OTP. Prompts for the
+        /// visible Client ID and hidden Refresh Token, then saves the verified
+        /// credential securely for automatic renewal.
+        #[arg(long, conflicts_with = "auth_method")]
+        oauth_api_token: bool,
         /// Select the user credential method: email-otp or oauth-refresh.
-        /// The setting is persisted on the selected workspace credential.
+        /// Interactive oauth-refresh setup prompts for one hidden refresh-token
+        /// paste and persists the verified credential on the selected workspace.
         #[arg(long, value_name = "METHOD", value_parser = ["email-otp", "oauth-refresh"])]
         auth_method: Option<String>,
         /// Refresh token to store and exchange (bypasses interactive flow).
@@ -1926,12 +1964,21 @@ pub(crate) enum OneCommand {
         command: OneFlowsCommand,
     },
     #[command(
-        about = "Read datasets from the Alteryx One dataset APIs",
+        about = "Create and read datasets from the Alteryx One dataset APIs",
         arg_required_else_help = true
     )]
     Datasets {
         #[command(subcommand)]
         command: OneDatasetsCommand,
+    },
+    #[command(
+        about = "Manage Agent Studio MCP asset registration",
+        long_about = "Manage Agent Studio agents and MCP registration state for One datasets and cloud-native workflows.\n\nThese operations use the Agent Studio service surface, not the public One OpenAPI surface. Dataset registration enables Insights; workflow registration creates an Apps shortcut.",
+        arg_required_else_help = true
+    )]
+    AgentAssets {
+        #[command(subcommand)]
+        command: OneAgentAssetsCommand,
     },
     #[command(
         about = "Alteryx One connections — list, create, and manage credentials",
@@ -2776,6 +2823,13 @@ pub(crate) enum OneFlowsCommand {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneDatasetsCommand {
+    /// Create an imported dataset reference from a JSON payload.
+    Create {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
     /// List datasets in the user-facing One dataset library.
     List {
         #[arg(long)]
@@ -3159,6 +3213,148 @@ pub(crate) enum OneConnectionPermissionCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub(crate) enum OneAgentAssetsCommand {
+    /// List, create, update, and delete Agent Studio agents.
+    #[command(arg_required_else_help = true)]
+    Agents {
+        #[command(subcommand)]
+        command: OneAgentsCommand,
+    },
+    /// Manage datasets registered for Agent Studio Insights.
+    #[command(arg_required_else_help = true)]
+    Datasets {
+        #[command(subcommand)]
+        command: OneAgentDatasetsCommand,
+    },
+    /// Manage workflow shortcuts registered for Agent Studio Apps.
+    #[command(arg_required_else_help = true)]
+    Workflows {
+        #[command(subcommand)]
+        command: OneAgentWorkflowsCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum OneAgentsCommand {
+    /// List Agent Studio agents.
+    List {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        page: u32,
+        #[arg(long, default_value_t = 25)]
+        page_size: u32,
+        #[arg(long)]
+        search_term: Option<String>,
+        #[arg(long)]
+        sort_field: Option<String>,
+        #[arg(long)]
+        sort_order: Option<String>,
+    },
+    /// Inspect one Agent Studio agent.
+    Detail {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "AGENT-ID")]
+        id: String,
+    },
+    /// Submit a prompt to an Agent Studio agent.
+    ///
+    /// This starts a new Copilot conversation and posts the prompt. Because
+    /// the agent may invoke configured tools, the command requires --apply.
+    Prompt {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "AGENT-ID")]
+        id: String,
+        #[arg(long, value_name = "TEXT")]
+        prompt: String,
+    },
+    /// Create an Agent Studio agent from a JSON payload.
+    Create {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
+    /// Update an Agent Studio agent from a JSON payload.
+    Update {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "AGENT-ID")]
+        id: String,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
+    /// Delete an Agent Studio agent.
+    Delete {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "AGENT-ID")]
+        id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum OneAgentDatasetsCommand {
+    /// List datasets known to Agent Studio, including MCP preparation state.
+    List {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        page: u32,
+        #[arg(long, default_value_t = 25)]
+        page_size: u32,
+        #[arg(long)]
+        search_term: Option<String>,
+        #[arg(long)]
+        mcp_enabled_only: bool,
+        #[arg(long)]
+        sort_field: Option<String>,
+        #[arg(long)]
+        sort_order: Option<String>,
+    },
+    /// Enable or disable a dataset for Agent Studio Insights.
+    Set {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "DATASET-ID")]
+        id: String,
+        #[arg(long, conflicts_with = "disable")]
+        enable: bool,
+        #[arg(long, conflicts_with = "enable")]
+        disable: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum OneAgentWorkflowsCommand {
+    /// List workflows and their Agent Studio shortcut state.
+    List {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long, default_value_t = 1000)]
+        limit: u32,
+    },
+    /// Register a workflow as an Agent Studio Apps shortcut.
+    Enable {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "WORKFLOW-ID")]
+        id: String,
+        #[arg(long, default_value_t = 180)]
+        timeout_seconds: u64,
+    },
+    /// Remove a workflow's Agent Studio Apps shortcut.
+    Disable {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "WORKFLOW-ID")]
+        id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub(crate) enum OneWorkflowsCommand {
     /// List Alteryx One cloud-native workflows.
     List {
@@ -3249,6 +3445,13 @@ pub(crate) enum OneWorkflowsCommand {
     Tools {
         #[arg(long)]
         profile: Option<String>,
+    },
+    /// Upload a cloud-native workflow JSON file to Alteryx One.
+    Upload {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
     },
     /// Delete a cloud-native workflow. Irreversible — no known restore/trash endpoint exists.
     Delete {

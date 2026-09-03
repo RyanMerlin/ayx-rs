@@ -74,6 +74,7 @@ pub(crate) fn login(
     auth_flow_arg: Option<String>,
     save_workspace_password: bool,
     secret_policy_arg: Option<String>,
+    oauth_api_token: bool,
     auth_method_arg: Option<String>,
     refresh_token_env: Option<String>,
     refresh_token_stdin: bool,
@@ -90,6 +91,7 @@ pub(crate) fn login(
     };
     use serde_json::json;
 
+    let mut client_id = client_id;
     let refresh_token_arg = read_refresh_token_source(
         refresh_token_arg,
         refresh_token_env.as_deref(),
@@ -180,7 +182,10 @@ pub(crate) fn login(
                 anyhow::anyhow!("invalid --auth-method; use email-otp or oauth-refresh")
             })
         })
-        .transpose()?;
+        .transpose()?
+        .or(oauth_api_token.then_some(OneCredentialKind::OAuthRefresh));
+    let explicit_oauth_token_setup =
+        oauth_api_token || requested_credential_kind == Some(OneCredentialKind::OAuthRefresh);
     let stored_credential_kind = config.alteryx_one.as_ref().and_then(|one| {
         if workspace_selector_supplied {
             workspace_id
@@ -203,6 +208,19 @@ pub(crate) fn login(
     });
     let has_explicit_oauth_flow = refresh_token_arg.is_some() || browser || device;
     let has_explicit_token_input = refresh_token_arg.is_some() || access_token_arg.is_some();
+    let has_explicit_login_setup = client_id.is_some()
+        || browser
+        || device
+        || refresh_token_arg.is_some()
+        || access_token_arg.is_some()
+        || token_endpoint_arg.is_some()
+        || base_url_arg.is_some()
+        || workspace_selector_supplied
+        || workspace_gid_arg.is_some()
+        || auth_flow_arg.is_some()
+        || save_workspace_password
+        || secret_policy_arg.is_some()
+        || requested_credential_kind.is_some();
     let credential_kind = requested_credential_kind
         .or_else(|| has_explicit_oauth_flow.then_some(OneCredentialKind::OAuthRefresh))
         .or(stored_credential_kind)
@@ -232,6 +250,34 @@ pub(crate) fn login(
             "--auth-flow applies only to the email-OTP method; use --auth-method email-otp for OTP login"
         );
     }
+    if should_report_existing_oauth_login(
+        credential_kind == Some(OneCredentialKind::OAuthRefresh),
+        has_explicit_login_setup,
+    ) {
+        return oauth_login_already_configured_envelope(&config);
+    }
+
+    // The Alteryx API-token page displays a Client ID separately from each
+    // generated token pair. A first-time person must provide it, while a
+    // deliberate replacement can retain the currently selected workspace's
+    // value with Enter or replace it with a new one. Do this before requesting
+    // the hidden refresh-token paste: the two values form one verified bundle.
+    if explicit_oauth_token_setup && client_id.is_none() {
+        let saved_client_id = oauth_client_id_for_login(
+            config.alteryx_one.as_ref(),
+            workspace_selector_supplied,
+            workspace_id.as_deref(),
+        );
+        client_id = if runtime.no_input {
+            Some(saved_client_id.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "OAuth API-token setup requires a Client ID; pass --client-id or configure alteryx_one.oauth_client_id before using --no-input"
+                )
+            })?)
+        } else {
+            Some(read_oauth_client_id_prompt(saved_client_id.as_deref())?)
+        };
+    }
 
     let mut refresh_token_arg = refresh_token_arg;
     if credential_kind == Some(OneCredentialKind::OAuthRefresh)
@@ -240,23 +286,38 @@ pub(crate) fn login(
         && access_token_arg.is_none()
         && refresh_token_arg.is_none()
     {
-        refresh_token_arg = config
-            .alteryx_one
-            .as_ref()
-            .and_then(|one| {
-                if workspace_selector_supplied {
-                    workspace_id
-                        .as_deref()
-                        .and_then(|id| one.workspace_credentials.get(id))
-                        .and_then(|credential| credential.refresh_token.as_deref())
-                } else {
-                    one.resolved_refresh_token()
-                }
-            })
-            .map(str::to_string);
+        // An explicit OAuth choice is the friendly interactive import path:
+        // one command, one hidden paste, then the CLI verifies and saves the
+        // durable workspace credential. Environment/stdin options remain for
+        // CI and secret managers, while an implicit stored OAuth policy keeps
+        // its compatibility behavior of reusing the selected credential.
+        refresh_token_arg = if should_prompt_for_oauth_refresh_token(
+            explicit_oauth_token_setup,
+            runtime.no_input,
+        ) {
+            eprintln!(
+                "OAuth API-token setup (not the email OTP flow). Paste the Refresh Token from Alteryx One now. Your input is hidden and will be saved in Windows Credential Manager only after verification."
+            );
+            Some(read_oauth_refresh_token_prompt()?)
+        } else {
+            config
+                .alteryx_one
+                .as_ref()
+                .and_then(|one| {
+                    if workspace_selector_supplied {
+                        workspace_id
+                            .as_deref()
+                            .and_then(|id| one.workspace_credentials.get(id))
+                            .and_then(|credential| credential.refresh_token.as_deref())
+                    } else {
+                        one.resolved_refresh_token()
+                    }
+                })
+                .map(str::to_string)
+        };
         if refresh_token_arg.is_none() {
             bail!(
-                "OAuth refresh authentication is selected for the active workspace, but no refresh token is configured; import one with --refresh-token-env NAME or --refresh-token-stdin"
+                "OAuth refresh authentication is selected for the active workspace, but no refresh token is configured; run `ayx one login --oauth-api-token` to paste it securely, or use --refresh-token-env NAME / --refresh-token-stdin for automation"
             );
         }
     }
@@ -267,7 +328,7 @@ pub(crate) fn login(
         && !device
     {
         bail!(
-            "OAuth refresh authentication requires a refresh token for durable rotation; use --refresh-token-env NAME or --refresh-token-stdin"
+            "OAuth refresh authentication requires a refresh token for durable rotation; run `ayx one login --oauth-api-token`, or use --refresh-token-env NAME / --refresh-token-stdin for automation"
         );
     }
     if runtime.no_input && refresh_token_arg.is_none() && access_token_arg.is_none() {
@@ -377,20 +438,16 @@ pub(crate) fn login(
         }
     }
 
-    // An explicit refresh-token login replaces the access credential. Clear
-    // stale access references before the preflight binding check below; if we
-    // wait until the exchange branch, an old binding can reject the new token
-    // before it gets a chance to be exchanged.
+    // An explicit refresh-token login replaces the selected credential pair.
+    // Clear stale selected references before the preflight binding check below;
+    // if we wait until the exchange branch, an old binding can reject the new
+    // token before it gets a chance to be exchanged. The replacement is still
+    // verified remotely and bound again at the secure write boundary.
     if refresh_token_arg.is_some() {
         let refresh_workspace_id = workspace_id
             .clone()
             .or_else(|| one.active_workspace_id().map(str::to_string));
-        one.access_token_ref = None;
-        if let Some(ws_id) = refresh_workspace_id
-            && let Some(credential) = one.workspace_credentials.get_mut(&ws_id)
-        {
-            credential.access_token_ref = None;
-        }
+        clear_explicit_refresh_token_references(one, refresh_workspace_id.as_deref());
     }
 
     let password_workspace_id = workspace_id.clone().or_else(|| {
@@ -432,6 +489,7 @@ pub(crate) fn login(
             // earlier workspace binding fail validation before this token can
             // be exchanged and securely persisted.
             credential.access_token_ref = None;
+            credential.refresh_token_ref = None;
             one.access_token_ref = None;
             credential.refresh_token = Some(rt);
         } else {
@@ -909,6 +967,125 @@ fn read_refresh_token_source(
     from_stdin: bool,
 ) -> Result<Option<String>> {
     read_secret_source(direct, environment_name, from_stdin, "refresh token")
+}
+
+/// Drop only the selected credential's old references while a caller supplies
+/// a replacement refresh token. The new value is still verified before the
+/// secure write path assigns its canonical bound keyring references.
+fn clear_explicit_refresh_token_references(
+    one: &mut ayx_core::profile::AlteryxOneProfile,
+    workspace_id: Option<&str>,
+) {
+    if let Some(workspace_id) = workspace_id {
+        if let Some(credential) = one.workspace_credentials.get_mut(workspace_id) {
+            credential.access_token_ref = None;
+            credential.refresh_token_ref = None;
+        }
+    } else {
+        one.access_token_ref = None;
+        one.refresh_token_ref = None;
+    }
+}
+
+/// A bare `ayx one login` should not quietly spend an OAuth refresh grant.
+/// Once OAuth is configured, ordinary commands renew access automatically;
+/// this response makes that existing state obvious and directs the person to
+/// an explicit command when they genuinely want to replace the credential.
+fn should_report_existing_oauth_login(
+    has_oauth_credential: bool,
+    has_explicit_setup: bool,
+) -> bool {
+    has_oauth_credential && !has_explicit_setup
+}
+
+fn oauth_login_already_configured_envelope(config: &ayx_core::profile::Config) -> Result<Envelope> {
+    let one = config
+        .alteryx_one
+        .as_ref()
+        .context("config missing alteryx_one section")?;
+    Ok(Envelope::ok_with_data(
+        "OAuth API token already configured",
+        serde_json::json!({
+            "action": "auth.login",
+            "status": "already_configured",
+            "auth_method": "oauth_api_token",
+            "profile": config.profile_name,
+            "workspace_id": one.active_workspace_id(),
+            "refresh_token_present": one.resolved_refresh_token().is_some(),
+            "message": "OAuth API token is already configured. Ordinary `ayx one ...` commands renew access automatically; use `ayx one auth diagnose` to validate it, or `ayx one login --oauth-api-token` only to replace it.",
+        }),
+    ))
+}
+
+/// A deliberately explicit OAuth choice means a person is setting up or
+/// repairing the durable credential. Prompt only in that case; background and
+/// CI invocations must remain non-interactive.
+fn should_prompt_for_oauth_refresh_token(explicit_oauth_method: bool, no_input: bool) -> bool {
+    explicit_oauth_method && !no_input
+}
+
+fn read_oauth_refresh_token_prompt() -> Result<String> {
+    let value = crate::read_secret_prompt("Alteryx One OAuth refresh token")?;
+    nonempty_secret(value, "OAuth refresh token")
+}
+
+/// Returns the visible, non-secret client ID currently associated with the
+/// login target. A selected workspace must not silently inherit a different
+/// workspace's client ID.
+fn oauth_client_id_for_login(
+    one: Option<&ayx_core::profile::AlteryxOneProfile>,
+    workspace_selector_supplied: bool,
+    workspace_id: Option<&str>,
+) -> Option<String> {
+    let one = one?;
+    if workspace_selector_supplied {
+        workspace_id
+            .and_then(|id| one.workspace_credentials.get(id))
+            .and_then(|credential| credential.oauth_client_id.as_deref())
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+    } else {
+        one.resolved_oauth_client_id().map(str::to_string)
+    }
+}
+
+/// Client IDs identify the OAuth application and are intentionally visible.
+/// Only a short suffix of an existing value is echoed so a person can confirm
+/// which saved configuration they are retaining without cluttering the prompt.
+fn read_oauth_client_id_prompt(saved_client_id: Option<&str>) -> Result<String> {
+    use std::io::{self, Write as _};
+
+    let prompt = if let Some(saved) = saved_client_id {
+        let suffix = saved
+            .chars()
+            .rev()
+            .take(6)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect::<String>();
+        format!(
+            "Alteryx One OAuth Client ID (paste a replacement, or press Enter to keep saved …{suffix}): "
+        )
+    } else {
+        "Alteryx One OAuth Client ID (copy it from the OAuth2.0 API Tokens page): ".to_string()
+    };
+    eprint!("{prompt}");
+    io::stderr()
+        .flush()
+        .context("failed to display OAuth Client ID prompt")?;
+
+    let mut value = String::new();
+    io::stdin()
+        .read_line(&mut value)
+        .context("failed to read OAuth Client ID from terminal")?;
+    let value = value.trim();
+    if value.is_empty() {
+        return saved_client_id
+            .map(str::to_string)
+            .ok_or_else(|| anyhow::anyhow!("OAuth Client ID cannot be empty"));
+    }
+    Ok(value.to_string())
 }
 
 fn read_secret_source(
@@ -1471,9 +1648,11 @@ mod tests {
     use super::{
         AuthenticatedWorkspace, BrowserCallback, accepts_plaintext_fallback,
         accepts_workspace_password_save, authenticated_workspace_from_value,
-        parse_browser_callback, persist_verified_workspace_credential,
-        persistence_policy_to_remember, read_refresh_token_source,
-        should_offer_workspace_password_save, workspace_password_for_login,
+        clear_explicit_refresh_token_references, oauth_client_id_for_login, parse_browser_callback,
+        persist_verified_workspace_credential, persistence_policy_to_remember,
+        read_refresh_token_source, should_offer_workspace_password_save,
+        should_prompt_for_oauth_refresh_token, should_report_existing_oauth_login,
+        workspace_password_for_login,
     };
     use ayx_core::profile::{
         AlteryxOneProfile, WorkspaceCredential, WorkspaceResolutionSource, WorkspaceTarget,
@@ -1617,6 +1796,85 @@ mod tests {
             credential.oauth_client_id.as_deref(),
             Some("af1b5321-afe0-48c2-966a-c77d74e98085"),
             "a stored refresh token must carry the client ID that can redeem it"
+        );
+    }
+
+    #[test]
+    fn explicit_oauth_login_prompts_only_when_interactive() {
+        assert!(should_prompt_for_oauth_refresh_token(true, false));
+        assert!(!should_prompt_for_oauth_refresh_token(true, true));
+        assert!(!should_prompt_for_oauth_refresh_token(false, false));
+    }
+
+    #[test]
+    fn api_token_setup_uses_only_the_selected_workspace_client_id() {
+        let mut one = AlteryxOneProfile {
+            oauth_client_id: Some("profile-client".to_string()),
+            ..AlteryxOneProfile::default()
+        };
+        one.workspace_credentials.insert(
+            "91946".to_string(),
+            WorkspaceCredential {
+                oauth_client_id: Some("workspace-client".to_string()),
+                ..WorkspaceCredential::default()
+            },
+        );
+
+        assert_eq!(
+            oauth_client_id_for_login(Some(&one), true, Some("91946")).as_deref(),
+            Some("workspace-client")
+        );
+        assert_eq!(
+            oauth_client_id_for_login(Some(&one), true, Some("other")),
+            None,
+            "a selected workspace must not inherit a profile or another workspace client ID"
+        );
+        assert_eq!(
+            oauth_client_id_for_login(Some(&one), false, None).as_deref(),
+            Some("workspace-client"),
+            "an implicit login follows the active workspace credential"
+        );
+    }
+
+    #[test]
+    fn bare_login_reports_existing_oauth_instead_of_spending_a_refresh_grant() {
+        assert!(should_report_existing_oauth_login(true, false));
+        assert!(!should_report_existing_oauth_login(true, true));
+        assert!(!should_report_existing_oauth_login(false, false));
+    }
+
+    #[test]
+    fn explicit_refresh_replacement_clears_only_the_selected_stale_references() {
+        let mut one = AlteryxOneProfile {
+            access_token_ref: Some("keyring:top-access".to_string()),
+            refresh_token_ref: Some("keyring:top-refresh".to_string()),
+            ..AlteryxOneProfile::default()
+        };
+        one.workspace_credentials.insert(
+            "91946".to_string(),
+            WorkspaceCredential {
+                access_token_ref: Some("keyring:old-workspace-access".to_string()),
+                refresh_token_ref: Some("keyring:old-workspace-refresh".to_string()),
+                ..WorkspaceCredential::default()
+            },
+        );
+
+        clear_explicit_refresh_token_references(&mut one, Some("91946"));
+
+        assert!(
+            one.workspace_credentials["91946"]
+                .access_token_ref
+                .is_none()
+        );
+        assert!(
+            one.workspace_credentials["91946"]
+                .refresh_token_ref
+                .is_none()
+        );
+        assert_eq!(one.access_token_ref.as_deref(), Some("keyring:top-access"));
+        assert_eq!(
+            one.refresh_token_ref.as_deref(),
+            Some("keyring:top-refresh")
         );
     }
 

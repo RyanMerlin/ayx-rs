@@ -89,6 +89,15 @@ the demo client slice is now implemented in the working release candidate:
   session-header reuse, JSON/SSE response handling, tool discovery, workflow/
   dataset/ability metadata-family filtering, and guarded raw calls through
   `ayx mcp gateway`.
+- Agent Studio asset plumbing and disposable-agent prompting are now exposed as
+  a guarded follow-up slice:
+  URI-backed imported dataset creation, cloud-native workflow upload, Agent
+  Studio agent CRUD, dataset Insights registration, workflow Apps shortcut
+  registration (including its asynchronous tool-creation poll), and a
+  preview-first prompt command that starts a Copilot conversation and posts
+  user text. These routes are based on the authenticated Agent Studio UI
+  contract and are labeled private-preview rather than presented as public One
+  API coverage. Live prompt validation is pending renewed local-dev auth.
 
 This does not mean the product-owned Headless Alteryx MCP implementation is
 complete. Product executable discovery/signature validation, stable tool
@@ -130,8 +139,10 @@ published Gateway endpoint/authentication contract remain future work below.
   layer, semantic/lineage asset search, ranking/trust selection, or cloud
   workflow authoring facade. The current Gateway client is deliberately
   contract-generic and exposes observed tool metadata.
-- Dataset support is read-oriented; cloud-native workflow commands do not yet
-  expose the product's build/run/repair lifecycle through MCP.
+- Dataset creation is currently URI/reference-oriented; local file staging and
+  upload semantics remain a product UI/API investigation. Cloud-native workflow
+  upload and Agent Studio registration are available as explicit CLI operations,
+  but the product's build/run/repair lifecycle is not yet exposed through MCP.
 - No MCP-specific lifecycle telemetry, provider/skill/session correlation, or
   product-compatible funnel reporting.
 - Capability execution through `catalog run` does not yet have the same explicit

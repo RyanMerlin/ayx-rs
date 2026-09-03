@@ -178,6 +178,19 @@ fn format_doctor(data: &Value, color: bool) -> String {
 
 /// Pretty-print just the data payload. Used by both text and table modes.
 fn render_data_text(data: &Value) -> String {
+    if data
+        .get("unrecognized_collection")
+        .is_some_and(|value| value.as_bool() == Some(true))
+    {
+        return data
+            .get("hint")
+            .and_then(Value::as_str)
+            .unwrap_or(
+                "The service returned a collection shape this CLI version does not recognize.",
+            )
+            .to_string();
+    }
+
     // Catalog uses named collections rather than the usual `items` wrapper.
     // Keep its operator view useful without changing the lossless JSON
     // contract consumed by agents and scripts.

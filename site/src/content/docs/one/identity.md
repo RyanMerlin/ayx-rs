@@ -35,10 +35,11 @@ passcode and workspace-password prompts.
 # Email OTP flow
 ayx one login
 
-# Persist OAuth API-token policy for the selected workspace
-ayx one login --auth-method oauth-refresh --refresh-token-env AYX_ONE_API_REFRESH_TOKEN
+# One-time OAuth API-token setup, not email OTP: paste the refresh token at the hidden prompt.
+# It is verified, then stored in the operating-system keyring.
+ayx one login --oauth-api-token
 
-# Safe non-interactive import from stdin (POSIX shell)
+# Non-interactive automation only: import from stdin (POSIX shell)
 printf '%s' "$AYX_ONE_API_REFRESH_TOKEN" |
   ayx one login --auth-method oauth-refresh --refresh-token-stdin
 
@@ -65,16 +66,19 @@ ayx one login --workspace-id <id> --workspace-gid <gid>
 
 ### Choosing the credential method
 
-`--auth-method email-otp` and `--auth-method oauth-refresh` set the user credential policy on the selected workspace credential. `oauth-refresh` requires a refresh token and never falls back to OTP or a service principal. A workspace with no `credential_kind` keeps legacy behavior; existing workspaces with a refresh credential are treated as OAuth for compatibility.
+`--auth-method email-otp` and `--auth-method oauth-refresh` set the user credential policy on the selected workspace credential. For a person, `--oauth-api-token` is the clear setup command: it is not email OTP and asks for the visible Client ID followed by one hidden Refresh Token paste, then verifies and stores the pair securely. It never falls back to OTP or a service principal. A workspace with no `credential_kind` keeps legacy behavior; existing workspaces with a refresh credential are treated as OAuth for compatibility.
 
 The OAuth pair normally consists of a client ID, token endpoint, access token,
 and refresh token from Alteryx One's OAuth2.0 API-token administration flow.
 Configure the client ID and endpoint in the profile (or use the documented
-environment overrides), then import the refresh token through
-`--refresh-token-env NAME` or `--refresh-token-stdin`. The CLI verifies the
-workspace before persisting the pair. It stores only secure references in the
-profile when secure persistence is selected, preserves provider-issued
-refresh-token replacements, and does not print token values.
+environment overrides), or run `ayx one login --oauth-api-token` and paste the
+Client ID shown on the OAuth2.0 API Tokens page followed by the Refresh Token
+at the hidden prompt. The CLI verifies the workspace before persisting the
+pair. It stores only secure references in the profile when secure persistence
+is selected, preserves provider-issued refresh-token replacements, and does
+not print token values. The
+`--refresh-token-env NAME` and `--refresh-token-stdin` forms are for
+non-interactive automation.
 
 `--access-token-env NAME` and `--access-token-stdin` avoid placing an access
 token in process arguments or shell history. An access-token-only import cannot
@@ -83,6 +87,12 @@ be used with `oauth-refresh`, because it cannot support refresh-token rotation.
 `auth_rollout` is separate: it selects the Wizard or Legacy implementation of the email-OTP flow and has no meaning for OAuth credentials. `auth_mode: service-principal` is also separate and selects client-credentials authentication for machine identities; it cannot be combined with a workspace user-credential policy.
 
 OAuth access tokens are short-lived. The CLI stores the rotating refresh token and refreshes before an applied mutation when its access token is expired or within the safety window. It never replays a mutation after an uncertain response.
+
+After OAuth API-token setup, ordinary `ayx one ...` commands renew access
+automatically. A bare `ayx one login` reports that OAuth is already configured
+instead of silently consuming a refresh grant. Use `ayx one auth diagnose` to
+validate the connection, or `ayx one login --oauth-api-token` only when you
+intend to replace the saved Refresh Token.
 
 Refresh-token exchange and provider-side rotation cannot be one atomic
 transaction with local keyring storage. If the process or keyring fails after
