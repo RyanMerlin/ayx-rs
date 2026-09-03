@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-02 22:06:20 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-03 19:08:35 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 399
+- Commands: 416
 - Capabilities: 6
 
 ## Commands
@@ -154,6 +154,21 @@ cargo run -q -p xtask -- refresh-command-surface
 | Name | Path | Safety | Mutating | Summary |
 | --- | --- | --- | --- | --- |
 | one | `one` | unclassified |  | Alteryx One command surface |
+| one agent-assets | `one/agent-assets` | unclassified |  | Manage Agent Studio MCP asset registration |
+| one agent-assets agents | `one/agent-assets/agents` | unclassified |  | List, create, update, and delete Agent Studio agents |
+| one agent-assets agents create | `one/agent-assets/agents/create` | unclassified |  | Create an Agent Studio agent from a JSON payload |
+| one agent-assets agents delete | `one/agent-assets/agents/delete` | unclassified |  | Delete an Agent Studio agent |
+| one agent-assets agents detail | `one/agent-assets/agents/detail` | unclassified |  | Inspect one Agent Studio agent |
+| one agent-assets agents list | `one/agent-assets/agents/list` | unclassified |  | List Agent Studio agents |
+| one agent-assets agents prompt | `one/agent-assets/agents/prompt` | unclassified |  | Submit a prompt to an Agent Studio agent |
+| one agent-assets agents update | `one/agent-assets/agents/update` | unclassified |  | Update an Agent Studio agent from a JSON payload |
+| one agent-assets datasets | `one/agent-assets/datasets` | unclassified |  | Manage datasets registered for Agent Studio Insights |
+| one agent-assets datasets list | `one/agent-assets/datasets/list` | unclassified |  | List datasets known to Agent Studio, including MCP preparation state |
+| one agent-assets datasets set | `one/agent-assets/datasets/set` | unclassified |  | Enable or disable a dataset for Agent Studio Insights |
+| one agent-assets workflows | `one/agent-assets/workflows` | unclassified |  | Manage workflow shortcuts registered for Agent Studio Apps |
+| one agent-assets workflows disable | `one/agent-assets/workflows/disable` | unclassified |  | Remove a workflow's Agent Studio Apps shortcut |
+| one agent-assets workflows enable | `one/agent-assets/workflows/enable` | unclassified |  | Register a workflow as an Agent Studio Apps shortcut |
+| one agent-assets workflows list | `one/agent-assets/workflows/list` | unclassified |  | List workflows and their Agent Studio shortcut state |
 | one api | `one/api` | unclassified |  | Alteryx One API introspection (spec + coverage) |
 | one api coverage | `one/api/coverage` | read-only | no | Diff the live One OpenAPI spec against wired commands (covered / missing / stale) |
 | one api diagnose | `one/api/diagnose` | read-only | no | Validate Alteryx One API reachability and auth posture |
@@ -186,8 +201,9 @@ cargo run -q -p xtask -- refresh-command-surface
 | one connections permissions list | `one/connections/permissions/list` | read-only | no | List the people and groups a One connection is shared with |
 | one connections status | `one/connections/status` | read-only | no | Inspect connection status |
 | one connections update | `one/connections/update` | mutating | yes | Update a One connection from JSON payload |
-| one datasets | `one/datasets` | unclassified |  | Read datasets from the Alteryx One dataset APIs |
+| one datasets | `one/datasets` | unclassified |  | Create and read datasets from the Alteryx One dataset APIs |
 | one datasets count | `one/datasets/count` | read-only | no | Count datasets in the user-facing One dataset library |
+| one datasets create | `one/datasets/create` | unclassified |  | Create an imported dataset reference from a JSON payload |
 | one datasets imported | `one/datasets/imported` | unclassified |  | Read imported-dataset resources |
 | one datasets imported detail | `one/datasets/imported/detail` | read-only | no | Inspect an imported dataset by id |
 | one datasets list | `one/datasets/list` | read-only | no | List datasets in the user-facing One dataset library |
@@ -327,6 +343,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one workflows run | `one/workflows/run` | mutating | yes | Queue a cloud-native workflow run |
 | one workflows share | `one/workflows/share` | mutating | yes | Share a cloud-native workflow with people or groups |
 | one workflows tools | `one/workflows/tools` | read-only | no | List the tools available to cloud-native workflows |
+| one workflows upload | `one/workflows/upload` | unclassified |  | Upload a cloud-native workflow JSON file to Alteryx One |
 | one workspace | `one/workspace` | unclassified |  | Alteryx One workspace inspection and administration |
 | one workspace add-group-users | `one/workspace/add-group-users` | mutating | yes | Add users to a One workspace group |
 | one workspace admins | `one/workspace/admins` | read-only | no | List workspace admins |

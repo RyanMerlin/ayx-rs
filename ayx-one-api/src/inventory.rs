@@ -292,6 +292,11 @@ const WORKFLOW_ENDPOINTS: &[EndpointSpec] = &[
     },
     EndpointSpec {
         method: "POST",
+        path: "/svc-workflow/api/v1/workflows",
+        commands: &["one workflows upload"],
+    },
+    EndpointSpec {
+        method: "POST",
         path: "/svc-workflow/api/v1/workflows/{id}/run",
         commands: &["one workflows run"],
     },
@@ -473,6 +478,11 @@ const FLOW_ENDPOINTS: &[EndpointSpec] = &[
 ];
 
 const DATASET_ENDPOINTS: &[EndpointSpec] = &[
+    EndpointSpec {
+        method: "POST",
+        path: "/v4/importedDatasets",
+        commands: &["one datasets create"],
+    },
     EndpointSpec {
         method: "GET",
         path: "/v4/datasetLibrary",
@@ -1076,6 +1086,90 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
 
 const DEFERRED_SURFACES: &[SurfaceSpec] = &[];
 
+const AGENT_ASSET_ENDPOINTS: &[EndpointSpec] = &[
+    EndpointSpec {
+        method: "GET",
+        path: "/ai-agents/backend/agents",
+        commands: &["one agent-assets agents list"],
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/ai-agents/backend/agents",
+        commands: &["one agent-assets agents create"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/ai-agents/backend/agents/{id}",
+        commands: &["one agent-assets agents detail"],
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/copilot/v2/conversations",
+        commands: &["one agent-assets agents prompt"],
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/copilot/v2/chats",
+        commands: &["one agent-assets agents prompt"],
+    },
+    EndpointSpec {
+        method: "PATCH",
+        path: "/ai-agents/backend/agents/{id}",
+        commands: &["one agent-assets agents update"],
+    },
+    EndpointSpec {
+        method: "DELETE",
+        path: "/ai-agents/backend/agents/{id}",
+        commands: &["one agent-assets agents delete"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/ai-agents/backend/agents/ayx-datasets",
+        commands: &[
+            "one agent-assets datasets list",
+            "one agent-assets datasets set",
+        ],
+    },
+    EndpointSpec {
+        method: "PATCH",
+        path: "/ai-agents/backend/agents/ayx-datasets/{id}/mcp-enabled",
+        commands: &["one agent-assets datasets set"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/ai-agents/backend/agentyx/workflows",
+        commands: &["one agent-assets workflows list"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/ai-agents/backend/agentyx/tools",
+        commands: &[
+            "one agent-assets workflows list",
+            "one agent-assets workflows disable",
+        ],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/ai-agents/backend/agentyx/toolCreations",
+        commands: &["one agent-assets workflows list"],
+    },
+    EndpointSpec {
+        method: "POST",
+        path: "/ai-agents/backend/agentyx/toolCreations",
+        commands: &["one agent-assets workflows enable"],
+    },
+    EndpointSpec {
+        method: "GET",
+        path: "/ai-agents/backend/agentyx/toolCreations/{id}",
+        commands: &["one agent-assets workflows enable"],
+    },
+    EndpointSpec {
+        method: "DELETE",
+        path: "/ai-agents/backend/agentyx/tools/{id}",
+        commands: &["one agent-assets workflows disable"],
+    },
+];
+
 const SURFACES: &[SurfaceSpec] = &[
     SurfaceSpec {
         name: "platform.iam",
@@ -1117,6 +1211,15 @@ const SURFACES: &[SurfaceSpec] = &[
             "Alteryx One cloud-native (canvas) workflows, ULID-keyed, served by /svc-workflow.",
             "Distinct from the `flow` surface, which is Designer Cloud /v4/flows keyed by integer ids.",
             "detail and count are synthesized client-side; the API exposes no per-id or count route.",
+        ],
+    },
+    SurfaceSpec {
+        name: "agentAssets",
+        status: "private-preview",
+        endpoints: AGENT_ASSET_ENDPOINTS,
+        notes: &[
+            "Agent Studio Set Up Assets service endpoints recovered from an authenticated UI HAR.",
+            "Agent CRUD and MCP asset registration are preview operations; these private routes are not described by the public One OpenAPI specification.",
         ],
     },
     SurfaceSpec {

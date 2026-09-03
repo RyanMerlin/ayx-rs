@@ -947,7 +947,7 @@ fn coverage_from_spec_file_reports_missing() {
     assert!(
         missing
             .iter()
-            .any(|m| m["path"] == "/v4/importedDatasets" && m["method"] == "POST")
+            .any(|m| m["path"] == "/v4/specOnlyResource" && m["method"] == "POST")
     );
 }
 

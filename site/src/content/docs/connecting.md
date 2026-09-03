@@ -67,15 +67,39 @@ OAuth instructions below; the CLI will not silently send an OTP instead.
 
 Use this method when the CLI must run unattended or when you want to avoid
 daily interactive authentication. Create or obtain an OAuth2.0 API-token pair
-from the Alteryx One administration experience, including its client ID and
-token endpoint. Configure the client ID and endpoint in the selected profile,
-then import the refresh token through an environment variable or stdin:
+from the Alteryx One administration experience. Run one command, paste the
+visible **Client ID** shown on the OAuth2.0 API Tokens page, then paste the
+hidden **Refresh Token** from the generated-token dialog. The CLI verifies the
+pair before saving it in the operating-system keyring rather than the profile
+file:
+
+```bash
+ayx one login --profile local-dev --workspace-id <workspace-id> \
+  --oauth-api-token \
+  --secret-policy secure
+```
+
+After that one-time setup, use `ayx` normally. `--oauth-api-token` is not the
+email one-time-passcode flow. The access token lasts only a
+few minutes, but the CLI renews it automatically with the securely stored
+refresh token. You should not have to paste it again until the provider's
+configured refresh-token lifetime (up to 365 days), unless it is revoked or
+deleted in Alteryx One.
+
+Once it is configured, do not use `login` as a routine step: run normal `ayx
+one ...` commands and they renew access when necessary. A bare `ayx one login`
+only confirms that OAuth is configured; `ayx one auth diagnose` performs a
+live check, and `ayx one login --oauth-api-token` intentionally replaces the
+saved credential.
+
+For CI, a secret manager, or other non-interactive automation, use an
+environment variable or stdin instead:
 
 ```bash
 # The environment variable is read for this import only; secure persistence
 # stores the resulting credential in the OS keyring.
 ayx one login --profile local-dev --workspace-id <workspace-id> \
-  --auth-method oauth-refresh \
+  --oauth-api-token \
   --refresh-token-env AYX_ONE_API_REFRESH_TOKEN \
   --secret-policy secure
 
@@ -90,8 +114,10 @@ $env:AYX_ONE_API_REFRESH_TOKEN |
     --auth-method oauth-refresh --refresh-token-stdin --secret-policy secure
 ```
 
-The client ID can be configured as `alteryx_one.oauth_client_id` or supplied
-through `AYX_ONE_OAUTH_CLIENT_ID`; the token endpoint can be configured as
+On an intentional replacement, press Enter at the Client ID prompt to retain
+the saved value or paste a replacement. For automation, the client ID can be
+configured as `alteryx_one.oauth_client_id` or supplied through
+`AYX_ONE_OAUTH_CLIENT_ID`; the token endpoint can be configured as
 `alteryx_one.token_endpoint_url` or `AYX_ONE_TOKEN_ENDPOINT_URL`. The refresh
 token is bound to the selected workspace and profile. After import, ordinary
 commands use the keyring-backed pair; no OTP prompt is expected. Automatic

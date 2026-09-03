@@ -183,6 +183,33 @@ Endpoints the CLI fully dispatches for this surface (`inventory.rs` `SURFACES`).
 | POST | `/svc-workflow/api/v2/workflows/{id}/share` | not probed | unverified | `one workflows share` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:NotFoundError (`{ kind: "NotFoundError", message, errors: [], params: {} }`) for a valid route / unknown resource id | Mutating; deliberately not probed — a live call shares a real workflow with a real person and sends mail. Body shape is recorded under Contracts below, recovered from the service's own schema-validation errors rather than a published spec. `one workflows share` gates it behind `--apply` and resolves `--to-person` emails to person ids before the dry-run body is shown. |
 | DELETE | `/svc-workflow/api/v2/workflows/{id}` | live 200 | 2026-09-01T21:44Z | `one workflows delete` | empty object `{}` on success (HTTP 200) / dry-run shape (`{ dry_run, mutating, would_send: null }` when not `--apply`) | json:NotFoundError (`{ kind: "NotFoundError", message, errors: [], params: {} }`) for a valid route / unknown resource id | Deleted the disposable copy by ID; final cloud-native workflow IDs matched the baseline. |
 
+### agentAssets (private-preview)
+
+> Agent Studio asset registration and prompt routes recovered from authenticated
+> Agent Studio UI traffic. These routes are not part of the public One OpenAPI
+> specification; all rows remain unverified until a fresh live credential is
+> available.
+
+| Method | Path | Live status | Verified (UTC) | ayx command(s) | Response shape | Error-body flavor | Notes |
+|---|---|---|---|---|---|---|---|
+| GET | `/ai-agents/backend/agents` | unverified | not probed this session | `one agent-assets agents list` | object: Agent Studio list response | unverified | Private-preview route recovered from authenticated Agent Studio HAR. |
+| POST | `/ai-agents/backend/agents` | unverified | not probed this session | `one agent-assets agents create` | object: agent result / dry-run shape | unverified | Mutating; private-preview route recovered from the create form bundle. |
+| GET | `/ai-agents/backend/agents/{id}` | unverified | not probed this session | `one agent-assets agents detail` | object: agent detail response | unverified | Private-preview route recovered from authenticated Agent Studio traffic. |
+| POST | `/copilot/v2/conversations` | unverified | not probed this session | `one agent-assets agents prompt` | object: conversation response | unverified | Starts a Copilot conversation for an Agent Studio agent; applying a prompt may invoke tools. |
+| POST | `/copilot/v2/chats` | unverified | not probed this session | `one agent-assets agents prompt` | object: chat response | unverified | Posts the prompt text to the newly-created conversation; the CLI uses the non-streaming path. |
+| PATCH | `/ai-agents/backend/agents/{id}` | unverified | not probed this session | `one agent-assets agents update` | object: agent result / dry-run shape | unverified | Mutating; private-preview route recovered from the create form bundle. |
+| DELETE | `/ai-agents/backend/agents/{id}` | unverified | not probed this session | `one agent-assets agents delete` | object: mutation result / dry-run shape | unverified | Mutating; private-preview route recovered from authenticated Agent Studio traffic. |
+| GET | `/ai-agents/backend/agents/ayx-datasets` | unverified | not probed this session | `one agent-assets datasets list`<br>`one agent-assets datasets set` | object: dataset registration list | unverified | Dataset lookup used before the MCP-enabled PATCH. |
+| PATCH | `/ai-agents/backend/agents/ayx-datasets/{id}/mcp-enabled` | unverified | not probed this session | `one agent-assets datasets set` | object: mutation result / dry-run shape | unverified | Mutating; toggles the Agent Studio Insights/MCP registration state. |
+| GET | `/ai-agents/backend/agentyx/workflows` | unverified | not probed this session | `one agent-assets workflows list` | object: workflow list | unverified | Private-preview workflow registration route. |
+| GET | `/ai-agents/backend/agentyx/tools` | unverified | not probed this session | `one agent-assets workflows list`<br>`one agent-assets workflows disable` | object: workflow shortcut list | unverified | Used to report and remove Apps shortcuts. |
+| GET | `/ai-agents/backend/agentyx/toolCreations` | unverified | not probed this session | `one agent-assets workflows list` | object: asynchronous creation-job list | unverified | Used to report shortcut-registration jobs. |
+| POST | `/ai-agents/backend/agentyx/toolCreations` | unverified | not probed this session | `one agent-assets workflows enable` | object: asynchronous creation job / dry-run shape | unverified | Mutating; registration returns a job that the CLI polls. |
+| GET | `/ai-agents/backend/agentyx/toolCreations/{id}` | unverified | not probed this session | `one agent-assets workflows enable` | object: asynchronous creation-job status | unverified | Polled until completion or timeout. |
+| DELETE | `/ai-agents/backend/agentyx/tools/{id}` | unverified | not probed this session | `one agent-assets workflows disable` | object: mutation result / dry-run shape | unverified | Mutating; removes an Apps shortcut. |
+| POST | `/v4/importedDatasets` | unverified | not probed this session | `one datasets create` | object: imported-dataset reference / dry-run shape | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException | Creates a URI-backed imported-dataset reference; local file staging remains UI-oriented. |
+| POST | `/svc-workflow/api/v1/workflows` | unverified | not probed this session | `one workflows upload` | object: workflow upload result / dry-run shape | unverified | Uploads a cloud-native workflow package; mutating and preview-first. |
+
 ### flow (implemented)
 
 > Flow lifecycle, package, parameters, library, folder, and permission commands are wired.

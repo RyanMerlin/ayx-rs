@@ -19,6 +19,7 @@ pub mod discover;
 pub(crate) mod headless;
 pub mod mongo;
 pub mod one;
+mod one_agent_assets;
 mod one_api;
 mod one_connections;
 pub mod one_datasets;
