@@ -985,6 +985,28 @@ mongo:
             "server-capable telemetry commands should still parse --source server"
         );
     }
+
+    #[test]
+    fn remediation_for_error_code_names_the_next_command() {
+        use ayx_core::envelope::ErrorCode;
+        let (summary, commands) =
+            remediation_for_error_code(ErrorCode::AuthFailed, "one.flows.list").unwrap();
+        assert!(summary.contains("log in"));
+        assert_eq!(commands[0], "ayx one login");
+
+        let (_, commands) =
+            remediation_for_error_code(ErrorCode::ConfigMissing, "profile.list").unwrap();
+        assert_eq!(
+            commands,
+            vec!["ayx onboard", "ayx profile list --output json"]
+        );
+
+        // Server commands must not be told to run a One login.
+        let (_, commands) = remediation_for_error_code(ErrorCode::AuthFailed, "server").unwrap();
+        assert!(commands.is_empty());
+
+        assert!(remediation_for_error_code(ErrorCode::Internal, "one.flows.list").is_none());
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -6150,6 +6172,15 @@ fn main() -> Result<()> {
 
     match result {
         Ok(envelope) => {
+            let mut envelope = envelope.finalize_retryable();
+            if !envelope.ok
+                && envelope.remediation.is_none()
+                && let Some(code) = envelope.error_code
+                && let Some((summary, commands)) =
+                    remediation_for_error_code(code, descriptor.command)
+            {
+                envelope = envelope.with_remediation(summary, commands);
+            }
             let rendered = format_envelope(&envelope, output, descriptor, output_limit)?;
             if envelope.ok {
                 print!("{rendered}");
@@ -6187,7 +6218,12 @@ fn main() -> Result<()> {
             if let Some(h) = hint {
                 data["hint"] = Value::String(h.to_string());
             }
-            let err_env = Envelope::err_coded(code, "command failed", data);
+            let mut err_env =
+                Envelope::err_coded(code, "command failed", data).finalize_retryable();
+            if let Some((summary, commands)) = remediation_for_error_code(code, descriptor.command)
+            {
+                err_env = err_env.with_remediation(summary, commands);
+            }
             // Errors always go to stderr; the format mirrors the success
             // renderer so JSON consumers see the same envelope shape. Exit
             // non-zero via process::exit (like the ok=false branch) rather than
@@ -6394,6 +6430,40 @@ fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static s
         }
         Internal => None,
     }
+}
+
+/// Structured remediation for dispatcher-classified failures. `command` is the
+/// descriptor's dotted command id (e.g. `one.flows.list`) so product-specific
+/// advice is only given to the product it applies to.
+fn remediation_for_error_code(
+    code: ayx_core::envelope::ErrorCode,
+    command: &str,
+) -> Option<(String, Vec<String>)> {
+    use ayx_core::envelope::ErrorCode::*;
+    let is_one = command == "one" || command.starts_with("one.");
+    let cmds = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    Some(match code {
+        ConfigMissing => (
+            "No usable profile was found; onboard or select an existing one.".to_string(),
+            cmds(&["ayx onboard", "ayx profile list --output json"]),
+        ),
+        AuthFailed if is_one => (
+            "The stored One credential was rejected; log in again.".to_string(),
+            cmds(&["ayx one login", "ayx one auth status --output json"]),
+        ),
+        AuthFailed => (
+            "The stored credential was rejected; refresh it for this product.".to_string(),
+            Vec::new(),
+        ),
+        WorkspaceMismatch => (
+            "The token belongs to a different workspace than the profile expects.".to_string(),
+            cmds(&[
+                "ayx one workspace current --output json",
+                "ayx one workspace switch",
+            ]),
+        ),
+        _ => return None,
+    })
 }
 
 /// Best-effort classification of an anyhow error chain into an `ErrorCode`.
