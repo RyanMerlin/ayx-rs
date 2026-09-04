@@ -1646,9 +1646,9 @@ pub(crate) fn binding_for_auth_config(
         .alteryx_one
         .as_ref()
         .context("config missing alteryx_one section")?;
-    let base_url = one
-        .normalized_base_url()
-        .context("alteryx_one.base_url is required for credential binding")?;
+    let base_url = one.normalized_base_url().context(
+        "alteryx_one.base_url is required for credential binding; set it in the profile or export AYX_ONE_BASE_URL",
+    )?;
     let issuer = one
         .effective_token_endpoint_url_for_workspace(workspace_id)
         .unwrap_or_else(|| base_url.clone());

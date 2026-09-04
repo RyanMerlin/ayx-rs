@@ -2829,6 +2829,15 @@ fn apply_jitter(base_ms: u64, pct: u64) -> u64 {
 /// the profile `base_url`, then the `AYX_ONE_API_BASE_URL` env var.
 /// For user mode (and as the SP fallback): profile `base_url` → env var.
 ///
+/// Two different env vars can satisfy this, at two different points:
+/// `AYX_ONE_BASE_URL` is folded into `config.alteryx_one.base_url` at
+/// profile *load* time (`apply_env_fallbacks`, `ayx-core/src/profile.rs`),
+/// so by the time this function runs it's indistinguishable from a
+/// profile-file `base_url`; `AYX_ONE_API_BASE_URL` is read directly, right
+/// here, as the final fallback. Both work as the remediation for "no base
+/// URL configured" — see the `cli_smoke.rs` tests proving `one open`'s
+/// no-base-URL guard and the `AYX_ONE_BASE_URL` remedy end to end.
+///
 /// Unlike `resolve_one_base_url`, this never falls back to the built-in
 /// `us1` default host, so a caller that must not guess a tenant — a browser
 /// deep link, for instance — can refuse instead of silently opening or

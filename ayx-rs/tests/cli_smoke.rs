@@ -1155,6 +1155,92 @@ fn jq_applies_on_the_err_path() {
     );
 }
 
+/// A minimal central profile home: one `default.yaml` profile with an
+/// `alteryx_one:` section that has no `base_url`. Shape derived from
+/// `ayx-core/src/profile.rs`'s `AlteryxOneProfile`/`Config` -- only
+/// `profile_name` and `alteryx_one.account_email` are non-defaulted, so
+/// nothing else is needed for `one open`'s no-base-URL guard.
+fn write_no_base_url_profile_home() -> tempfile::TempDir {
+    let home = tempfile::tempdir().expect("tempdir");
+    let profiles_dir = home.path().join("profiles");
+    fs::create_dir_all(&profiles_dir).expect("create profiles dir");
+    fs::write(
+        profiles_dir.join("default.yaml"),
+        "profile_name: default\nalteryx_one:\n  account_email: user@example.com\n",
+    )
+    .expect("write profile");
+    home
+}
+
+#[test]
+fn one_open_refuses_to_guess_a_tenant_without_a_base_url() {
+    let home = write_no_base_url_profile_home();
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "open", "workflow", "01TEST", "--print", "--no-input"])
+        .env("AYX_CONFIG_HOME", home.path())
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .output()
+        .expect("ayx binary should run");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let envelope: serde_json::Value = serde_json::from_str(stderr.trim())
+        .unwrap_or_else(|e| panic!("stderr not JSON: {e}\n{stderr}"));
+    assert_eq!(envelope["error_code"], "validation");
+    // `message` is the fixed "command failed" summary (main.rs's Err(err)
+    // branch); the actual error text -- what must name both remedies -- is
+    // data.fields.error (compact envelopes always carry it, per the F3 fix).
+    let message = envelope["data"]["fields"]["error"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        message.contains("alteryx_one.base_url"),
+        "message should name alteryx_one.base_url: {stderr}"
+    );
+    assert!(
+        message.contains("AYX_ONE_BASE_URL"),
+        "message should name AYX_ONE_BASE_URL: {stderr}"
+    );
+}
+
+#[test]
+fn one_open_uses_ayx_one_base_url_from_the_environment() {
+    let home = write_no_base_url_profile_home();
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "open", "workflow", "01TEST", "--print", "--no-input"])
+        .env("AYX_CONFIG_HOME", home.path())
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .env("AYX_ONE_BASE_URL", "https://eu1.example.test")
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let envelope: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout not JSON: {e}\n{stdout}"));
+    let url = envelope["data"]["fields"]["url"]
+        .as_str()
+        .unwrap_or_else(|| panic!("data.fields.url missing: {stdout}"));
+    assert!(
+        url.starts_with("https://eu1.example.test/ayx-one/cloud-native/workflows/01TEST"),
+        "unexpected url: {url}"
+    );
+    assert_eq!(envelope["data"]["fields"]["launched"], false);
+}
+
 #[test]
 fn omitted_workflow_id_off_tty_names_the_list_command() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
