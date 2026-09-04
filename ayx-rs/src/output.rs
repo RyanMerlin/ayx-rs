@@ -57,6 +57,8 @@ pub struct OutputDescriptor {
     pub command: &'static str,
     pub kind: ViewKind,
     pub fields: &'static [&'static str],
+    /// Service-specific collection wrappers accepted by this command.
+    pub collection_keys: &'static [&'static str],
 }
 
 impl OutputDescriptor {
@@ -65,11 +67,17 @@ impl OutputDescriptor {
             command,
             kind,
             fields: &[],
+            collection_keys: &[],
         }
     }
 
     pub const fn with_fields(mut self, fields: &'static [&'static str]) -> Self {
         self.fields = fields;
+        self
+    }
+
+    pub const fn with_collection_keys(mut self, collection_keys: &'static [&'static str]) -> Self {
+        self.collection_keys = collection_keys;
         self
     }
 }
@@ -114,6 +122,7 @@ pub fn render_envelope(
                         &clean.data,
                         descriptor.kind,
                         descriptor.fields,
+                        descriptor.collection_keys,
                         output_limit,
                         false,
                     ),
@@ -148,6 +157,7 @@ fn compact_envelope(
             &envelope.data,
             kind,
             descriptor.fields,
+            descriptor.collection_keys,
             output_limit,
             !envelope.ok,
         ),
@@ -158,6 +168,7 @@ fn compact_data(
     data: &Value,
     kind: ViewKind,
     descriptor_fields: &[&str],
+    collection_keys: &[&'static str],
     limit: usize,
     is_error: bool,
 ) -> Value {
@@ -170,7 +181,7 @@ fn compact_data(
         });
     }
     match kind {
-        ViewKind::List => compact_list(data, descriptor_fields, limit),
+        ViewKind::List => compact_list(data, descriptor_fields, collection_keys, limit),
         ViewKind::Detail => compact_object("detail", data, descriptor_fields),
         ViewKind::Result => compact_object("result", data, descriptor_fields),
         ViewKind::Diagnostic => compact_object("diagnostic", data, descriptor_fields),
@@ -179,8 +190,19 @@ fn compact_data(
     }
 }
 
-fn compact_list(data: &Value, descriptor_fields: &[&str], limit: usize) -> Value {
-    let (items, source_key) = list_items(data).unwrap_or((&[], "items"));
+fn compact_list(
+    data: &Value,
+    descriptor_fields: &[&str],
+    collection_keys: &[&'static str],
+    limit: usize,
+) -> Value {
+    let Some((items, source_key, collection_data)) = list_items(data, collection_keys) else {
+        return json!({
+            "kind": "list",
+            "unrecognized_collection": true,
+            "hint": "The service returned a collection shape this CLI version does not recognize. Use --output json-full to inspect it.",
+        });
+    };
     let shown = if limit == 0 {
         items.len()
     } else {
@@ -198,9 +220,9 @@ fn compact_list(data: &Value, descriptor_fields: &[&str], limit: usize) -> Value
             None => scalar_projection(item),
         })
         .collect();
-    let total = known_total(data);
+    let total = known_total(collection_data);
     let truncated = shown < items.len() || total.is_some_and(|n| n > shown);
-    let omitted = data
+    let omitted = collection_data
         .as_object()
         .map(|object| {
             object
@@ -222,7 +244,10 @@ fn compact_list(data: &Value, descriptor_fields: &[&str], limit: usize) -> Value
         "total_count": total,
         "shown_count": shown,
         "truncated": truncated,
-        "next_page_token": data.get("next_page_token").cloned().unwrap_or(Value::Null),
+        "next_page_token": collection_data
+            .get("next_page_token")
+            .cloned()
+            .unwrap_or(Value::Null),
         "omitted_fields": omitted,
     })
 }
@@ -295,12 +320,20 @@ fn list_projection(items: &[Value]) -> Vec<&'static str> {
         .collect()
 }
 
-fn list_items(data: &Value) -> Option<(&[Value], &str)> {
+fn list_items<'a>(
+    data: &'a Value,
+    collection_keys: &[&'static str],
+) -> Option<(&'a [Value], &'static str, &'a Value)> {
     if let Some(items) = data.as_array() {
-        return Some((items, "items"));
+        return Some((items, "items", data));
     }
     for key in [
         "items",
+        "data",
+        "results",
+        "records",
+        "value",
+        "assets",
         "actions",
         "workflows",
         "hits",
@@ -309,12 +342,17 @@ fn list_items(data: &Value) -> Option<(&[Value], &str)> {
         "flows",
         "plans",
         "connections",
-    ] {
+    ]
+    .into_iter()
+    .chain(collection_keys.iter().copied())
+    {
         if let Some(items) = data.get(key).and_then(Value::as_array) {
-            return Some((items, key));
+            return Some((items, key, data));
         }
     }
-    None
+    data.get("response")
+        .filter(|response| !response.is_null())
+        .and_then(|response| list_items(response, collection_keys))
 }
 
 fn known_total(data: &Value) -> Option<usize> {
@@ -330,7 +368,12 @@ fn project_object(object: Option<&Map<String, Value>>, fields: &[&str]) -> Map<S
     if let Some(object) = object {
         for field in fields {
             if let Some(value) = object.get(*field) {
-                projected.insert((*field).to_string(), scalar_projection(value));
+                let projected_value = if *field == "summary" {
+                    summary_projection(value)
+                } else {
+                    scalar_projection(value)
+                };
+                projected.insert((*field).to_string(), projected_value);
             }
         }
     }
@@ -367,6 +410,21 @@ fn scalar_projection(value: &Value) -> Value {
             object.len()
         )),
         _ => value.clone(),
+    }
+}
+
+fn summary_projection(value: &Value) -> Value {
+    const MAX_SUMMARY_FIELDS: usize = 8;
+    match value {
+        Value::Object(object)
+            if object.len() <= MAX_SUMMARY_FIELDS
+                && object
+                    .values()
+                    .all(|item| !item.is_object() && !item.is_array()) =>
+        {
+            value.clone()
+        }
+        _ => scalar_projection(value),
     }
 }
 
@@ -544,10 +602,107 @@ mod tests {
         let items: Vec<Value> = (0..21)
             .map(|n| json!({"id": n, "name": format!("n{n}"), "body": {"large": true}}))
             .collect();
-        let value = compact_data(&json!({"items": items}), ViewKind::List, &[], 20, false);
+        let value = compact_data(
+            &json!({"items": items}),
+            ViewKind::List,
+            &[],
+            &[],
+            20,
+            false,
+        );
         assert_eq!(value["shown_count"], 20);
         assert_eq!(value["truncated"], true);
         assert_eq!(value["items"].as_array().unwrap().len(), 20);
+    }
+
+    #[test]
+    fn workspace_groups_wrapper_is_scoped_and_lossless() {
+        let envelope = Envelope::ok_with_data(
+            "groups listed",
+            json!({
+                "response": {
+                    "groups": [{"id": 42, "name": "SEs", "members": [{"id": 7}]}],
+                    "count": 1,
+                    "next_page_token": "next-42"
+                }
+            }),
+        );
+        let descriptor = OutputDescriptor::new("one.workspace.groups", ViewKind::List)
+            .with_fields(&["id", "name"])
+            .with_collection_keys(&["groups"]);
+
+        let compact: Value = serde_json::from_str(
+            &render_envelope(&envelope, OutputMode::Json, descriptor, 20).expect("compact JSON"),
+        )
+        .expect("compact output is JSON");
+        assert_eq!(compact["data"]["kind"], "list");
+        assert_eq!(compact["data"]["items"][0]["name"], "SEs");
+        assert_eq!(compact["data"]["total_count"], 1);
+        assert_eq!(compact["data"]["next_page_token"], "next-42");
+        assert!(compact["data"].get("unrecognized_collection").is_none());
+
+        let full =
+            render_envelope(&envelope, OutputMode::JsonFull, descriptor, 20).expect("full JSON");
+        assert!(full.contains("\"members\""));
+        assert!(full.contains("\"id\": 7"));
+        let yaml = render_envelope(&envelope, OutputMode::Yaml, descriptor, 20).expect("YAML");
+        assert!(yaml.contains("groups:"));
+        assert!(yaml.contains("SEs"));
+        for mode in [OutputMode::Text, OutputMode::Table] {
+            let rendered = render_envelope(&envelope, mode, descriptor, 20).expect("human output");
+            assert!(rendered.contains("SEs"));
+            assert!(!rendered.contains("does not recognize"));
+        }
+    }
+
+    #[test]
+    fn groups_wrapper_requires_command_opt_in() {
+        let envelope = Envelope::ok_with_data(
+            "unexpected wrapper",
+            json!({"response": {"groups": [{"id": 42, "name": "SEs"}]}}),
+        );
+        let descriptor = OutputDescriptor::new("one.workspace.people", ViewKind::List);
+        let compact: Value = serde_json::from_str(
+            &render_envelope(&envelope, OutputMode::Json, descriptor, 20).expect("compact JSON"),
+        )
+        .expect("compact output is JSON");
+        assert_eq!(compact["data"]["unrecognized_collection"], true);
+        assert!(compact["data"].get("items").is_none());
+    }
+
+    #[test]
+    fn telemetry_permission_summary_is_detail_and_preserves_counts() {
+        let envelope = Envelope::ok_with_data(
+            "permission summary",
+            json!({
+                "source": "one",
+                "generated_at": "2026-09-04T00:00:00Z",
+                "summary": {"connection_count": 11, "denied_count": 2}
+            }),
+        );
+        let descriptor = OutputDescriptor::new("telemetry.permissions.summary", ViewKind::Detail)
+            .with_fields(&["source", "generated_at", "summary"]);
+        let compact: Value = serde_json::from_str(
+            &render_envelope(&envelope, OutputMode::Json, descriptor, 20).expect("compact JSON"),
+        )
+        .expect("compact output is JSON");
+        assert_eq!(compact["data"]["kind"], "detail");
+        assert_eq!(compact["data"]["fields"]["summary"]["connection_count"], 11);
+        assert!(
+            render_envelope(&envelope, OutputMode::JsonFull, descriptor, 20)
+                .expect("full JSON")
+                .contains("\"connection_count\": 11")
+        );
+        assert!(
+            render_envelope(&envelope, OutputMode::Yaml, descriptor, 20)
+                .expect("YAML")
+                .contains("connection_count: 11")
+        );
+        for mode in [OutputMode::Text, OutputMode::Table] {
+            let rendered = render_envelope(&envelope, mode, descriptor, 20).expect("human output");
+            assert!(rendered.contains("connection_count"));
+            assert!(rendered.contains("11"));
+        }
     }
 
     #[test]
@@ -735,6 +890,7 @@ mod tests {
             }),
             ViewKind::Detail,
             &[],
+            &[],
             20,
             false,
         );
@@ -786,6 +942,7 @@ mod tests {
             &json!({"status": "ok", "noise": 1, "more_noise": 2}),
             ViewKind::Result,
             &["status"],
+            &[],
             20,
             false,
         );

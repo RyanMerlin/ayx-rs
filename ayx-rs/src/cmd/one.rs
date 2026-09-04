@@ -58,9 +58,14 @@ const RESULT_FIELDS: &[&str] = &[
 ];
 const WORKFLOW_LIST_FIELDS: &[&str] =
     &["id", "name", "owner", "last_updated_at", "workflow_version"];
+const GROUP_LIST_COLLECTION_KEYS: &[&str] = &["groups"];
 
 fn list(command: &'static str) -> OutputDescriptor {
     OutputDescriptor::new(command, ViewKind::List).with_fields(LIST_FIELDS)
+}
+
+fn group_list(command: &'static str) -> OutputDescriptor {
+    list(command).with_collection_keys(GROUP_LIST_COLLECTION_KEYS)
 }
 
 fn detail(command: &'static str) -> OutputDescriptor {
@@ -119,8 +124,8 @@ fn workspace_descriptor(command: &OneWorkspaceCommand) -> OutputDescriptor {
         OneWorkspaceCommand::List { .. } => list("one.workspace.list"),
         OneWorkspaceCommand::People => list("one.workspace.people"),
         OneWorkspaceCommand::Admins => list("one.workspace.admins"),
-        OneWorkspaceCommand::Groups { .. } => list("one.workspace.groups"),
-        OneWorkspaceCommand::GroupsGlobal => list("one.workspace.groups-global"),
+        OneWorkspaceCommand::Groups { .. } => group_list("one.workspace.groups"),
+        OneWorkspaceCommand::GroupsGlobal => group_list("one.workspace.groups-global"),
         OneWorkspaceCommand::CloudConfigs { .. } => list("one.workspace.cloud-configs"),
         OneWorkspaceCommand::Current => detail("one.workspace.current"),
         OneWorkspaceCommand::CurrentConfiguration => detail("one.workspace.current-configuration"),
@@ -623,6 +628,12 @@ mod tests {
         assert!(workflow.fields.contains(&"owner"));
         assert!(workflow.fields.contains(&"last_updated_at"));
         assert!(workflow.fields.contains(&"workflow_version"));
+
+        let groups = output_descriptor(&OneCommand::Workspace {
+            command: OneWorkspaceCommand::Groups { workspace_id: None },
+        });
+        assert_eq!(groups.command, "one.workspace.groups");
+        assert_eq!(groups.collection_keys, &["groups"]);
 
         let plan = output_descriptor(&OneCommand::Plans {
             command: OnePlansCommand::Run {

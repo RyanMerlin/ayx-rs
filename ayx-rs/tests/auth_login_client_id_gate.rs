@@ -47,17 +47,17 @@ fn config_home_with_oauth_policy_without_refresh() -> TempDir {
         profiles.join("gate.yaml"),
         "profile_name: gate\n\
          alteryx_one:\n\
-           account_email: user@example.com\n\
-           base_url: https://us1.alteryxcloud.com\n\
-           oauth_client_id: client\n\
-           active_workspace_id: '42'\n\
-           workspace_credentials:\n\
-             '42':\n\
-               workspace_id: '42'\n\
-               workspace_gid: gid-42\n\
-               workspace_name: test\n\
-               credential_kind: oauth_refresh\n\
-               access_token: expired\n",
+        \x20 account_email: user@example.com\n\
+        \x20 base_url: https://us1.alteryxcloud.com\n\
+        \x20 oauth_client_id: client\n\
+        \x20 active_workspace_id: '42'\n\
+        \x20 workspace_credentials:\n\
+        \x20   '42':\n\
+        \x20     workspace_id: '42'\n\
+        \x20     workspace_gid: gid-42\n\
+        \x20     workspace_name: test\n\
+        \x20     credential_kind: oauth_refresh\n\
+        \x20     access_token: expired\n",
     )
     .expect("write profile");
     temp
