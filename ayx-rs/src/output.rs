@@ -4,6 +4,7 @@
 //! the only place that projects it for terminal or compact JSON output.
 
 use ayx_core::envelope::Envelope;
+use ayx_core::observability::redact_text;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
@@ -514,7 +515,18 @@ pub fn redacted_envelope(envelope: &Envelope) -> Envelope {
         error_code: envelope.error_code,
         remediation: envelope.remediation.clone(),
         retryable: envelope.retryable,
-        next: envelope.next.clone(),
+        // `next` hints are full command lines (see pagination_next_command),
+        // not bare secret values, so they need the same in-place text
+        // redaction applied to raw error strings (ayx_core::observability::
+        // redact_text masks just the offending token/value and keeps the
+        // rest of the command intact) rather than redact_value's
+        // whole-string-to-[REDACTED] replacement, which would either erase
+        // the whole hint or (since it only matches a bare value) miss it
+        // entirely.
+        next: envelope
+            .next
+            .as_ref()
+            .map(|hints| hints.iter().map(|hint| redact_text(hint)).collect()),
     }
 }
 
@@ -867,6 +879,23 @@ mod tests {
         assert_eq!(clean.data["authorization"], "[REDACTED]");
         assert_eq!(clean.data["nested"][0]["password"], "[REDACTED]");
         assert_eq!(clean.data["url"], "[REDACTED]");
+    }
+
+    #[test]
+    fn next_hints_are_redacted_like_data() {
+        let env = Envelope::ok_with_data("ok", json!({"n": 1})).with_next(vec![
+            "ayx one login --refresh-token refresh_token=SECRETVALUE".to_string(),
+        ]);
+        let clean = redacted_envelope(&env);
+        let hint = &clean.next.expect("next hints present")[0];
+        assert!(
+            !hint.contains("SECRETVALUE"),
+            "hint leaked a secret: {hint}"
+        );
+        assert!(
+            hint.starts_with("ayx one login --refresh-token refresh_token="),
+            "hint should keep the runnable command around the masked value: {hint}"
+        );
     }
 
     /// Keys that merely *describe* a credential must survive redaction.
