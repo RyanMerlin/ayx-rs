@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-04 20:02:42 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-04 20:17:03 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -253,7 +253,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one job-groups status | `one/job-groups/status` | read-only | no | Inspect a One job group status |
 | one login | `one/login` | mutating | yes | Authenticate with Alteryx One and store credentials |
 | one logout | `one/logout` | mutating | yes | Clear stored Alteryx One credentials from the active profile |
-| one open | `one/open` | read-only | no | Open a One resource in the web console; prints the URL off a terminal or with --print |
+| one open | `one/open` | read-only | no | Open a One resource in the web console. Launches a browser only on a terminal without --no-input; otherwise, or with --print, prints the URL |
 | one output-objects | `one/output-objects` | unclassified |  | Alteryx One output objects — list, create, and manage |
 | one output-objects count | `one/output-objects/count` | read-only | no | Count One output objects |
 | one output-objects create | `one/output-objects/create` | mutating | yes | Create a One output object from JSON payload |

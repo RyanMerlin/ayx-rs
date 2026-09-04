@@ -51,7 +51,11 @@ pub fn execute(
         .alteryx_one
         .as_ref()
         .ok_or_else(|| anyhow!("validation: `one open` requires an alteryx_one profile"))?;
-    let base = ayx_one_api::resolve_one_base_url(&config);
+    let base = ayx_one_api::configured_one_base_url(&config).ok_or_else(|| {
+        anyhow!(
+            "validation: this profile has no Alteryx One base URL, so `one open` cannot pick a tenant; set `alteryx_one.base_url` in the profile or export AYX_ONE_BASE_URL"
+        )
+    })?;
     let id = match (kind.as_str(), id) {
         ("workspace", None) => one
             .resolved_workspace_gid()
