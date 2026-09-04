@@ -1918,6 +1918,19 @@ pub(crate) enum OneCommand {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Open a One resource in the web console; prints the URL off a terminal or with --print.
+    Open {
+        /// Resource kind: `workspace` or `workflow` (other kinds are not yet verified).
+        #[arg(value_name = "KIND")]
+        kind: String,
+        /// Workspace GID for `workspace` (defaults to the profile's active
+        /// workspace) or workflow ULID for `workflow`.
+        #[arg(value_name = "ID")]
+        id: Option<String>,
+        /// Print the URL instead of launching a browser.
+        #[arg(long)]
+        print: bool,
+    },
     /// Alteryx One API introspection (spec + coverage).
     #[command(arg_required_else_help = true)]
     Api {

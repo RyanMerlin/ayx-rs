@@ -410,6 +410,16 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         notes: &["Maps to GET /v4/people/current in the One API docs."],
     },
     CatalogMetadata {
+        path: "one/open",
+        output: "url envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["alteryx_one profile with a base URL"],
+        notes: &[
+            "Launches a browser only on a terminal without --no-input; otherwise prints the URL.",
+        ],
+    },
+    CatalogMetadata {
         path: "one/person/list",
         output: "one person list envelope",
         safety: "read-only",

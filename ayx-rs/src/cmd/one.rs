@@ -114,6 +114,8 @@ pub(crate) fn output_descriptor(command: &OneCommand) -> OutputDescriptor {
         OneCommand::Inventory { .. } => {
             OutputDescriptor::new("one.inventory", ViewKind::Diagnostic)
         }
+        OneCommand::Open { .. } => OutputDescriptor::new("one.open", ViewKind::Result)
+            .with_fields(&["kind", "id", "url", "launched"]),
         #[cfg(feature = "ui")]
         OneCommand::Ui { .. } => OutputDescriptor::new("one.ui", ViewKind::Raw),
     }
@@ -568,6 +570,9 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
         OneCommand::Inventory { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_surface_inventory_envelope(&config)?
+        }
+        OneCommand::Open { kind, id, print } => {
+            super::one_open::execute(&runtime, kind, id, print)?
         }
         OneCommand::Doctor { command } => super::one_doctor::execute(&runtime, command)?,
         OneCommand::Api { command } => super::one_api::execute(&runtime, command)?,

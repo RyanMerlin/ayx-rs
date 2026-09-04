@@ -39,6 +39,7 @@ rpassword = "7.5.4"
 jaq-core.workspace = true
 jaq-json.workspace = true
 jaq-std.workspace = true
+open.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
