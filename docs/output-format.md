@@ -64,3 +64,9 @@ standard library) over the rendered JSON and prints one value per line.
 redaction and `--output-limit`, so it cannot reveal anything the plain output
 would not. A filter that fails to parse, compile, or run is a `validation`
 error (exit 2).
+
+The filter runs on the rendered, redacted document. The `env`/`$ENV` and
+`now` builtins, and the wall-clock/timezone builtins (`strftime`,
+`strflocaltime`, `gmtime`, `localtime`, `mktime`, `strptime`), are not
+available, and `halt`/`halt_error` are rejected, so a filter cannot read the
+process environment or host clock, or change the exit code.

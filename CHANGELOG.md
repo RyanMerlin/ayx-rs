@@ -32,6 +32,11 @@
 - `--jq <FILTER>` and `--raw-output` (`-r`) run a jq filter over the JSON
   result in-binary (pure-Rust `jaq`). Non-finite results (`NaN`, `Infinity`)
   are rejected as `validation` errors; big integers are preserved exactly.
+  The filter runs on the rendered, redacted document. The `env`/`$ENV` and
+  `now` builtins, and the wall-clock/timezone builtins (`strftime`,
+  `strflocaltime`, `gmtime`, `localtime`, `mktime`, `strptime`), are not
+  available, and `halt`/`halt_error` are rejected, so a filter cannot read
+  the process environment or host clock, or change the exit code.
 - `ayx one workspace detail <id>`.
 - `ayx one open <kind> [id] [--print]` deep-links the web console for
   `workspace` and `workflow`. It refuses to guess a tenant: a profile without

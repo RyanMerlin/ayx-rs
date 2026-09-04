@@ -1,12 +1,47 @@
 //! `--jq` post-processing: run a jq filter over the rendered JSON envelope.
 //!
-//! The filter sees exactly what the user would have seen (redaction and
-//! `--output-limit` already applied), so it cannot widen the output.
+//! The filter runs on the rendered, redacted document. The `env`/`$ENV` and
+//! `now` builtins, and the wall-clock/timezone builtins (`strftime`,
+//! `strflocaltime`, `gmtime`, `localtime`, `mktime`, `strptime`), are not
+//! available, and `halt`/`halt_error` are rejected — so a filter cannot read
+//! the process environment or host clock, or change the exit code.
+//! (`fromdateiso8601`/`todateiso8601`, reachable via `fromdate`/`todate`,
+//! stay: they convert an explicit input value and read no ambient state.)
 
 use anyhow::{Context, Result, anyhow};
 use jaq_core::load::{Arena, File, Loader};
 use jaq_core::{Compiler, Ctx, Vars, data};
 use jaq_json::{Val, read};
+
+/// Native `jaq-std` filters excluded from `--jq` because they read ambient
+/// process state: the process environment (`env`) or the host clock/
+/// timezone (`now` and the `strftime`/`gmtime`/`mktime` family).
+/// `fromdateiso8601`/`todateiso8601` are deliberately NOT here even though
+/// they are part of the same `time` feature group — `jaq-std`'s
+/// unconditional `defs.jq` defines `todate`/`fromdate` in terms of them, and
+/// jaq typechecks the whole loaded module graph eagerly, so removing a
+/// native filter that an always-loaded def references breaks compilation of
+/// every `--jq` filter, not just ones that call it.
+///
+/// Excluding by name here (rather than dropping the `jaq-std` `time`
+/// feature in `Cargo.toml`) is deliberate too: `jaq-std`'s public `funs()`/
+/// `extra_funs()` are gated behind `std`+`format`+`log`+`math`+`regex`+
+/// `time` all being enabled at once (`jaq-std-3.0.3/src/lib.rs`), so
+/// disabling `time` to drop the embedded tz database would also silently
+/// drop `format`/`math`/`regex`/`log` — a much bigger functionality cut than
+/// intended. Filtering by name keeps those, at the cost of not shrinking the
+/// binary (the `jiff`-backed code is still linked, just unreachable from a
+/// `--jq` filter).
+const DENIED_STD_FILTERS: &[&str] = &[
+    "env",
+    "now",
+    "strftime",
+    "strflocaltime",
+    "gmtime",
+    "localtime",
+    "strptime",
+    "mktime",
+];
 
 /// Run `filter_src` over `json_document`; return one line per output value.
 /// With `raw_output`, string results print without quotes (like `jq -r`).
@@ -22,7 +57,7 @@ pub fn apply(filter_src: &str, json_document: &str, raw_output: bool) -> Result<
         .chain(jaq_std::defs())
         .chain(jaq_json::defs());
     let funs = jaq_core::funs()
-        .chain(jaq_std::funs())
+        .chain(jaq_std::funs().filter(|(name, ..)| !DENIED_STD_FILTERS.contains(name)))
         .chain(jaq_json::funs());
 
     let loader = Loader::new(defs);
@@ -152,6 +187,14 @@ mod tests {
             apply("\"a\\\"b\\\\c\"", DOC, true).unwrap(),
             vec!["a\"b\\c"]
         );
+    }
+
+    #[test]
+    fn env_and_time_builtins_are_not_compiled_in() {
+        for filter in ["env", "$ENV", "now"] {
+            let err = apply(filter, DOC, false).unwrap_err().to_string();
+            assert!(err.starts_with("validation:"), "{filter}: {err}");
+        }
     }
 
     #[test]

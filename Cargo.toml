@@ -34,7 +34,7 @@ fs_extra = "1.3"
 httpmock = "0.8"
 inquire = "0.9"
 jaq-core = "3.1"
-jaq-json = { version = "2.0", features = ["serde"] }
+jaq-json = { version = "2.0" }
 jaq-std = "3.0"
 keyring-core = "1"
 lzf = "1"
