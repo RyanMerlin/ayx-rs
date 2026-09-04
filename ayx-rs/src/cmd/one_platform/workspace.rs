@@ -21,10 +21,11 @@ use crate::{
 const WORKSPACE_ADMINS_ENDPOINT: &str = "/v4/workspaces/{workspaceId}/admins";
 
 /// `GET /v4/workspaces/{workspaceId}` — same numeric-id contract as `admins`.
-/// Previously reachable only from `ayx tui`'s One browser, which dispatches
+/// Previously reachable only from `ayx tui`'s One browser, which dispatched
 /// the same route under its own `{id}` placeholder (a separate literal from
-/// this one, still carved out in `one_inventory_drift.rs` until the TUI is
-/// removed later in Wave 0).
+/// this one). The TUI was removed in 0.20.0 (ADR 0004), so this is now the
+/// sole caller and the `one_inventory_drift.rs` carve-out for the old `{id}`
+/// literal is gone.
 const WORKSPACE_DETAIL_ENDPOINT: &str = "/v4/workspaces/{workspaceId}";
 
 /// Resolve and validate the numeric workspace id required by path-scoped

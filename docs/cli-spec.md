@@ -135,7 +135,6 @@ The CLI is product-first. The stable top-level commands and families are:
 - `tools`
 - `sqlserver`
 - `update`
-- `tui`
 - `completions`
 - `discover`
 

@@ -102,7 +102,6 @@ fn ayx_help_renders() {
     assert!(stdout.contains("one"));
     assert!(stdout.contains("server"));
     assert!(stdout.contains("mongo"));
-    assert!(stdout.contains("tui"));
 }
 
 #[test]
@@ -184,17 +183,35 @@ fn catalog_surface_lists_core_one_commands() {
 }
 
 #[test]
-fn tui_help_renders() {
+fn tui_stub_returns_remediation_and_is_hidden() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["tui", "--help"])
+        .args(["tui", "--output", "json-full"])
         .output()
         .expect("ayx binary should run");
 
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Interactive TUI"));
-    assert!(stdout.contains("central profile"));
-    assert!(!stdout.contains("config.yaml"));
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "removed command is a validation error"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let envelope: serde_json::Value =
+        serde_json::from_str(stderr.trim()).expect("stderr is one JSON envelope");
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["error_code"], "validation");
+    assert_eq!(envelope["retryable"], false);
+    assert_eq!(envelope["remediation"]["commands"][0], "ayx onboard");
+
+    let help = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["--help"])
+        .output()
+        .expect("ayx binary should run");
+    assert!(
+        !String::from_utf8_lossy(&help.stdout)
+            .to_lowercase()
+            .contains("tui"),
+        "hidden stub must not appear in --help"
+    );
 }
 
 #[test]

@@ -1,5 +1,6 @@
 //! `telemetry weekly run-counts` — emit a stable 7×24 matrix the next phase
-//! (richer renderer or TUI heatmap) consumes directly.
+//! (a richer renderer, or a heatmap in a separate visualization tool per ADR
+//! 0004 — no bundled TUI) consumes directly.
 //!
 //! Per user direction the rendering of the heatmap itself is the next phase;
 //! this command's job is to lock in a stable data contract.

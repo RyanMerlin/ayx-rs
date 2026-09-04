@@ -10,9 +10,9 @@ Runtime config is central-only.
 
 Editor/onboarding exception:
 
-- The TUI and onboarding/migration flows may open or edit explicit files and workspaces.
+- Onboarding and migration flows may open or edit explicit files and workspaces.
 - Those explicit paths are inspection/edit targets only; they are not runtime selectors.
-- Any path-based helper used by the TUI must stay visibly separate from the central runtime loader.
+- Any path-based helper used by onboarding or migration must stay visibly separate from the central runtime loader.
 
 Forbidden patterns:
 

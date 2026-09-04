@@ -33,12 +33,11 @@ progressive traversal.
 
 Notes:
 
-- `tui`, `completions`, and onboarding-style flows still perform direct terminal I/O in places, so they are not pure envelope commands.
+- `completions` and onboarding-style flows still perform direct terminal I/O in places, so they are not pure envelope commands.
 - Success documents go to stdout; selected-format failure envelopes go to
   stderr. Verbose/debug diagnostics also use stderr.
 - `yaml` serializes the full redacted envelope. `table` remains the text/list
   table presentation.
-- `tui`, interactive onboarding/authentication, and shell completion scripts
-  are direct-terminal workflows; structured modes return an envelope summary.
+- Interactive onboarding/authentication and shell completion scripts are direct-terminal workflows; structured modes return an envelope summary.
 - For `workflow yxdb`, keep `--csv <path>` for export and add `--output json`
   when you want structured metadata alongside it.

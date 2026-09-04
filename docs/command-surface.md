@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-04 15:50:28 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-04 16:34:53 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 400
+- Commands: 399
 - Capabilities: 6
 
 ## Commands
@@ -510,12 +510,6 @@ cargo run -q -p xtask -- refresh-command-surface
 | tools workspace init | `tools/workspace/init` | unclassified |  | Write an environments.yaml workspace template |
 | tools workspace migrate-workflows | `tools/workspace/migrate-workflows` | unclassified |  | (preview) Resolve and summarize both workspace profiles — workflow migration not yet implemented |
 | tools workspace resolve | `tools/workspace/resolve` | unclassified |  | Resolve source and target environments from a workspace |
-
-### `tui`
-
-| Name | Path | Safety | Mutating | Summary |
-| --- | --- | --- | --- | --- |
-| tui | `tui` | unclassified |  | Interactive TUI for central profile selection, explicit file editing, One credentials, and connectivity checks |
 
 ### `update`
 

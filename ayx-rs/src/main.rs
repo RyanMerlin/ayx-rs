@@ -16,16 +16,13 @@ use ayx_core::envelope::{Envelope, ErrorCode};
 use ayx_core::observability::{redact_text, transport_error_summary};
 use ayx_core::profile::{
     AyxState, Config, ServerProfile, ayx_config_home, ayx_profiles_dir, ayx_state_path,
-    ayx_workspaces_dir, list_central_profiles, load_ayx_state, profile_resolution_detail,
-    profile_shape_label, profile_storage_path, resolve_runtime_profile, save_ayx_state,
+    ayx_workspaces_dir, list_central_profiles, load_ayx_state, profile_shape_label,
+    profile_storage_path, resolve_runtime_profile, save_ayx_state,
 };
 // Most ayx_one + ayx_one_api helpers used by the One dispatch are now imported
 // directly in cmd/one.rs. These re-exports stay so the License surface and the
-// doctor envelope helpers (still in main.rs) and the TUI can use them.
-use ayx_one::{
-    api_diagnose_envelope, api_inventory_envelope, api_status_envelope,
-    one_surface_inventory_envelope,
-};
+// doctor envelope helpers (still in main.rs) can use them.
+use ayx_one::{api_diagnose_envelope, api_inventory_envelope, api_status_envelope};
 use ayx_one_api::one_api_live_request;
 // server (logs/upgrade/util/api) helpers moved to cmd/server.rs.
 // mongo to cmd/mongo.rs. sqlserver to cmd/sqlserver.rs.
@@ -41,7 +38,6 @@ mod onboard;
 mod output;
 mod render;
 pub(crate) mod secret;
-mod tui;
 
 const ALTERYX_BLUE: Color = Color::Rgb(RgbColor(0, 103, 185));
 const ALTERYX_CYAN: Color = Color::Rgb(RgbColor(0, 169, 224));
@@ -256,7 +252,7 @@ fn auth_token_health(access_token: Option<&str>) -> &'static str {
 #[command(
     name = "ayx",
     version,
-    about = "Operator CLI and TUI for the Alteryx ecosystem (Server, One, Mongo, Designer workflows).",
+    about = "Operator CLI for the Alteryx ecosystem (Server, One, Mongo, Designer workflows).",
     long_about = "ayx is a single-binary, agent-friendly CLI for Alteryx administrators and \
                   automation. It produces a uniform JSON envelope (use --output json), gates \
                   mutating One API calls behind --apply (dry-run by default), records audit \
@@ -370,7 +366,7 @@ fn output_descriptor(command: &Command) -> output::OutputDescriptor {
         },
         Command::Completions { .. } => OutputDescriptor::new("completions", ViewKind::Export)
             .with_fields(&["shell", "bytes", "usage_hint"]),
-        Command::Tui => OutputDescriptor::new("tui", ViewKind::Raw),
+        Command::Tui => OutputDescriptor::new("tui", ViewKind::Result),
         Command::One { command } => cmd::one::output_descriptor(command),
         Command::Server { .. } => OutputDescriptor::new("server", ViewKind::Raw),
         Command::Mongo { .. } => OutputDescriptor::new("mongo", ViewKind::Raw),
@@ -470,9 +466,10 @@ enum Command {
         #[arg(long)]
         non_interactive: bool,
     },
-    #[command(
-        about = "Interactive TUI for central profile selection, explicit file editing, One credentials, and connectivity checks"
-    )]
+    /// Removed in 0.20.0 (ADR 0004). Hidden stub for one release cycle so
+    /// muscle-memory invocations get a remediation envelope instead of a clap
+    /// "unrecognized subcommand". Delete in 0.21.0.
+    #[command(hide = true)]
     Tui,
     #[command(
         about = "Machine-readable command registry",
@@ -4406,7 +4403,23 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
             )?;
             Envelope::ok_with_data("onboarding completed", detail)
         }
-        Command::Tui => return tui::run(),
+        Command::Tui => Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::Validation,
+            "ayx tui was removed in 0.20.0",
+            json!({
+                "removed_in": "0.20.0",
+                "adr": "docs/adr/0004-no-bundled-tui.md",
+            }),
+        )
+        .with_remediation(
+            "Use the targeted commands that replaced the TUI",
+            vec![
+                "ayx onboard".to_string(),
+                "ayx one login".to_string(),
+                "ayx profile list".to_string(),
+                "ayx doctor".to_string(),
+            ],
+        ),
         Command::Profile { command } => match command {
             ProfileCommand::List => profile_list_envelope()?,
             ProfileCommand::Current => profile_current_envelope()?,
@@ -5263,137 +5276,8 @@ fn doctor_config_envelope(profile: Option<&str>, fix: bool) -> Result<Envelope> 
     ))
 }
 
-pub(crate) fn doctor_config_envelope_from_path(profile: &Path, fix: bool) -> Result<Envelope> {
-    if fix {
-        fs::create_dir_all(ayx_profiles_dir()?)?;
-        fs::create_dir_all(ayx_workspaces_dir()?)?;
-        if !ayx_state_path()?.exists() {
-            save_ayx_state(&AyxState::default())?;
-        }
-    }
-    let resolution = profile_resolution_detail(profile)?;
-    let (shape, inline_risks) = if Path::new(&resolution.resolved_path).exists() {
-        let raw = fs::read_to_string(&resolution.resolved_path)?;
-        let value: serde_yaml::Value = serde_yaml::from_str(&raw)?;
-        (
-            profile_shape_label(&value),
-            collect_inline_secret_warnings(&raw, &value),
-        )
-    } else {
-        ("missing", Vec::new())
-    };
-    let label = Path::new(&resolution.resolved_path)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("profile");
-    let (status, summary) = doctor_config_status_summary(label, shape, &inline_risks);
-    let secret_posture = secret::inspect_profile(profile)
-        .map(|slots| json!({ "available": true, "slots": slots }))
-        .unwrap_or_else(|_| {
-            json!({
-                "available": false,
-                "status": "unavailable",
-                "hint": "run `ayx secret validate` for reference remediation"
-            })
-        });
-    Ok(Envelope::ok_with_data(
-        "doctor config completed",
-        json!({
-            "config_home": ayx_config_home()?.display().to_string(),
-            "profiles_dir": ayx_profiles_dir()?.display().to_string(),
-            "workspaces_dir": ayx_workspaces_dir()?.display().to_string(),
-            "state_path": ayx_state_path()?.display().to_string(),
-            "resolution": resolution,
-            "shape": shape,
-            "inline_secret_risks": inline_risks,
-            "secret_posture": secret_posture,
-            "fix_applied": fix,
-            "status": status,
-            "summary": summary,
-        }),
-    ))
-}
-
 fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
     let config = load_profile_with_env(profile, environment)?;
-    let one = config.alteryx_one.as_ref();
-    let server = config.server.as_ref();
-    let one_configured = one.is_some();
-    let one_access_token_present = one
-        .and_then(|v| v.access_token.as_ref())
-        .is_some_and(|v| !v.trim().is_empty());
-    let one_refresh_token_present = one
-        .and_then(|v| v.refresh_token.as_ref())
-        .is_some_and(|v| !v.trim().is_empty());
-    let one_oauth_client_id_present = one
-        .and_then(|v| v.oauth_client_id.as_ref())
-        .is_some_and(|v| !v.trim().is_empty());
-    let server_configured = server.is_some();
-    let server_api_key_present = server.is_some_and(|v| !v.curator_api_key.trim().is_empty());
-    let server_api_secret_present = server.is_some_and(|v| !v.curator_api_secret.trim().is_empty());
-    let (status, summary) = doctor_auth_status_summary(
-        one_configured,
-        one_access_token_present,
-        one_refresh_token_present,
-        one_oauth_client_id_present,
-        server_configured,
-        server_api_key_present,
-        server_api_secret_present,
-    );
-    let one_status = auth_product_status(
-        one_configured,
-        one_access_token_present && one_refresh_token_present && one_oauth_client_id_present,
-    );
-    let server_status = auth_product_status(
-        server_configured,
-        server_api_key_present && server_api_secret_present,
-    );
-    Ok(Envelope::ok_with_data(
-        "doctor auth completed",
-        json!({
-            "profile": config.profile_name,
-            "status": status,
-            "summary": summary,
-            "one_status": one_status,
-            "server_status": server_status,
-            "inline_secret_fields": ayx_core::auth::inline_secret_fields(&config),
-            "migration": {
-                "available": !ayx_core::auth::inline_secret_fields(&config).is_empty(),
-                "hint": "run `ayx one doctor auth --migrate` when secure storage is available"
-            },
-            "one": {
-                "configured": one_configured,
-                "access_token_present": one_access_token_present,
-                "refresh_token_present": one_refresh_token_present,
-                "oauth_client_id_present": one_oauth_client_id_present,
-                "access_token_source": secret_source(
-                    one.and_then(|v| v.access_token_ref.as_ref()),
-                    one.and_then(|v| v.access_token.as_deref()),
-                ),
-                "refresh_token_source": secret_source(
-                    one.and_then(|v| v.refresh_token_ref.as_ref()),
-                    one.and_then(|v| v.refresh_token.as_deref()),
-                ),
-            },
-            "server": {
-                "configured": server_configured,
-                "curator_api_key_present": server_api_key_present,
-                "curator_api_secret_present": server_api_secret_present,
-                "curator_api_secret_source": secret_source(
-                    server.and_then(|v| v.curator_api_secret_ref.as_ref()),
-                    server.map(|v| v.curator_api_secret.as_str()),
-                ),
-            }
-        }),
-    ))
-}
-
-pub(crate) fn doctor_auth_envelope_from_path(
-    profile: &Path,
-    environment: Option<&str>,
-) -> Result<Envelope> {
-    let config = Config::load_from_path_with_environment(profile, environment)?;
-    validate_loaded_auth_bindings(&config)?;
     let one = config.alteryx_one.as_ref();
     let server = config.server.as_ref();
     let one_configured = one.is_some();
