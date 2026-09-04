@@ -1919,7 +1919,8 @@ pub(crate) enum OneCommand {
         profile: Option<String>,
     },
     /// Open a One resource in the web console. Launches a browser only on a
-    /// terminal without --no-input; otherwise, or with --print, prints the URL.
+    /// terminal, without --no-input or --print, and when no agent host is
+    /// detected; otherwise prints the URL.
     Open {
         /// Resource kind: `workspace` or `workflow` (other kinds are not yet verified).
         #[arg(value_name = "KIND")]

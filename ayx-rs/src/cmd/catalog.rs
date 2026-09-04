@@ -416,7 +416,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         mutating: false,
         prerequisites: &["alteryx_one profile with a base URL"],
         notes: &[
-            "Launches a browser only on a terminal without --no-input and without --print; otherwise prints the URL. Requires a configured One base URL.",
+            "Launches a browser only on a terminal, without --no-input or --print, and when no agent host is detected; otherwise prints the URL. Requires a configured One base URL.",
         ],
     },
     CatalogMetadata {

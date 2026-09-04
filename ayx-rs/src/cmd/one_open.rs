@@ -40,6 +40,14 @@ pub fn build_url(base: &str, kind: &str, id: &str) -> Result<String, Box<Envelop
     }
 }
 
+/// A browser may launch only on a terminal, without `--print` or
+/// `--no-input`, and when no agent host is detected — an agent under a pty
+/// still reports `is_terminal() == true`, so the TTY check alone isn't
+/// enough to stop `one open` from popping a browser in an unattended run.
+fn should_launch(print: bool, no_input: bool, agent: bool, tty: bool) -> bool {
+    !print && !no_input && !agent && tty
+}
+
 pub fn execute(
     runtime: &RuntimeCtx<'_>,
     kind: String,
@@ -72,7 +80,13 @@ pub fn execute(
         Ok(url) => url,
         Err(envelope) => return Ok(*envelope),
     };
-    let launch = !print && !runtime.no_input && std::io::stdout().is_terminal();
+    let agent = crate::output::agent_marker_present(|k| std::env::var(k).ok());
+    let launch = should_launch(
+        print,
+        runtime.no_input,
+        agent,
+        std::io::stdout().is_terminal(),
+    );
     let launched = launch && open::that(&url).is_ok();
     Ok(Envelope::ok_with_data(
         if launched {
@@ -87,6 +101,15 @@ pub fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_launch_requires_tty_and_refuses_print_no_input_or_agent() {
+        assert!(should_launch(false, false, false, true));
+        assert!(!should_launch(true, false, false, true), "print");
+        assert!(!should_launch(false, true, false, true), "no_input");
+        assert!(!should_launch(false, false, true, true), "agent");
+        assert!(!should_launch(false, false, false, false), "no tty");
+    }
 
     #[test]
     fn verified_kinds_build_their_paths() {
