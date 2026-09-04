@@ -66,8 +66,15 @@ is superseded by Wave 2 and ADR 0005.
 - Run the Wave 1 live re-verification checklist against a real tenant before
   its implementation plan is written; several source endpoints were last
   probed in August.
-- Confirm internally whether Agent Studio / AOA accepts third-party MCP
-  servers. This gates the AOA positioning of Wave 2, not the build.
+- ~~Confirm internally whether Agent Studio / AOA accepts third-party MCP
+  servers.~~ **Checked 2026-09-04 (internal Confluence):** Agent Studio and
+  Copilot Service consume only Alteryx-owned toolsets (`insights`, `apps`,
+  `designer`) in a hub-and-spoke model; the Alteryx MCP Server exposes those
+  toolsets *outward* to external hosts (scoped with `?toolsets=`). No page
+  describes registering a third-party server. The AOA positioning of Wave 2 is
+  therefore deferred; the design stands on external hosts registering both the
+  Alteryx MCP Server and `ayx mcp serve`. Re-check if the "RBAC-First Asset
+  Access for Alteryx Agents and MCP" or "MCP Server Asset Scope" pages change.
 - Write the Wave 2 and Wave 3 design specs after Wave 1's collector exists;
   the curated MCP tools and the plan artifact both consume it.
 

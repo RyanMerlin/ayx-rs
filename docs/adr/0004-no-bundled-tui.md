@@ -55,8 +55,10 @@ terminal or `--no-input` is set, so agent-mode behavior never changes:
    On a TTY it launches the browser; off a TTY it prints the URL.
 
 `ratatui`, `tui-input`, and `nucleo-matcher` leave the dependency graph.
-`crossterm` survives only as a transitive dependency of the picker crate; its
-one direct non-TUI use (`one_platform/auth.rs`) is removed.
+`crossterm` stays: its one non-TUI use, `ensure_visible_line_input()` in
+`one_platform/auth.rs`, restores the Windows console after an interrupted
+masked password prompt (added in `e591b13`, unrelated to the TUI), and the
+picker crate depends on it anyway.
 
 Any future full-screen interface is a separate binary and repository, never a
 feature of the plumbing CLI. The removal is recorded with a `tui-final` git tag

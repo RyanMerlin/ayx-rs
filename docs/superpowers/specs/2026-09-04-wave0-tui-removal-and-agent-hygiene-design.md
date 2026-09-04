@@ -67,10 +67,10 @@ Delete `ayx-rs/src/tui/` (30 files, 9,868 lines). Then remove every reference:
 | `ayx-rs/src/main.rs:~447-450` `Command::Tui` variant | replace with the hidden deprecation stub (A3) |
 | `ayx-rs/src/main.rs:~365` `OutputDescriptor::new("tui", ViewKind::Raw)` | keep for the stub, `ViewKind::Result` |
 | `ayx-rs/src/main.rs:~4300` `Command::Tui => return tui::run()` | dispatch to the stub |
-| `ayx-rs/src/cmd/one_platform/auth.rs:829` `crossterm::terminal::disable_raw_mode()` | Determine why the OTP login flow resets raw mode (it is a defensive reset after an interrupted TUI session). With no TUI it is dead; remove it. If a terminal-state reset is still wanted, use the picker crate's terminal helper rather than a direct `crossterm` import. |
+| `ayx-rs/src/cmd/one_platform/auth.rs:1058-1066` `ensure_visible_line_input()` (`crossterm::terminal::disable_raw_mode()`, `#[cfg(windows)]`) | **Keep.** `git log -L` shows it was added in `e591b13` "complete secure internal login flow" to restore the Windows console after an interrupted masked password prompt. It has nothing to do with the TUI. |
 | `Cargo.toml:40` `ratatui`, `:60` `tui-input`, `:39` `nucleo-matcher` | remove |
-| `Cargo.toml:31` `crossterm` | remove the direct declaration; it returns as a transitive dependency of the picker crate (B5) |
-| `ayx-rs/Cargo.toml:24-27` | remove the four `.workspace = true` lines; add the picker crate |
+| `Cargo.toml:31` `crossterm` | keep (used by `auth.rs` above; also a dependency of the picker crate — align versions with `cargo tree -i crossterm`) |
+| `ayx-rs/Cargo.toml:25-27` | remove `ratatui`, `nucleo-matcher`, `tui-input`; keep `crossterm.workspace = true`; add the picker crate |
 | `ayx-rs/tests/cli_smoke.rs:187-198` `tui_help_renders` | replace with `tui_stub_returns_remediation` (A3) |
 | `ayx-rs/tests/one_inventory_drift.rs:92-100` v2 endpoint allowlist, `:115-124` workspace-detail carve-out | delete both (A1 makes the carve-out unnecessary) |
 | `ayx-rs/src/cmd/catalog.rs` any `tui` row in `CATALOG_METADATA` | delete or reclassify to the stub |
@@ -268,12 +268,15 @@ branches; the interactive branch gets one manual smoke on Windows Terminal and
 one on a Linux terminal (colleagues are on Windows; the internal release is
 cut there).
 
-### B6. Stretch: `--watch` on `one job-groups status <id>`
+### B6. `--watch` on `one job-groups status <id>` — moved to Wave 1
 
 Poll every `--interval` (default 5s) until the job group reaches a terminal
 state. On a TTY, redraw one status line; off a TTY, emit one JSON Lines event
-per poll and a final envelope. Bounded by `--timeout` (default 30m). Ship only
-if it fits the release; otherwise it moves to Wave 1 unchanged.
+per poll and a final envelope. Bounded by `--timeout` (default 30m).
+**Deferred to Wave 1 (2026-09-04):** the job-group terminal-state vocabulary
+is not documented in `docs/one-endpoint-matrix.md`, so the stop condition
+cannot be specified without a live probe. Wave 1's re-verification checklist
+gains an item for it.
 
 ## Testing and verification
 

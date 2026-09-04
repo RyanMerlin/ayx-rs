@@ -195,6 +195,16 @@ in `docs/one-endpoint-matrix.md`.
    handling.
 7. `GET /v4/flows/{id}/permissions` and `/v4/authorization/roles/{id}/people`:
    re-confirm 403 so `blocked_by_scope` is stated from evidence, not memory.
+8. Job-group status vocabulary: record the exact terminal `status` values a
+   `GET /v4/jobGroups/{id}` returns (success, failure, cancelled) so the
+   `--watch` stop condition inherited from Wave 0 can be specified.
+
+## Inherited from Wave 0: `one job-groups status <id> --watch`
+
+Poll every `--interval` (default 5s) until the job group reaches a terminal
+state per checklist item 8. On a TTY, redraw one status line; off a TTY, emit
+one JSON Lines event per poll and a final envelope. Bounded by `--timeout`
+(default 30m). Read-only; `CATALOG_METADATA` says so.
 
 ## Testing
 
