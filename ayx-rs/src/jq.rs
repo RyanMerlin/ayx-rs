@@ -38,15 +38,20 @@ pub fn apply(filter_src: &str, json_document: &str, raw_output: bool) -> Result<
     let ctx = Ctx::<data::JustLut<Val>>::new(&filter.lut, Vars::new([]));
     let mut lines = Vec::new();
     for out in filter.id.run((ctx, input)).map(unwrap_valr) {
-        let val = out.map_err(|e| anyhow!("validation: --jq filter error: {e}"))?;
-        let line = match (&val, raw_output) {
-            // Only text strings unquote under `-r`, matching `jq -r` semantics;
-            // every other value type (including the byte-string superset type)
-            // keeps its JSON rendering.
-            (Val::TStr(bytes), true) => jaq_json::bstr(bytes.as_ref()).to_string(),
-            _ => val.to_string(),
-        };
-        lines.push(line);
+        let val = out.map_err(|e| anyhow!("validation: --jq filter error: {e:?}"))?;
+        // `Val`'s Display emits `NaN`/`Infinity` for non-finite floats, which is
+        // not JSON. Round-trip through serde_json so every printed line is valid
+        // JSON, and reject anything that is not.
+        let rendered = val.to_string();
+        let value: serde_json::Value = serde_json::from_str(&rendered).map_err(|_| {
+            anyhow!(
+                "validation: --jq produced a value that is not valid JSON (NaN or Infinity): {rendered}"
+            )
+        })?;
+        lines.push(match (&value, raw_output) {
+            (serde_json::Value::String(s), true) => s.clone(),
+            _ => serde_json::to_string(&value)?,
+        });
     }
     Ok(lines)
 }
@@ -89,5 +94,30 @@ mod tests {
     fn bad_filter_is_a_validation_error() {
         let err = apply(".[", DOC, false).unwrap_err().to_string();
         assert!(err.starts_with("validation:"), "{err}");
+    }
+
+    #[test]
+    fn non_finite_results_are_validation_errors_not_output() {
+        for filter in ["1/0", "0/0", "-1/0", "{a: (1/0)}", "[1, (0/0)]"] {
+            let err = apply(filter, DOC, false).unwrap_err().to_string();
+            assert!(err.starts_with("validation:"), "{filter}: {err}");
+            assert!(err.contains("not valid JSON"), "{filter}: {err}");
+        }
+    }
+
+    #[test]
+    fn every_output_line_is_valid_json() {
+        for filter in [
+            ".",
+            ".data.items",
+            "\"a\\\"b\\\\c\"",
+            "99999999999999999999999999999999",
+            "null",
+        ] {
+            for line in apply(filter, DOC, false).unwrap() {
+                serde_json::from_str::<serde_json::Value>(&line)
+                    .unwrap_or_else(|e| panic!("{filter}: line {line:?} is not JSON: {e}"));
+            }
+        }
     }
 }
