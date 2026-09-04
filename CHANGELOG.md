@@ -4,6 +4,44 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+### Removed
+
+- **`ayx tui`.** The bundled terminal UI (legacy and the `AYX_TUI_V2` preview)
+  is removed per ADR 0004. A hidden `ayx tui` stub returns a remediation
+  envelope for this release cycle and is deleted in 0.21.0. Profile, auth, and
+  connectivity setup live in `ayx onboard`, `ayx one login`, `ayx profile`,
+  and `ayx doctor`.
+
+### Changed
+
+- **Output mode is auto-detected.** Without `--output`, `ayx` emits compact
+  JSON when stdout is not a terminal or an agent host is detected
+  (`AYX_AGENT`, `CLAUDECODE`, `AI_AGENT`); `AYX_OUTPUT=<mode>` overrides the
+  automatic choice. Terminals still get text. Piped human use needs
+  `AYX_OUTPUT=text`. `ayx completions <shell>` is exempt from automatic
+  detection so redirected completion scripts stay scripts; an empty
+  `AYX_OUTPUT` is ignored.
+- `docs/cli-schema.json` now admits `error_code` and the new optional fields;
+  every error envelope previously failed the published schema.
+
+### Added
+
+- Error envelopes carry `retryable` and, for dispatcher-classified failures, a
+  structured `remediation { summary, commands }`. Paginated list results carry
+  `next` with the exact `--page-token` continuation command.
+- `--jq <FILTER>` and `--raw-output` (`-r`) run a jq filter over the JSON
+  result in-binary (pure-Rust `jaq`). Non-finite results (`NaN`, `Infinity`)
+  are rejected as `validation` errors; big integers are preserved exactly.
+- `ayx one workspace detail <id>`.
+- `ayx one open <kind> [id] [--print]` deep-links the web console for
+  `workspace` and `workflow`. It refuses to guess a tenant: a profile without
+  a configured One base URL gets a `validation` error naming the fix
+  (`alteryx_one.base_url` or `AYX_ONE_BASE_URL`).
+- Omitting the id of `one workflows detail|delete`, `one flows detail`,
+  `one connections detail`, `one job-groups detail`, `one person detail`, or
+  `one plans detail` on a terminal opens a picker; off a terminal it is a
+  `validation` error naming the list command.
+
 ## 0.19.1 — 2026-09-02
 
 ### Added

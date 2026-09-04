@@ -14,7 +14,11 @@ ayx one auth status --output json
 ayx one workspace current --output json
 ```
 
-Always put `--output json` at the end of the command. For an unfamiliar One
+Always put `--output json` at the end of the command. From 0.20.0 a
+non-terminal stdout already defaults to compact JSON; keep the explicit flag
+for clarity. Use `--jq <filter>` to project fields in-binary. Error envelopes
+carry `error_code`, `retryable`, and, where the CLI can name the fix,
+`remediation.commands`; run those before retrying. For an unfamiliar One
 family, discover it first:
 
 ```text
