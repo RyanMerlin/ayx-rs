@@ -1106,6 +1106,30 @@ fn jq_halt_cannot_hijack_the_exit_code() {
 }
 
 #[test]
+fn compact_error_envelope_carries_error_text_off_tty() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "one",
+            "flows",
+            "list",
+            "--profile",
+            "definitely-not-a-profile",
+        ])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(!output.status.success());
+    let envelope: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&output.stderr).trim())
+            .expect("stderr should be a JSON envelope");
+    assert_eq!(envelope["data"]["kind"], "error");
+    let error_text = envelope["data"]["fields"]["error"]
+        .as_str()
+        .expect("data.fields.error should be a non-empty string");
+    assert!(!error_text.is_empty());
+}
+
+#[test]
 fn omitted_workflow_id_off_tty_names_the_list_command() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([

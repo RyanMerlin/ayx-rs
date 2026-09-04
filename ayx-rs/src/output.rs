@@ -238,7 +238,19 @@ fn compact_data(
     is_error: bool,
 ) -> Value {
     if is_error {
-        let fields = selected_fields(descriptor_fields);
+        // Always carry the fields an error envelope actually needs — the
+        // descriptor's `fields` describe a *success* shape (e.g. `id`,
+        // `name` for a list view) and generally don't overlap with them, so
+        // projecting through the descriptor alone (the prior behavior) left
+        // `data.fields` empty on failure. Union the two: error fields first,
+        // then whatever the descriptor adds.
+        const ERROR_FIELDS: [&str; 4] = ["error", "error_code", "hint", "transport"];
+        let mut fields: Vec<&str> = ERROR_FIELDS.to_vec();
+        for field in selected_fields(descriptor_fields) {
+            if !fields.contains(&field) {
+                fields.push(field);
+            }
+        }
         return json!({
             "kind": "error",
             "fields": project_object(data.as_object(), &fields),
@@ -727,6 +739,32 @@ mod tests {
         assert_eq!(value["shown_count"], 20);
         assert_eq!(value["truncated"], true);
         assert_eq!(value["items"].as_array().unwrap().len(), 20);
+    }
+
+    #[test]
+    fn compact_error_envelope_carries_error_text_through_a_success_descriptor() {
+        use ayx_core::envelope::ErrorCode;
+
+        let envelope = Envelope::err_coded(
+            ErrorCode::ConfigMissing,
+            "command failed",
+            json!({"error": "boom", "error_code": "config_missing", "hint": "run onboard"}),
+        );
+        // A List descriptor's `fields` describe the success shape (id, name)
+        // and share nothing with the error payload's keys.
+        let descriptor =
+            OutputDescriptor::new("one.flows.list", ViewKind::List).with_fields(&["id", "name"]);
+        let value = compact_data(
+            &envelope.data,
+            descriptor.kind,
+            descriptor.fields,
+            descriptor.collection_keys,
+            20,
+            true,
+        );
+        assert_eq!(value["fields"]["error"], "boom");
+        assert_eq!(value["fields"]["hint"], "run onboard");
+        assert_eq!(value["fields"]["error_code"], "config_missing");
     }
 
     #[test]
