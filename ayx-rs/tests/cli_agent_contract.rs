@@ -78,7 +78,7 @@ fn trailing_json_output_is_supported_for_discovery_and_help() {
     let help = run(&["one", "workflows", "--help"]);
     assert!(help.status.success());
     let help_text = String::from_utf8_lossy(&help.stdout);
-    assert!(help_text.contains("Put this after the complete command path"));
+    assert!(help_text.contains("Put it after the complete command path"));
 }
 
 #[test]

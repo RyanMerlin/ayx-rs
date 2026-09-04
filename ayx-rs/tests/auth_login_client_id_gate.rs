@@ -72,7 +72,10 @@ fn run_login(home: &TempDir, extra: &[&str]) -> (bool, String) {
 }
 
 fn run_login_with_rollout(home: &TempDir, extra: &[&str], rollout: Option<&str>) -> (bool, String) {
-    let mut args = vec!["one", "login", "--profile", "gate"];
+    // These assertions check human-readable substrings, so pin the text
+    // renderer explicitly — the default now auto-detects json for a
+    // non-terminal stdout (this test harness's stdout is a pipe).
+    let mut args = vec!["one", "login", "--profile", "gate", "--output", "text"];
     args.extend_from_slice(extra);
     let mut command = Command::new(env!("CARGO_BIN_EXE_ayx"));
     command

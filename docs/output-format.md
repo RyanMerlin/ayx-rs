@@ -24,6 +24,19 @@ Why this form is preferred:
 - It keeps examples consistent across human and agent usage.
 - Leading placement remains accepted for backwards compatibility.
 
+Resolution order for the effective mode:
+
+1. An explicit `--output <mode>` always wins.
+2. `AYX_OUTPUT=<mode>` (case-insensitive; an unknown value is a `validation`
+   error, exit 2).
+3. `json` when an agent host is detected (`AYX_AGENT`, `CLAUDECODE`, or
+   `AI_AGENT` set to a non-empty value other than `0`) or when stdout is not a
+   terminal.
+4. Otherwise `text`.
+
+Piping `ayx … | less` therefore shows JSON since 0.20.0; set `AYX_OUTPUT=text`
+in your shell profile if you prefer the text renderer in pipes.
+
 Compact list output defaults to 20 projected rows. Use `--output-limit N` to
 change that limit, or `--output-limit 0` for every projected row. Use
 `json-full` when a script needs unprojected/nested fields; its payload is still

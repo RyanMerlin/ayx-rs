@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Write as _};
+use std::io::{self, IsTerminal, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -264,14 +264,13 @@ fn auth_token_health(access_token: Option<&str>) -> &'static str {
     styles = AYX_STYLES
 )]
 struct Cli {
-    /// Output format for the result. Put this after the complete command path,
-    /// for example: `ayx one flows list --output json`.
-    #[arg(
-        long,
-        default_value_t = output::OutputMode::Text,
-        global = true
-    )]
-    output: output::OutputMode,
+    /// Output format. Defaults to `text` on a terminal and `json` when stdout
+    /// is not a terminal or an agent host is detected (`AYX_AGENT`,
+    /// `CLAUDECODE`, `AI_AGENT`). `AYX_OUTPUT=<mode>` overrides the automatic
+    /// choice; this flag overrides everything. Put it after the complete
+    /// command path, for example: `ayx one flows list --output json`.
+    #[arg(long, global = true)]
+    output: Option<output::OutputMode>,
     /// Universal One workspace selector: numeric ID, GID, or exact saved name.
     #[arg(long, global = true)]
     workspace: Option<String>,
@@ -6044,7 +6043,30 @@ fn main() -> Result<()> {
     // Clap owns --help/-h rendering. Previously a hand-rolled print_help()
     // intercepted bare --help; that drifted from the actual command tree.
     let cli = Cli::parse();
-    let output = cli.output;
+    let (output, output_source) = match output::resolve_output_mode(
+        cli.output,
+        std::env::var("AYX_OUTPUT").ok().as_deref(),
+        io::stdout().is_terminal(),
+        output::agent_marker_present(|key| std::env::var(key).ok()),
+    ) {
+        Ok(resolved) => resolved,
+        Err(message) => {
+            let err_env = Envelope::err_coded(
+                ayx_core::envelope::ErrorCode::Validation,
+                message,
+                json!({ "env": "AYX_OUTPUT" }),
+            )
+            .finalize_retryable();
+            eprintln!(
+                "{}",
+                serde_json::to_string_pretty(&err_env).unwrap_or_default()
+            );
+            std::process::exit(exit_code_for_envelope(&err_env));
+        }
+    };
+    if cli.debug {
+        eprintln!("[ayx-debug] output mode {output} ({output_source:?})");
+    }
     let error_format = cli.error_format;
     let output_limit = cli.output_limit;
     let descriptor = output_descriptor(&cli.command);

@@ -134,7 +134,7 @@ fn ayx_apply_is_global_flag() {
 #[test]
 fn completions_command_emits_script() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["completions", "bash"])
+        .args(["completions", "bash", "--output", "text"])
         .output()
         .expect("ayx binary should run");
     assert!(output.status.success());
@@ -999,4 +999,52 @@ fn one_workspace_detail_help_renders() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Inspect a One workspace by numeric id"));
     assert!(stdout.contains("<ID>"));
+}
+
+#[test]
+fn piped_stdout_defaults_to_compact_json() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["catalog", "list"])
+        .env_remove("AYX_OUTPUT")
+        .env_remove("AYX_AGENT")
+        .env_remove("CLAUDECODE")
+        .env_remove("AI_AGENT")
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let v: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("piped stdout is compact JSON");
+    assert_eq!(v["schema_version"], "ayx.output.v1");
+}
+
+#[test]
+fn ayx_output_env_overrides_auto_detection() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["catalog", "list"])
+        .env("AYX_OUTPUT", "text")
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    assert!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).is_err(),
+        "AYX_OUTPUT=text must produce the text renderer, not JSON"
+    );
+}
+
+#[test]
+fn bad_ayx_output_is_a_validation_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["catalog", "list"])
+        .env("AYX_OUTPUT", "xml")
+        .output()
+        .expect("ayx binary should run");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("AYX_OUTPUT"));
 }

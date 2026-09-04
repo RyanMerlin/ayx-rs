@@ -40,6 +40,57 @@ impl std::fmt::Display for OutputMode {
     }
 }
 
+/// Where the effective output mode came from. Logged under `--debug`; never
+/// part of the envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputModeSource {
+    Explicit,
+    Env,
+    AutoAgentMarker,
+    AutoNonTty,
+    Default,
+}
+
+/// Environment variables that identify an agent host. Every entry was observed
+/// on a live host before being added (`CLAUDECODE` and `AI_AGENT` inside Claude
+/// Code, 2026-09-04). Extend only after observing a variable on the host
+/// itself; do not guess.
+pub const AGENT_MARKER_VARS: &[&str] = &["AYX_AGENT", "CLAUDECODE", "AI_AGENT"];
+
+/// True when any agent marker is set to a non-empty value other than `0`.
+pub fn agent_marker_present(get: impl Fn(&str) -> Option<String>) -> bool {
+    AGENT_MARKER_VARS
+        .iter()
+        .any(|key| get(key).is_some_and(|v| !v.is_empty() && v != "0"))
+}
+
+/// Resolve the effective output mode. Order: explicit `--output`, then
+/// `AYX_OUTPUT`, then `json` for agent hosts or a non-terminal stdout, else
+/// `text`. The error carries a human sentence for a bad `AYX_OUTPUT` value.
+pub fn resolve_output_mode(
+    explicit: Option<OutputMode>,
+    env_value: Option<&str>,
+    stdout_is_terminal: bool,
+    agent_marker: bool,
+) -> Result<(OutputMode, OutputModeSource), String> {
+    if let Some(mode) = explicit {
+        return Ok((mode, OutputModeSource::Explicit));
+    }
+    if let Some(raw) = env_value {
+        let mode = <OutputMode as clap::ValueEnum>::from_str(raw, true).map_err(|_| {
+            format!("AYX_OUTPUT={raw:?} is not one of: text, json, json-full, yaml, table")
+        })?;
+        return Ok((mode, OutputModeSource::Env));
+    }
+    if agent_marker {
+        return Ok((OutputMode::Json, OutputModeSource::AutoAgentMarker));
+    }
+    if !stdout_is_terminal {
+        return Ok((OutputMode::Json, OutputModeSource::AutoNonTty));
+    }
+    Ok((OutputMode::Text, OutputModeSource::Default))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewKind {
     List,
@@ -1033,5 +1084,50 @@ mod tests {
         let clean = redacted_envelope(&env);
         assert_eq!(clean.data["tokenInfo"]["tokenId"], "12345");
         assert_eq!(clean.data["tokenValue"], "[REDACTED]");
+    }
+
+    #[test]
+    fn explicit_output_always_wins() {
+        let (mode, src) =
+            resolve_output_mode(Some(OutputMode::Yaml), Some("json"), false, true).unwrap();
+        assert_eq!((mode, src), (OutputMode::Yaml, OutputModeSource::Explicit));
+    }
+
+    #[test]
+    fn env_beats_auto_detection_and_rejects_garbage() {
+        let (mode, src) = resolve_output_mode(None, Some("text"), false, true).unwrap();
+        assert_eq!((mode, src), (OutputMode::Text, OutputModeSource::Env));
+        let (mode, _) = resolve_output_mode(None, Some("JSON-FULL"), true, false).unwrap();
+        assert_eq!(mode, OutputMode::JsonFull, "env value is case-insensitive");
+        let err = resolve_output_mode(None, Some("xml"), true, false).unwrap_err();
+        assert!(err.contains("AYX_OUTPUT"));
+    }
+
+    #[test]
+    fn agent_marker_then_non_tty_then_text() {
+        assert_eq!(
+            resolve_output_mode(None, None, true, true).unwrap(),
+            (OutputMode::Json, OutputModeSource::AutoAgentMarker)
+        );
+        assert_eq!(
+            resolve_output_mode(None, None, false, false).unwrap(),
+            (OutputMode::Json, OutputModeSource::AutoNonTty)
+        );
+        assert_eq!(
+            resolve_output_mode(None, None, true, false).unwrap(),
+            (OutputMode::Text, OutputModeSource::Default)
+        );
+    }
+
+    #[test]
+    fn agent_marker_ignores_empty_and_zero_values() {
+        let env = |k: &str| match k {
+            "CLAUDECODE" => Some("0".to_string()),
+            "AI_AGENT" => Some(String::new()),
+            _ => None,
+        };
+        assert!(!agent_marker_present(env));
+        let env = |k: &str| (k == "AYX_AGENT").then(|| "1".to_string());
+        assert!(agent_marker_present(env));
     }
 }
