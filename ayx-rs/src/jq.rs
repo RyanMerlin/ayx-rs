@@ -3,7 +3,7 @@
 //! The filter sees exactly what the user would have seen (redaction and
 //! `--output-limit` already applied), so it cannot widen the output.
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use jaq_core::load::{Arena, File, Loader};
 use jaq_core::{Compiler, Ctx, Vars, data, unwrap_valr};
 use jaq_json::{Val, read};
@@ -39,18 +39,20 @@ pub fn apply(filter_src: &str, json_document: &str, raw_output: bool) -> Result<
     let mut lines = Vec::new();
     for out in filter.id.run((ctx, input)).map(unwrap_valr) {
         let val = out.map_err(|e| anyhow!("validation: --jq filter error: {e:?}"))?;
-        // `Val`'s Display emits `NaN`/`Infinity` for non-finite floats, which is
-        // not JSON. Round-trip through serde_json so every printed line is valid
-        // JSON, and reject anything that is not.
+        // `Val`'s Display is JSON for every finite value (and preserves big
+        // integers exactly), but emits `NaN`/`Infinity` for non-finite floats.
+        // Validate the syntax without re-materializing the value so precision
+        // is never lost, and print the rendering itself.
         let rendered = val.to_string();
-        let value: serde_json::Value = serde_json::from_str(&rendered).map_err(|_| {
+        serde_json::from_str::<serde::de::IgnoredAny>(&rendered).map_err(|_| {
             anyhow!(
                 "validation: --jq produced a value that is not valid JSON (NaN or Infinity): {rendered}"
             )
         })?;
-        lines.push(match (&value, raw_output) {
-            (serde_json::Value::String(s), true) => s.clone(),
-            _ => serde_json::to_string(&value)?,
+        lines.push(if raw_output && rendered.starts_with('"') {
+            serde_json::from_str::<String>(&rendered).context("unescape --raw-output string")?
+        } else {
+            rendered
         });
     }
     Ok(lines)
@@ -119,5 +121,29 @@ mod tests {
                     .unwrap_or_else(|e| panic!("{filter}: line {line:?} is not JSON: {e}"));
             }
         }
+    }
+
+    #[test]
+    fn big_integers_round_trip_byte_exact() {
+        for literal in [
+            "99999999999999999999999999999999",
+            "18446744073709551616",
+            "-9223372036854775809",
+            "18446744073709551615",
+        ] {
+            assert_eq!(
+                apply(literal, DOC, false).unwrap(),
+                vec![literal.to_string()],
+                "{literal}"
+            );
+        }
+    }
+
+    #[test]
+    fn raw_output_unescapes_json_string_syntax() {
+        assert_eq!(
+            apply("\"a\\\"b\\\\c\"", DOC, true).unwrap(),
+            vec!["a\"b\\c"]
+        );
     }
 }
