@@ -22,6 +22,7 @@ serde.workspace = true
 serde_yaml.workspace = true
 serde_json.workspace = true
 crossterm.workspace = true
+inquire.workspace = true
 url.workspace = true
 ayx_server_api = { package = "ayx-server-api", path = "../ayx-server-api" }
 ayx-core = { path = "../ayx-core" }

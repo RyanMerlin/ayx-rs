@@ -615,6 +615,19 @@ pub(crate) fn execute(
             id,
             include_dependencies,
         } => {
+            let id = crate::cmd::select::resolve_selector(
+                "workflow id",
+                "ayx one workflows list --output json",
+                id,
+                crate::cmd::select::SelectPolicy::from_runtime(runtime.no_input),
+                || {
+                    let config = runtime.load_profile_lenient(profile.as_deref())?;
+                    crate::cmd::select::items_from_envelope(
+                        &fetch_all_assets(&config)?,
+                        &["name", "title"],
+                    )
+                },
+            )?;
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             let envelope = fetch_all_assets(&config)?;
             let mut result = resolve_workflow_detail(envelope, &id);
@@ -705,6 +718,19 @@ pub(crate) fn execute(
             )?
         }
         OneWorkflowsCommand::Delete { profile, id } => {
+            let id = crate::cmd::select::resolve_selector(
+                "workflow id",
+                "ayx one workflows list --output json",
+                id,
+                crate::cmd::select::SelectPolicy::from_runtime(runtime.no_input),
+                || {
+                    let config = runtime.load_profile_lenient(profile.as_deref())?;
+                    crate::cmd::select::items_from_envelope(
+                        &fetch_all_assets(&config)?,
+                        &["name", "title"],
+                    )
+                },
+            )?;
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             // Resolve the target before prompting or sending anything: names the
             // workflow in the confirmation message (a bare ULID gives the operator

@@ -3221,8 +3221,9 @@ pub(crate) enum OneWorkflowsCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
+        /// Workflow ULID. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
         /// Also resolve the workflow's connections, datasets, and macros.
         #[arg(long)]
         include_dependencies: bool,
@@ -3285,8 +3286,9 @@ pub(crate) enum OneWorkflowsCommand {
     Delete {
         #[arg(long)]
         profile: Option<String>,
+        /// Workflow ULID. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
     },
     /// Duplicate a cloud-native workflow.
     Copy {
@@ -6183,6 +6185,15 @@ fn main() -> Result<()> {
             if let Some((summary, commands)) = remediation_for_error_code(code, descriptor.command)
             {
                 err_env = err_env.with_remediation(summary, commands);
+            }
+            if let Some(missing) = err.downcast_ref::<cmd::select::MissingSelector>() {
+                err_env = err_env.with_remediation(
+                    format!(
+                        "Provide the {} explicitly, or run on a terminal to pick one",
+                        missing.what
+                    ),
+                    vec![missing.list_command.to_string()],
+                );
             }
             // Errors always go to stderr; the format mirrors the success
             // renderer so JSON consumers see the same envelope shape. Exit

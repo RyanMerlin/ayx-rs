@@ -35,6 +35,7 @@ mod one_webhook_flow_tasks;
 mod one_workflows;
 mod one_write_settings;
 pub mod registry;
+pub mod select;
 pub mod server;
 pub mod sqlserver;
 pub mod telemetry;

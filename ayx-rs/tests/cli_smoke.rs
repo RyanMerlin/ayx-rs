@@ -1084,3 +1084,32 @@ fn jq_filters_the_compact_envelope() {
     assert_eq!(bad.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&bad.stderr).contains("validation"));
 }
+
+#[test]
+fn omitted_workflow_id_off_tty_names_the_list_command() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "one",
+            "workflows",
+            "detail",
+            "--no-input",
+            "--output",
+            "json-full",
+        ])
+        .output()
+        .expect("ayx binary should run");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&output.stderr).trim()).unwrap();
+    assert_eq!(envelope["error_code"], "validation");
+    assert_eq!(
+        envelope["remediation"]["commands"][0],
+        "ayx one workflows list --output json"
+    );
+}
