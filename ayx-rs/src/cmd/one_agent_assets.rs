@@ -270,6 +270,20 @@ fn creation_status(envelope: &Envelope) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
+fn terminal_creation_envelope(status: &Envelope, terminal: &str, job_id: &str) -> Envelope {
+    Envelope::err_coded(
+        ErrorCode::Upstream,
+        format!("Agent Studio tool creation ended in a non-success state: {terminal}"),
+        json!({
+            "surface": "agent-assets",
+            "operation": "tool-creation-status",
+            "job_id": job_id,
+            "status": terminal,
+            "response": response_body(status),
+        }),
+    )
+}
+
 fn poll_tool_creation(
     config: &ayx_core::profile::Config,
     job_id: &str,
@@ -292,7 +306,9 @@ fn poll_tool_creation(
         }
         match creation_status(&status) {
             Some("COMPLETE") => return Ok(status),
-            Some("FAILED" | "CANCELED" | "SKIPPED" | "UNKNOWN") => return Ok(status),
+            Some(terminal @ ("FAILED" | "CANCELED" | "SKIPPED" | "UNKNOWN")) => {
+                return Ok(terminal_creation_envelope(&status, terminal, job_id));
+            }
             _ if started.elapsed() >= timeout => {
                 return Ok(Envelope::err_coded(
                     ErrorCode::Incomplete,
@@ -544,6 +560,12 @@ pub(crate) fn execute(
                 if !workflows.ok {
                     return Ok(workflows);
                 }
+                if !tools.ok {
+                    return Ok(tools);
+                }
+                if !creations.ok {
+                    return Ok(creations);
+                }
                 let mut data = workflows.data;
                 data["tools"] = response_body(&tools).clone();
                 data["tool_creations"] = response_body(&creations).clone();
@@ -590,9 +612,6 @@ pub(crate) fn execute(
                         json!({ "creation": response_body(&creation) }),
                     ));
                 };
-                if timeout_seconds == 0 {
-                    bail!("validation: --timeout-seconds must be greater than zero");
-                }
                 let status = poll_tool_creation(&config, job_id, timeout_seconds)?;
                 if !status.ok {
                     return Ok(status);
@@ -664,8 +683,11 @@ pub(crate) fn execute(
 
 #[cfg(test)]
 mod tests {
-    use super::{agent_payload, chat_payload, datasets_from, find_dataset, prompt_payload, query};
-    use ayx_core::envelope::Envelope;
+    use super::{
+        agent_payload, chat_payload, creation_status, datasets_from, find_dataset, prompt_payload,
+        query, terminal_creation_envelope,
+    };
+    use ayx_core::envelope::{Envelope, ErrorCode};
     use serde_json::json;
 
     #[test]
@@ -724,5 +746,25 @@ mod tests {
         );
         assert!(prompt_payload("agent-42", "  ").is_err());
         assert!(prompt_payload("agent-42", &"x".repeat(32 * 1024 + 1)).is_err());
+    }
+
+    #[test]
+    fn terminal_creation_envelope_reports_failed_status_as_an_error() {
+        for terminal in ["FAILED", "CANCELED", "SKIPPED", "UNKNOWN"] {
+            let status = Envelope::ok_with_data(
+                "fixture",
+                json!({"response": {"status": terminal, "id": "job-1"}}),
+            );
+            assert_eq!(creation_status(&status), Some(terminal));
+
+            let envelope = terminal_creation_envelope(&status, terminal, "job-1");
+            assert!(
+                !envelope.ok,
+                "a {terminal} tool-creation job must not be reported as success"
+            );
+            assert_eq!(envelope.error_code, Some(ErrorCode::Upstream));
+            assert_eq!(envelope.data["job_id"], "job-1");
+            assert_eq!(envelope.data["status"], terminal);
+        }
     }
 }

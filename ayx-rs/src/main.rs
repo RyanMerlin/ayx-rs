@@ -892,6 +892,38 @@ mongo:
         ])
         .expect_err("the user should not have to choose between equivalent modes");
         assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+
+        let browser_error =
+            Cli::try_parse_from(["ayx", "one", "login", "--oauth-api-token", "--browser"])
+                .expect_err("oauth-api-token should not combine with the browser PKCE flow");
+        assert_eq!(
+            browser_error.kind(),
+            clap::error::ErrorKind::ArgumentConflict
+        );
+
+        let device_error =
+            Cli::try_parse_from(["ayx", "one", "login", "--oauth-api-token", "--device"])
+                .expect_err("oauth-api-token should not combine with the device-code flow");
+        assert_eq!(
+            device_error.kind(),
+            clap::error::ErrorKind::ArgumentConflict
+        );
+    }
+
+    #[test]
+    fn workflows_enable_rejects_zero_timeout_at_parse_time() {
+        let error = Cli::try_parse_from([
+            "ayx",
+            "one",
+            "agent-assets",
+            "workflows",
+            "enable",
+            "wf-1",
+            "--timeout-seconds",
+            "0",
+        ])
+        .expect_err("a zero timeout should be rejected before any request fires");
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
     }
 
     #[test]
@@ -1824,8 +1856,8 @@ pub(crate) enum OneCommand {
         device: bool,
         /// Set up a long-lived OAuth API token, not email OTP. Prompts for the
         /// visible Client ID and hidden Refresh Token, then saves the verified
-        /// credential securely for automatic renewal.
-        #[arg(long, conflicts_with = "auth_method")]
+        /// credential under this profile's secret policy for automatic renewal.
+        #[arg(long, conflicts_with_all = ["auth_method", "browser", "device"])]
         oauth_api_token: bool,
         /// Select the user credential method: email-otp or oauth-refresh.
         /// Interactive oauth-refresh setup prompts for one hidden refresh-token
@@ -3342,7 +3374,7 @@ pub(crate) enum OneAgentWorkflowsCommand {
         profile: Option<String>,
         #[arg(value_name = "WORKFLOW-ID")]
         id: String,
-        #[arg(long, default_value_t = 180)]
+        #[arg(long, default_value_t = 180, value_parser = clap::value_parser!(u64).range(1..))]
         timeout_seconds: u64,
     },
     /// Remove a workflow's Agent Studio Apps shortcut.
