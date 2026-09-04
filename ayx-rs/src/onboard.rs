@@ -2574,6 +2574,56 @@ alteryx_one:
     }
 
     #[test]
+    fn profile_save_surfaces_inline_fields_when_keyring_unavailable() {
+        // Force the keyring-store step to fail deterministically so the inline
+        // fallback path always runs, regardless of whether the host has a live
+        // D-Bus Secret Service. The scoped test seam is thread-local, so this
+        // test remains safe under `cargo test`'s concurrent execution.
+        //
+        // This guards the property five live production sites depend on:
+        // `write_config_with_policy` (and friends) must both fall back to
+        // inline storage AND surface that fact in `SecretizeOutput::inline_fields`
+        // so callers (onboard::run_onboarding, `profile migrate`,
+        // `one_platform::auth`, `one_platform::workspace`) can warn the operator
+        // instead of silently persisting a plaintext-inline credential.
+        let _force_keyring_unavailable =
+            ayx_core::secrets::ForcedKeyringUnavailable::for_current_thread();
+        let _home = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::set_var("AYX_CONFIG_HOME", _home.path());
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("profile-inline-fallback.yaml");
+        std::fs::write(
+            &path,
+            r#"profile_name: inline-fallback-test
+alteryx_one:
+  account_email: test@example.com
+  base_url: https://us1.alteryxcloud.com
+  access_token: plaintext-fallback-token
+"#,
+        )
+        .unwrap();
+        let config = Config::load_from_path_with_environment(&path, None).unwrap();
+        let out = write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
+        // With the keyring forced unavailable, the writer must fall back to
+        // inline storage AND surface that fact in SecretizeOutput.
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains("inline:"),
+            "forced-unavailable keyring must produce inline: ref on disk"
+        );
+        assert!(
+            !out.inline_fields.is_empty(),
+            "inline fallback must be reported in SecretizeOutput, not swallowed"
+        );
+        assert!(
+            out.inline_fields.iter().any(|f| f.contains("access_token")),
+            "inline_fields must name the secretized field (access_token)"
+        );
+    }
+
+    #[test]
     fn workspace_password_is_saved_under_workspace_credential() {
         let _home = isolated_config_home();
         let temp = tempfile::tempdir().unwrap();
