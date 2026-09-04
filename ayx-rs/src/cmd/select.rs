@@ -35,10 +35,13 @@ pub struct SelectPolicy {
 }
 
 impl SelectPolicy {
-    /// Prompting needs both stdin (keys) and stdout (the list) to be terminals.
+    /// Prompting needs both stdin (keys) and stdout (the list) to be
+    /// terminals. `AYX_NO_INPUT` is honored the same way `cmd::confirm`
+    /// honors it, so a picker can't fire under an agent host or CI runner
+    /// that sets the env var instead of (or in addition to) `--no-input`.
     pub fn from_runtime(no_input: bool) -> Self {
         Self {
-            no_input,
+            no_input: no_input || std::env::var_os("AYX_NO_INPUT").is_some(),
             interactive_terminal: std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
         }
     }
@@ -182,6 +185,29 @@ mod tests {
         let missing = err.downcast_ref::<MissingSelector>().expect("typed error");
         assert_eq!(missing.list_command, "ayx one workflows list --output json");
         assert!(err.to_string().starts_with("validation:"));
+    }
+
+    #[test]
+    fn from_runtime_honors_ayx_no_input_env_var() {
+        // nextest gives each test its own process, so mutating this
+        // process-global env var here doesn't race with other tests. Mirrors
+        // the convention in cmd/confirm.rs's own AYX_NO_INPUT test.
+        //
+        // SAFETY: single-threaded at this point in the test process; no
+        // other thread reads/writes env vars concurrently with this call.
+        unsafe {
+            std::env::set_var("AYX_NO_INPUT", "1");
+        }
+        let policy = SelectPolicy::from_runtime(false);
+        assert!(
+            policy.no_input,
+            "AYX_NO_INPUT must be honored even when the --no-input flag was not passed"
+        );
+        assert!(!policy.may_prompt());
+        // SAFETY: same single-threaded context as the set_var above.
+        unsafe {
+            std::env::remove_var("AYX_NO_INPUT");
+        }
     }
 
     #[test]
