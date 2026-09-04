@@ -52,3 +52,6 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_SystemServices",
     "Win32_System_Threading",
 ] }
+
+[dev-dependencies]
+jsonschema = "0.53"

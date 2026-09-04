@@ -90,6 +90,12 @@ struct CompactEnvelope {
     message: String,
     timestamp_utc: chrono::DateTime<chrono::Utc>,
     error_code: Option<ayx_core::envelope::ErrorCode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remediation: Option<ayx_core::envelope::Remediation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retryable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next: Option<Vec<String>>,
     data: Value,
 }
 
@@ -127,6 +133,9 @@ pub fn render_envelope(
                         false,
                     ),
                     error_code: clean.error_code,
+                    remediation: clean.remediation.clone(),
+                    retryable: clean.retryable,
+                    next: clean.next.clone(),
                 };
                 Ok(render::render_text(&projected))
             } else {
@@ -153,6 +162,9 @@ fn compact_envelope(
         message: envelope.message.clone(),
         timestamp_utc: envelope.timestamp_utc,
         error_code: envelope.error_code,
+        remediation: envelope.remediation.clone(),
+        retryable: envelope.retryable,
+        next: envelope.next.clone(),
         data: compact_data(
             &envelope.data,
             kind,
@@ -435,6 +447,9 @@ pub fn redacted_envelope(envelope: &Envelope) -> Envelope {
         timestamp_utc: envelope.timestamp_utc,
         data: redact_value(&envelope.data, None),
         error_code: envelope.error_code,
+        remediation: envelope.remediation.clone(),
+        retryable: envelope.retryable,
+        next: envelope.next.clone(),
     }
 }
 

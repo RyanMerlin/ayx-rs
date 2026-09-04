@@ -1,13 +1,33 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "AYX-RS Envelope",
+  "description": "The full (`--output json-full`) envelope. The compact `ayx.output.v1` view adds `schema_version` and `command` on top of these fields.",
   "type": "object",
   "required": ["ok", "message", "timestamp_utc", "data"],
   "properties": {
     "ok": { "type": "boolean" },
     "message": { "type": "string" },
     "timestamp_utc": { "type": "string", "format": "date-time" },
-    "data": {}
+    "data": {},
+    "error_code": {
+      "type": "string",
+      "enum": [
+        "config_missing", "auth_failed", "permission_denied", "not_found", "gone",
+        "validation", "conflict", "rate_limited", "network", "upstream",
+        "workspace_mismatch", "incomplete", "output_classification", "internal"
+      ]
+    },
+    "remediation": {
+      "type": "object",
+      "required": ["summary", "commands"],
+      "properties": {
+        "summary": { "type": "string" },
+        "commands": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "retryable": { "type": "boolean" },
+    "next": { "type": "array", "items": { "type": "string" } }
   },
   "additionalProperties": false
 }

@@ -120,6 +120,31 @@ impl ErrorCode {
             _ => Some(ErrorCode::Internal),
         }
     }
+
+    /// Whether re-running the identical command can reasonably succeed without
+    /// the caller changing anything. Transport and upstream classes qualify;
+    /// everything the caller controls (input, auth, config, permissions) does
+    /// not. `Incomplete` qualifies because the pagination that stalled may
+    /// finish on a retry.
+    pub fn retryable(self) -> bool {
+        matches!(
+            self,
+            ErrorCode::RateLimited
+                | ErrorCode::Network
+                | ErrorCode::Upstream
+                | ErrorCode::Incomplete
+        )
+    }
+}
+
+/// Machine-readable next step attached to an error envelope so an agent can
+/// branch on structure instead of parsing prose.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Remediation {
+    /// One human-readable sentence.
+    pub summary: String,
+    /// Zero or more exact commands to run next, in order.
+    pub commands: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -131,6 +156,16 @@ pub struct Envelope {
     /// Machine-readable error classification. Absent on success envelopes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<ErrorCode>,
+    /// Suggested next step. Errors only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remediation: Option<Remediation>,
+    /// Whether an identical retry may succeed. Errors only; filled from the
+    /// error code by `finalize_retryable` when a command did not set it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+    /// Suggested follow-up commands. Successes only; keep to three or fewer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<Vec<String>>,
 }
 
 impl Envelope {
@@ -141,6 +176,9 @@ impl Envelope {
             timestamp_utc: Utc::now(),
             data: Value::Null,
             error_code: None,
+            remediation: None,
+            retryable: None,
+            next: None,
         }
     }
 
@@ -151,6 +189,9 @@ impl Envelope {
             timestamp_utc: Utc::now(),
             data,
             error_code: None,
+            remediation: None,
+            retryable: None,
+            next: None,
         }
     }
 
@@ -161,6 +202,9 @@ impl Envelope {
             timestamp_utc: Utc::now(),
             data,
             error_code: Some(ErrorCode::Internal),
+            remediation: None,
+            retryable: None,
+            next: None,
         }
     }
 
@@ -174,6 +218,9 @@ impl Envelope {
             timestamp_utc: Utc::now(),
             data,
             error_code: Some(code),
+            remediation: None,
+            retryable: None,
+            next: None,
         }
     }
 
@@ -181,6 +228,33 @@ impl Envelope {
     /// outer dispatch layer when classifying anyhow errors.
     pub fn with_error_code(mut self, code: ErrorCode) -> Self {
         self.error_code = Some(code);
+        self
+    }
+
+    pub fn with_remediation(mut self, summary: impl Into<String>, commands: Vec<String>) -> Self {
+        self.remediation = Some(Remediation {
+            summary: summary.into(),
+            commands,
+        });
+        self
+    }
+
+    pub fn with_retryable(mut self, retryable: bool) -> Self {
+        self.retryable = Some(retryable);
+        self
+    }
+
+    pub fn with_next(mut self, next: Vec<String>) -> Self {
+        self.next = Some(next);
+        self
+    }
+
+    /// Fill `retryable` from the error code on failure envelopes that did not
+    /// set it explicitly. No-op on success envelopes.
+    pub fn finalize_retryable(mut self) -> Self {
+        if !self.ok && self.retryable.is_none() {
+            self.retryable = Some(self.error_code.unwrap_or(ErrorCode::Internal).retryable());
+        }
         self
     }
 }
@@ -311,5 +385,96 @@ mod tests {
         let env = Envelope::ok("done");
         let serialized = serde_json::to_string(&env).unwrap();
         assert!(!serialized.contains("error_code"));
+    }
+
+    #[test]
+    fn retryable_is_derived_from_error_code() {
+        for code in [
+            ErrorCode::RateLimited,
+            ErrorCode::Network,
+            ErrorCode::Upstream,
+            ErrorCode::Incomplete,
+        ] {
+            assert!(code.retryable(), "{code:?} must be retryable");
+        }
+        for code in [
+            ErrorCode::ConfigMissing,
+            ErrorCode::AuthFailed,
+            ErrorCode::PermissionDenied,
+            ErrorCode::NotFound,
+            ErrorCode::Gone,
+            ErrorCode::Validation,
+            ErrorCode::Conflict,
+            ErrorCode::WorkspaceMismatch,
+            ErrorCode::OutputClassification,
+            ErrorCode::Internal,
+        ] {
+            assert!(!code.retryable(), "{code:?} must not be retryable");
+        }
+    }
+
+    #[test]
+    fn optional_fields_are_omitted_when_unset_and_present_when_set() {
+        let ok = serde_json::to_value(Envelope::ok("fine")).unwrap();
+        assert!(ok.get("remediation").is_none());
+        assert!(ok.get("retryable").is_none());
+        assert!(ok.get("next").is_none());
+
+        let err = Envelope::err_coded(ErrorCode::AuthFailed, "expired", Value::Null)
+            .with_remediation("Log in again", vec!["ayx one login".to_string()])
+            .finalize_retryable();
+        let v = serde_json::to_value(&err).unwrap();
+        assert_eq!(v["retryable"], Value::Bool(false));
+        assert_eq!(v["remediation"]["summary"], "Log in again");
+        assert_eq!(v["remediation"]["commands"][0], "ayx one login");
+
+        let next = serde_json::to_value(
+            Envelope::ok("page").with_next(vec!["ayx one flows list --page-token abc".to_string()]),
+        )
+        .unwrap();
+        assert_eq!(next["next"][0], "ayx one flows list --page-token abc");
+    }
+
+    #[test]
+    fn finalize_retryable_does_not_override_an_explicit_value() {
+        let e = Envelope::err_coded(ErrorCode::Network, "flaky", Value::Null)
+            .with_retryable(false)
+            .finalize_retryable();
+        assert_eq!(e.retryable, Some(false));
+        let ok = Envelope::ok("fine").finalize_retryable();
+        assert_eq!(
+            ok.retryable, None,
+            "success envelopes never carry retryable"
+        );
+    }
+
+    #[test]
+    fn envelopes_validate_against_the_published_schema() {
+        let schema_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/cli-schema.json");
+        let schema: Value =
+            serde_json::from_str(&std::fs::read_to_string(schema_path).unwrap()).unwrap();
+        let validator = jsonschema::validator_for(&schema).expect("schema compiles");
+
+        let ok = serde_json::to_value(Envelope::ok_with_data(
+            "fine",
+            serde_json::json!({ "n": 1 }),
+        ))
+        .unwrap();
+        assert!(validator.is_valid(&ok), "success envelope must validate");
+
+        let err = serde_json::to_value(
+            Envelope::err_coded(ErrorCode::NotFound, "missing", Value::Null)
+                .with_remediation(
+                    "List first",
+                    vec!["ayx one workflows list --output json".to_string()],
+                )
+                .finalize_retryable(),
+        )
+        .unwrap();
+        let problems: Vec<String> = validator.iter_errors(&err).map(|e| e.to_string()).collect();
+        assert!(
+            problems.is_empty(),
+            "error envelope must validate: {problems:?}"
+        );
     }
 }
