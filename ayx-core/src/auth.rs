@@ -1208,6 +1208,42 @@ mod tests {
     }
 
     #[test]
+    fn keyring_account_in_namespace_scopes_by_namespace_and_is_deterministic() {
+        // Same profile identity, same field -- only the namespace differs.
+        // This is the live path `bound_keyring_account_in_namespace`
+        // (ayx-rs/src/onboard.rs) uses to keep e.g. `staging` and
+        // `production` environment credentials for the same profile from
+        // colliding on one keyring account.
+        let binding = CredentialBinding::new(
+            "person@example.com",
+            "https://issuer.example/as",
+            "us1",
+            "https://us1.example",
+            None,
+            None,
+        )
+        .unwrap();
+
+        let staging = binding.keyring_account_in_namespace(Some("staging"), "access_token");
+        let production = binding.keyring_account_in_namespace(Some("production"), "access_token");
+        assert_ne!(
+            staging, production,
+            "different namespaces must not share a keyring account"
+        );
+
+        let staging_again = binding.keyring_account_in_namespace(Some("staging"), "access_token");
+        assert_eq!(
+            staging, staging_again,
+            "the same namespace must deterministically produce the same account"
+        );
+
+        // No namespace at all (the `keyring_account` shorthand) must also
+        // differ from every namespaced account -- unnamespaced callers must
+        // not accidentally collide with a namespaced one.
+        assert_ne!(binding.keyring_account("access_token"), staging);
+    }
+
+    #[test]
     fn credential_binding_canonicalization_is_length_delimited_and_case_safe() {
         let left =
             CredentialBinding::new("a|issuer=b", "issuer", "us1", "https://example", None, None)

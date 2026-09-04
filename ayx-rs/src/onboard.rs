@@ -452,9 +452,7 @@ pub(crate) struct SecretizeOutput {
     /// The keyring scope string(s) the writer passed to `secretize_config`.
     ///
     /// Single-profile writes (`write_config_with_policy`) populate exactly one
-    /// entry (the on-disk file stem).  Workspace writes (`write_workspace_config`)
-    /// accumulate one entry per environment.  In-memory only — not serialized to
-    /// disk.
+    /// entry (the on-disk file stem). In-memory only — not serialized to disk.
     pub scopes_used: Vec<String>,
 }
 
