@@ -588,6 +588,17 @@ fn is_sensitive_key(key: &str) -> bool {
         return false;
     }
     let key = normalized;
+    // Kept in step with the canonical list in `ayx_core::observability`. This
+    // one had drifted behind it, so `--output json-full` emitted values under
+    // names the rest of the codebase treats as secret.
+    //
+    // `credential` is deliberately NOT here despite being canonical: the match
+    // is a substring test, and adding it would redact the posture fields that
+    // exist to report credential state (`credential_kind`, `credential_health`,
+    // and the `workspace_credentials` container itself), none of which match a
+    // metadata suffix above. Closing that gap needs the metadata rule extended
+    // first; the child fields inside those objects are already covered by the
+    // `token`, `password`, and `secret` needles.
     [
         "authorization",
         "token",
@@ -597,6 +608,11 @@ fn is_sensitive_key(key: &str) -> bool {
         "connectionstring",
         "clientkey",
         "apikey",
+        "privatekey",
+        "accountkey",
+        "sharedkey",
+        "signature",
+        "csrf",
     ]
     .iter()
     .any(|needle| key.contains(needle))
@@ -972,6 +988,59 @@ mod tests {
             !text.contains("request-123"),
             "transport diagnostics that the descriptor did not declare stay out"
         );
+    }
+
+    /// The envelope redactor had drifted behind the canonical list in
+    /// `ayx_core::observability`, so these names were emitted in full.
+    #[test]
+    fn redacts_the_canonical_secret_key_names() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({
+                "privateKey": "pk-secret",
+                "accountKey": "ak-secret",
+                "sharedKey": "sk-secret",
+                "signature": "sig-secret",
+                "csrf": "csrf-secret",
+            }),
+        );
+        let full = render_envelope(
+            &env,
+            OutputMode::JsonFull,
+            OutputDescriptor::new("one.test", ViewKind::Raw),
+            DEFAULT_OUTPUT_LIMIT,
+        )
+        .expect("full JSON should render");
+
+        for secret in [
+            "pk-secret",
+            "ak-secret",
+            "sk-secret",
+            "sig-secret",
+            "csrf-secret",
+        ] {
+            assert!(!full.contains(secret), "{secret} leaked in {full}");
+        }
+    }
+
+    /// Redacting these would break the diagnostics that report credential
+    /// posture, which is why `credential` is not a sensitive-key needle.
+    #[test]
+    fn credential_posture_fields_stay_readable() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({"credential_kind": "oauth_refresh", "credential_health": "verified"}),
+        );
+        let full = render_envelope(
+            &env,
+            OutputMode::JsonFull,
+            OutputDescriptor::new("one.test", ViewKind::Raw),
+            DEFAULT_OUTPUT_LIMIT,
+        )
+        .expect("full JSON should render");
+
+        assert!(full.contains("oauth_refresh"), "{full}");
+        assert!(full.contains("verified"), "{full}");
     }
 
     #[test]
