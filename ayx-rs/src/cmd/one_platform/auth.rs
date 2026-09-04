@@ -1020,9 +1020,6 @@ fn read_refresh_token_source(
     read_secret_source(direct, environment_name, from_stdin, "refresh token")
 }
 
-/// Drop only the selected credential's old references while a caller supplies
-/// a replacement refresh token. The new value is still verified before the
-/// secure write path assigns its canonical bound keyring references.
 /// The keyring accounts that `clear_explicit_refresh_token_references` is about
 /// to orphan, in the same selection order it uses.
 ///
@@ -1044,6 +1041,9 @@ fn explicit_refresh_keyring_accounts(
             add(credential.access_token_ref.as_deref());
             add(credential.refresh_token_ref.as_deref());
         }
+        // The profile-level access reference is cleared in this case too, so
+        // its account must be collected too.
+        add(one.access_token_ref.as_deref());
     } else {
         add(one.access_token_ref.as_deref());
         add(one.refresh_token_ref.as_deref());
@@ -1051,6 +1051,20 @@ fn explicit_refresh_keyring_accounts(
     accounts
 }
 
+/// Drop the old token references while a caller supplies a replacement refresh
+/// token. The new value is still verified before the secure write path assigns
+/// its canonical bound keyring references.
+///
+/// The profile-level `access_token_ref` is cleared unconditionally, matching
+/// the behavior this helper replaced. The preflight binding check reads that
+/// field, so a stale top-level `keyring:v1/...` binding left in place rejects
+/// the very login that would replace it, with a "credential binding mismatch"
+/// that only `ayx one logout` can clear. Scoping the clear to the selected
+/// credential also cleared nothing at all when that credential had no map entry
+/// yet.
+///
+/// The profile-level `refresh_token_ref` stays scoped: it does not gate the
+/// preflight, and the earlier code never cleared it unconditionally either.
 fn clear_explicit_refresh_token_references(
     one: &mut ayx_core::profile::AlteryxOneProfile,
     workspace_id: Option<&str>,
@@ -1061,9 +1075,9 @@ fn clear_explicit_refresh_token_references(
             credential.refresh_token_ref = None;
         }
     } else {
-        one.access_token_ref = None;
         one.refresh_token_ref = None;
     }
+    one.access_token_ref = None;
 }
 
 /// A bare `ayx one login` should not quietly spend an OAuth refresh grant.
@@ -1989,6 +2003,44 @@ mod tests {
         );
     }
 
+    /// A stale top-level binding is read by the preflight check, so leaving it
+    /// in place rejects the login that would replace it.
+    #[test]
+    fn a_selected_workspace_login_still_clears_the_profile_level_references() {
+        let mut one = AlteryxOneProfile {
+            access_token_ref: Some("keyring:v1/legacy-access".to_string()),
+            refresh_token_ref: Some("keyring:v1/legacy-refresh".to_string()),
+            ..AlteryxOneProfile::default()
+        };
+        one.workspace_credentials
+            .entry("91946".to_string())
+            .or_default()
+            .refresh_token_ref = Some("keyring:v1/workspace-refresh".to_string());
+
+        let accounts = explicit_refresh_keyring_accounts(&one, Some("91946"));
+        assert!(accounts.contains("v1/legacy-access"));
+        assert!(accounts.contains("v1/workspace-refresh"));
+
+        clear_explicit_refresh_token_references(&mut one, Some("91946"));
+        assert!(
+            one.access_token_ref.is_none(),
+            "a stale profile-level access binding must not survive to block the preflight"
+        );
+    }
+
+    /// The selected credential may not have a map entry yet. The profile-level
+    /// references must still be cleared rather than nothing at all.
+    #[test]
+    fn clearing_works_when_the_selected_credential_has_no_entry() {
+        let mut one = AlteryxOneProfile {
+            access_token_ref: Some("keyring:v1/legacy-access".to_string()),
+            ..AlteryxOneProfile::default()
+        };
+
+        clear_explicit_refresh_token_references(&mut one, Some("no-such-workspace"));
+        assert!(one.access_token_ref.is_none());
+    }
+
     #[test]
     fn explicit_oauth_login_prompts_only_when_interactive() {
         assert!(should_prompt_for_oauth_refresh_token(true, false));
@@ -2033,6 +2085,9 @@ mod tests {
         assert!(!should_report_existing_oauth_login(false, false));
     }
 
+    /// The clear stays scoped to the selected credential, with one deliberate
+    /// exception: the profile-level `access_token_ref` gates the preflight
+    /// binding check, so leaving it set rejects the login that replaces it.
     #[test]
     fn explicit_refresh_replacement_clears_only_the_selected_stale_references() {
         let mut one = AlteryxOneProfile {
@@ -2061,10 +2116,14 @@ mod tests {
                 .refresh_token_ref
                 .is_none()
         );
-        assert_eq!(one.access_token_ref.as_deref(), Some("keyring:top-access"));
+        assert!(
+            one.access_token_ref.is_none(),
+            "the top-level access binding gates the preflight and must be cleared"
+        );
         assert_eq!(
             one.refresh_token_ref.as_deref(),
-            Some("keyring:top-refresh")
+            Some("keyring:top-refresh"),
+            "the top-level refresh reference does not gate the preflight and stays"
         );
     }
 
