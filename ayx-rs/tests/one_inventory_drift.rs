@@ -101,26 +101,14 @@ const DYNAMIC_ENDPOINTS: &[(&str, &str, &str)] = &[
 ];
 
 /// `(method, endpoint)` pairs dispatched only by a non-`one`-namespace
-/// surface (currently just `ayx telemetry ...`), so they cannot be added to
-/// `ayx-one-api/src/inventory.rs`: its `commands` field is contractually
-/// `ayx one ...`-only (see
-/// `ayx_one_api::coverage::tests::every_endpoint_row_names_at_least_one_one_command`).
-///
-/// The telemetry permissions workflows and summary commands share
-/// `GET /v4/people` with the normal `one` surface. The inventory row already
-/// covers that path, so they need no separate carve-out here. Keep this list
-/// limited to endpoints that are genuinely reachable only through a
-/// non-`one` surface.
+/// surface, so they cannot be added to `ayx-one-api/src/inventory.rs` (its
+/// `commands` field is contractually `ayx one ...`-only).
 const NON_ONE_SURFACE_ENDPOINTS: &[(&str, &str)] = &[
-    // `ayx tui`'s legacy One browser (`tui/one_browser.rs`) fetches a workspace
-    // by id. No `ayx one` command does: the `one workspace` tree exposes
-    // `list`, `current`, and configuration leaves, but no `detail <id>`. Found
-    // when discovery widened to the whole crate — until then this endpoint was
-    // wired and reachable while appearing in no inventory row at all.
-    //
-    // Adding `one workspace detail <id>` would make this a normal inventory row
-    // and is the better long-term fix; it is a new command, not a drift repair,
-    // so it is deliberately not bundled here.
+    // `ayx tui`'s legacy One browser (`tui/one_browser.rs`) still fetches a
+    // workspace by id via its own `{id}` placeholder -- a different literal
+    // from `WORKSPACE_DETAIL_ENDPOINT`'s `{workspaceId}` (0.20.0), so adding
+    // `one workspace detail <id>` did not retire this carve-out. Remove this
+    // entry when the TUI itself is removed later in Wave 0.
     ("GET", "/v4/workspaces/{id}"),
 ];
 

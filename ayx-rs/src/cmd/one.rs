@@ -128,6 +128,7 @@ fn workspace_descriptor(command: &OneWorkspaceCommand) -> OutputDescriptor {
         OneWorkspaceCommand::GroupsGlobal => group_list("one.workspace.groups-global"),
         OneWorkspaceCommand::CloudConfigs { .. } => list("one.workspace.cloud-configs"),
         OneWorkspaceCommand::Current => detail("one.workspace.current"),
+        OneWorkspaceCommand::Detail { .. } => detail("one.workspace.detail"),
         OneWorkspaceCommand::CurrentConfiguration => detail("one.workspace.current-configuration"),
         OneWorkspaceCommand::ConfigurationV4 { .. } => detail("one.workspace.configuration-v4"),
         OneWorkspaceCommand::Configuration { .. } => detail("one.workspace.configuration"),

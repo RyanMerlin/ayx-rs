@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-02 22:06:20 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-04 15:50:28 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 399
+- Commands: 400
 - Capabilities: 6
 
 ## Commands
@@ -344,6 +344,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one workspace delete-configuration | `one/workspace/delete-configuration` | mutating | yes | Reset a workspace configuration by workspace id |
 | one workspace delete-current-configuration | `one/workspace/delete-current-configuration` | mutating | yes | Reset the current workspace configuration |
 | one workspace delete-group | `one/workspace/delete-group` | mutating | yes | Delete a group from a One workspace |
+| one workspace detail | `one/workspace/detail` | read-only | no | Inspect a One workspace by numeric id (`GET /v4/workspaces/{workspaceId}`) |
 | one workspace groups | `one/workspace/groups` | read-only | no | List groups in a One workspace |
 | one workspace groups-global | `one/workspace/groups-global` | read-only | no | List groups visible to the current One user |
 | one workspace invitation-link | `one/workspace/invitation-link` | read-only | no | Get the invitation link for a person in a One workspace |

@@ -2139,6 +2139,11 @@ pub(crate) enum OneWorkspaceCommand {
     },
     /// Inspect the current One workspace posture.
     Current,
+    /// Inspect a One workspace by numeric id (`GET /v4/workspaces/{workspaceId}`).
+    Detail {
+        #[arg(value_name = "ID")]
+        id: String,
+    },
     /// Inspect the current One workspace configuration.
     CurrentConfiguration,
     /// Inspect a One workspace configuration by id.

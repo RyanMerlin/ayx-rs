@@ -966,3 +966,20 @@ fn coverage_check_flag_exits_nonzero_when_missing() {
         "--check must fail when endpoints are missing"
     );
 }
+
+#[test]
+fn one_workspace_detail_help_renders() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "workspace", "detail", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Inspect a One workspace by numeric id"));
+    assert!(stdout.contains("<ID>"));
+}

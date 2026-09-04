@@ -20,6 +20,13 @@ use crate::{
 /// `/v4/people?role=admin`, which the gateway ignores.
 const WORKSPACE_ADMINS_ENDPOINT: &str = "/v4/workspaces/{workspaceId}/admins";
 
+/// `GET /v4/workspaces/{workspaceId}` — same numeric-id contract as `admins`.
+/// Previously reachable only from `ayx tui`'s One browser, which dispatches
+/// the same route under its own `{id}` placeholder (a separate literal from
+/// this one, still carved out in `one_inventory_drift.rs` until the TUI is
+/// removed later in Wave 0).
+const WORKSPACE_DETAIL_ENDPOINT: &str = "/v4/workspaces/{workspaceId}";
+
 /// Resolve and validate the numeric workspace id required by path-scoped
 /// `/v4/workspaces` operations. The profile's active workspace is a ULID/GID
 /// for header scope, so it cannot be substituted into these numeric path
@@ -259,6 +266,18 @@ pub(crate) fn execute(
                 "/v4/workspaces/current",
                 false,
                 &[],
+            )?
+        }
+        OneWorkspaceCommand::Detail { id } => {
+            let config = runtime.load_profile_lenient(None)?;
+            one_api_live_request(
+                &config,
+                "workspace",
+                "workspace-detail",
+                "GET",
+                WORKSPACE_DETAIL_ENDPOINT,
+                false,
+                &[("workspaceId", &id)],
             )?
         }
         OneWorkspaceCommand::ConfigurationSchema { id } => {

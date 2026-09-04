@@ -27,6 +27,11 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
     },
     EndpointSpec {
         method: "GET",
+        path: "/v4/workspaces/{workspaceId}",
+        commands: &["one workspace detail"],
+    },
+    EndpointSpec {
+        method: "GET",
         path: "/v4/workspaces/{id}/configuration",
         commands: &[
             "one workspace configuration",

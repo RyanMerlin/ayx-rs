@@ -518,6 +518,14 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         notes: &["Maps to GET /v4/workspaces/current in the One API docs."],
     },
     CatalogMetadata {
+        path: "one/workspace/detail",
+        output: "workspace resource envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["One PAT for the target workspace"],
+        notes: &["Numeric workspace id, not the GID; mirrors `one workspace admins`."],
+    },
+    CatalogMetadata {
         path: "one/workspace/current-configuration",
         output: "one workspace current configuration envelope",
         safety: "read-only",
