@@ -689,15 +689,20 @@ pub fn pagination_next_command(argv: &[String], token: &str) -> String {
     parts.join(" ")
 }
 
+/// Single-quote `arg` for a POSIX shell unless it consists solely of
+/// characters that never need quoting (`[A-Za-z0-9_@%+=:,./-]`, the same
+/// set Python's `shlex.quote` treats as safe). Embedded single quotes use
+/// the `'\''` idiom.
 fn shell_quote(arg: &str) -> String {
-    if arg.is_empty()
-        || arg.chars().any(|c| {
-            c.is_whitespace() || matches!(c, '\'' | '"' | '$' | '`' | '\\' | '|' | '&' | ';')
-        })
-    {
-        format!("'{}'", arg.replace('\'', "'\\''"))
-    } else {
+    let safe = !arg.is_empty()
+        && arg.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, '_' | '@' | '%' | '+' | '=' | ':' | ',' | '.' | '/' | '-')
+        });
+    if safe {
         arg.to_string()
+    } else {
+        format!("'{}'", arg.replace('\'', "'\\''"))
     }
 }
 
@@ -1222,6 +1227,37 @@ mod tests {
         assert_eq!(
             cmd,
             "ayx one flows list --profile 'my profile' --page-token t"
+        );
+    }
+
+    #[test]
+    fn next_command_quotes_every_unsafe_argument() {
+        let cmd = pagination_next_command(
+            &argv(&[
+                "ayx", "one", "flows", "list", "--filter", "#urgent", "--name", "a*b", "--owner",
+                "it's", "--note", "",
+            ]),
+            "t",
+        );
+        assert_eq!(
+            cmd,
+            "ayx one flows list --filter '#urgent' --name 'a*b' --owner 'it'\\''s' --note '' --page-token t"
+        );
+        // Safe arguments stay bare.
+        let cmd = pagination_next_command(
+            &argv(&[
+                "ayx",
+                "one",
+                "flows",
+                "list",
+                "--profile",
+                "dev-01@eu.example.com",
+            ]),
+            "t",
+        );
+        assert_eq!(
+            cmd,
+            "ayx one flows list --profile dev-01@eu.example.com --page-token t"
         );
     }
 }
