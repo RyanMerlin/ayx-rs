@@ -66,13 +66,15 @@ pub fn agent_marker_present(get: impl Fn(&str) -> Option<String>) -> bool {
 
 /// Resolve the effective output mode. Order: explicit `--output`, then
 /// `AYX_OUTPUT`, then `json` for agent hosts or a non-terminal stdout, else
-/// `text`. The error carries a human sentence for a bad `AYX_OUTPUT` value.
+/// `text`. An empty (or whitespace-only) `AYX_OUTPUT` is ignored, as if unset.
+/// The error carries a human sentence for a bad `AYX_OUTPUT` value.
 pub fn resolve_output_mode(
     explicit: Option<OutputMode>,
     env_value: Option<&str>,
     stdout_is_terminal: bool,
     agent_marker: bool,
 ) -> Result<(OutputMode, OutputModeSource), String> {
+    let env_value = env_value.filter(|v| !v.trim().is_empty());
     if let Some(mode) = explicit {
         return Ok((mode, OutputModeSource::Explicit));
     }
@@ -1129,5 +1131,17 @@ mod tests {
         assert!(!agent_marker_present(env));
         let env = |k: &str| (k == "AYX_AGENT").then(|| "1".to_string());
         assert!(agent_marker_present(env));
+    }
+
+    #[test]
+    fn empty_env_value_is_treated_as_unset() {
+        assert_eq!(
+            resolve_output_mode(None, Some(""), true, false).unwrap(),
+            (OutputMode::Text, OutputModeSource::Default)
+        );
+        assert_eq!(
+            resolve_output_mode(None, Some("  "), false, false).unwrap(),
+            (OutputMode::Json, OutputModeSource::AutoNonTty)
+        );
     }
 }

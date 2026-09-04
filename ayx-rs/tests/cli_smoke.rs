@@ -134,7 +134,7 @@ fn ayx_apply_is_global_flag() {
 #[test]
 fn completions_command_emits_script() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["completions", "bash", "--output", "text"])
+        .args(["completions", "bash"])
         .output()
         .expect("ayx binary should run");
     assert!(output.status.success());
@@ -142,6 +142,17 @@ fn completions_command_emits_script() {
     // clap_complete emits a function named after the binary.
     assert!(stdout.contains("_ayx"));
     assert!(stdout.contains("COMPREPLY"));
+}
+
+#[test]
+fn completions_honor_explicit_json_output() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["completions", "bash", "--output", "json"])
+        .output()
+        .expect("ayx binary should run");
+    assert!(output.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).expect("explicit json wins");
+    assert_eq!(v["schema_version"], "ayx.output.v1");
 }
 
 #[test]

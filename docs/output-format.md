@@ -28,7 +28,7 @@ Resolution order for the effective mode:
 
 1. An explicit `--output <mode>` always wins.
 2. `AYX_OUTPUT=<mode>` (case-insensitive; an unknown value is a `validation`
-   error, exit 2).
+   error, exit 2). An empty `AYX_OUTPUT` is ignored.
 3. `json` when an agent host is detected (`AYX_AGENT`, `CLAUDECODE`, or
    `AI_AGENT` set to a non-empty value other than `0`) or when stdout is not a
    terminal.

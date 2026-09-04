@@ -6064,6 +6064,18 @@ fn main() -> Result<()> {
             std::process::exit(exit_code_for_envelope(&err_env));
         }
     };
+    // Shell completion scripts are raw stdout payloads and are almost always
+    // redirected to a file, so a non-terminal stdout must not flip them to
+    // JSON. Explicit `--output` and `AYX_OUTPUT` still win.
+    let output = if matches!(cli.command, Command::Completions { .. })
+        && matches!(
+            output_source,
+            output::OutputModeSource::AutoNonTty | output::OutputModeSource::AutoAgentMarker
+        ) {
+        output::OutputMode::Text
+    } else {
+        output
+    };
     if cli.debug {
         eprintln!("[ayx-debug] output mode {output} ({output_source:?})");
     }
