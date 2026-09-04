@@ -272,6 +272,7 @@ fn compact_list(
 }
 
 fn compact_object(kind: &str, data: &Value, descriptor_fields: &[&str]) -> Value {
+    let wrapper = transport_wrapper(data);
     let data = presentation_body(data);
     match data.as_object() {
         Some(object) => {
@@ -288,7 +289,7 @@ fn compact_object(kind: &str, data: &Value, descriptor_fields: &[&str]) -> Value
             };
             json!({
                 "kind": kind,
-                "fields": project_object(Some(object), &fields),
+                "fields": project_object_with_wrapper(Some(object), wrapper, &fields),
                 "omitted_fields": omitted_fields(Some(object), &fields),
             })
         }
@@ -327,7 +328,7 @@ fn human_resource_data(data: &Value, descriptor_fields: &[&str]) -> Value {
     } else {
         descriptor_fields.to_vec()
     };
-    let projected = project_object(Some(object), &fields);
+    let projected = project_object_with_wrapper(Some(object), transport_wrapper(data), &fields);
     if projected.is_empty() {
         json!({
             "response_available": true,
@@ -444,6 +445,43 @@ fn next_page_token(data: &Value) -> Option<&Value> {
             .filter(|response| !response.is_null())
             .and_then(next_page_token)
     })
+}
+
+/// The transport wrapper around a server body, or `None` when the envelope is a
+/// native command result that was never wrapped.
+fn transport_wrapper(data: &Value) -> Option<&Map<String, Value>> {
+    data.get("response")
+        .filter(|response| !response.is_null())
+        .and(data.as_object())
+}
+
+/// Project declared fields from the server body, falling back to the transport
+/// wrapper for fields that only exist there.
+///
+/// `dry_run`, `mutating`, `applied`, `would_send`, and `audit_artifact` are set
+/// by this CLI's transport layer, not by the service, so they live beside
+/// `response` rather than inside it. Projecting the body alone dropped them
+/// into `omitted_fields` on exactly the commands where they matter: an applied
+/// mutation has a real body, so anything asserting `dry_run == false` before
+/// treating the mutation as executed read `null` instead.
+fn project_object_with_wrapper(
+    object: Option<&Map<String, Value>>,
+    wrapper: Option<&Map<String, Value>>,
+    fields: &[&str],
+) -> Map<String, Value> {
+    let mut projected = project_object(object, fields);
+    let Some(wrapper) = wrapper else {
+        return projected;
+    };
+    for field in fields {
+        if projected.contains_key(*field) {
+            continue;
+        }
+        if let Some(value) = wrapper.get(*field) {
+            projected.insert((*field).to_string(), scalar_projection(value));
+        }
+    }
+    projected
 }
 
 fn project_object(object: Option<&Map<String, Value>>, fields: &[&str]) -> Map<String, Value> {
@@ -890,6 +928,49 @@ mod tests {
                 .expect("omitted fields list")
                 .iter()
                 .any(|field| field == "workspacetiers")
+        );
+    }
+
+    /// `dry_run` / `mutating` / `applied` are set by the transport layer, not by
+    /// the service, so they sit beside `response` rather than inside it. An
+    /// applied mutation has a real body, which is exactly when a body-only
+    /// projection dropped them and left automation reading `null` for the flag
+    /// that says whether the mutation ran.
+    #[test]
+    fn result_view_keeps_transport_safety_flags_for_an_applied_mutation() {
+        let env = Envelope::ok_with_data(
+            "workflow shared",
+            json!({
+                "dry_run": false,
+                "mutating": true,
+                "applied": true,
+                "request_id": "request-123",
+                "response": {"id": "wf-1", "name": "shared-workflow", "status": "ok"}
+            }),
+        );
+        let descriptor = OutputDescriptor::new("one.workflows.share", ViewKind::Result)
+            .with_fields(&["id", "name", "status", "dry_run", "mutating", "applied"]);
+
+        let compact: Value = serde_json::from_str(
+            &render_envelope(&env, OutputMode::Json, descriptor, DEFAULT_OUTPUT_LIMIT)
+                .expect("compact JSON should render"),
+        )
+        .expect("compact JSON should parse");
+
+        assert_eq!(compact["data"]["fields"]["name"], "shared-workflow");
+        assert_eq!(compact["data"]["fields"]["applied"], true);
+        assert_eq!(compact["data"]["fields"]["mutating"], true);
+        assert_eq!(
+            compact["data"]["fields"]["dry_run"], false,
+            "a false dry_run must be reported as false, never dropped to null"
+        );
+
+        let text = render_envelope(&env, OutputMode::Text, descriptor, DEFAULT_OUTPUT_LIMIT)
+            .expect("text should render");
+        assert!(text.contains("applied"));
+        assert!(
+            !text.contains("request-123"),
+            "transport diagnostics that the descriptor did not declare stay out"
         );
     }
 
