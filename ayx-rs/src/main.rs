@@ -1011,6 +1011,16 @@ mongo:
 
         assert!(remediation_for_error_code(ErrorCode::Internal, "one.flows.list").is_none());
     }
+
+    #[test]
+    fn not_found_remediation_names_the_familys_list_command() {
+        use ayx_core::envelope::ErrorCode;
+        let (_, commands) =
+            remediation_for_error_code(ErrorCode::NotFound, "one.flows.detail").unwrap();
+        assert_eq!(commands, vec!["ayx one flows list --output json"]);
+
+        assert!(remediation_for_error_code(ErrorCode::NotFound, "server").is_none());
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -6466,6 +6476,28 @@ fn remediation_for_error_code(
     use ayx_core::envelope::ErrorCode::*;
     let is_one = command == "one" || command.starts_with("one.");
     let cmds = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+    if code == NotFound {
+        // `command` is the descriptor's dotted id, e.g. `one.flows.detail`.
+        // Only name a `<family> list` command when the live command tree
+        // still exposes one at `one/<family>/list` -- never fabricate a
+        // command that doesn't exist.
+        let mut parts = command.split('.');
+        if let (Some("one"), Some(family), Some(_verb), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        {
+            let list_path = format!("one/{family}/list");
+            if crate::cmd::command_surface::visible_command_paths().contains(&list_path) {
+                return Some((
+                    "The id was not found in this workspace; list the family to find a valid one."
+                        .to_string(),
+                    vec![format!("ayx one {family} list --output json")],
+                ));
+            }
+        }
+        return None;
+    }
+
     Some(match code {
         ConfigMissing => (
             "No usable profile was found; onboard or select an existing one.".to_string(),

@@ -84,10 +84,10 @@ pub(crate) fn visible_commands() -> Vec<LiveCommand> {
 /// for membership checks (e.g. "does the live tree still expose X") without
 /// carrying summaries around.
 ///
-/// Test-only today (`discover --deep` and `catalog list --scope all` are
-/// both cross-checked against it) — no non-test caller needs the bare path
-/// set instead of the full `LiveCommand` records, hence the narrow allow.
-#[allow(dead_code)]
+/// Used by `remediation_for_error_code` (`main.rs`) to confirm a `<family>
+/// list` command actually exists before naming it in a `NotFound`
+/// remediation, and cross-checked in tests against `discover --deep` and
+/// `catalog list --scope all`.
 pub(crate) fn visible_command_paths() -> BTreeSet<String> {
     visible_commands().into_iter().map(|c| c.path).collect()
 }
