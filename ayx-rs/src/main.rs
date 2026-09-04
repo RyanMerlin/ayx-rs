@@ -6117,6 +6117,19 @@ fn main() -> Result<()> {
             {
                 envelope = envelope.with_remediation(summary, commands);
             }
+            if envelope.ok
+                && envelope.next.is_none()
+                && envelope.data.get("pages_fetched").is_some()
+                && let Some(token) = envelope
+                    .data
+                    .get("next_page_token")
+                    .and_then(Value::as_str)
+                    .filter(|t| !t.is_empty())
+                    .map(str::to_string)
+            {
+                let argv: Vec<String> = std::env::args().collect();
+                envelope = envelope.with_next(vec![output::pagination_next_command(&argv, &token)]);
+            }
             let rendered = format_envelope(&envelope, output, descriptor, output_limit)?;
             let rendered = match apply_jq_or_passthrough(rendered, jq_filter.as_deref(), raw_output)
             {

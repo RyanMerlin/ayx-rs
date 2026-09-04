@@ -660,6 +660,47 @@ fn has_populated_assignment(haystack: &str, needle: &str) -> bool {
     })
 }
 
+/// Rebuild the invoking command line with `--page-token <token>` so an agent
+/// can fetch the next page without reconstructing the arguments. `argv[0]` is
+/// normalized to `ayx`; an existing `--page-token` (either form) is replaced.
+pub fn pagination_next_command(argv: &[String], token: &str) -> String {
+    let mut parts: Vec<String> = Vec::with_capacity(argv.len() + 2);
+    let mut skip_next = false;
+    for (i, arg) in argv.iter().enumerate() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if i == 0 {
+            parts.push("ayx".to_string());
+            continue;
+        }
+        if arg == "--page-token" {
+            skip_next = true;
+            continue;
+        }
+        if arg.starts_with("--page-token=") {
+            continue;
+        }
+        parts.push(shell_quote(arg));
+    }
+    parts.push("--page-token".to_string());
+    parts.push(shell_quote(token));
+    parts.join(" ")
+}
+
+fn shell_quote(arg: &str) -> String {
+    if arg.is_empty()
+        || arg.chars().any(|c| {
+            c.is_whitespace() || matches!(c, '\'' | '"' | '$' | '`' | '\\' | '|' | '&' | ';')
+        })
+    {
+        format!("'{}'", arg.replace('\'', "'\\''"))
+    } else {
+        arg.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1142,6 +1183,45 @@ mod tests {
         assert_eq!(
             resolve_output_mode(None, Some("  "), false, false).unwrap(),
             (OutputMode::Json, OutputModeSource::AutoNonTty)
+        );
+    }
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn next_command_appends_the_token() {
+        let cmd = pagination_next_command(
+            &argv(&["/usr/bin/ayx", "one", "flows", "list", "--output", "json"]),
+            "tok123",
+        );
+        assert_eq!(cmd, "ayx one flows list --output json --page-token tok123");
+    }
+
+    #[test]
+    fn next_command_replaces_an_existing_token_in_either_form() {
+        let cmd = pagination_next_command(
+            &argv(&["ayx", "one", "flows", "list", "--page-token", "old"]),
+            "new",
+        );
+        assert_eq!(cmd, "ayx one flows list --page-token new");
+        let cmd = pagination_next_command(
+            &argv(&["ayx", "one", "flows", "list", "--page-token=old"]),
+            "new",
+        );
+        assert_eq!(cmd, "ayx one flows list --page-token new");
+    }
+
+    #[test]
+    fn next_command_quotes_arguments_with_spaces() {
+        let cmd = pagination_next_command(
+            &argv(&["ayx", "one", "flows", "list", "--profile", "my profile"]),
+            "t",
+        );
+        assert_eq!(
+            cmd,
+            "ayx one flows list --profile 'my profile' --page-token t"
         );
     }
 }
