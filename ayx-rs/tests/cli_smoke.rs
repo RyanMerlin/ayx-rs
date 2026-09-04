@@ -1130,6 +1130,32 @@ fn compact_error_envelope_carries_error_text_off_tty() {
 }
 
 #[test]
+fn jq_applies_on_the_err_path() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "one",
+            "flows",
+            "list",
+            "--profile",
+            "definitely-not-a-profile",
+            "--jq",
+            ".error_code",
+        ])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let trimmed = stderr.trim();
+    let value: serde_json::Value =
+        serde_json::from_str(trimmed).unwrap_or_else(|e| panic!("stderr not JSON: {e}\n{stderr}"));
+    assert!(
+        value.is_string(),
+        "--jq .error_code should print a JSON string: {stderr}"
+    );
+}
+
+#[test]
 fn omitted_workflow_id_off_tty_names_the_list_command() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([

@@ -6219,24 +6219,34 @@ fn main() -> Result<()> {
             // non-zero via process::exit (like the ok=false branch) rather than
             // returning Err, which would make the runtime print a second,
             // non-JSON `Error: ...` line and corrupt the stderr envelope.
-            eprint!(
-                "{}",
-                format_envelope(
-                    &err_env,
-                    if error_format == output::ErrorFormat::Json {
-                        output::OutputMode::Json
-                    } else {
-                        output
-                    },
-                    descriptor,
-                    output_limit,
-                )
-                .unwrap_or_else(|_| err_env.message.clone())
-            );
+            let rendered = format_envelope(
+                &err_env,
+                if error_format == output::ErrorFormat::Json {
+                    output::OutputMode::Json
+                } else {
+                    output
+                },
+                descriptor,
+                output_limit,
+            )
+            .unwrap_or_else(|_| err_env.message.clone());
+            // `--jq` applies to dispatcher-level failures too, not just the
+            // Ok(envelope) path -- a jq failure here still prints a
+            // validation envelope and exits with its code, exactly like the
+            // Ok(envelope) branch above.
+            let (rendered, exit_envelope) =
+                match apply_jq_or_passthrough(rendered, jq_filter.as_deref(), raw_output) {
+                    Ok(text) => (text, err_env),
+                    Err(jq_err_env) => (
+                        serde_json::to_string_pretty(&jq_err_env).unwrap_or_default(),
+                        *jq_err_env,
+                    ),
+                };
+            eprint!("{rendered}");
             eprintln!();
             let _ = io::stdout().lock().flush();
             let _ = io::stderr().lock().flush();
-            std::process::exit(exit_code_for_envelope(&err_env));
+            std::process::exit(exit_code_for_envelope(&exit_envelope));
         }
     }
 }
