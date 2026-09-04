@@ -2085,8 +2085,9 @@ pub(crate) enum OnePersonCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
+        /// Resource id. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
     },
     /// Create a One person from JSON payload.
     Create {
@@ -2521,8 +2522,9 @@ pub(crate) enum OnePlansCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
+        /// Resource id. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
     },
     /// Inspect a One plan with the full documented payload.
     Full {
@@ -2656,8 +2658,9 @@ pub(crate) enum OneFlowsCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
+        /// Resource id. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
     },
     /// Update a One flow from JSON payload.
     Update {
@@ -3018,8 +3021,9 @@ pub(crate) enum OneConnectionsCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
+        /// Resource id. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
     },
     /// Inspect connection status.
     Status {
@@ -3472,8 +3476,9 @@ pub(crate) enum OneJobGroupCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
+        /// Resource id. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
     },
     /// Cancel a One job group.
     Cancel {

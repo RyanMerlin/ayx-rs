@@ -1113,3 +1113,26 @@ fn omitted_workflow_id_off_tty_names_the_list_command() {
         "ayx one workflows list --output json"
     );
 }
+
+#[test]
+fn omitted_flow_id_off_tty_names_the_list_command() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "one",
+            "flows",
+            "detail",
+            "--no-input",
+            "--output",
+            "json-full",
+        ])
+        .output()
+        .expect("ayx binary should run");
+
+    assert_eq!(output.status.code(), Some(2));
+    let envelope: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&output.stderr).trim()).unwrap();
+    assert_eq!(
+        envelope["remediation"]["commands"][0],
+        "ayx one flows list --output json"
+    );
+}
