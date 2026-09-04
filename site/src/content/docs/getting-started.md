@@ -156,7 +156,7 @@ ayx one workspace current --output json
 
 `ayx one open <kind> [id]` opens the relevant page in the Alteryx One web console — a workspace or a workflow — right from your terminal. Pass `--print` to get the URL instead of launching a browser, which is handy over SSH.
 
-When you omit the id on a detail or delete command (workflows, flows, connections, job-groups, person, or plans), `ayx` opens an interactive picker listing the candidates so you can select one instead of looking up the id yourself. Both the picker and `ayx one open`'s browser launch are inert when stdout isn't a terminal or you pass `--no-input` — scripts and agents get a structured error naming the list command instead.
+When you omit the id on `ayx one workflows detail` or `ayx one workflows delete`, or on `detail` for flows, connections, job-groups, person, or plans, `ayx` opens an interactive picker over the matching list. Off a terminal, or with `--no-input`, the same omission is a `validation` error whose `remediation.commands` names the list command to run instead.
 
 ## Where to go next
 
