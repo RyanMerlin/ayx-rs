@@ -381,6 +381,101 @@ fn token_failure_prefix(status: StatusCode) -> &'static str {
 
 /// Return an allowlisted, bounded summary of a failed OAuth token exchange.
 ///
+/// Require a complete, verified workspace identity before an applied One
+/// mutation leaves the process, and refresh the access token if it is stale.
+///
+/// Returns the refreshed access token when one was minted, so the caller can
+/// reuse it instead of resolving a second time.
+///
+/// Shared rather than inlined because every applied mutation needs it and a
+/// path that forgets it sends the write against whatever workspace the ambient
+/// token happens to resolve to. The multipart upload path was added without it.
+fn preflight_applied_mutation(
+    config: &Config,
+    surface: &str,
+    operation: &str,
+    url: &str,
+    mutating: bool,
+) -> Result<Option<String>> {
+    if !mutating {
+        return Ok(None);
+    }
+    let mut preflight_access_token = None;
+    // The old guard was conditional on the legacy `expected_workspace_id` field
+    // and could therefore send a mutation with only an unverified numeric ID or
+    // top-level token context.
+    let one = config.alteryx_one.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("workspace identity is required for an applied One mutation")
+    })?;
+    let key = one
+        .active_workspace_id()
+        // A legacy profile that only carries top-level tokens cannot be
+        // promoted here: it has no numeric workspace ID and no verified
+        // workspace name, so it can never satisfy `WorkspaceTarget`.
+        // Re-running login is the only way to obtain a verified credential.
+        .ok_or_else(|| anyhow::anyhow!("no active verified workspace credential; authenticate or select a workspace before applying a mutation (run `ayx one login`, or `ayx one login --workspace-id <numeric-id-or-gid>` to select among saved workspace credentials)"))?;
+    let credential = one
+        .workspace_credentials
+        .get(key)
+        .ok_or_else(|| anyhow::anyhow!("active workspace credential is missing"))?;
+    let target = ayx_core::profile::WorkspaceTarget::from_credential(
+        key,
+        credential,
+        ayx_core::profile::WorkspaceResolutionSource::ActiveProfile,
+    )
+    .ok_or_else(|| {
+        anyhow::anyhow!(
+            "active workspace credential lacks complete verified ID, GID, or name metadata"
+        )
+    })?;
+    if one_access_token_needs_refresh(config) {
+        let refresh_client = build_client()?;
+        preflight_access_token = Some(refresh_one_access_token_for_request(
+            config,
+            &refresh_client,
+        )?);
+    }
+    verify_workspace_identity(
+        config,
+        surface,
+        operation,
+        url,
+        &target.workspace_id,
+        &target.workspace_gid,
+        preflight_access_token.as_deref(),
+    )?;
+    Ok(preflight_access_token)
+}
+
+/// Mask credential-shaped runs inside provider-controlled prose.
+///
+/// `redact_text` masks `key=value` assignments and JWT shapes. A token endpoint
+/// is free to write a bare opaque token into `error_description`, where neither
+/// pattern matches and the value would be echoed verbatim. Replace any run long
+/// enough to be a credential and not a plain alphabetic word, which keeps the
+/// sentence readable while making it unable to carry a secret.
+fn mask_opaque_runs(value: &str) -> String {
+    const MIN_OPAQUE_CHARS: usize = 20;
+
+    value
+        .split_inclusive(char::is_whitespace)
+        .map(|chunk| {
+            let trimmed = chunk.trim_end();
+            let trailing = &chunk[trimmed.len()..];
+            let core = trimmed.trim_matches(|character: char| !character.is_ascii_alphanumeric());
+            if core.chars().count() >= MIN_OPAQUE_CHARS
+                && !core
+                    .chars()
+                    .all(|character| character.is_ascii_alphabetic())
+            {
+                format!("***{trailing}")
+            } else {
+                chunk.to_string()
+            }
+        })
+        .collect()
+}
+
 /// Token endpoints commonly return an OAuth error object for a 400 response.
 /// The raw body must never be surfaced because proxies and providers are free
 /// to include request data in it. Keep only the fields that identify the
@@ -412,8 +507,13 @@ fn oauth_token_error_summary(body: &str, request_id: Option<&str>) -> String {
         if let Some(code) = field(&json, "error_code") {
             fields.push(format!("provider_error_code={code}"));
         }
+        // `error` and `error_code` are short spec/provider enums. Only the
+        // description is free prose, so only it needs the opaque-run pass.
         if let Some(description) = field(&json, "error_description") {
-            fields.push(format!("oauth_error_description={description}"));
+            fields.push(format!(
+                "oauth_error_description={}",
+                mask_opaque_runs(&description)
+            ));
         }
     }
     if let Some(request_id) = request_id.map(bounded).filter(|value| !value.is_empty()) {
@@ -1200,53 +1300,8 @@ pub fn one_api_live_request_with_body(
         return Ok(envelope);
     }
 
-    let mut preflight_access_token = None;
-    // Every applied One mutation must have a complete selected workspace
-    // identity. The old guard was conditional on the legacy
-    // `expected_workspace_id` field and could therefore send a mutation with
-    // only an unverified numeric ID or top-level token context.
-    if mutating {
-        let one = config.alteryx_one.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("workspace identity is required for an applied One mutation")
-        })?;
-        let key = one
-            .active_workspace_id()
-            // A legacy profile that only carries top-level tokens cannot be
-            // promoted here: it has no numeric workspace ID and no verified
-            // workspace name, so it can never satisfy `WorkspaceTarget`.
-            // Re-running login is the only way to obtain a verified credential.
-            .ok_or_else(|| anyhow::anyhow!("no active verified workspace credential; authenticate or select a workspace before applying a mutation (run `ayx one login`, or `ayx one login --workspace-id <numeric-id-or-gid>` to select among saved workspace credentials)"))?;
-        let credential = one
-            .workspace_credentials
-            .get(key)
-            .ok_or_else(|| anyhow::anyhow!("active workspace credential is missing"))?;
-        let target = ayx_core::profile::WorkspaceTarget::from_credential(
-            key,
-            credential,
-            ayx_core::profile::WorkspaceResolutionSource::ActiveProfile,
-        )
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "active workspace credential lacks complete verified ID, GID, or name metadata"
-            )
-        })?;
-        if one_access_token_needs_refresh(config) {
-            let refresh_client = build_client()?;
-            preflight_access_token = Some(refresh_one_access_token_for_request(
-                config,
-                &refresh_client,
-            )?);
-        }
-        verify_workspace_identity(
-            config,
-            surface,
-            operation,
-            &url,
-            &target.workspace_id,
-            &target.workspace_gid,
-            preflight_access_token.as_deref(),
-        )?;
-    }
+    let preflight_access_token =
+        preflight_applied_mutation(config, surface, operation, &url, mutating)?;
 
     let client = build_client()?;
     trace_one(format!(
@@ -1779,8 +1834,17 @@ pub fn one_api_multipart_file_request(
         ));
     }
 
+    // An applied upload is a write like any other: it must prove the selected
+    // workspace identity before the bytes leave the process, or it lands in
+    // whatever workspace the ambient token resolves to.
+    let preflight_access_token =
+        preflight_applied_mutation(config, surface, operation, &url, mutating)?;
+
     let client = build_client()?;
-    let access_token = resolve_one_access_token(config, &client)?;
+    let access_token = match preflight_access_token {
+        Some(token) => token,
+        None => resolve_one_access_token(config, &client)?,
+    };
     let workspace_context = workspace_context_header_value(config);
     let workspace_gid = config
         .alteryx_one
@@ -3228,6 +3292,40 @@ mongo:
         ] {
             assert!(!summary.contains(secret), "secret leaked in {summary}");
         }
+    }
+
+    /// A provider may write a bare token into the description, where neither the
+    /// `key=value` nor the JWT pattern matches. Prose must survive; anything
+    /// credential-shaped must not.
+    #[test]
+    fn oauth_token_error_summary_masks_opaque_tokens_in_provider_prose() {
+        let summary = oauth_token_error_summary(
+            r#"{
+                "error":"invalid_grant",
+                "error_description":"refresh credential aB3xY7pQ9wL2mN5kR8tZ was revoked"
+            }"#,
+            None,
+        );
+
+        assert!(
+            !summary.contains("aB3xY7pQ9wL2mN5kR8tZ"),
+            "an opaque token in prose leaked: {summary}"
+        );
+        assert!(summary.contains("oauth_error=invalid_grant"), "{summary}");
+        assert!(
+            summary.contains("refresh credential") && summary.contains("was revoked"),
+            "the readable prose must survive: {summary}"
+        );
+    }
+
+    #[test]
+    fn oauth_token_error_summary_keeps_ordinary_long_words() {
+        assert_eq!(
+            mask_opaque_runs("internationalization and authentication failed"),
+            "internationalization and authentication failed",
+            "plain alphabetic words are not credentials"
+        );
+        assert_eq!(mask_opaque_runs("token abc123def456ghi789jkl"), "token ***");
     }
 
     #[test]
