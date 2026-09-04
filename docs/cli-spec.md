@@ -67,6 +67,13 @@ with `--output-limit`; use `0` for no compact-list cap. `json-full` and YAML
 serialize the full, recursively redacted envelope. Raw-field scripts must use
 `json-full`.
 
+Two more global flags post-process the rendered result: `--jq <FILTER>` runs a
+jq filter (pure-Rust `jaq`) over the JSON output and prints one value per
+line, forcing `--output json` unless `--output json-full` is given; `--raw-output`
+/ `-r` (requires `--jq`) prints string results unquoted. A filter that fails to
+parse, compile, or run exits 2 (`validation`), matching every other
+`validation`-class failure.
+
 The full envelope contract is:
 
 - `ok`

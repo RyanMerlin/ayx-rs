@@ -1059,3 +1059,28 @@ fn bad_ayx_output_is_a_validation_error() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("AYX_OUTPUT"));
 }
+
+#[test]
+fn jq_filters_the_compact_envelope() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["catalog", "list", "--jq", ".schema_version", "--raw-output"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "ayx.output.v1"
+    );
+
+    let bad = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["catalog", "list", "--jq", ".["])
+        .output()
+        .expect("ayx binary should run");
+    assert_eq!(bad.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("validation"));
+}

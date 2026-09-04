@@ -34,6 +34,7 @@ use self_update::backends::github::Update as GitHubUpdate;
 mod capability;
 mod cmd;
 mod headless;
+mod jq;
 mod onboard;
 mod output;
 mod render;
@@ -321,6 +322,13 @@ struct Cli {
     /// commands. Has no effect on read-only or non-destructive flows.
     #[arg(long, global = true)]
     yes: bool,
+    /// Apply a jq filter to the JSON result and print one value per line.
+    /// Forces `--output json` unless `--output json-full` is given.
+    #[arg(long, global = true, value_name = "FILTER")]
+    jq: Option<String>,
+    /// With --jq, print string results without quotes (like `jq -r`).
+    #[arg(long, short = 'r', global = true, requires = "jq")]
+    raw_output: bool,
 
     #[command(subcommand)]
     command: Command,
@@ -6076,6 +6084,16 @@ fn main() -> Result<()> {
     } else {
         output
     };
+    // An explicit --jq is an explicit request for JSON: it forces json unless
+    // the caller asked for the full (uncompacted) envelope. This applies even
+    // to `Command::Completions`, deliberately overriding the exemption above.
+    let jq_filter = cli.jq.clone();
+    let raw_output = cli.raw_output;
+    let output = match (&jq_filter, output) {
+        (Some(_), output::OutputMode::JsonFull) => output::OutputMode::JsonFull,
+        (Some(_), _) => output::OutputMode::Json,
+        (None, mode) => mode,
+    };
     if cli.debug {
         eprintln!("[ayx-debug] output mode {output} ({output_source:?})");
     }
@@ -6100,6 +6118,17 @@ fn main() -> Result<()> {
                 envelope = envelope.with_remediation(summary, commands);
             }
             let rendered = format_envelope(&envelope, output, descriptor, output_limit)?;
+            let rendered = match apply_jq_or_passthrough(rendered, jq_filter.as_deref(), raw_output)
+            {
+                Ok(text) => text,
+                Err(err_env) => {
+                    eprintln!(
+                        "{}",
+                        serde_json::to_string_pretty(&err_env).unwrap_or_default()
+                    );
+                    std::process::exit(exit_code_for_envelope(&err_env));
+                }
+            };
             if envelope.ok {
                 print!("{rendered}");
                 println!();
@@ -6166,6 +6195,29 @@ fn main() -> Result<()> {
             let _ = io::stderr().lock().flush();
             std::process::exit(exit_code_for_envelope(&err_env));
         }
+    }
+}
+
+/// Apply `--jq` to a rendered JSON document, or pass it through. A filter
+/// failure becomes a validation envelope so the caller sees the standard shape.
+fn apply_jq_or_passthrough(
+    rendered: String,
+    jq_filter: Option<&str>,
+    raw_output: bool,
+) -> Result<String, Box<Envelope>> {
+    let Some(filter) = jq_filter else {
+        return Ok(rendered);
+    };
+    match jq::apply(filter, &rendered, raw_output) {
+        Ok(lines) => Ok(lines.join("\n")),
+        Err(err) => Err(Box::new(
+            Envelope::err_coded(
+                ayx_core::envelope::ErrorCode::Validation,
+                err.to_string(),
+                json!({ "jq": filter }),
+            )
+            .finalize_retryable(),
+        )),
     }
 }
 

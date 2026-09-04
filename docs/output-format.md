@@ -54,3 +54,13 @@ Notes:
 - Interactive onboarding/authentication and shell completion scripts are direct-terminal workflows; structured modes return an envelope summary.
 - For `workflow yxdb`, keep `--csv <path>` for export and add `--output json`
   when you want structured metadata alongside it.
+
+## `--jq`
+
+`--jq <FILTER>` runs a jq filter (pure-Rust `jaq`; jq 1.7 syntax and the
+standard library) over the rendered JSON and prints one value per line.
+`--raw-output` / `-r` prints string results without quotes. `--jq` forces
+`--output json` unless `--output json-full` is given, and it runs after
+redaction and `--output-limit`, so it cannot reveal anything the plain output
+would not. A filter that fails to parse, compile, or run is a `validation`
+error (exit 2).
