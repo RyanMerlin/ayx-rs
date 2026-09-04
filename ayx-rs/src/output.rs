@@ -57,6 +57,8 @@ pub struct OutputDescriptor {
     pub command: &'static str,
     pub kind: ViewKind,
     pub fields: &'static [&'static str],
+    /// Service-specific collection wrappers accepted by this command.
+    pub collection_keys: &'static [&'static str],
 }
 
 impl OutputDescriptor {
@@ -65,11 +67,17 @@ impl OutputDescriptor {
             command,
             kind,
             fields: &[],
+            collection_keys: &[],
         }
     }
 
     pub const fn with_fields(mut self, fields: &'static [&'static str]) -> Self {
         self.fields = fields;
+        self
+    }
+
+    pub const fn with_collection_keys(mut self, collection_keys: &'static [&'static str]) -> Self {
+        self.collection_keys = collection_keys;
         self
     }
 }
@@ -116,6 +124,7 @@ pub fn render_envelope(
                         &clean.data,
                         descriptor.kind,
                         descriptor.fields,
+                        descriptor.collection_keys,
                         output_limit,
                         false,
                     ),
@@ -160,6 +169,7 @@ fn compact_envelope(
             &envelope.data,
             kind,
             descriptor.fields,
+            descriptor.collection_keys,
             output_limit,
             !envelope.ok,
         ),
@@ -170,6 +180,7 @@ fn compact_data(
     data: &Value,
     kind: ViewKind,
     descriptor_fields: &[&str],
+    collection_keys: &[&'static str],
     limit: usize,
     is_error: bool,
 ) -> Value {
@@ -182,7 +193,7 @@ fn compact_data(
         });
     }
     match kind {
-        ViewKind::List => compact_list(data, descriptor_fields, limit),
+        ViewKind::List => compact_list(data, descriptor_fields, collection_keys, limit),
         ViewKind::Detail => compact_object("detail", data, descriptor_fields),
         ViewKind::Result => compact_object("result", data, descriptor_fields),
         ViewKind::Diagnostic => compact_object("diagnostic", data, descriptor_fields),
@@ -191,8 +202,13 @@ fn compact_data(
     }
 }
 
-fn compact_list(data: &Value, descriptor_fields: &[&str], limit: usize) -> Value {
-    let Some((items, source_key)) = list_items(data) else {
+fn compact_list(
+    data: &Value,
+    descriptor_fields: &[&str],
+    collection_keys: &[&'static str],
+    limit: usize,
+) -> Value {
+    let Some((items, source_key)) = list_items(data, collection_keys) else {
         // An unknown gateway wrapper is a CLI compatibility problem, not proof
         // that the server returned an empty collection. Do not turn it into a
         // deceptively reassuring "(no items)" message.
@@ -361,7 +377,10 @@ fn list_projection(items: &[Value]) -> Vec<&'static str> {
 /// body nested by `one_api_live_request`. The latter is intentional in the
 /// lossless `json-full` contract, but human/compact list views must not claim
 /// it is empty merely because a gateway uses `{ "data": [...] }`.
-fn list_items(data: &Value) -> Option<(&[Value], &'static str)> {
+fn list_items<'a>(
+    data: &'a Value,
+    collection_keys: &[&'static str],
+) -> Option<(&'a [Value], &'static str)> {
     if let Some(items) = data.as_array() {
         return Some((items, "items"));
     }
@@ -380,14 +399,17 @@ fn list_items(data: &Value) -> Option<(&[Value], &'static str)> {
         "flows",
         "plans",
         "connections",
-    ] {
+    ]
+    .into_iter()
+    .chain(collection_keys.iter().copied())
+    {
         if let Some(items) = data.get(key).and_then(Value::as_array) {
             return Some((items, key));
         }
     }
     data.get("response")
         .filter(|response| !response.is_null())
-        .and_then(list_items)
+        .and_then(|response| list_items(response, collection_keys))
 }
 
 fn known_total(data: &Value) -> Option<usize> {
@@ -418,7 +440,12 @@ fn project_object(object: Option<&Map<String, Value>>, fields: &[&str]) -> Map<S
     if let Some(object) = object {
         for field in fields {
             if let Some(value) = object.get(*field) {
-                projected.insert((*field).to_string(), scalar_projection(value));
+                let projected_value = if *field == "summary" {
+                    summary_projection(value)
+                } else {
+                    scalar_projection(value)
+                };
+                projected.insert((*field).to_string(), projected_value);
             }
         }
     }
@@ -455,6 +482,25 @@ fn scalar_projection(value: &Value) -> Value {
             object.len()
         )),
         _ => value.clone(),
+    }
+}
+
+/// A small scalar-only rollup is the result of a detail command, not an
+/// unbounded raw object. Preserve it so compact telemetry can report the
+/// counts it was asked to summarize. Other nested objects still use the
+/// bounded scalar projection above.
+fn summary_projection(value: &Value) -> Value {
+    const MAX_SUMMARY_FIELDS: usize = 8;
+    match value {
+        Value::Object(object)
+            if object.len() <= MAX_SUMMARY_FIELDS
+                && object
+                    .values()
+                    .all(|item| !item.is_object() && !item.is_array()) =>
+        {
+            value.clone()
+        }
+        _ => scalar_projection(value),
     }
 }
 
@@ -632,7 +678,14 @@ mod tests {
         let items: Vec<Value> = (0..21)
             .map(|n| json!({"id": n, "name": format!("n{n}"), "body": {"large": true}}))
             .collect();
-        let value = compact_data(&json!({"items": items}), ViewKind::List, &[], 20, false);
+        let value = compact_data(
+            &json!({"items": items}),
+            ViewKind::List,
+            &[],
+            &[],
+            20,
+            false,
+        );
         assert_eq!(value["shown_count"], 20);
         assert_eq!(value["truncated"], true);
         assert_eq!(value["items"].as_array().unwrap().len(), 20);
@@ -666,9 +719,73 @@ mod tests {
         assert!(rendered.contains("Nitin Grewal"));
         assert!(!rendered.contains("no items"));
 
-        let compact = compact_data(&env.data, ViewKind::List, &[], DEFAULT_OUTPUT_LIMIT, false);
+        let compact = compact_data(
+            &env.data,
+            ViewKind::List,
+            &[],
+            &[],
+            DEFAULT_OUTPUT_LIMIT,
+            false,
+        );
         assert_eq!(compact["total_count"], 2);
         assert_eq!(compact["shown_count"], 2);
+    }
+
+    #[test]
+    fn workspace_groups_wrapper_is_a_supported_list_in_every_output_mode() {
+        let env = Envelope::ok_with_data(
+            "workspace groups ok",
+            json!({
+                "operation": "workspace-groups",
+                "response": {
+                    "groups": [{
+                        "id": 42,
+                        "name": "SEs",
+                        "members": [{"id": 7, "email": "member@example.test"}]
+                    }],
+                    "count": 1,
+                    "next_page_token": "groups-page-2"
+                }
+            }),
+        );
+        let descriptor = OutputDescriptor::new("one.workspace.groups", ViewKind::List)
+            .with_fields(&["id", "name"])
+            .with_collection_keys(&["groups"]);
+
+        let compact: Value = serde_json::from_str(
+            &render_envelope(&env, OutputMode::Json, descriptor, DEFAULT_OUTPUT_LIMIT)
+                .expect("compact JSON should render"),
+        )
+        .expect("compact JSON should parse");
+        assert_eq!(compact["schema_version"], COMPACT_SCHEMA_VERSION);
+        assert_eq!(compact["command"], "one.workspace.groups");
+        assert_eq!(compact["ok"], true);
+        assert_eq!(compact["data"]["kind"], "list");
+        assert_eq!(compact["data"]["items"][0]["name"], "SEs");
+        assert_eq!(compact["data"]["total_count"], 1);
+        assert_eq!(compact["data"]["next_page_token"], "groups-page-2");
+        assert_ne!(compact["data"]["unrecognized_collection"], true);
+
+        let full: Value = serde_json::from_str(
+            &render_envelope(&env, OutputMode::JsonFull, descriptor, DEFAULT_OUTPUT_LIMIT)
+                .expect("full JSON should render"),
+        )
+        .expect("full JSON should parse");
+        assert_eq!(full["data"]["response"]["groups"][0]["members"][0]["id"], 7);
+
+        let yaml: Value = serde_yaml::from_str(
+            &render_envelope(&env, OutputMode::Yaml, descriptor, DEFAULT_OUTPUT_LIMIT)
+                .expect("YAML should render"),
+        )
+        .expect("YAML should parse");
+        assert_eq!(yaml["data"]["response"]["groups"][0]["name"], "SEs");
+
+        for mode in [OutputMode::Text, OutputMode::Table] {
+            let rendered = render_envelope(&env, mode, descriptor, DEFAULT_OUTPUT_LIMIT)
+                .expect("human output should render");
+            assert!(rendered.contains("SEs"));
+            assert!(!rendered.contains("does not recognize"));
+        }
     }
 
     #[test]
@@ -683,6 +800,22 @@ mod tests {
             .expect("unknown list shape should render an actionable cue");
         assert!(text.contains("does not recognize"));
         assert!(!text.contains("no items"));
+
+        let compact: Value = serde_json::from_str(
+            &render_envelope(&env, OutputMode::Json, descriptor, DEFAULT_OUTPUT_LIMIT)
+                .expect("compact JSON should render"),
+        )
+        .expect("compact JSON should parse");
+        assert_eq!(compact["data"]["unrecognized_collection"], true);
+    }
+
+    #[test]
+    fn groups_wrapper_requires_a_command_opt_in() {
+        let env = Envelope::ok_with_data(
+            "unexpected group wrapper",
+            json!({"response": {"groups": [{"id": 1, "name": "not-a-group-list"}]}}),
+        );
+        let descriptor = OutputDescriptor::new("one.workspace.people", ViewKind::List);
 
         let compact: Value = serde_json::from_str(
             &render_envelope(&env, OutputMode::Json, descriptor, DEFAULT_OUTPUT_LIMIT)
@@ -734,6 +867,61 @@ mod tests {
                 .iter()
                 .any(|field| field == "workspacetiers")
         );
+    }
+
+    #[test]
+    fn telemetry_permission_summary_is_a_detail_not_a_list_in_every_output_mode() {
+        let env = Envelope::ok_with_data(
+            "telemetry permissions summary: 11 connection(s)",
+            json!({
+                "source": "one",
+                "generated_at": "2026-09-04T00:00:00Z",
+                "summary": {
+                    "connection_count": 11,
+                    "workspace_member_count": null
+                }
+            }),
+        );
+        let descriptor = OutputDescriptor::new("telemetry.permissions.summary", ViewKind::Detail)
+            .with_fields(&["source", "generated_at", "summary"]);
+
+        let compact: Value = serde_json::from_str(
+            &render_envelope(&env, OutputMode::Json, descriptor, DEFAULT_OUTPUT_LIMIT)
+                .expect("compact JSON should render"),
+        )
+        .expect("compact JSON should parse");
+        assert_eq!(compact["schema_version"], COMPACT_SCHEMA_VERSION);
+        assert_eq!(compact["command"], "telemetry.permissions.summary");
+        assert_eq!(compact["data"]["kind"], "detail");
+        assert_eq!(compact["data"]["fields"]["source"], "one");
+        assert_eq!(compact["data"]["fields"]["summary"]["connection_count"], 11);
+        assert_eq!(
+            compact["data"]["fields"]["summary"]["workspace_member_count"],
+            Value::Null
+        );
+        assert_ne!(compact["data"]["unrecognized_collection"], true);
+
+        let full: Value = serde_json::from_str(
+            &render_envelope(&env, OutputMode::JsonFull, descriptor, DEFAULT_OUTPUT_LIMIT)
+                .expect("full JSON should render"),
+        )
+        .expect("full JSON should parse");
+        assert_eq!(full["data"]["summary"]["connection_count"], 11);
+
+        let yaml: Value = serde_yaml::from_str(
+            &render_envelope(&env, OutputMode::Yaml, descriptor, DEFAULT_OUTPUT_LIMIT)
+                .expect("YAML should render"),
+        )
+        .expect("YAML should parse");
+        assert_eq!(yaml["data"]["summary"]["connection_count"], 11);
+
+        for mode in [OutputMode::Text, OutputMode::Table] {
+            let rendered = render_envelope(&env, mode, descriptor, DEFAULT_OUTPUT_LIMIT)
+                .expect("human output should render");
+            assert!(rendered.contains("connection_count"));
+            assert!(rendered.contains("11"));
+            assert!(!rendered.contains("does not recognize"));
+        }
     }
 
     #[test]
@@ -921,6 +1109,7 @@ mod tests {
             }),
             ViewKind::Detail,
             &[],
+            &[],
             20,
             false,
         );
@@ -972,6 +1161,7 @@ mod tests {
             &json!({"status": "ok", "noise": 1, "more_noise": 2}),
             ViewKind::Result,
             &["status"],
+            &[],
             20,
             false,
         );

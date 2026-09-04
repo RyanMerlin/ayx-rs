@@ -63,6 +63,7 @@ const WORKFLOW_LIST_FIELDS: &[&str] =
 /// These are deliberately distinct from the generic list columns.
 const PEOPLE_LIST_FIELDS: &[&str] = &["id", "name", "fullName", "email", "isAdmin", "isDisabled"];
 const WORKSPACE_ADMIN_LIST_FIELDS: &[&str] = &["id", "name", "email", "createdAt", "updatedAt"];
+const GROUP_LIST_COLLECTION_KEYS: &[&str] = &["groups"];
 const WORKSPACE_CURRENT_FIELDS: &[&str] = &[
     "id",
     "name",
@@ -80,6 +81,10 @@ fn list(command: &'static str) -> OutputDescriptor {
 
 fn list_with(command: &'static str, fields: &'static [&'static str]) -> OutputDescriptor {
     OutputDescriptor::new(command, ViewKind::List).with_fields(fields)
+}
+
+fn group_list(command: &'static str) -> OutputDescriptor {
+    list(command).with_collection_keys(GROUP_LIST_COLLECTION_KEYS)
 }
 
 fn detail(command: &'static str) -> OutputDescriptor {
@@ -145,8 +150,8 @@ fn workspace_descriptor(command: &OneWorkspaceCommand) -> OutputDescriptor {
         OneWorkspaceCommand::Admins => {
             list_with("one.workspace.admins", WORKSPACE_ADMIN_LIST_FIELDS)
         }
-        OneWorkspaceCommand::Groups { .. } => list("one.workspace.groups"),
-        OneWorkspaceCommand::GroupsGlobal => list("one.workspace.groups-global"),
+        OneWorkspaceCommand::Groups { .. } => group_list("one.workspace.groups"),
+        OneWorkspaceCommand::GroupsGlobal => group_list("one.workspace.groups-global"),
         OneWorkspaceCommand::CloudConfigs { .. } => list("one.workspace.cloud-configs"),
         OneWorkspaceCommand::Current => {
             detail_with("one.workspace.current", WORKSPACE_CURRENT_FIELDS)
@@ -708,6 +713,12 @@ mod tests {
         assert_eq!(admins.command, "one.workspace.admins");
         assert!(admins.fields.contains(&"email"));
         assert!(!admins.fields.contains(&"isAdmin"));
+
+        let groups = output_descriptor(&OneCommand::Workspace {
+            command: OneWorkspaceCommand::Groups { workspace_id: None },
+        });
+        assert_eq!(groups.command, "one.workspace.groups");
+        assert_eq!(groups.collection_keys, &["groups"]);
 
         let current = output_descriptor(&OneCommand::Workspace {
             command: OneWorkspaceCommand::Current,
