@@ -286,17 +286,28 @@ pub(crate) fn login(
         && access_token_arg.is_none()
         && refresh_token_arg.is_none()
     {
-        // An explicit OAuth choice is the friendly interactive import path:
-        // one command, one hidden paste, then the CLI verifies and saves the
+        // `--oauth-api-token` is the friendly interactive import path: one
+        // command, one hidden paste, then the CLI verifies and saves the
         // durable workspace credential. Environment/stdin options remain for
         // CI and secret managers, while an implicit stored OAuth policy keeps
         // its compatibility behavior of reusing the selected credential.
+        //
+        // Gate on `oauth_api_token` alone, not on `explicit_oauth_token_setup`.
+        // The wider condition also caught `--auth-method oauth-refresh`, which
+        // used to reuse the stored token; prompting there blocks indefinitely
+        // in any session that has a controlling tty but no human, which is
+        // exactly how agents run here. `rpassword` reads /dev/tty, so a truly
+        // headless job fails fast while a pty-backed one hangs.
         refresh_token_arg = if should_prompt_for_oauth_refresh_token(
-            explicit_oauth_token_setup,
+            oauth_api_token,
             runtime.no_input,
         ) {
+            // Do not name a single platform's store, and do not promise secure
+            // storage outright: under a remembered or explicit plaintext policy
+            // this value is written to the profile file instead, and that
+            // fallback suppresses its own warning once remembered.
             eprintln!(
-                "OAuth API-token setup (not the email OTP flow). Paste the Refresh Token from Alteryx One now. Your input is hidden and will be saved in Windows Credential Manager only after verification."
+                "OAuth API-token setup (not the email OTP flow). Paste the Refresh Token from Alteryx One now. Your input is hidden, and after verification it is stored using this profile's secret policy: the operating-system credential store (Keychain, libsecret, or Windows Credential Manager) under the default `secure` policy, or the profile file under `plaintext`."
             );
             Some(read_oauth_refresh_token_prompt()?)
         } else {
@@ -357,6 +368,13 @@ pub(crate) fn login(
             "--secret-policy session is not supported by the standalone `ayx one login` command: the process exits after login and cannot retain a usable session; use secure or plaintext explicitly"
         );
     }
+    // A Client ID supplied on the command line, or pasted at the prompt, must
+    // win over whatever the selected workspace credential already holds.
+    // `resolved_oauth_client_id` prefers the workspace value over the
+    // profile-level one, so without this the exchange below would redeem a
+    // freshly pasted refresh token against the *previous* client ID — breaking
+    // the credential-replacement flow `--oauth-api-token` exists to support.
+    let explicit_client_id = client_id.clone();
     let mut auth_machine = None;
     {
         let one = config
@@ -395,11 +413,13 @@ pub(crate) fn login(
     // grants. The default email-OTP flow, and the --refresh-token/--access-token
     // bypass paths, never use it. Resolve it lazily so a brand-new user can
     // complete the default OTP login without first creating an OAuth client.
-    let client_id_opt = config
-        .alteryx_one
-        .as_ref()
-        .and_then(|o| o.resolved_oauth_client_id())
-        .map(str::to_string);
+    let client_id_opt = explicit_client_id.clone().or_else(|| {
+        config
+            .alteryx_one
+            .as_ref()
+            .and_then(|o| o.resolved_oauth_client_id())
+            .map(str::to_string)
+    });
 
     if save_workspace_password
         && (browser || device || refresh_token_arg.is_some() || access_token_arg.is_some())
@@ -443,10 +463,19 @@ pub(crate) fn login(
     // if we wait until the exchange branch, an old binding can reject the new
     // token before it gets a chance to be exchanged. The replacement is still
     // verified remotely and bound again at the secure write boundary.
+    //
+    // Capture the keyring accounts those references point at *before* dropping
+    // them. `logout` only ever discovers accounts that are still referenced, so
+    // a reference cleared here without being recorded leaves its secret behind
+    // in the OS keyring permanently — still valid until the provider revokes
+    // it, and no longer reachable by any cleanup path.
+    let mut superseded_keyring_accounts: BTreeSet<String> = BTreeSet::new();
     if refresh_token_arg.is_some() {
         let refresh_workspace_id = workspace_id
             .clone()
             .or_else(|| one.active_workspace_id().map(str::to_string));
+        superseded_keyring_accounts =
+            explicit_refresh_keyring_accounts(one, refresh_workspace_id.as_deref());
         clear_explicit_refresh_token_references(one, refresh_workspace_id.as_deref());
     }
 
@@ -832,6 +861,7 @@ pub(crate) fn login(
         &final_access_token,
         final_refresh_token.as_deref(),
         workspace_password_to_save,
+        explicit_client_id.as_deref(),
     );
     if let Some(credential) = one
         .workspace_credentials
@@ -873,13 +903,32 @@ pub(crate) fn login(
         // unless the interactive fallback below receives explicit consent.
         crate::onboard::InlineSecretPolicy::Forbid
     };
-    let secretize_result = crate::onboard::write_config_with_binding_for_rollout(
-        &path,
-        &config,
-        secret_policy,
-        Some(&binding),
-        Some(rollout),
-    );
+    // Delete the keyring entries this login supersedes, but only those no other
+    // profile still points at. Computed against the config as it will be
+    // written, so an account the new credential reuses is never in the set.
+    let superseded_keyring_accounts: BTreeSet<String> = if superseded_keyring_accounts.is_empty() {
+        BTreeSet::new()
+    } else {
+        let profiles_dir = path
+            .parent()
+            .context("profile storage path has no profiles directory")?;
+        crate::secret::unreferenced_keyring_accounts_excluding_profile(
+            profiles_dir,
+            &path,
+            &superseded_keyring_accounts.iter().cloned().collect(),
+        )?
+        .into_iter()
+        .collect()
+    };
+    let secretize_result =
+        crate::onboard::write_config_with_binding_for_rollout_and_delete_keyring_accounts(
+            &path,
+            &config,
+            secret_policy,
+            Some(&binding),
+            Some(rollout),
+            &superseded_keyring_accounts,
+        );
     let mut effective_persistence_policy = persistence_policy;
     let secretize = match secretize_result {
         Ok(output) => output,
@@ -888,13 +937,15 @@ pub(crate) fn login(
             && !runtime.no_input
             && interactive_secret_fallback()? =>
         {
-            let output = crate::onboard::write_config_with_binding_for_rollout(
-                &path,
-                &config,
-                crate::onboard::InlineSecretPolicy::Allow,
-                Some(&binding),
-                Some(rollout),
-            )?;
+            let output =
+                crate::onboard::write_config_with_binding_for_rollout_and_delete_keyring_accounts(
+                    &path,
+                    &config,
+                    crate::onboard::InlineSecretPolicy::Allow,
+                    Some(&binding),
+                    Some(rollout),
+                    &superseded_keyring_accounts,
+                )?;
             let _ = ayx_core::auth::save_persistence_policy(
                 &path,
                 SecretPersistencePolicy::PlaintextFallback,
@@ -972,6 +1023,34 @@ fn read_refresh_token_source(
 /// Drop only the selected credential's old references while a caller supplies
 /// a replacement refresh token. The new value is still verified before the
 /// secure write path assigns its canonical bound keyring references.
+/// The keyring accounts that `clear_explicit_refresh_token_references` is about
+/// to orphan, in the same selection order it uses.
+///
+/// Kept adjacent to that function on purpose: the two must always agree about
+/// which references are being dropped, or a superseded secret survives in the
+/// OS keyring with nothing left pointing at it.
+fn explicit_refresh_keyring_accounts(
+    one: &ayx_core::profile::AlteryxOneProfile,
+    workspace_id: Option<&str>,
+) -> BTreeSet<String> {
+    let mut accounts = BTreeSet::new();
+    let mut add = |reference: Option<&str>| {
+        if let Some(account) = reference.and_then(|reference| reference.strip_prefix("keyring:")) {
+            accounts.insert(account.to_string());
+        }
+    };
+    if let Some(workspace_id) = workspace_id {
+        if let Some(credential) = one.workspace_credentials.get(workspace_id) {
+            add(credential.access_token_ref.as_deref());
+            add(credential.refresh_token_ref.as_deref());
+        }
+    } else {
+        add(one.access_token_ref.as_deref());
+        add(one.refresh_token_ref.as_deref());
+    }
+    accounts
+}
+
 fn clear_explicit_refresh_token_references(
     one: &mut ayx_core::profile::AlteryxOneProfile,
     workspace_id: Option<&str>,
@@ -1585,12 +1664,20 @@ fn persist_verified_workspace_credential(
     access_token: &str,
     refresh_token: Option<&str>,
     workspace_password: Option<String>,
+    explicit_oauth_client_id: Option<&str>,
 ) {
     // Resolve the profile-level client ID before taking the mutable borrow on
     // the credential entry.
     let profile_oauth_client_id = one
         .oauth_client_id
         .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    // A Client ID the person supplied for *this* login replaces the stored one.
+    // Filling only when empty would leave the credential bound to a client ID
+    // that no longer mints its refresh token.
+    let explicit_oauth_client_id = explicit_oauth_client_id
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
@@ -1610,9 +1697,12 @@ fn persist_verified_workspace_credential(
         credential.refresh_token = Some(refresh_token.to_string());
         // `Config::validate` rejects a credential that carries a refresh token
         // without its own `oauth_client_id`, and the refresh grant must reuse
-        // the client ID that minted the token. Copying the profile-level value
-        // keeps the profile this login just wrote loadable on the next command.
-        if credential
+        // the client ID that minted the token. An explicit value replaces the
+        // stored one; otherwise copy the profile-level value down so the
+        // profile this login just wrote stays loadable on the next command.
+        if let Some(explicit) = explicit_oauth_client_id {
+            credential.oauth_client_id = Some(explicit);
+        } else if credential
             .oauth_client_id
             .as_deref()
             .is_none_or(|value| value.trim().is_empty())
@@ -1648,11 +1738,11 @@ mod tests {
     use super::{
         AuthenticatedWorkspace, BrowserCallback, accepts_plaintext_fallback,
         accepts_workspace_password_save, authenticated_workspace_from_value,
-        clear_explicit_refresh_token_references, oauth_client_id_for_login, parse_browser_callback,
-        persist_verified_workspace_credential, persistence_policy_to_remember,
-        read_refresh_token_source, should_offer_workspace_password_save,
-        should_prompt_for_oauth_refresh_token, should_report_existing_oauth_login,
-        workspace_password_for_login,
+        clear_explicit_refresh_token_references, explicit_refresh_keyring_accounts,
+        oauth_client_id_for_login, parse_browser_callback, persist_verified_workspace_credential,
+        persistence_policy_to_remember, read_refresh_token_source,
+        should_offer_workspace_password_save, should_prompt_for_oauth_refresh_token,
+        should_report_existing_oauth_login, workspace_password_for_login,
     };
     use ayx_core::profile::{
         AlteryxOneProfile, WorkspaceCredential, WorkspaceResolutionSource, WorkspaceTarget,
@@ -1709,6 +1799,7 @@ mod tests {
             "access-token-value",
             None,
             None,
+            None,
         );
 
         assert_eq!(
@@ -1750,6 +1841,7 @@ mod tests {
             "access-token-value",
             None,
             None,
+            None,
         );
 
         assert!(one.workspace_credentials.contains_key("91946"));
@@ -1783,6 +1875,7 @@ mod tests {
             "access-token-value",
             Some("refresh-token-value"),
             None,
+            None,
         );
 
         let credential = one
@@ -1796,6 +1889,103 @@ mod tests {
             credential.oauth_client_id.as_deref(),
             Some("af1b5321-afe0-48c2-966a-c77d74e98085"),
             "a stored refresh token must carry the client ID that can redeem it"
+        );
+    }
+
+    /// Regenerating a token pair on the Alteryx API-tokens page yields a new
+    /// Client ID *and* a new Refresh Token. The explicit value must replace the
+    /// one already bound to the workspace, or the next refresh grant redeems
+    /// the new token against the client that no longer mints it.
+    #[test]
+    fn an_explicit_client_id_replaces_the_stored_workspace_client_id() {
+        let mut one = AlteryxOneProfile {
+            oauth_client_id: Some("new-client".to_string()),
+            ..AlteryxOneProfile::default()
+        };
+        one.workspace_credentials
+            .entry("91946".to_string())
+            .or_default()
+            .oauth_client_id = Some("stale-client".to_string());
+
+        persist_verified_workspace_credential(
+            &mut one,
+            "91946",
+            &verified_workspace("91946", "01KMGF85WTTEJZ397MW1RBD9ZB", "alteryx-fde"),
+            "access-token-value",
+            Some("refresh-token-value"),
+            None,
+            Some("new-client"),
+        );
+
+        assert_eq!(
+            one.active_workspace_credential()
+                .and_then(|credential| credential.oauth_client_id.as_deref()),
+            Some("new-client"),
+            "an explicitly supplied client ID must overwrite the stored one"
+        );
+    }
+
+    /// Without an explicit value the profile-level fallback still only fills an
+    /// empty credential, so an unrelated login cannot silently rebind a
+    /// workspace to a different OAuth client.
+    #[test]
+    fn a_stored_client_id_survives_a_login_that_supplies_none() {
+        let mut one = AlteryxOneProfile {
+            oauth_client_id: Some("profile-client".to_string()),
+            ..AlteryxOneProfile::default()
+        };
+        one.workspace_credentials
+            .entry("91946".to_string())
+            .or_default()
+            .oauth_client_id = Some("workspace-client".to_string());
+
+        persist_verified_workspace_credential(
+            &mut one,
+            "91946",
+            &verified_workspace("91946", "01KMGF85WTTEJZ397MW1RBD9ZB", "alteryx-fde"),
+            "access-token-value",
+            Some("refresh-token-value"),
+            None,
+            None,
+        );
+
+        assert_eq!(
+            one.active_workspace_credential()
+                .and_then(|credential| credential.oauth_client_id.as_deref()),
+            Some("workspace-client")
+        );
+    }
+
+    /// The accounts collected here are deleted from the OS keyring, so they must
+    /// match exactly the references `clear_explicit_refresh_token_references`
+    /// drops. Anything missed survives with nothing pointing at it.
+    #[test]
+    fn superseded_keyring_accounts_match_the_references_being_cleared() {
+        let mut one = AlteryxOneProfile::default();
+        let credential = one
+            .workspace_credentials
+            .entry("91946".to_string())
+            .or_default();
+        credential.access_token_ref = Some("keyring:v1/old-access".to_string());
+        credential.refresh_token_ref = Some("keyring:v1/old-refresh".to_string());
+        credential.workspace_password_ref = Some("keyring:v1/password".to_string());
+
+        let accounts = explicit_refresh_keyring_accounts(&one, Some("91946"));
+
+        assert!(accounts.contains("v1/old-access"));
+        assert!(accounts.contains("v1/old-refresh"));
+        assert!(
+            !accounts.contains("v1/password"),
+            "the workspace password reference is not cleared here, so it must not be deleted"
+        );
+
+        clear_explicit_refresh_token_references(&mut one, Some("91946"));
+        let credential = one.workspace_credentials.get("91946").expect("credential");
+        assert!(credential.access_token_ref.is_none());
+        assert!(credential.refresh_token_ref.is_none());
+        assert!(
+            credential.workspace_password_ref.is_some(),
+            "clearing must stay scoped to the token references"
         );
     }
 
@@ -1901,6 +2091,7 @@ mod tests {
             "access-token-value",
             Some("refresh-token-value"),
             None,
+            None,
         );
 
         assert_eq!(
@@ -1925,12 +2116,14 @@ mod tests {
             "first-access-token",
             None,
             Some("workspace-password".to_string()),
+            None,
         );
         persist_verified_workspace_credential(
             &mut one,
             "91946",
             &workspace,
             "second-access-token",
+            None,
             None,
             None,
         );
@@ -1965,12 +2158,14 @@ mod tests {
             "first-access-token",
             None,
             None,
+            None,
         );
         persist_verified_workspace_credential(
             &mut one,
             "50021",
             &verified_workspace("50021", "01KMGF85WTTEJZ397MW1RBD9ZC", "alteryx-prod"),
             "second-access-token",
+            None,
             None,
             None,
         );
@@ -2014,6 +2209,7 @@ mod tests {
             "91946",
             &verified_workspace("91946", "01KMGF85WTTEJZ397MW1RBD9ZB", "alteryx-fde"),
             "access-token-value",
+            None,
             None,
             None,
         );
