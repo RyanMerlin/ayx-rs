@@ -1086,6 +1086,26 @@ fn jq_filters_the_compact_envelope() {
 }
 
 #[test]
+fn jq_halt_cannot_hijack_the_exit_code() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["catalog", "list", "--jq", "halt"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&output.stderr).trim())
+            .expect("stderr should be a JSON envelope");
+    assert_eq!(envelope["error_code"], "validation");
+}
+
+#[test]
 fn omitted_workflow_id_off_tty_names_the_list_command() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([

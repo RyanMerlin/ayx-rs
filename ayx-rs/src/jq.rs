@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result, anyhow};
 use jaq_core::load::{Arena, File, Loader};
-use jaq_core::{Compiler, Ctx, Vars, data, unwrap_valr};
+use jaq_core::{Compiler, Ctx, Vars, data};
 use jaq_json::{Val, read};
 
 /// Run `filter_src` over `json_document`; return one line per output value.
@@ -37,8 +37,15 @@ pub fn apply(filter_src: &str, json_document: &str, raw_output: bool) -> Result<
 
     let ctx = Ctx::<data::JustLut<Val>>::new(&filter.lut, Vars::new([]));
     let mut lines = Vec::new();
-    for out in filter.id.run((ctx, input)).map(unwrap_valr) {
-        let val = out.map_err(|e| anyhow!("validation: --jq filter error: {e:?}"))?;
+    for out in filter.id.run((ctx, input)) {
+        // Iterate the raw `ValX` stream instead of going through
+        // `jaq_core::unwrap_valr`, which calls `std::process::exit` on a
+        // `halt`/`halt_error` exception. A `--jq` filter must never be able
+        // to set our exit code or terminate the process directly.
+        let val = out.map_err(|exn| match exn.get_err() {
+            Ok(error) => anyhow!("validation: --jq filter error: {error}"),
+            Err(_) => anyhow!("validation: --jq filters may not call halt or halt_error"),
+        })?;
         // `Val`'s Display is JSON for every finite value (and preserves big
         // integers exactly), but emits `NaN`/`Infinity` for non-finite floats.
         // Validate the syntax without re-materializing the value so precision
@@ -145,5 +152,13 @@ mod tests {
             apply("\"a\\\"b\\\\c\"", DOC, true).unwrap(),
             vec!["a\"b\\c"]
         );
+    }
+
+    #[test]
+    fn halt_is_a_validation_error_not_an_exit() {
+        for filter in ["halt", "\"x\" | halt_error", "halt_error"] {
+            let err = apply(filter, DOC, false).unwrap_err().to_string();
+            assert!(err.starts_with("validation:"), "{filter}: {err}");
+        }
     }
 }
