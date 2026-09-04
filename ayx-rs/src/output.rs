@@ -1298,4 +1298,53 @@ mod tests {
             "ayx one flows list --profile dev-01@eu.example.com --page-token t"
         );
     }
+
+    #[test]
+    fn compact_envelopes_validate_against_the_published_schema() {
+        // Sibling to ayx-core's envelope::tests::envelopes_validate_against_the_published_schema
+        // -- CompactEnvelope lives here, not in ayx-core, so the compact half
+        // of docs/cli-schema.json is covered from this crate instead.
+        let schema_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/cli-schema.json");
+        let schema: Value =
+            serde_json::from_str(&std::fs::read_to_string(schema_path).unwrap()).unwrap();
+        let validator = jsonschema::validator_for(&schema).expect("schema compiles");
+
+        let ok_envelope = Envelope::ok_with_data("fine", json!({"n": 1}));
+        let ok_descriptor = OutputDescriptor::new("catalog", ViewKind::Raw);
+        let ok_compact =
+            serde_json::to_value(compact_envelope(&ok_envelope, ok_descriptor, 20)).unwrap();
+        let problems: Vec<String> = validator
+            .iter_errors(&ok_compact)
+            .map(|e| e.to_string())
+            .collect();
+        assert!(
+            problems.is_empty(),
+            "compact success envelope must validate: {problems:?}\n{ok_compact:#}"
+        );
+
+        let err_envelope = Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::NotFound,
+            "missing",
+            Value::Null,
+        )
+        .with_remediation(
+            "List first",
+            vec!["ayx one workflows list --output json".to_string()],
+        )
+        .finalize_retryable();
+        let err_descriptor = OutputDescriptor::new("one.workflows.detail", ViewKind::Detail);
+        let err_compact =
+            serde_json::to_value(compact_envelope(&err_envelope, err_descriptor, 20)).unwrap();
+        // Confirms the always-present, possibly-null error_code the compact
+        // shape carries (unlike the full envelope, which omits it on success).
+        assert_eq!(ok_compact["error_code"], Value::Null);
+        let problems: Vec<String> = validator
+            .iter_errors(&err_compact)
+            .map(|e| e.to_string())
+            .collect();
+        assert!(
+            problems.is_empty(),
+            "compact error envelope must validate: {problems:?}\n{err_compact:#}"
+        );
+    }
 }

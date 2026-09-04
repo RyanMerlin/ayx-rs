@@ -1,15 +1,50 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "AYX-RS Envelope",
-  "description": "The full (`--output json-full`) envelope. The compact `ayx.output.v1` view adds `schema_version` and `command` on top of these fields.",
-  "type": "object",
-  "required": ["ok", "message", "timestamp_utc", "data"],
-  "properties": {
-    "ok": { "type": "boolean" },
-    "message": { "type": "string" },
-    "timestamp_utc": { "type": "string", "format": "date-time" },
-    "data": {},
-    "error_code": {
+  "description": "Every `ayx` envelope is either the full (`--output json-full`) envelope, or the compact `ayx.output.v1` document (`--output json` -- the default off a terminal or under an agent host). The compact form adds `schema_version` and `command` on top of the full envelope's fields, and always serializes `error_code` (as `null` on success) instead of omitting it.",
+  "oneOf": [
+    { "$ref": "#/$defs/FullEnvelope" },
+    { "$ref": "#/$defs/CompactEnvelope" }
+  ],
+  "$defs": {
+    "FullEnvelope": {
+      "type": "object",
+      "required": ["ok", "message", "timestamp_utc", "data"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "message": { "type": "string" },
+        "timestamp_utc": { "type": "string", "format": "date-time" },
+        "data": {},
+        "error_code": { "$ref": "#/$defs/ErrorCode" },
+        "remediation": { "$ref": "#/$defs/Remediation" },
+        "retryable": { "type": "boolean" },
+        "next": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "CompactEnvelope": {
+      "type": "object",
+      "required": [
+        "schema_version", "command", "ok", "message", "timestamp_utc",
+        "error_code", "data"
+      ],
+      "properties": {
+        "schema_version": { "const": "ayx.output.v1" },
+        "command": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "message": { "type": "string" },
+        "timestamp_utc": { "type": "string", "format": "date-time" },
+        "error_code": {
+          "anyOf": [{ "$ref": "#/$defs/ErrorCode" }, { "type": "null" }]
+        },
+        "remediation": { "$ref": "#/$defs/Remediation" },
+        "retryable": { "type": "boolean" },
+        "next": { "type": "array", "items": { "type": "string" } },
+        "data": {}
+      },
+      "additionalProperties": false
+    },
+    "ErrorCode": {
       "type": "string",
       "enum": [
         "config_missing", "auth_failed", "permission_denied", "not_found", "gone",
@@ -17,7 +52,7 @@
         "workspace_mismatch", "incomplete", "output_classification", "internal"
       ]
     },
-    "remediation": {
+    "Remediation": {
       "type": "object",
       "required": ["summary", "commands"],
       "properties": {
@@ -25,9 +60,6 @@
         "commands": { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": false
-    },
-    "retryable": { "type": "boolean" },
-    "next": { "type": "array", "items": { "type": "string" } }
-  },
-  "additionalProperties": false
+    }
+  }
 }

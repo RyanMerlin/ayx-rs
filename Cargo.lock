@@ -417,6 +417,7 @@ dependencies = [
  "jaq-core",
  "jaq-json",
  "jaq-std",
+ "jsonschema",
  "keyring-core",
  "open",
  "regex",
