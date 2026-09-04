@@ -348,6 +348,13 @@ fn output_descriptor(command: &Command) -> output::OutputDescriptor {
             .with_fields(&["schema_version", "binary"]),
         Command::Catalog { .. } => OutputDescriptor::new("catalog", ViewKind::Raw),
         Command::Doctor { .. } => OutputDescriptor::new("doctor", ViewKind::Diagnostic),
+        Command::Telemetry {
+            command:
+                cmd::telemetry::TelemetryCommand::Permissions {
+                    command: cmd::telemetry::TelemetryPermissionsCommand::Summary { .. },
+                },
+        } => OutputDescriptor::new("telemetry.permissions.summary", ViewKind::Detail)
+            .with_fields(&["source", "generated_at", "summary"]),
         Command::Telemetry { .. } => OutputDescriptor::new("telemetry", ViewKind::List),
         Command::Actions { command } => match command {
             ActionsCommand::List { .. } | ActionsCommand::Resolve { .. } => {
@@ -692,6 +699,7 @@ fn parse_param_kv(s: &str) -> Result<(String, String), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::output::ViewKind;
 
     #[test]
     fn shared_profile_loader_rejects_mismatched_bound_one_refs_but_reads_legacy_refs() {
@@ -934,6 +942,16 @@ mongo:
             parsed.is_ok(),
             "global --output should work after the subcommand"
         );
+    }
+
+    #[test]
+    fn telemetry_permissions_summary_has_a_detail_output_descriptor() {
+        let cli = Cli::try_parse_from(["ayx", "telemetry", "permissions", "summary"])
+            .expect("telemetry permission summary should parse");
+        let descriptor = output_descriptor(&cli.command);
+        assert_eq!(descriptor.command, "telemetry.permissions.summary");
+        assert_eq!(descriptor.kind, ViewKind::Detail);
+        assert_eq!(descriptor.fields, &["source", "generated_at", "summary"]);
     }
 
     #[test]
