@@ -1,6 +1,6 @@
 use anyhow::Result;
 use ayx_core::envelope::Envelope;
-use ayx_one_api::one_api_live_request;
+use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
 use url::form_urlencoded::Serializer;
 
 use crate::{
@@ -28,6 +28,20 @@ fn datasets_filter_query(filters: &[DatasetFilter]) -> Vec<(&'static str, String
 
 pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneDatasetsCommand) -> Result<Envelope> {
     Ok(match command {
+        OneDatasetsCommand::Create { profile, body } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let payload = crate::load_payload(&body)?;
+            one_api_live_request_with_body(
+                &config,
+                "datasets",
+                "create",
+                "POST",
+                "/v4/importedDatasets",
+                true,
+                &[],
+                Some(payload),
+            )?
+        }
         OneDatasetsCommand::List {
             profile,
             datasets_filter,

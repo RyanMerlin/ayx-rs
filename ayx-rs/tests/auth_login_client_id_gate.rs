@@ -39,6 +39,14 @@ fn config_home_without_client_id() -> TempDir {
     temp
 }
 
+/// Isolated config home with a One profile whose active workspace is already on
+/// the OAuth-refresh policy and has a Client ID, but holds **no refresh token**.
+///
+/// Every indent space is escaped as `\x20` on purpose. A plain `\`-continued
+/// literal strips the newline *and* the leading indentation of the next line,
+/// which flattens the document so `alteryx_one` deserializes to null. That
+/// empty profile still produced the error this test asserts, so the test passed
+/// for the wrong reason until a Client-ID gate started failing earlier.
 fn config_home_with_oauth_policy_without_refresh() -> TempDir {
     let temp = tempfile::tempdir().expect("tempdir");
     let profiles = temp.path().join("profiles");
@@ -192,6 +200,12 @@ fn configured_oauth_method_never_falls_back_to_otp() {
     assert!(
         !ok,
         "OAuth login without a refresh token must fail closed\noutput:\n{out}"
+    );
+    // Guard the fixture itself: if the profile ever stops parsing, the run
+    // stops at the Client-ID gate and every assertion below becomes vacuous.
+    assert!(
+        !out.contains("requires a Client ID"),
+        "the fixture profile must load with its oauth_client_id; output:\n{out}"
     );
     assert!(
         out.contains("OAuth refresh authentication is selected")

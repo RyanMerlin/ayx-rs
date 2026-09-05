@@ -1627,7 +1627,7 @@ pub(crate) fn write_config_exact(
     transaction.commit().map_err(anyhow::Error::from)
 }
 
-fn write_config_with_binding_for_rollout_and_delete_keyring_accounts(
+pub(crate) fn write_config_with_binding_for_rollout_and_delete_keyring_accounts(
     path: &Path,
     config: &Config,
     policy: InlineSecretPolicy,

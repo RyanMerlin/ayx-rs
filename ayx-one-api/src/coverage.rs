@@ -351,17 +351,17 @@ mod tests {
     #[test]
     fn spec_only_op_is_missing() {
         let spec = spec_with(json!({
-            "/v4/importedDatasets": { "post": { "summary": "Upload", "operationId": "createImported" } }
+            "/v4/specOnlyResource": { "post": { "summary": "Create", "operationId": "createSpecOnly" } }
         }));
         let r = coverage(&spec);
         let m = r
             .missing
             .iter()
-            .find(|m| m.path == "/v4/importedDatasets" && m.method == "POST")
+            .find(|m| m.path == "/v4/specOnlyResource" && m.method == "POST")
             .expect("should be missing");
-        assert_eq!(m.resource, "importedDatasets");
-        assert_eq!(m.summary.as_deref(), Some("Upload"));
-        assert_eq!(m.operation_id.as_deref(), Some("createImported"));
+        assert_eq!(m.resource, "specOnlyResource");
+        assert_eq!(m.summary.as_deref(), Some("Create"));
+        assert_eq!(m.operation_id.as_deref(), Some("createSpecOnly"));
     }
 
     #[test]
