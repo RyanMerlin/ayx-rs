@@ -16,6 +16,7 @@ use ayx_core::envelope::Envelope;
 use ayx_one::one_surface_inventory_envelope;
 
 use crate::{
+    OneAgentAssetsCommand, OneAgentDatasetsCommand, OneAgentWorkflowsCommand, OneAgentsCommand,
     OneApiCommand, OneAuthCommand, OneCommand, OneConnectionPermissionCommand,
     OneConnectionsCommand, OneConnectorMetadataCommand, OneConnectorMetadataOverridesCommand,
     OneDatasetsCommand, OneDatasetsImportedCommand, OneDatasetsWrangledCommand,
@@ -59,6 +60,20 @@ const RESULT_FIELDS: &[&str] = &[
 const WORKFLOW_LIST_FIELDS: &[&str] =
     &["id", "name", "owner", "last_updated_at", "workflow_version"];
 const GROUP_LIST_COLLECTION_KEYS: &[&str] = &["groups"];
+/// People are identified and disambiguated by email, not only a display name.
+/// These are deliberately distinct from the generic list columns.
+const PEOPLE_LIST_FIELDS: &[&str] = &["id", "name", "fullName", "email", "isAdmin", "isDisabled"];
+const WORKSPACE_ADMIN_LIST_FIELDS: &[&str] = &["id", "name", "email", "createdAt", "updatedAt"];
+const WORKSPACE_CURRENT_FIELDS: &[&str] = &[
+    "id",
+    "name",
+    "displayName",
+    "state",
+    "workspace_member_count",
+    "workspace_tier",
+    "gid",
+    "custom_url",
+];
 
 fn list(command: &'static str) -> OutputDescriptor {
     OutputDescriptor::new(command, ViewKind::List).with_fields(LIST_FIELDS)
@@ -68,8 +83,16 @@ fn group_list(command: &'static str) -> OutputDescriptor {
     list(command).with_collection_keys(GROUP_LIST_COLLECTION_KEYS)
 }
 
+fn list_with(command: &'static str, fields: &'static [&'static str]) -> OutputDescriptor {
+    OutputDescriptor::new(command, ViewKind::List).with_fields(fields)
+}
+
 fn detail(command: &'static str) -> OutputDescriptor {
     OutputDescriptor::new(command, ViewKind::Detail).with_fields(DETAIL_FIELDS)
+}
+
+fn detail_with(command: &'static str, fields: &'static [&'static str]) -> OutputDescriptor {
+    OutputDescriptor::new(command, ViewKind::Detail).with_fields(fields)
 }
 
 fn result(command: &'static str) -> OutputDescriptor {
@@ -87,6 +110,7 @@ pub(crate) fn output_descriptor(command: &OneCommand) -> OutputDescriptor {
         OneCommand::Connections { command } => connections_descriptor(command),
         OneCommand::Plans { command } => plans_descriptor(command),
         OneCommand::Datasets { command } => datasets_descriptor(command),
+        OneCommand::AgentAssets { command } => agent_assets_descriptor(command),
         OneCommand::JobGroups { command } => job_groups_descriptor(command),
         OneCommand::OutputObjects { command } => output_objects_descriptor(command),
         OneCommand::WriteSettings { command } => write_settings_descriptor(command),
@@ -124,12 +148,16 @@ pub(crate) fn output_descriptor(command: &OneCommand) -> OutputDescriptor {
 fn workspace_descriptor(command: &OneWorkspaceCommand) -> OutputDescriptor {
     match command {
         OneWorkspaceCommand::List { .. } => list("one.workspace.list"),
-        OneWorkspaceCommand::People => list("one.workspace.people"),
-        OneWorkspaceCommand::Admins => list("one.workspace.admins"),
+        OneWorkspaceCommand::People => list_with("one.workspace.people", PEOPLE_LIST_FIELDS),
+        OneWorkspaceCommand::Admins => {
+            list_with("one.workspace.admins", WORKSPACE_ADMIN_LIST_FIELDS)
+        }
         OneWorkspaceCommand::Groups { .. } => group_list("one.workspace.groups"),
         OneWorkspaceCommand::GroupsGlobal => group_list("one.workspace.groups-global"),
         OneWorkspaceCommand::CloudConfigs { .. } => list("one.workspace.cloud-configs"),
-        OneWorkspaceCommand::Current => detail("one.workspace.current"),
+        OneWorkspaceCommand::Current => {
+            detail_with("one.workspace.current", WORKSPACE_CURRENT_FIELDS)
+        }
         OneWorkspaceCommand::Detail { .. } => detail("one.workspace.detail"),
         OneWorkspaceCommand::CurrentConfiguration => detail("one.workspace.current-configuration"),
         OneWorkspaceCommand::ConfigurationV4 { .. } => detail("one.workspace.configuration-v4"),
@@ -185,7 +213,9 @@ fn workspace_descriptor(command: &OneWorkspaceCommand) -> OutputDescriptor {
 
 fn person_descriptor(command: Option<&OnePersonCommand>) -> OutputDescriptor {
     match command {
-        None | Some(OnePersonCommand::List { .. }) => list("one.person.list"),
+        None | Some(OnePersonCommand::List { .. }) => {
+            list_with("one.person.list", PEOPLE_LIST_FIELDS)
+        }
         Some(OnePersonCommand::Current) => detail("one.person.current"),
         Some(OnePersonCommand::Count) => detail("one.person.count"),
         Some(OnePersonCommand::Detail { .. }) => detail("one.person.detail"),
@@ -291,6 +321,7 @@ fn workflows_descriptor(command: &OneWorkflowsCommand) -> OutputDescriptor {
         }
         OneWorkflowsCommand::Assets { .. } => list("one.workflows.assets"),
         OneWorkflowsCommand::Tools { .. } => list("one.workflows.tools"),
+        OneWorkflowsCommand::Upload { .. } => result("one.workflows.upload"),
         OneWorkflowsCommand::Dependencies { .. } => list("one.workflows.dependencies"),
         OneWorkflowsCommand::Count { .. } => detail("one.workflows.count"),
         OneWorkflowsCommand::Detail { .. } => detail("one.workflows.detail"),
@@ -390,6 +421,7 @@ fn plans_descriptor(command: &OnePlansCommand) -> OutputDescriptor {
 
 fn datasets_descriptor(command: &OneDatasetsCommand) -> OutputDescriptor {
     match command {
+        OneDatasetsCommand::Create { .. } => result("one.datasets.create"),
         OneDatasetsCommand::List { .. } => list("one.datasets.list"),
         OneDatasetsCommand::Count { .. } => detail("one.datasets.count"),
         OneDatasetsCommand::Wrangled { command } => match command {
@@ -399,6 +431,30 @@ fn datasets_descriptor(command: &OneDatasetsCommand) -> OutputDescriptor {
         },
         OneDatasetsCommand::Imported { command } => match command {
             OneDatasetsImportedCommand::Detail { .. } => detail("one.datasets.imported.detail"),
+        },
+    }
+}
+
+fn agent_assets_descriptor(command: &OneAgentAssetsCommand) -> OutputDescriptor {
+    match command {
+        OneAgentAssetsCommand::Agents { command } => match command {
+            OneAgentsCommand::List { .. } => list("one.agent-assets.agents.list"),
+            OneAgentsCommand::Detail { .. } => detail("one.agent-assets.agents.detail"),
+            OneAgentsCommand::Prompt { .. } => result("one.agent-assets.agents.prompt"),
+            OneAgentsCommand::Create { .. } => result("one.agent-assets.agents.create"),
+            OneAgentsCommand::Update { .. } => result("one.agent-assets.agents.update"),
+            OneAgentsCommand::Delete { .. } => result("one.agent-assets.agents.delete"),
+        },
+        OneAgentAssetsCommand::Datasets { command } => match command {
+            OneAgentDatasetsCommand::List { .. } => list("one.agent-assets.datasets.list"),
+            OneAgentDatasetsCommand::Set { .. } => result("one.agent-assets.datasets.set"),
+        },
+        OneAgentAssetsCommand::Workflows { command } => match command {
+            OneAgentWorkflowsCommand::List { .. } => list("one.agent-assets.workflows.list"),
+            OneAgentWorkflowsCommand::Enable { .. } => result("one.agent-assets.workflows.enable"),
+            OneAgentWorkflowsCommand::Disable { .. } => {
+                result("one.agent-assets.workflows.disable")
+            }
         },
     }
 }
@@ -484,7 +540,7 @@ pub(crate) fn run_otp_login(
     let runtime = crate::cmd::RuntimeCtx::new(environment);
     super::one_platform::auth::login(
         &runtime, profile, None, false, false, None, None, None, None, None, None, None, false,
-        None, None, None, false, None, false,
+        None, false, None, None, false, None, false,
     )
 }
 
@@ -515,6 +571,7 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             client_id,
             browser,
             device,
+            oauth_api_token,
             auth_method,
             refresh_token,
             refresh_token_env,
@@ -544,6 +601,7 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             auth_flow,
             save_workspace_password,
             secret_policy,
+            oauth_api_token,
             auth_method,
             refresh_token_env,
             refresh_token_stdin,
@@ -593,6 +651,9 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             super::one_workflows::execute(&runtime, cli.apply, cli.yes, command)?
         }
         OneCommand::Datasets { command } => super::one_datasets::execute(&runtime, command)?,
+        OneCommand::AgentAssets { command } => {
+            super::one_agent_assets::execute(&runtime, cli.apply, cli.yes, command)?
+        }
         OneCommand::Flows { command } => {
             super::one_flows::execute(&runtime, cli.apply, cli.yes, command)?
         }
@@ -650,5 +711,25 @@ mod tests {
         assert_eq!(plan.command, "one.plans.run");
         assert_eq!(plan.kind, ViewKind::Result);
         assert!(plan.fields.contains(&"dry_run"));
+
+        let people = output_descriptor(&OneCommand::Workspace {
+            command: OneWorkspaceCommand::People,
+        });
+        assert_eq!(people.command, "one.workspace.people");
+        assert!(people.fields.contains(&"email"));
+        assert!(people.fields.contains(&"isAdmin"));
+
+        let admins = output_descriptor(&OneCommand::Workspace {
+            command: OneWorkspaceCommand::Admins,
+        });
+        assert_eq!(admins.command, "one.workspace.admins");
+        assert!(admins.fields.contains(&"email"));
+        assert!(!admins.fields.contains(&"isAdmin"));
+
+        let current = output_descriptor(&OneCommand::Workspace {
+            command: OneWorkspaceCommand::Current,
+        });
+        assert!(current.fields.contains(&"workspace_member_count"));
+        assert!(current.fields.contains(&"workspace_tier"));
     }
 }

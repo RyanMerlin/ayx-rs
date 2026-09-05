@@ -3,6 +3,6 @@
   "servers": [{ "url": "https://example/" }],
   "paths": {
     "/v4/flows/{flowId}": { "get": { "summary": "Get a flow" } },
-    "/v4/importedDatasets": { "post": { "summary": "Upload an imported dataset", "operationId": "createImportedDataset" } }
+    "/v4/specOnlyResource": { "post": { "summary": "Spec-only resource", "operationId": "createSpecOnly" } }
   }
 }

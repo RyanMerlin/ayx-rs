@@ -379,6 +379,154 @@ fn token_failure_prefix(status: StatusCode) -> &'static str {
     }
 }
 
+/// Return an allowlisted, bounded summary of a failed OAuth token exchange.
+///
+/// Require a complete, verified workspace identity before an applied One
+/// mutation leaves the process, and refresh the access token if it is stale.
+///
+/// Returns the refreshed access token when one was minted, so the caller can
+/// reuse it instead of resolving a second time.
+///
+/// Shared rather than inlined because every applied mutation needs it and a
+/// path that forgets it sends the write against whatever workspace the ambient
+/// token happens to resolve to. The multipart upload path was added without it.
+fn preflight_applied_mutation(
+    config: &Config,
+    surface: &str,
+    operation: &str,
+    url: &str,
+    mutating: bool,
+) -> Result<Option<String>> {
+    if !mutating {
+        return Ok(None);
+    }
+    let mut preflight_access_token = None;
+    // The old guard was conditional on the legacy `expected_workspace_id` field
+    // and could therefore send a mutation with only an unverified numeric ID or
+    // top-level token context.
+    let one = config.alteryx_one.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("workspace identity is required for an applied One mutation")
+    })?;
+    let key = one
+        .active_workspace_id()
+        // A legacy profile that only carries top-level tokens cannot be
+        // promoted here: it has no numeric workspace ID and no verified
+        // workspace name, so it can never satisfy `WorkspaceTarget`.
+        // Re-running login is the only way to obtain a verified credential.
+        .ok_or_else(|| anyhow::anyhow!("no active verified workspace credential; authenticate or select a workspace before applying a mutation (run `ayx one login`, or `ayx one login --workspace-id <numeric-id-or-gid>` to select among saved workspace credentials)"))?;
+    let credential = one
+        .workspace_credentials
+        .get(key)
+        .ok_or_else(|| anyhow::anyhow!("active workspace credential is missing"))?;
+    let target = ayx_core::profile::WorkspaceTarget::from_credential(
+        key,
+        credential,
+        ayx_core::profile::WorkspaceResolutionSource::ActiveProfile,
+    )
+    .ok_or_else(|| {
+        anyhow::anyhow!(
+            "active workspace credential lacks complete verified ID, GID, or name metadata"
+        )
+    })?;
+    if one_access_token_needs_refresh(config) {
+        let refresh_client = build_client()?;
+        preflight_access_token = Some(refresh_one_access_token_for_request(
+            config,
+            &refresh_client,
+        )?);
+    }
+    verify_workspace_identity(
+        config,
+        surface,
+        operation,
+        url,
+        &target.workspace_id,
+        &target.workspace_gid,
+        preflight_access_token.as_deref(),
+    )?;
+    Ok(preflight_access_token)
+}
+
+/// Mask credential-shaped runs inside provider-controlled prose.
+///
+/// `redact_text` masks `key=value` assignments and JWT shapes. A token endpoint
+/// is free to write a bare opaque token into `error_description`, where neither
+/// pattern matches and the value would be echoed verbatim. Replace any run long
+/// enough to be a credential and not a plain alphabetic word, which keeps the
+/// sentence readable while making it unable to carry a secret.
+fn mask_opaque_runs(value: &str) -> String {
+    const MIN_OPAQUE_CHARS: usize = 20;
+
+    value
+        .split_inclusive(char::is_whitespace)
+        .map(|chunk| {
+            let trimmed = chunk.trim_end();
+            let trailing = &chunk[trimmed.len()..];
+            let core = trimmed.trim_matches(|character: char| !character.is_ascii_alphanumeric());
+            if core.chars().count() >= MIN_OPAQUE_CHARS
+                && !core
+                    .chars()
+                    .all(|character| character.is_ascii_alphabetic())
+            {
+                format!("***{trailing}")
+            } else {
+                chunk.to_string()
+            }
+        })
+        .collect()
+}
+
+/// Token endpoints commonly return an OAuth error object for a 400 response.
+/// The raw body must never be surfaced because proxies and providers are free
+/// to include request data in it. Keep only the fields that identify the
+/// failure class, and redact their values before attaching them to an error.
+fn oauth_token_error_summary(body: &str, request_id: Option<&str>) -> String {
+    const MAX_FIELD_CHARS: usize = 200;
+
+    let bounded = |value: &str| {
+        redact_text(
+            &value
+                .trim()
+                .chars()
+                .take(MAX_FIELD_CHARS)
+                .collect::<String>(),
+        )
+    };
+    let field = |json: &Value, name: &str| {
+        json.get(name)
+            .and_then(Value::as_str)
+            .map(&bounded)
+            .filter(|value| !value.is_empty())
+    };
+
+    let mut fields = Vec::new();
+    if let Ok(json) = serde_json::from_str::<Value>(body) {
+        if let Some(error) = field(&json, "error") {
+            fields.push(format!("oauth_error={error}"));
+        }
+        if let Some(code) = field(&json, "error_code") {
+            fields.push(format!("provider_error_code={code}"));
+        }
+        // `error` and `error_code` are short spec/provider enums. Only the
+        // description is free prose, so only it needs the opaque-run pass.
+        if let Some(description) = field(&json, "error_description") {
+            fields.push(format!(
+                "oauth_error_description={}",
+                mask_opaque_runs(&description)
+            ));
+        }
+    }
+    if let Some(request_id) = request_id.map(bounded).filter(|value| !value.is_empty()) {
+        fields.push(format!("request_id={request_id}"));
+    }
+
+    if fields.is_empty() {
+        "provider did not return a recognized OAuth error".to_string()
+    } else {
+        fields.join("; ")
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn one_response_metadata(
     surface: &str,
@@ -1152,53 +1300,8 @@ pub fn one_api_live_request_with_body(
         return Ok(envelope);
     }
 
-    let mut preflight_access_token = None;
-    // Every applied One mutation must have a complete selected workspace
-    // identity. The old guard was conditional on the legacy
-    // `expected_workspace_id` field and could therefore send a mutation with
-    // only an unverified numeric ID or top-level token context.
-    if mutating {
-        let one = config.alteryx_one.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("workspace identity is required for an applied One mutation")
-        })?;
-        let key = one
-            .active_workspace_id()
-            // A legacy profile that only carries top-level tokens cannot be
-            // promoted here: it has no numeric workspace ID and no verified
-            // workspace name, so it can never satisfy `WorkspaceTarget`.
-            // Re-running login is the only way to obtain a verified credential.
-            .ok_or_else(|| anyhow::anyhow!("no active verified workspace credential; authenticate or select a workspace before applying a mutation (run `ayx one login`, or `ayx one login --workspace-id <numeric-id-or-gid>` to select among saved workspace credentials)"))?;
-        let credential = one
-            .workspace_credentials
-            .get(key)
-            .ok_or_else(|| anyhow::anyhow!("active workspace credential is missing"))?;
-        let target = ayx_core::profile::WorkspaceTarget::from_credential(
-            key,
-            credential,
-            ayx_core::profile::WorkspaceResolutionSource::ActiveProfile,
-        )
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "active workspace credential lacks complete verified ID, GID, or name metadata"
-            )
-        })?;
-        if one_access_token_needs_refresh(config) {
-            let refresh_client = build_client()?;
-            preflight_access_token = Some(refresh_one_access_token_for_request(
-                config,
-                &refresh_client,
-            )?);
-        }
-        verify_workspace_identity(
-            config,
-            surface,
-            operation,
-            &url,
-            &target.workspace_id,
-            &target.workspace_gid,
-            preflight_access_token.as_deref(),
-        )?;
-    }
+    let preflight_access_token =
+        preflight_applied_mutation(config, surface, operation, &url, mutating)?;
 
     let client = build_client()?;
     trace_one(format!(
@@ -1687,6 +1790,180 @@ pub fn flow_import_package_envelope(
             response_shape: Some(parsed_response_shape),
             mutating: !dry_run,
             dry_run,
+        },
+    );
+    Ok(envelope)
+}
+
+/// Upload one file as a multipart `file` field to a One sibling service.
+///
+/// Agent Studio's workflow shortcut source uses the documented
+/// `/svc-workflow/api/v1/workflows` upload route.  Keep this transport helper
+/// separate from the legacy `/v4/flows/package` importer because the two
+/// services use different multipart field names and represent different asset
+/// families.
+pub fn one_api_multipart_file_request(
+    config: &Config,
+    surface: &str,
+    operation: &str,
+    endpoint: &str,
+    input_path: &Path,
+    mutating: bool,
+) -> Result<Envelope> {
+    let file_bytes = fs::read(input_path)
+        .with_context(|| format!("failed to read upload file '{}'", input_path.display()))?;
+    let file_name = input_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "upload.bin".to_string());
+    let url = format!("{}{}", resolve_one_base_url(config), endpoint);
+
+    if mutating && !one_apply() {
+        return Ok(one_dry_run_envelope(
+            surface,
+            operation,
+            "POST",
+            &url,
+            endpoint,
+            Some(&json!({
+                "field": "file",
+                "file_name": file_name,
+                "bytes": file_bytes.len(),
+                "input_path": input_path.display().to_string(),
+            })),
+        ));
+    }
+
+    // An applied upload is a write like any other: it must prove the selected
+    // workspace identity before the bytes leave the process, or it lands in
+    // whatever workspace the ambient token resolves to.
+    let preflight_access_token =
+        preflight_applied_mutation(config, surface, operation, &url, mutating)?;
+
+    let client = build_client()?;
+    let access_token = match preflight_access_token {
+        Some(token) => token,
+        None => resolve_one_access_token(config, &client)?,
+    };
+    let workspace_context = workspace_context_header_value(config);
+    let workspace_gid = config
+        .alteryx_one
+        .as_ref()
+        .and_then(|one| one.resolved_workspace_gid())
+        .map(str::to_string);
+    let started = Instant::now();
+    let form = Form::new().part(
+        "file",
+        Part::bytes(file_bytes)
+            .file_name(file_name)
+            .mime_str("application/octet-stream")
+            .expect("mime literal is valid"),
+    );
+    let mut request = client
+        .post(&url)
+        .header(AUTHORIZATION, bearer_authorization_value(&access_token))
+        .header(reqwest::header::ACCEPT, "application/json");
+    if let Some(gid) = workspace_gid {
+        request = request.header("x-alteryx-workspace-gid", gid);
+    }
+    if let Some(workspace_context) = workspace_context {
+        request = request.header("x-trifacta-person-workspace-id", workspace_context);
+    }
+    let response = request
+        .multipart(form)
+        .send()
+        .with_context(|| format!("{surface} upload request to '{url}' failed"))?;
+
+    let status = response.status();
+    let request_id = response
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned);
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let text = response.text().unwrap_or_default();
+    let parsed = parse_one_response(&content_type, &text);
+    let parsed_response_shape = match &parsed {
+        ParsedOneResponse::Json { response_shape, .. } => *response_shape,
+        ParsedOneResponse::NonJson { response_kind, .. } => *response_kind,
+    };
+    let envelope = match parsed {
+        ParsedOneResponse::Json {
+            body: response_body,
+            response_shape: body_shape,
+        } => one_http_envelope(
+            status,
+            format!(
+                "{surface} {operation} {}",
+                if status.is_success() { "ok" } else { "failed" }
+            ),
+            Value::Object({
+                let mut data = one_response_metadata(
+                    surface,
+                    operation,
+                    "POST",
+                    &url,
+                    endpoint,
+                    1,
+                    Some(status.as_u16()),
+                    request_id.clone(),
+                    status.is_success(),
+                    body_shape,
+                    None,
+                    mutating,
+                    false,
+                );
+                data.insert(
+                    "elapsed_ms".to_string(),
+                    Value::from(started.elapsed().as_millis() as u64),
+                );
+                data.insert("response".to_string(), response_body);
+                data.insert(
+                    "error_code".to_string(),
+                    ayx_core::envelope::ErrorCode::from_http_status(status.as_u16())
+                        .map_or(Value::Null, |code| Value::String(code.as_str().to_string())),
+                );
+                data
+            }),
+        ),
+        ParsedOneResponse::NonJson { .. } => one_transport_failure_envelope(
+            Some(status),
+            surface,
+            operation,
+            "POST",
+            &url,
+            endpoint,
+            1,
+            None,
+            &parsed,
+            mutating,
+            false,
+        ),
+    };
+    let _ = record_api_event(
+        config.observability.as_ref(),
+        ApiEvent {
+            product: "one",
+            surface,
+            operation,
+            method: "POST",
+            endpoint_template: endpoint,
+            resolved_url: &url,
+            status_code: Some(status.as_u16()),
+            duration_ms: started.elapsed().as_millis(),
+            attempt: 1,
+            retry_after_seconds: None,
+            request_id: request_id.as_deref(),
+            ok: status.is_success(),
+            error_class: None,
+            response_shape: Some(parsed_response_shape),
+            mutating,
+            dry_run: false,
         },
     );
     Ok(envelope)
@@ -2199,23 +2476,29 @@ pub fn refresh_one_tokens(config: &Config, client: &Client) -> Result<RefreshedO
         .send()
         .with_context(|| format!("refresh token request to '{}' failed", token_endpoint))?;
     let status = response.status();
+    let request_id = response
+        .headers()
+        .get("x-request-id")
+        .or_else(|| response.headers().get("x-correlation-id"))
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
     trace_one(format!(
         "refresh token request to {} returned {}",
         token_endpoint_url,
         status.as_u16()
     ));
-    if !status.is_success() {
-        std::mem::forget(response);
-        bail!(
-            "{}: refresh token request to '{}' returned {}",
-            token_failure_prefix(status),
-            token_endpoint_url,
-            status.as_u16()
-        );
-    }
     let text = response
         .text()
         .context("failed to read refresh token response body")?;
+    if !status.is_success() {
+        bail!(
+            "{}: refresh token request to '{}' returned {} ({})",
+            token_failure_prefix(status),
+            token_endpoint_url,
+            status.as_u16(),
+            oauth_token_error_summary(&text, request_id.as_deref())
+        );
+    }
     let token_json: Value = serde_json::from_str(&text).with_context(|| {
         format!(
             "auth failed: refresh token response from '{}' was not valid JSON. Body preview: '{}'",
@@ -3073,6 +3356,81 @@ mongo:
         assert_eq!(refreshed.refresh_token.as_deref(), Some("fresh-refresh"));
         assert_eq!(refreshed.expires_in, Some(300));
         assert_eq!(refreshed.token_type, "Bearer");
+    }
+
+    #[test]
+    fn oauth_token_error_summary_keeps_only_allowlisted_redacted_fields() {
+        let summary = oauth_token_error_summary(
+            r#"{
+                "error":"invalid_grant",
+                "error_code":"internal",
+                "error_description":"refresh_token=provider-refresh-secret",
+                "access_token":"provider-access-secret",
+                "refresh_token":"provider-refresh-secret",
+                "client_secret":"provider-client-secret"
+            }"#,
+            Some("request-42"),
+        );
+
+        assert!(summary.contains("oauth_error=invalid_grant"), "{summary}");
+        assert!(
+            summary.contains("provider_error_code=internal"),
+            "{summary}"
+        );
+        assert!(summary.contains("request_id=request-42"), "{summary}");
+        assert!(summary.contains("refresh_token=***"), "{summary}");
+        for secret in [
+            "provider-access-secret",
+            "provider-refresh-secret",
+            "provider-client-secret",
+        ] {
+            assert!(!summary.contains(secret), "secret leaked in {summary}");
+        }
+    }
+
+    /// A provider may write a bare token into the description, where neither the
+    /// `key=value` nor the JWT pattern matches. Prose must survive; anything
+    /// credential-shaped must not.
+    #[test]
+    fn oauth_token_error_summary_masks_opaque_tokens_in_provider_prose() {
+        let summary = oauth_token_error_summary(
+            r#"{
+                "error":"invalid_grant",
+                "error_description":"refresh credential aB3xY7pQ9wL2mN5kR8tZ was revoked"
+            }"#,
+            None,
+        );
+
+        assert!(
+            !summary.contains("aB3xY7pQ9wL2mN5kR8tZ"),
+            "an opaque token in prose leaked: {summary}"
+        );
+        assert!(summary.contains("oauth_error=invalid_grant"), "{summary}");
+        assert!(
+            summary.contains("refresh credential") && summary.contains("was revoked"),
+            "the readable prose must survive: {summary}"
+        );
+    }
+
+    #[test]
+    fn oauth_token_error_summary_keeps_ordinary_long_words() {
+        assert_eq!(
+            mask_opaque_runs("internationalization and authentication failed"),
+            "internationalization and authentication failed",
+            "plain alphabetic words are not credentials"
+        );
+        assert_eq!(mask_opaque_runs("token abc123def456ghi789jkl"), "token ***");
+    }
+
+    #[test]
+    fn oauth_token_error_summary_never_includes_unrecognized_body_content() {
+        let summary = oauth_token_error_summary(
+            "token endpoint copied request refresh_token=provider-refresh-secret",
+            None,
+        );
+
+        assert_eq!(summary, "provider did not return a recognized OAuth error");
+        assert!(!summary.contains("provider-refresh-secret"));
     }
 
     #[test]

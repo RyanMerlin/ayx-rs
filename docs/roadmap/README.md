@@ -33,6 +33,9 @@ letting stale notes accumulate.
 - [Command surface coverage and gaps](command-surface-coverage.md) (mostly
   delivered)
 - [Headless Alteryx integration](headless-alteryx-integration.md)
+- [Agent-first substrate and governance](agent-first-substrate.md) (four-wave
+  strategy; owns the TUI removal, governance primitives, and the AYX-owned MCP
+  server)
 
 ## Relationship To Other Docs
 
