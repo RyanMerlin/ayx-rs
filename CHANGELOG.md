@@ -4,6 +4,15 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.20.0 — 2026-09-04
+
+Breaking. The bundled terminal UI is removed, and `ayx` now picks its output
+format based on whether a terminal or an agent is calling. Full notes in
+`docs/releases/v0.20.0.md`.
+
+There is no v0.19.2 release. That tag was cut, failed its release build on
+every platform, and was withdrawn. Its work ships here.
+
 ### Removed
 
 - **`ayx tui`.** The bundled terminal UI (legacy and the `AYX_TUI_V2` preview)
