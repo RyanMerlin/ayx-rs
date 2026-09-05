@@ -83,6 +83,30 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             )?
         }
         OneJobGroupCommand::Detail { profile, id } => {
+            let id = crate::cmd::select::resolve_selector(
+                "job group id",
+                "ayx one job-groups list --output json",
+                id,
+                crate::cmd::select::SelectPolicy::from_runtime(runtime.no_input),
+                || {
+                    let config = runtime.load_profile_lenient(profile.as_deref())?;
+                    let params = ayx_one_api::OneListParams::new()
+                        .with_limit(Some(200))
+                        .with_all(true, Some(10));
+                    let listed = ayx_one_api::one_api_list_request(
+                        &config,
+                        "jobGroup",
+                        "picker-list",
+                        "/v4/jobLibrary",
+                        &[],
+                        &params,
+                    )?;
+                    crate::cmd::select::items_from_envelope(
+                        &listed,
+                        &["name", "flowName", "flow_name"],
+                    )
+                },
+            )?;
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,

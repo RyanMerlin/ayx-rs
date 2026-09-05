@@ -138,6 +138,8 @@ pub(crate) fn output_descriptor(command: &OneCommand) -> OutputDescriptor {
         OneCommand::Inventory { .. } => {
             OutputDescriptor::new("one.inventory", ViewKind::Diagnostic)
         }
+        OneCommand::Open { .. } => OutputDescriptor::new("one.open", ViewKind::Result)
+            .with_fields(&["kind", "id", "url", "launched"]),
         #[cfg(feature = "ui")]
         OneCommand::Ui { .. } => OutputDescriptor::new("one.ui", ViewKind::Raw),
     }
@@ -155,6 +157,14 @@ fn workspace_descriptor(command: &OneWorkspaceCommand) -> OutputDescriptor {
         OneWorkspaceCommand::CloudConfigs { .. } => list("one.workspace.cloud-configs"),
         OneWorkspaceCommand::Current => {
             detail_with("one.workspace.current", WORKSPACE_CURRENT_FIELDS)
+        }
+        // Same resource as `current`, just addressed by id, so it gets the same
+        // projection. The generic detail fields omit `state`, `gid`,
+        // `workspace_member_count`, `workspace_tier`, and `custom_url`, which
+        // would hand an agent a thinner object here than `workspace current`
+        // returns for the very same workspace.
+        OneWorkspaceCommand::Detail { .. } => {
+            detail_with("one.workspace.detail", WORKSPACE_CURRENT_FIELDS)
         }
         OneWorkspaceCommand::CurrentConfiguration => detail("one.workspace.current-configuration"),
         OneWorkspaceCommand::ConfigurationV4 { .. } => detail("one.workspace.configuration-v4"),
@@ -625,6 +635,9 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
         OneCommand::Inventory { profile } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_surface_inventory_envelope(&config)?
+        }
+        OneCommand::Open { kind, id, print } => {
+            super::one_open::execute(&runtime, kind, id, print)?
         }
         OneCommand::Doctor { command } => super::one_doctor::execute(&runtime, command)?,
         OneCommand::Api { command } => super::one_api::execute(&runtime, command)?,

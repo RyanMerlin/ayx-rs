@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-03 19:08:35 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-05 02:00:57 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 416
+- Commands: 417
 - Capabilities: 6
 
 ## Commands
@@ -269,6 +269,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one job-groups status | `one/job-groups/status` | read-only | no | Inspect a One job group status |
 | one login | `one/login` | mutating | yes | Authenticate with Alteryx One and store credentials |
 | one logout | `one/logout` | mutating | yes | Clear stored Alteryx One credentials from the active profile |
+| one open | `one/open` | read-only | no | Open a One resource in the web console. Launches a browser only on a terminal, without --no-input or --print, and when no agent host is detected; otherwise prints the URL |
 | one output-objects | `one/output-objects` | unclassified |  | Alteryx One output objects — list, create, and manage |
 | one output-objects count | `one/output-objects/count` | read-only | no | Count One output objects |
 | one output-objects create | `one/output-objects/create` | mutating | yes | Create a One output object from JSON payload |
@@ -361,6 +362,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one workspace delete-configuration | `one/workspace/delete-configuration` | mutating | yes | Reset a workspace configuration by workspace id |
 | one workspace delete-current-configuration | `one/workspace/delete-current-configuration` | mutating | yes | Reset the current workspace configuration |
 | one workspace delete-group | `one/workspace/delete-group` | mutating | yes | Delete a group from a One workspace |
+| one workspace detail | `one/workspace/detail` | read-only | no | Inspect a One workspace by numeric id (`GET /v4/workspaces/{workspaceId}`) |
 | one workspace groups | `one/workspace/groups` | read-only | no | List groups in a One workspace |
 | one workspace groups-global | `one/workspace/groups-global` | read-only | no | List groups visible to the current One user |
 | one workspace invitation-link | `one/workspace/invitation-link` | read-only | no | Get the invitation link for a person in a One workspace |
@@ -526,12 +528,6 @@ cargo run -q -p xtask -- refresh-command-surface
 | tools workspace init | `tools/workspace/init` | unclassified |  | Write an environments.yaml workspace template |
 | tools workspace migrate-workflows | `tools/workspace/migrate-workflows` | unclassified |  | (preview) Resolve and summarize both workspace profiles — workflow migration not yet implemented |
 | tools workspace resolve | `tools/workspace/resolve` | unclassified |  | Resolve source and target environments from a workspace |
-
-### `tui`
-
-| Name | Path | Safety | Mutating | Summary |
-| --- | --- | --- | --- | --- |
-| tui | `tui` | unclassified |  | Interactive TUI for central profile selection, explicit file editing, One credentials, and connectivity checks |
 
 ### `update`
 

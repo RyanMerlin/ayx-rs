@@ -251,6 +251,27 @@ pub(crate) fn execute(
             )?
         }
         OneFlowsCommand::Detail { profile, id } => {
+            let id = crate::cmd::select::resolve_selector(
+                "flow id",
+                "ayx one flows list --output json",
+                id,
+                crate::cmd::select::SelectPolicy::from_runtime(runtime.no_input),
+                || {
+                    let config = runtime.load_profile_lenient(profile.as_deref())?;
+                    let params = ayx_one_api::OneListParams::new()
+                        .with_limit(Some(200))
+                        .with_all(true, Some(10));
+                    let listed = ayx_one_api::one_api_list_request(
+                        &config,
+                        "flow",
+                        "picker-list",
+                        "/v4/flows",
+                        &[],
+                        &params,
+                    )?;
+                    crate::cmd::select::items_from_envelope(&listed, &["name"])
+                },
+            )?;
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,

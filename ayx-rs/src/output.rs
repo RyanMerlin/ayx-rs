@@ -4,6 +4,7 @@
 //! the only place that projects it for terminal or compact JSON output.
 
 use ayx_core::envelope::Envelope;
+use ayx_core::observability::redact_text;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
@@ -38,6 +39,59 @@ impl std::fmt::Display for OutputMode {
             Self::Table => "table",
         })
     }
+}
+
+/// Where the effective output mode came from. Logged under `--debug`; never
+/// part of the envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputModeSource {
+    Explicit,
+    Env,
+    AutoAgentMarker,
+    AutoNonTty,
+    Default,
+}
+
+/// Environment variables that identify an agent host. Every entry was observed
+/// on a live host before being added (`CLAUDECODE` and `AI_AGENT` inside Claude
+/// Code, 2026-09-04). Extend only after observing a variable on the host
+/// itself; do not guess.
+pub const AGENT_MARKER_VARS: &[&str] = &["AYX_AGENT", "CLAUDECODE", "AI_AGENT"];
+
+/// True when any agent marker is set to a non-empty value other than `0`.
+pub fn agent_marker_present(get: impl Fn(&str) -> Option<String>) -> bool {
+    AGENT_MARKER_VARS
+        .iter()
+        .any(|key| get(key).is_some_and(|v| !v.is_empty() && v != "0"))
+}
+
+/// Resolve the effective output mode. Order: explicit `--output`, then
+/// `AYX_OUTPUT`, then `json` for agent hosts or a non-terminal stdout, else
+/// `text`. An empty (or whitespace-only) `AYX_OUTPUT` is ignored, as if unset.
+/// The error carries a human sentence for a bad `AYX_OUTPUT` value.
+pub fn resolve_output_mode(
+    explicit: Option<OutputMode>,
+    env_value: Option<&str>,
+    stdout_is_terminal: bool,
+    agent_marker: bool,
+) -> Result<(OutputMode, OutputModeSource), String> {
+    let env_value = env_value.filter(|v| !v.trim().is_empty());
+    if let Some(mode) = explicit {
+        return Ok((mode, OutputModeSource::Explicit));
+    }
+    if let Some(raw) = env_value {
+        let mode = <OutputMode as clap::ValueEnum>::from_str(raw, true).map_err(|_| {
+            format!("AYX_OUTPUT={raw:?} is not one of: text, json, json-full, yaml, table")
+        })?;
+        return Ok((mode, OutputModeSource::Env));
+    }
+    if agent_marker {
+        return Ok((OutputMode::Json, OutputModeSource::AutoAgentMarker));
+    }
+    if !stdout_is_terminal {
+        return Ok((OutputMode::Json, OutputModeSource::AutoNonTty));
+    }
+    Ok((OutputMode::Text, OutputModeSource::Default))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +144,12 @@ struct CompactEnvelope {
     message: String,
     timestamp_utc: chrono::DateTime<chrono::Utc>,
     error_code: Option<ayx_core::envelope::ErrorCode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remediation: Option<ayx_core::envelope::Remediation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retryable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next: Option<Vec<String>>,
     data: Value,
 }
 
@@ -139,6 +199,9 @@ pub fn render_envelope(
                     timestamp_utc: clean.timestamp_utc,
                     data,
                     error_code: clean.error_code,
+                    remediation: clean.remediation.clone(),
+                    retryable: clean.retryable,
+                    next: clean.next.clone(),
                 };
                 Ok(render::render_text(&projected))
             } else {
@@ -165,6 +228,9 @@ fn compact_envelope(
         message: envelope.message.clone(),
         timestamp_utc: envelope.timestamp_utc,
         error_code: envelope.error_code,
+        remediation: envelope.remediation.clone(),
+        retryable: envelope.retryable,
+        next: envelope.next.clone(),
         data: compact_data(
             &envelope.data,
             kind,
@@ -185,7 +251,19 @@ fn compact_data(
     is_error: bool,
 ) -> Value {
     if is_error {
-        let fields = selected_fields(descriptor_fields);
+        // Always carry the fields an error envelope actually needs — the
+        // descriptor's `fields` describe a *success* shape (e.g. `id`,
+        // `name` for a list view) and generally don't overlap with them, so
+        // projecting through the descriptor alone (the prior behavior) left
+        // `data.fields` empty on failure. Union the two: error fields first,
+        // then whatever the descriptor adds.
+        const ERROR_FIELDS: [&str; 4] = ["error", "error_code", "hint", "transport"];
+        let mut fields: Vec<&str> = ERROR_FIELDS.to_vec();
+        for field in selected_fields(descriptor_fields) {
+            if !fields.contains(&field) {
+                fields.push(field);
+            }
+        }
         return json!({
             "kind": "error",
             "fields": project_object(data.as_object(), &fields),
@@ -556,6 +634,20 @@ pub fn redacted_envelope(envelope: &Envelope) -> Envelope {
         timestamp_utc: envelope.timestamp_utc,
         data: redact_value(&envelope.data, None),
         error_code: envelope.error_code,
+        remediation: envelope.remediation.clone(),
+        retryable: envelope.retryable,
+        // `next` hints are full command lines (see pagination_next_command),
+        // not bare secret values, so they need the same in-place text
+        // redaction applied to raw error strings (ayx_core::observability::
+        // redact_text masks just the offending token/value and keeps the
+        // rest of the command intact) rather than redact_value's
+        // whole-string-to-[REDACTED] replacement, which would either erase
+        // the whole hint or (since it only matches a bare value) miss it
+        // entirely.
+        next: envelope
+            .next
+            .as_ref()
+            .map(|hints| hints.iter().map(|hint| redact_text(hint)).collect()),
     }
 }
 
@@ -729,6 +821,52 @@ fn has_populated_assignment(haystack: &str, needle: &str) -> bool {
     })
 }
 
+/// Rebuild the invoking command line with `--page-token <token>` so an agent
+/// can fetch the next page without reconstructing the arguments. `argv[0]` is
+/// normalized to `ayx`; an existing `--page-token` (either form) is replaced.
+pub fn pagination_next_command(argv: &[String], token: &str) -> String {
+    let mut parts: Vec<String> = Vec::with_capacity(argv.len() + 2);
+    let mut skip_next = false;
+    for (i, arg) in argv.iter().enumerate() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if i == 0 {
+            parts.push("ayx".to_string());
+            continue;
+        }
+        if arg == "--page-token" {
+            skip_next = true;
+            continue;
+        }
+        if arg.starts_with("--page-token=") {
+            continue;
+        }
+        parts.push(shell_quote(arg));
+    }
+    parts.push("--page-token".to_string());
+    parts.push(shell_quote(token));
+    parts.join(" ")
+}
+
+/// Single-quote `arg` for a POSIX shell unless it consists solely of
+/// characters that never need quoting (`[A-Za-z0-9_@%+=:,./-]`, the same
+/// set Python's `shlex.quote` treats as safe). Embedded single quotes use
+/// the `'\''` idiom.
+fn shell_quote(arg: &str) -> String {
+    let safe = !arg.is_empty()
+        && arg.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, '_' | '@' | '%' | '+' | '=' | ':' | ',' | '.' | '/' | '-')
+        });
+    if safe {
+        arg.to_string()
+    } else {
+        format!("'{}'", arg.replace('\'', "'\\''"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -750,6 +888,32 @@ mod tests {
         assert_eq!(value["shown_count"], 20);
         assert_eq!(value["truncated"], true);
         assert_eq!(value["items"].as_array().unwrap().len(), 20);
+    }
+
+    #[test]
+    fn compact_error_envelope_carries_error_text_through_a_success_descriptor() {
+        use ayx_core::envelope::ErrorCode;
+
+        let envelope = Envelope::err_coded(
+            ErrorCode::ConfigMissing,
+            "command failed",
+            json!({"error": "boom", "error_code": "config_missing", "hint": "run onboard"}),
+        );
+        // A List descriptor's `fields` describe the success shape (id, name)
+        // and share nothing with the error payload's keys.
+        let descriptor =
+            OutputDescriptor::new("one.flows.list", ViewKind::List).with_fields(&["id", "name"]);
+        let value = compact_data(
+            &envelope.data,
+            descriptor.kind,
+            descriptor.fields,
+            descriptor.collection_keys,
+            20,
+            true,
+        );
+        assert_eq!(value["fields"]["error"], "boom");
+        assert_eq!(value["fields"]["hint"], "run onboard");
+        assert_eq!(value["fields"]["error_code"], "config_missing");
     }
 
     #[test]
@@ -1055,6 +1219,23 @@ mod tests {
         assert_eq!(clean.data["url"], "[REDACTED]");
     }
 
+    #[test]
+    fn next_hints_are_redacted_like_data() {
+        let env = Envelope::ok_with_data("ok", json!({"n": 1})).with_next(vec![
+            "ayx one login --refresh-token refresh_token=SECRETVALUE".to_string(),
+        ]);
+        let clean = redacted_envelope(&env);
+        let hint = &clean.next.expect("next hints present")[0];
+        assert!(
+            !hint.contains("SECRETVALUE"),
+            "hint leaked a secret: {hint}"
+        );
+        assert!(
+            hint.starts_with("ayx one login --refresh-token refresh_token="),
+            "hint should keep the runnable command around the masked value: {hint}"
+        );
+    }
+
     /// Keys that merely *describe* a credential must survive redaction.
     ///
     /// The sensitive-key check is a substring match, so before the metadata
@@ -1356,5 +1537,181 @@ mod tests {
         let clean = redacted_envelope(&env);
         assert_eq!(clean.data["tokenInfo"]["tokenId"], "12345");
         assert_eq!(clean.data["tokenValue"], "[REDACTED]");
+    }
+
+    #[test]
+    fn explicit_output_always_wins() {
+        let (mode, src) =
+            resolve_output_mode(Some(OutputMode::Yaml), Some("json"), false, true).unwrap();
+        assert_eq!((mode, src), (OutputMode::Yaml, OutputModeSource::Explicit));
+    }
+
+    #[test]
+    fn env_beats_auto_detection_and_rejects_garbage() {
+        let (mode, src) = resolve_output_mode(None, Some("text"), false, true).unwrap();
+        assert_eq!((mode, src), (OutputMode::Text, OutputModeSource::Env));
+        let (mode, _) = resolve_output_mode(None, Some("JSON-FULL"), true, false).unwrap();
+        assert_eq!(mode, OutputMode::JsonFull, "env value is case-insensitive");
+        let err = resolve_output_mode(None, Some("xml"), true, false).unwrap_err();
+        assert!(err.contains("AYX_OUTPUT"));
+    }
+
+    #[test]
+    fn agent_marker_then_non_tty_then_text() {
+        assert_eq!(
+            resolve_output_mode(None, None, true, true).unwrap(),
+            (OutputMode::Json, OutputModeSource::AutoAgentMarker)
+        );
+        assert_eq!(
+            resolve_output_mode(None, None, false, false).unwrap(),
+            (OutputMode::Json, OutputModeSource::AutoNonTty)
+        );
+        assert_eq!(
+            resolve_output_mode(None, None, true, false).unwrap(),
+            (OutputMode::Text, OutputModeSource::Default)
+        );
+    }
+
+    #[test]
+    fn agent_marker_ignores_empty_and_zero_values() {
+        let env = |k: &str| match k {
+            "CLAUDECODE" => Some("0".to_string()),
+            "AI_AGENT" => Some(String::new()),
+            _ => None,
+        };
+        assert!(!agent_marker_present(env));
+        let env = |k: &str| (k == "AYX_AGENT").then(|| "1".to_string());
+        assert!(agent_marker_present(env));
+    }
+
+    #[test]
+    fn empty_env_value_is_treated_as_unset() {
+        assert_eq!(
+            resolve_output_mode(None, Some(""), true, false).unwrap(),
+            (OutputMode::Text, OutputModeSource::Default)
+        );
+        assert_eq!(
+            resolve_output_mode(None, Some("  "), false, false).unwrap(),
+            (OutputMode::Json, OutputModeSource::AutoNonTty)
+        );
+    }
+
+    fn argv(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn next_command_appends_the_token() {
+        let cmd = pagination_next_command(
+            &argv(&["/usr/bin/ayx", "one", "flows", "list", "--output", "json"]),
+            "tok123",
+        );
+        assert_eq!(cmd, "ayx one flows list --output json --page-token tok123");
+    }
+
+    #[test]
+    fn next_command_replaces_an_existing_token_in_either_form() {
+        let cmd = pagination_next_command(
+            &argv(&["ayx", "one", "flows", "list", "--page-token", "old"]),
+            "new",
+        );
+        assert_eq!(cmd, "ayx one flows list --page-token new");
+        let cmd = pagination_next_command(
+            &argv(&["ayx", "one", "flows", "list", "--page-token=old"]),
+            "new",
+        );
+        assert_eq!(cmd, "ayx one flows list --page-token new");
+    }
+
+    #[test]
+    fn next_command_quotes_arguments_with_spaces() {
+        let cmd = pagination_next_command(
+            &argv(&["ayx", "one", "flows", "list", "--profile", "my profile"]),
+            "t",
+        );
+        assert_eq!(
+            cmd,
+            "ayx one flows list --profile 'my profile' --page-token t"
+        );
+    }
+
+    #[test]
+    fn next_command_quotes_every_unsafe_argument() {
+        let cmd = pagination_next_command(
+            &argv(&[
+                "ayx", "one", "flows", "list", "--filter", "#urgent", "--name", "a*b", "--owner",
+                "it's", "--note", "",
+            ]),
+            "t",
+        );
+        assert_eq!(
+            cmd,
+            "ayx one flows list --filter '#urgent' --name 'a*b' --owner 'it'\\''s' --note '' --page-token t"
+        );
+        // Safe arguments stay bare.
+        let cmd = pagination_next_command(
+            &argv(&[
+                "ayx",
+                "one",
+                "flows",
+                "list",
+                "--profile",
+                "dev-01@eu.example.com",
+            ]),
+            "t",
+        );
+        assert_eq!(
+            cmd,
+            "ayx one flows list --profile dev-01@eu.example.com --page-token t"
+        );
+    }
+
+    #[test]
+    fn compact_envelopes_validate_against_the_published_schema() {
+        // Sibling to ayx-core's envelope::tests::envelopes_validate_against_the_published_schema
+        // -- CompactEnvelope lives here, not in ayx-core, so the compact half
+        // of docs/cli-schema.json is covered from this crate instead.
+        let schema_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/cli-schema.json");
+        let schema: Value =
+            serde_json::from_str(&std::fs::read_to_string(schema_path).unwrap()).unwrap();
+        let validator = jsonschema::validator_for(&schema).expect("schema compiles");
+
+        let ok_envelope = Envelope::ok_with_data("fine", json!({"n": 1}));
+        let ok_descriptor = OutputDescriptor::new("catalog", ViewKind::Raw);
+        let ok_compact =
+            serde_json::to_value(compact_envelope(&ok_envelope, ok_descriptor, 20)).unwrap();
+        let problems: Vec<String> = validator
+            .iter_errors(&ok_compact)
+            .map(|e| e.to_string())
+            .collect();
+        assert!(
+            problems.is_empty(),
+            "compact success envelope must validate: {problems:?}\n{ok_compact:#}"
+        );
+
+        let err_envelope = Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::NotFound,
+            "missing",
+            Value::Null,
+        )
+        .with_remediation(
+            "List first",
+            vec!["ayx one workflows list --output json".to_string()],
+        )
+        .finalize_retryable();
+        let err_descriptor = OutputDescriptor::new("one.workflows.detail", ViewKind::Detail);
+        let err_compact =
+            serde_json::to_value(compact_envelope(&err_envelope, err_descriptor, 20)).unwrap();
+        // Confirms the always-present, possibly-null error_code the compact
+        // shape carries (unlike the full envelope, which omits it on success).
+        assert_eq!(ok_compact["error_code"], Value::Null);
+        let problems: Vec<String> = validator
+            .iter_errors(&err_compact)
+            .map(|e| e.to_string())
+            .collect();
+        assert!(
+            problems.is_empty(),
+            "compact error envelope must validate: {problems:?}\n{err_compact:#}"
+        );
     }
 }

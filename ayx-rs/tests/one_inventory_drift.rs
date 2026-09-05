@@ -84,45 +84,16 @@ const DYNAMIC_ENDPOINTS: &[(&str, &str, &str)] = &[
     // `connections permissions delete` builds the unshare query (ids +
     // subject type) via `build_connection_unshare_query`.
     ("cmd/one_connections.rs", "DELETE", "/v4/connections/share"),
-    // The v2 TUI worker dispatches whatever `kind_impl(kind).list_endpoint()` /
-    // `.detail_endpoint()` returns, so the call site passes `endpoint.path`
-    // rather than a literal. The literals live in `tui/v2/resource/*.rs`; every
-    // path that registry can produce is listed here, and each is asserted to be
-    // inventoried by `dynamic_endpoint_allowlist_is_inventoried_and_not_stale`.
-    ("tui/v2/worker.rs", "GET", "/v4/workspaces"),
-    ("tui/v2/worker.rs", "GET", "/v4/flows"),
-    ("tui/v2/worker.rs", "GET", "/v4/flows/{id}"),
-    ("tui/v2/worker.rs", "GET", "/v4/connections"),
-    ("tui/v2/worker.rs", "GET", "/v4/connections/{id}"),
-    ("tui/v2/worker.rs", "GET", "/v4/people"),
-    ("tui/v2/worker.rs", "GET", "/v4/people/{id}"),
-    ("tui/v2/worker.rs", "GET", "/v4/jobLibrary"),
-    ("tui/v2/worker.rs", "GET", "/v4/jobGroups/{id}"),
 ];
 
 /// `(method, endpoint)` pairs dispatched only by a non-`one`-namespace
-/// surface (currently just `ayx telemetry ...`), so they cannot be added to
-/// `ayx-one-api/src/inventory.rs`: its `commands` field is contractually
-/// `ayx one ...`-only (see
+/// surface, so they cannot be added to `ayx-one-api/src/inventory.rs` (its
+/// `commands` field is contractually `ayx one ...`-only; see
 /// `ayx_one_api::coverage::tests::every_endpoint_row_names_at_least_one_one_command`).
-///
-/// The telemetry permissions workflows and summary commands share
-/// `GET /v4/people` with the normal `one` surface. The inventory row already
-/// covers that path, so they need no separate carve-out here. Keep this list
-/// limited to endpoints that are genuinely reachable only through a
-/// non-`one` surface.
-const NON_ONE_SURFACE_ENDPOINTS: &[(&str, &str)] = &[
-    // `ayx tui`'s legacy One browser (`tui/one_browser.rs`) fetches a workspace
-    // by id. No `ayx one` command does: the `one workspace` tree exposes
-    // `list`, `current`, and configuration leaves, but no `detail <id>`. Found
-    // when discovery widened to the whole crate — until then this endpoint was
-    // wired and reachable while appearing in no inventory row at all.
-    //
-    // Adding `one workspace detail <id>` would make this a normal inventory row
-    // and is the better long-term fix; it is a new command, not a drift repair,
-    // so it is deliberately not bundled here.
-    ("GET", "/v4/workspaces/{id}"),
-];
+/// Empty since 0.20.0: `ayx one workspace detail` made
+/// `GET /v4/workspaces/{workspaceId}` a normal inventory row and the TUI that
+/// used to carve out its `{id}` spelling is gone.
+const NON_ONE_SURFACE_ENDPOINTS: &[(&str, &str)] = &[];
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")

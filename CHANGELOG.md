@@ -4,6 +4,95 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+### Removed
+
+- **`ayx tui`.** The bundled terminal UI (legacy and the `AYX_TUI_V2` preview)
+  is removed per ADR 0004. A hidden `ayx tui` stub returns a remediation
+  envelope for this release cycle and is deleted in 0.21.0. Profile, auth, and
+  connectivity setup live in `ayx onboard`, `ayx one login`, `ayx profile`,
+  and `ayx doctor`.
+
+### Changed
+
+- **Output mode is auto-detected.** Without `--output`, `ayx` emits compact
+  JSON when stdout is not a terminal or an agent host is detected
+  (`AYX_AGENT`, `CLAUDECODE`, `AI_AGENT`); `AYX_OUTPUT=<mode>` overrides the
+  automatic choice. Terminals still get text. Piped human use needs
+  `AYX_OUTPUT=text`. `ayx completions <shell>` is exempt from automatic
+  detection so redirected completion scripts stay scripts; an empty
+  `AYX_OUTPUT` is ignored.
+- `docs/cli-schema.json` now admits `error_code` and the new optional fields;
+  every error envelope previously failed the published schema.
+- **Compact output projects the resource, not the transport.** Default terminal
+  output and compact JSON now show the underlying resource rather than timing,
+  retry, and raw-response metadata. `--output json-full` remains the lossless
+  diagnostic format, and compact list results still report `omitted_fields`,
+  `truncated`, `shown_count`, and `total_count` so a caller can always tell it
+  is reading a projection.
+
+### Added
+
+- Error envelopes carry `retryable` and, for dispatcher-classified failures, a
+  structured `remediation { summary, commands }`. Paginated list results carry
+  `next` with the exact `--page-token` continuation command.
+- `--jq <FILTER>` and `--raw-output` (`-r`) run a jq filter over the JSON
+  result in-binary (pure-Rust `jaq`). Non-finite results (`NaN`, `Infinity`)
+  are rejected as `validation` errors; big integers are preserved exactly.
+  The filter runs on the rendered, redacted document. The `env`/`$ENV` and
+  `now` builtins, and the wall-clock/timezone builtins (`strftime`,
+  `strflocaltime`, `gmtime`, `localtime`, `mktime`, `strptime`), are not
+  available, and `halt`/`halt_error` are rejected, so a filter cannot read
+  the process environment or host clock, or change the exit code.
+- `ayx one workspace detail <id>`.
+- `ayx one open <kind> [id] [--print]` deep-links the web console for
+  `workspace` and `workflow`. It refuses to guess a tenant: a profile without
+  a configured One base URL gets a `validation` error naming the fix
+  (`alteryx_one.base_url` or `AYX_ONE_BASE_URL`).
+- Omitting the id of `one workflows detail|delete`, `one flows detail`,
+  `one connections detail`, `one job-groups detail`, `one person detail`, or
+  `one plans detail` on a terminal opens a picker; off a terminal it is a
+  `validation` error naming the list command.
+- **`ayx one login --oauth-api-token`.** A guided, explicitly non-OTP setup
+  path for an OAuth 2.0 API token generated in Alteryx One. It prompts for the
+  visible Client ID and hides the refresh-token entry, verifies the pair before
+  persisting it under the profile's secret policy, and renews access tokens
+  from that refresh credential. An ordinary `ayx one login` now retains an
+  existing OAuth credential instead of spending a refresh grant.
+- **`ayx one agent-assets`.** Read and manage Agent Studio agents, datasets,
+  prompts, and workflow shortcuts. Mutating subcommands use the standard
+  dry-run and confirmation protections.
+
+### Fixed
+
+- Replacing an OAuth credential no longer orphans the secret it replaces. The
+  superseded keyring entries are deleted with the same guarded path `logout`
+  uses, which skips any account another profile still references.
+- An explicit `--client-id` is no longer ignored when the selected workspace
+  already stores one. Regenerating a token pair, which yields a new Client ID
+  and Refresh Token together, previously redeemed the new token against the old
+  client and failed with an error that passing `--client-id` could not fix.
+- A stale profile-level access-token reference no longer rejects the login that
+  would replace it with a "credential binding mismatch" that only
+  `ayx one logout` could clear.
+- `--auth-method oauth-refresh` no longer prompts for a refresh token it
+  already has, which blocked indefinitely in any session with a controlling
+  terminal but no human.
+- Result and detail views keep the `dry_run`, `mutating`, and `applied`
+  transport flags. They previously fell out of the projection on applied
+  mutations, so a caller checking whether a mutation ran read `null`.
+- `--output json-full` redacts `privateKey`, `accountKey`, `sharedKey`,
+  `signature`, and `csrf`, which had drifted out of the envelope redactor.
+- Provider `error_description` text is scrubbed of credential-shaped runs
+  before it reaches an error message or log.
+- An applied multipart upload verifies the selected workspace identity before
+  sending, like every other applied mutation.
+- `agent-assets workflows enable` reports a `FAILED`, `CANCELED`, `SKIPPED`, or
+  `UNKNOWN` job as a failure rather than a successful registration, rejects a
+  zero `--timeout-seconds` before the mutation fires, and surfaces a failed
+  sub-request instead of rendering it as an empty result.
+- `--oauth-api-token` now conflicts with `--browser` and `--device` instead of
+  silently running a different grant.
+
 ## 0.19.1 — 2026-09-02
 
 ### Added

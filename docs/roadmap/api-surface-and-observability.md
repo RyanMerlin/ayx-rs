@@ -44,11 +44,12 @@ Status: active
   string form was correct all along. `build_workflow_share_body` in
   `ayx-rs/src/cmd/one_workflows.rs` now serializes both fields as strings,
   matching `build_connection_share_body` in `one_connections.rs`.
-- **Add `ayx one workspace detail <id>`.** `GET /v4/workspaces/{id}` is wired
-  and reachable today, but only from `ayx tui`'s legacy One browser — no `one`
-  command dispatches it, so it sits in `NON_ONE_SURFACE_ENDPOINTS` in the drift
-  gate rather than in the inventory proper. A real command would make it a
-  normal inventory row and remove the carve-out.
+- **RESOLVED (Wave 0, 0.20.0):** `ayx one workspace detail <id>` now dispatches
+  `GET /v4/workspaces/{id}` directly. It previously sat in
+  `NON_ONE_SURFACE_ENDPOINTS` in the drift gate because the only caller was
+  `ayx tui`'s legacy One browser, itself removed in the same release; the
+  endpoint is a normal inventory row now and `NON_ONE_SURFACE_ENDPOINTS` is
+  empty.
 - Chase the remaining unverified review leads, each raised against real source
   but never confirmed with a live call:
   - `record_api_event` logs `status.is_success()` while the envelope it

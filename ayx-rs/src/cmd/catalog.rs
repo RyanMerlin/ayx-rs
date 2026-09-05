@@ -410,6 +410,16 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         notes: &["Maps to GET /v4/people/current in the One API docs."],
     },
     CatalogMetadata {
+        path: "one/open",
+        output: "url envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["alteryx_one profile with a base URL"],
+        notes: &[
+            "Launches a browser only on a terminal, without --no-input or --print, and when no agent host is detected; otherwise prints the URL. Requires a configured One base URL.",
+        ],
+    },
+    CatalogMetadata {
         path: "one/person/list",
         output: "one person list envelope",
         safety: "read-only",
@@ -516,6 +526,14 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         mutating: false,
         prerequisites: &["central runtime profile", "server_api"],
         notes: &["Maps to GET /v4/workspaces/current in the One API docs."],
+    },
+    CatalogMetadata {
+        path: "one/workspace/detail",
+        output: "workspace resource envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &["One PAT for the target workspace"],
+        notes: &["Numeric workspace id, not the GID; mirrors `one workspace admins`."],
     },
     CatalogMetadata {
         path: "one/workspace/current-configuration",

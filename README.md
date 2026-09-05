@@ -129,7 +129,7 @@ The tool returns a consistent envelope model so humans and agents can parse succ
 
 `ayx` resolves profiles from its central config home by default and keeps an active-profile pointer in local state.
 Use `ayx profile current` to see the active profile, `ayx profile list` to inspect stored profiles, and `ayx profile use <name>` to switch the default profile.
-`--profile <name>` selects a central profile by name. Use `ayx profile migrate --profile <path>` to import a legacy YAML file into the central store; the TUI and onboarding flows are the only places that intentionally operate on explicit file paths.
+`--profile <name>` selects a central profile by name. Use `ayx profile migrate --profile <path>` to import a legacy YAML file into the central store; onboarding and migration flows are the only places that intentionally operate on explicit file paths.
 
 `environments.yaml` is the canonical multi-environment file shape. It should contain `workspace_name`, `active_environment`, and an `environments` map of named `Config` entries. Use `--environment <name>` to override the active environment for a single run.
 For promotion-style workflows with multiple Server instances, keep one environment per instance and use `tools workspace resolve` to make source/target selection explicit. `tools workspace compare` and the cross-environment migration helpers (`migrate-workflows`, `check-dcm-connections`) resolve and summarize both environments today but do not yet compare or migrate anything (preview / not yet implemented).
@@ -331,7 +331,6 @@ The repository includes a `docs/fixtures/RuntimeSettings.xml` fixture for offlin
 - `mongo` — embedded and managed Mongo inventory, backup, restore, query, and doctor helpers, plus a guarded template-based `mutate`/`undo` for live, named remediation writes (preview-first: `mutate --apply` requires `--accept-mutation-risk`, `--backup-audit-artifact`, `--approval-artifact`, and `--approve` together; `undo --apply` requires the same gates, minus a backup)
 - `sqlserver` — SQL Server status, prechecks, connection helpers, and migration planning
 - `onboard` — interactive first-run setup for `config.yaml` or `environments.yaml`
-- `tui` — interactive TUI for profile selection, editing, credentials, and connectivity checks
 - `catalog` — machine-readable command registry
 - `audit` — audit artifact management, retention, and cleanup
 - `actions` — action registry with safety, validation, and rollback notes; `actions workflows` composes actions into higher-order skill chains

@@ -102,7 +102,6 @@ fn ayx_help_renders() {
     assert!(stdout.contains("one"));
     assert!(stdout.contains("server"));
     assert!(stdout.contains("mongo"));
-    assert!(stdout.contains("tui"));
 }
 
 #[test]
@@ -146,6 +145,17 @@ fn completions_command_emits_script() {
 }
 
 #[test]
+fn completions_honor_explicit_json_output() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["completions", "bash", "--output", "json"])
+        .output()
+        .expect("ayx binary should run");
+    assert!(output.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).expect("explicit json wins");
+    assert_eq!(v["schema_version"], "ayx.output.v1");
+}
+
+#[test]
 fn catalog_surface_lists_core_one_commands() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([
@@ -184,17 +194,35 @@ fn catalog_surface_lists_core_one_commands() {
 }
 
 #[test]
-fn tui_help_renders() {
+fn tui_stub_returns_remediation_and_is_hidden() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["tui", "--help"])
+        .args(["tui", "--output", "json-full"])
         .output()
         .expect("ayx binary should run");
 
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Interactive TUI"));
-    assert!(stdout.contains("central profile"));
-    assert!(!stdout.contains("config.yaml"));
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "removed command is a validation error"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let envelope: serde_json::Value =
+        serde_json::from_str(stderr.trim()).expect("stderr is one JSON envelope");
+    assert_eq!(envelope["ok"], false);
+    assert_eq!(envelope["error_code"], "validation");
+    assert_eq!(envelope["retryable"], false);
+    assert_eq!(envelope["remediation"]["commands"][0], "ayx onboard");
+
+    let help = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["--help"])
+        .output()
+        .expect("ayx binary should run");
+    assert!(
+        !String::from_utf8_lossy(&help.stdout)
+            .to_lowercase()
+            .contains("tui"),
+        "hidden stub must not appear in --help"
+    );
 }
 
 #[test]
@@ -964,5 +992,303 @@ fn coverage_check_flag_exits_nonzero_when_missing() {
     assert!(
         !output.status.success(),
         "--check must fail when endpoints are missing"
+    );
+}
+
+#[test]
+fn one_workspace_detail_help_renders() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "workspace", "detail", "--help"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Inspect a One workspace by numeric id"));
+    assert!(stdout.contains("<ID>"));
+}
+
+#[test]
+fn piped_stdout_defaults_to_compact_json() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["catalog", "list"])
+        .env_remove("AYX_OUTPUT")
+        .env_remove("AYX_AGENT")
+        .env_remove("CLAUDECODE")
+        .env_remove("AI_AGENT")
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let v: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("piped stdout is compact JSON");
+    assert_eq!(v["schema_version"], "ayx.output.v1");
+}
+
+#[test]
+fn ayx_output_env_overrides_auto_detection() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["catalog", "list"])
+        .env("AYX_OUTPUT", "text")
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(output.status.success());
+    assert!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).is_err(),
+        "AYX_OUTPUT=text must produce the text renderer, not JSON"
+    );
+}
+
+#[test]
+fn bad_ayx_output_is_a_validation_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["catalog", "list"])
+        .env("AYX_OUTPUT", "xml")
+        .output()
+        .expect("ayx binary should run");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("AYX_OUTPUT"));
+}
+
+#[test]
+fn jq_filters_the_compact_envelope() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["catalog", "list", "--jq", ".schema_version", "--raw-output"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "ayx.output.v1"
+    );
+
+    let bad = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["catalog", "list", "--jq", ".["])
+        .output()
+        .expect("ayx binary should run");
+    assert_eq!(bad.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("validation"));
+}
+
+#[test]
+fn jq_halt_cannot_hijack_the_exit_code() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["catalog", "list", "--jq", "halt"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&output.stderr).trim())
+            .expect("stderr should be a JSON envelope");
+    assert_eq!(envelope["error_code"], "validation");
+}
+
+#[test]
+fn compact_error_envelope_carries_error_text_off_tty() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "one",
+            "flows",
+            "list",
+            "--profile",
+            "definitely-not-a-profile",
+        ])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(!output.status.success());
+    let envelope: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&output.stderr).trim())
+            .expect("stderr should be a JSON envelope");
+    assert_eq!(envelope["data"]["kind"], "error");
+    let error_text = envelope["data"]["fields"]["error"]
+        .as_str()
+        .expect("data.fields.error should be a non-empty string");
+    assert!(!error_text.is_empty());
+}
+
+#[test]
+fn jq_applies_on_the_err_path() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "one",
+            "flows",
+            "list",
+            "--profile",
+            "definitely-not-a-profile",
+            "--jq",
+            ".error_code",
+        ])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let trimmed = stderr.trim();
+    let value: serde_json::Value =
+        serde_json::from_str(trimmed).unwrap_or_else(|e| panic!("stderr not JSON: {e}\n{stderr}"));
+    assert!(
+        value.is_string(),
+        "--jq .error_code should print a JSON string: {stderr}"
+    );
+}
+
+/// A minimal central profile home: one `default.yaml` profile with an
+/// `alteryx_one:` section that has no `base_url`. Shape derived from
+/// `ayx-core/src/profile.rs`'s `AlteryxOneProfile`/`Config` -- only
+/// `profile_name` and `alteryx_one.account_email` are non-defaulted, so
+/// nothing else is needed for `one open`'s no-base-URL guard.
+fn write_no_base_url_profile_home() -> tempfile::TempDir {
+    let home = tempfile::tempdir().expect("tempdir");
+    let profiles_dir = home.path().join("profiles");
+    fs::create_dir_all(&profiles_dir).expect("create profiles dir");
+    fs::write(
+        profiles_dir.join("default.yaml"),
+        "profile_name: default\nalteryx_one:\n  account_email: user@example.com\n",
+    )
+    .expect("write profile");
+    home
+}
+
+#[test]
+fn one_open_refuses_to_guess_a_tenant_without_a_base_url() {
+    let home = write_no_base_url_profile_home();
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "open", "workflow", "01TEST", "--print", "--no-input"])
+        .env("AYX_CONFIG_HOME", home.path())
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .output()
+        .expect("ayx binary should run");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let envelope: serde_json::Value = serde_json::from_str(stderr.trim())
+        .unwrap_or_else(|e| panic!("stderr not JSON: {e}\n{stderr}"));
+    assert_eq!(envelope["error_code"], "validation");
+    // `message` is the fixed "command failed" summary (main.rs's Err(err)
+    // branch); the actual error text -- what must name both remedies -- is
+    // data.fields.error (compact envelopes always carry it, per the F3 fix).
+    let message = envelope["data"]["fields"]["error"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        message.contains("alteryx_one.base_url"),
+        "message should name alteryx_one.base_url: {stderr}"
+    );
+    assert!(
+        message.contains("AYX_ONE_BASE_URL"),
+        "message should name AYX_ONE_BASE_URL: {stderr}"
+    );
+}
+
+#[test]
+fn one_open_uses_ayx_one_base_url_from_the_environment() {
+    let home = write_no_base_url_profile_home();
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "open", "workflow", "01TEST", "--print", "--no-input"])
+        .env("AYX_CONFIG_HOME", home.path())
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .env("AYX_ONE_BASE_URL", "https://eu1.example.test")
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let envelope: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout not JSON: {e}\n{stdout}"));
+    let url = envelope["data"]["fields"]["url"]
+        .as_str()
+        .unwrap_or_else(|| panic!("data.fields.url missing: {stdout}"));
+    assert!(
+        url.starts_with("https://eu1.example.test/ayx-one/cloud-native/workflows/01TEST"),
+        "unexpected url: {url}"
+    );
+    assert_eq!(envelope["data"]["fields"]["launched"], false);
+}
+
+#[test]
+fn omitted_workflow_id_off_tty_names_the_list_command() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "one",
+            "workflows",
+            "detail",
+            "--no-input",
+            "--output",
+            "json-full",
+        ])
+        .output()
+        .expect("ayx binary should run");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&output.stderr).trim()).unwrap();
+    assert_eq!(envelope["error_code"], "validation");
+    assert_eq!(
+        envelope["remediation"]["commands"][0],
+        "ayx one workflows list --output json"
+    );
+}
+
+#[test]
+fn omitted_flow_id_off_tty_names_the_list_command() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "one",
+            "flows",
+            "detail",
+            "--no-input",
+            "--output",
+            "json-full",
+        ])
+        .output()
+        .expect("ayx binary should run");
+
+    assert_eq!(output.status.code(), Some(2));
+    let envelope: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&output.stderr).trim()).unwrap();
+    assert_eq!(
+        envelope["remediation"]["commands"][0],
+        "ayx one flows list --output json"
     );
 }

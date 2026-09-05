@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Write as _};
+use std::io::{self, IsTerminal, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -16,16 +16,13 @@ use ayx_core::envelope::{Envelope, ErrorCode};
 use ayx_core::observability::{redact_text, transport_error_summary};
 use ayx_core::profile::{
     AyxState, Config, ServerProfile, ayx_config_home, ayx_profiles_dir, ayx_state_path,
-    ayx_workspaces_dir, list_central_profiles, load_ayx_state, profile_resolution_detail,
-    profile_shape_label, profile_storage_path, resolve_runtime_profile, save_ayx_state,
+    ayx_workspaces_dir, list_central_profiles, load_ayx_state, profile_shape_label,
+    profile_storage_path, resolve_runtime_profile, save_ayx_state,
 };
 // Most ayx_one + ayx_one_api helpers used by the One dispatch are now imported
 // directly in cmd/one.rs. These re-exports stay so the License surface and the
-// doctor envelope helpers (still in main.rs) and the TUI can use them.
-use ayx_one::{
-    api_diagnose_envelope, api_inventory_envelope, api_status_envelope,
-    one_surface_inventory_envelope,
-};
+// doctor envelope helpers (still in main.rs) can use them.
+use ayx_one::{api_diagnose_envelope, api_inventory_envelope, api_status_envelope};
 use ayx_one_api::one_api_live_request;
 // server (logs/upgrade/util/api) helpers moved to cmd/server.rs.
 // mongo to cmd/mongo.rs. sqlserver to cmd/sqlserver.rs.
@@ -37,11 +34,11 @@ use self_update::backends::github::Update as GitHubUpdate;
 mod capability;
 mod cmd;
 mod headless;
+mod jq;
 mod onboard;
 mod output;
 mod render;
 pub(crate) mod secret;
-mod tui;
 
 const ALTERYX_BLUE: Color = Color::Rgb(RgbColor(0, 103, 185));
 const ALTERYX_CYAN: Color = Color::Rgb(RgbColor(0, 169, 224));
@@ -256,7 +253,7 @@ fn auth_token_health(access_token: Option<&str>) -> &'static str {
 #[command(
     name = "ayx",
     version,
-    about = "Operator CLI and TUI for the Alteryx ecosystem (Server, One, Mongo, Designer workflows).",
+    about = "Operator CLI for the Alteryx ecosystem (Server, One, Mongo, Designer workflows).",
     long_about = "ayx is a single-binary, agent-friendly CLI for Alteryx administrators and \
                   automation. It produces a uniform JSON envelope (use --output json), gates \
                   mutating One API calls behind --apply (dry-run by default), records audit \
@@ -268,14 +265,13 @@ fn auth_token_health(access_token: Option<&str>) -> &'static str {
     styles = AYX_STYLES
 )]
 struct Cli {
-    /// Output format for the result. Put this after the complete command path,
-    /// for example: `ayx one flows list --output json`.
-    #[arg(
-        long,
-        default_value_t = output::OutputMode::Text,
-        global = true
-    )]
-    output: output::OutputMode,
+    /// Output format. Defaults to `text` on a terminal and `json` when stdout
+    /// is not a terminal or an agent host is detected (`AYX_AGENT`,
+    /// `CLAUDECODE`, `AI_AGENT`). `AYX_OUTPUT=<mode>` overrides the automatic
+    /// choice; this flag overrides everything. Put it after the complete
+    /// command path, for example: `ayx one flows list --output json`.
+    #[arg(long, global = true)]
+    output: Option<output::OutputMode>,
     /// Universal One workspace selector: numeric ID, GID, or exact saved name.
     #[arg(long, global = true)]
     workspace: Option<String>,
@@ -326,6 +322,13 @@ struct Cli {
     /// commands. Has no effect on read-only or non-destructive flows.
     #[arg(long, global = true)]
     yes: bool,
+    /// Apply a jq filter to the JSON result and print one value per line.
+    /// Forces `--output json` unless `--output json-full` is given.
+    #[arg(long, global = true, value_name = "FILTER")]
+    jq: Option<String>,
+    /// With --jq, print string results without quotes (like `jq -r`).
+    #[arg(long, short = 'r', global = true, requires = "jq")]
+    raw_output: bool,
 
     #[command(subcommand)]
     command: Command,
@@ -370,7 +373,7 @@ fn output_descriptor(command: &Command) -> output::OutputDescriptor {
         },
         Command::Completions { .. } => OutputDescriptor::new("completions", ViewKind::Export)
             .with_fields(&["shell", "bytes", "usage_hint"]),
-        Command::Tui => OutputDescriptor::new("tui", ViewKind::Raw),
+        Command::Tui => OutputDescriptor::new("tui", ViewKind::Result),
         Command::One { command } => cmd::one::output_descriptor(command),
         Command::Server { .. } => OutputDescriptor::new("server", ViewKind::Raw),
         Command::Mongo { .. } => OutputDescriptor::new("mongo", ViewKind::Raw),
@@ -470,9 +473,10 @@ enum Command {
         #[arg(long)]
         non_interactive: bool,
     },
-    #[command(
-        about = "Interactive TUI for central profile selection, explicit file editing, One credentials, and connectivity checks"
-    )]
+    /// Removed in 0.20.0 (ADR 0004). Hidden stub for one release cycle so
+    /// muscle-memory invocations get a remediation envelope instead of a clap
+    /// "unrecognized subcommand". Delete in 0.21.0.
+    #[command(hide = true)]
     Tui,
     #[command(
         about = "Machine-readable command registry",
@@ -1046,6 +1050,38 @@ mongo:
             parsed.is_ok(),
             "server-capable telemetry commands should still parse --source server"
         );
+    }
+
+    #[test]
+    fn remediation_for_error_code_names_the_next_command() {
+        use ayx_core::envelope::ErrorCode;
+        let (summary, commands) =
+            remediation_for_error_code(ErrorCode::AuthFailed, "one.flows.list").unwrap();
+        assert!(summary.contains("log in"));
+        assert_eq!(commands[0], "ayx one login");
+
+        let (_, commands) =
+            remediation_for_error_code(ErrorCode::ConfigMissing, "profile.list").unwrap();
+        assert_eq!(
+            commands,
+            vec!["ayx onboard", "ayx profile list --output json"]
+        );
+
+        // Server commands must not be told to run a One login.
+        let (_, commands) = remediation_for_error_code(ErrorCode::AuthFailed, "server").unwrap();
+        assert!(commands.is_empty());
+
+        assert!(remediation_for_error_code(ErrorCode::Internal, "one.flows.list").is_none());
+    }
+
+    #[test]
+    fn not_found_remediation_names_the_familys_list_command() {
+        use ayx_core::envelope::ErrorCode;
+        let (_, commands) =
+            remediation_for_error_code(ErrorCode::NotFound, "one.flows.detail").unwrap();
+        assert_eq!(commands, vec!["ayx one flows list --output json"]);
+
+        assert!(remediation_for_error_code(ErrorCode::NotFound, "server").is_none());
     }
 }
 
@@ -1962,6 +1998,21 @@ pub(crate) enum OneCommand {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Open a One resource in the web console. Launches a browser only on a
+    /// terminal, without --no-input or --print, and when no agent host is
+    /// detected; otherwise prints the URL.
+    Open {
+        /// Resource kind: `workspace` or `workflow` (other kinds are not yet verified).
+        #[arg(value_name = "KIND")]
+        kind: String,
+        /// Workspace GID for `workspace` (defaults to the profile's active
+        /// workspace) or workflow ULID for `workflow`.
+        #[arg(value_name = "ID")]
+        id: Option<String>,
+        /// Print the URL instead of launching a browser.
+        #[arg(long)]
+        print: bool,
+    },
     /// Alteryx One API introspection (spec + coverage).
     #[command(arg_required_else_help = true)]
     Api {
@@ -2138,8 +2189,9 @@ pub(crate) enum OnePersonCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
+        /// Resource id. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
     },
     /// Create a One person from JSON payload.
     Create {
@@ -2218,6 +2270,11 @@ pub(crate) enum OneWorkspaceCommand {
     },
     /// Inspect the current One workspace posture.
     Current,
+    /// Inspect a One workspace by numeric id (`GET /v4/workspaces/{workspaceId}`).
+    Detail {
+        #[arg(value_name = "ID")]
+        id: String,
+    },
     /// Inspect the current One workspace configuration.
     CurrentConfiguration,
     /// Inspect a One workspace configuration by id.
@@ -2569,8 +2626,9 @@ pub(crate) enum OnePlansCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
+        /// Resource id. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
     },
     /// Inspect a One plan with the full documented payload.
     Full {
@@ -2704,8 +2762,9 @@ pub(crate) enum OneFlowsCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
+        /// Resource id. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
     },
     /// Update a One flow from JSON payload.
     Update {
@@ -3073,8 +3132,9 @@ pub(crate) enum OneConnectionsCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
+        /// Resource id. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
     },
     /// Inspect connection status.
     Status {
@@ -3418,8 +3478,9 @@ pub(crate) enum OneWorkflowsCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
+        /// Workflow ULID. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
         /// Also resolve the workflow's connections, datasets, and macros.
         #[arg(long)]
         include_dependencies: bool,
@@ -3489,8 +3550,9 @@ pub(crate) enum OneWorkflowsCommand {
     Delete {
         #[arg(long)]
         profile: Option<String>,
+        /// Workflow ULID. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
     },
     /// Duplicate a cloud-native workflow.
     Copy {
@@ -3674,8 +3736,9 @@ pub(crate) enum OneJobGroupCommand {
     Detail {
         #[arg(long)]
         profile: Option<String>,
+        /// Resource id. Omit on a terminal to pick from the list.
         #[arg(value_name = "ID")]
-        id: String,
+        id: Option<String>,
     },
     /// Cancel a One job group.
     Cancel {
@@ -4614,7 +4677,23 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
             )?;
             Envelope::ok_with_data("onboarding completed", detail)
         }
-        Command::Tui => return tui::run(),
+        Command::Tui => Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::Validation,
+            "ayx tui was removed in 0.20.0",
+            json!({
+                "removed_in": "0.20.0",
+                "adr": "docs/adr/0004-no-bundled-tui.md",
+            }),
+        )
+        .with_remediation(
+            "Use the targeted commands that replaced the TUI",
+            vec![
+                "ayx onboard".to_string(),
+                "ayx one login".to_string(),
+                "ayx profile list".to_string(),
+                "ayx doctor".to_string(),
+            ],
+        ),
         Command::Profile { command } => match command {
             ProfileCommand::List => profile_list_envelope()?,
             ProfileCommand::Current => profile_current_envelope()?,
@@ -5471,137 +5550,8 @@ fn doctor_config_envelope(profile: Option<&str>, fix: bool) -> Result<Envelope> 
     ))
 }
 
-pub(crate) fn doctor_config_envelope_from_path(profile: &Path, fix: bool) -> Result<Envelope> {
-    if fix {
-        fs::create_dir_all(ayx_profiles_dir()?)?;
-        fs::create_dir_all(ayx_workspaces_dir()?)?;
-        if !ayx_state_path()?.exists() {
-            save_ayx_state(&AyxState::default())?;
-        }
-    }
-    let resolution = profile_resolution_detail(profile)?;
-    let (shape, inline_risks) = if Path::new(&resolution.resolved_path).exists() {
-        let raw = fs::read_to_string(&resolution.resolved_path)?;
-        let value: serde_yaml::Value = serde_yaml::from_str(&raw)?;
-        (
-            profile_shape_label(&value),
-            collect_inline_secret_warnings(&raw, &value),
-        )
-    } else {
-        ("missing", Vec::new())
-    };
-    let label = Path::new(&resolution.resolved_path)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("profile");
-    let (status, summary) = doctor_config_status_summary(label, shape, &inline_risks);
-    let secret_posture = secret::inspect_profile(profile)
-        .map(|slots| json!({ "available": true, "slots": slots }))
-        .unwrap_or_else(|_| {
-            json!({
-                "available": false,
-                "status": "unavailable",
-                "hint": "run `ayx secret validate` for reference remediation"
-            })
-        });
-    Ok(Envelope::ok_with_data(
-        "doctor config completed",
-        json!({
-            "config_home": ayx_config_home()?.display().to_string(),
-            "profiles_dir": ayx_profiles_dir()?.display().to_string(),
-            "workspaces_dir": ayx_workspaces_dir()?.display().to_string(),
-            "state_path": ayx_state_path()?.display().to_string(),
-            "resolution": resolution,
-            "shape": shape,
-            "inline_secret_risks": inline_risks,
-            "secret_posture": secret_posture,
-            "fix_applied": fix,
-            "status": status,
-            "summary": summary,
-        }),
-    ))
-}
-
 fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
     let config = load_profile_with_env(profile, environment)?;
-    let one = config.alteryx_one.as_ref();
-    let server = config.server.as_ref();
-    let one_configured = one.is_some();
-    let one_access_token_present = one
-        .and_then(|v| v.access_token.as_ref())
-        .is_some_and(|v| !v.trim().is_empty());
-    let one_refresh_token_present = one
-        .and_then(|v| v.refresh_token.as_ref())
-        .is_some_and(|v| !v.trim().is_empty());
-    let one_oauth_client_id_present = one
-        .and_then(|v| v.oauth_client_id.as_ref())
-        .is_some_and(|v| !v.trim().is_empty());
-    let server_configured = server.is_some();
-    let server_api_key_present = server.is_some_and(|v| !v.curator_api_key.trim().is_empty());
-    let server_api_secret_present = server.is_some_and(|v| !v.curator_api_secret.trim().is_empty());
-    let (status, summary) = doctor_auth_status_summary(
-        one_configured,
-        one_access_token_present,
-        one_refresh_token_present,
-        one_oauth_client_id_present,
-        server_configured,
-        server_api_key_present,
-        server_api_secret_present,
-    );
-    let one_status = auth_product_status(
-        one_configured,
-        one_access_token_present && one_refresh_token_present && one_oauth_client_id_present,
-    );
-    let server_status = auth_product_status(
-        server_configured,
-        server_api_key_present && server_api_secret_present,
-    );
-    Ok(Envelope::ok_with_data(
-        "doctor auth completed",
-        json!({
-            "profile": config.profile_name,
-            "status": status,
-            "summary": summary,
-            "one_status": one_status,
-            "server_status": server_status,
-            "inline_secret_fields": ayx_core::auth::inline_secret_fields(&config),
-            "migration": {
-                "available": !ayx_core::auth::inline_secret_fields(&config).is_empty(),
-                "hint": "run `ayx one doctor auth --migrate` when secure storage is available"
-            },
-            "one": {
-                "configured": one_configured,
-                "access_token_present": one_access_token_present,
-                "refresh_token_present": one_refresh_token_present,
-                "oauth_client_id_present": one_oauth_client_id_present,
-                "access_token_source": secret_source(
-                    one.and_then(|v| v.access_token_ref.as_ref()),
-                    one.and_then(|v| v.access_token.as_deref()),
-                ),
-                "refresh_token_source": secret_source(
-                    one.and_then(|v| v.refresh_token_ref.as_ref()),
-                    one.and_then(|v| v.refresh_token.as_deref()),
-                ),
-            },
-            "server": {
-                "configured": server_configured,
-                "curator_api_key_present": server_api_key_present,
-                "curator_api_secret_present": server_api_secret_present,
-                "curator_api_secret_source": secret_source(
-                    server.and_then(|v| v.curator_api_secret_ref.as_ref()),
-                    server.map(|v| v.curator_api_secret.as_str()),
-                ),
-            }
-        }),
-    ))
-}
-
-pub(crate) fn doctor_auth_envelope_from_path(
-    profile: &Path,
-    environment: Option<&str>,
-) -> Result<Envelope> {
-    let config = Config::load_from_path_with_environment(profile, environment)?;
-    validate_loaded_auth_bindings(&config)?;
     let one = config.alteryx_one.as_ref();
     let server = config.server.as_ref();
     let one_configured = one.is_some();
@@ -6368,7 +6318,52 @@ fn main() -> Result<()> {
     // Clap owns --help/-h rendering. Previously a hand-rolled print_help()
     // intercepted bare --help; that drifted from the actual command tree.
     let cli = Cli::parse();
-    let output = cli.output;
+    let (output, output_source) = match output::resolve_output_mode(
+        cli.output,
+        std::env::var("AYX_OUTPUT").ok().as_deref(),
+        io::stdout().is_terminal(),
+        output::agent_marker_present(|key| std::env::var(key).ok()),
+    ) {
+        Ok(resolved) => resolved,
+        Err(message) => {
+            let err_env = Envelope::err_coded(
+                ayx_core::envelope::ErrorCode::Validation,
+                message,
+                json!({ "env": "AYX_OUTPUT" }),
+            )
+            .finalize_retryable();
+            eprintln!(
+                "{}",
+                serde_json::to_string_pretty(&err_env).unwrap_or_default()
+            );
+            std::process::exit(exit_code_for_envelope(&err_env));
+        }
+    };
+    // Shell completion scripts are raw stdout payloads and are almost always
+    // redirected to a file, so a non-terminal stdout must not flip them to
+    // JSON. Explicit `--output` and `AYX_OUTPUT` still win.
+    let output = if matches!(cli.command, Command::Completions { .. })
+        && matches!(
+            output_source,
+            output::OutputModeSource::AutoNonTty | output::OutputModeSource::AutoAgentMarker
+        ) {
+        output::OutputMode::Text
+    } else {
+        output
+    };
+    // An explicit --jq is an explicit request for JSON: it forces json unless
+    // the caller asked for the full (uncompacted) envelope. This applies even
+    // to `Command::Completions`, deliberately overriding the exemption above.
+    let jq_filter = cli.jq.clone();
+    let raw_output = cli.raw_output;
+    let output = match (&jq_filter, output) {
+        (Some(_), output::OutputMode::JsonFull) => output::OutputMode::JsonFull,
+        (Some(_), _) => output::OutputMode::Json,
+        (None, mode) => mode,
+    };
+    if cli.debug {
+        eprintln!("[ayx-debug] output mode {output} ({output_source:?})");
+    }
     let error_format = cli.error_format;
     let output_limit = cli.output_limit;
     let descriptor = output_descriptor(&cli.command);
@@ -6380,7 +6375,40 @@ fn main() -> Result<()> {
 
     match result {
         Ok(envelope) => {
+            let mut envelope = envelope.finalize_retryable();
+            if !envelope.ok
+                && envelope.remediation.is_none()
+                && let Some(code) = envelope.error_code
+                && let Some((summary, commands)) =
+                    remediation_for_error_code(code, descriptor.command)
+            {
+                envelope = envelope.with_remediation(summary, commands);
+            }
+            if envelope.ok
+                && envelope.next.is_none()
+                && envelope.data.get("pages_fetched").is_some()
+                && let Some(token) = envelope
+                    .data
+                    .get("next_page_token")
+                    .and_then(Value::as_str)
+                    .filter(|t| !t.is_empty())
+                    .map(str::to_string)
+            {
+                let argv: Vec<String> = std::env::args().collect();
+                envelope = envelope.with_next(vec![output::pagination_next_command(&argv, &token)]);
+            }
             let rendered = format_envelope(&envelope, output, descriptor, output_limit)?;
+            let rendered = match apply_jq_or_passthrough(rendered, jq_filter.as_deref(), raw_output)
+            {
+                Ok(text) => text,
+                Err(err_env) => {
+                    eprintln!(
+                        "{}",
+                        serde_json::to_string_pretty(&err_env).unwrap_or_default()
+                    );
+                    std::process::exit(exit_code_for_envelope(&err_env));
+                }
+            };
             if envelope.ok {
                 print!("{rendered}");
                 println!();
@@ -6417,31 +6445,78 @@ fn main() -> Result<()> {
             if let Some(h) = hint {
                 data["hint"] = Value::String(h.to_string());
             }
-            let err_env = Envelope::err_coded(code, "command failed", data);
+            let mut err_env =
+                Envelope::err_coded(code, "command failed", data).finalize_retryable();
+            if let Some((summary, commands)) = remediation_for_error_code(code, descriptor.command)
+            {
+                err_env = err_env.with_remediation(summary, commands);
+            }
+            if let Some(missing) = err.downcast_ref::<cmd::select::MissingSelector>() {
+                err_env = err_env.with_remediation(
+                    format!(
+                        "Provide the {} explicitly, or run on a terminal to pick one",
+                        missing.what
+                    ),
+                    vec![missing.list_command.to_string()],
+                );
+            }
             // Errors always go to stderr; the format mirrors the success
             // renderer so JSON consumers see the same envelope shape. Exit
             // non-zero via process::exit (like the ok=false branch) rather than
             // returning Err, which would make the runtime print a second,
             // non-JSON `Error: ...` line and corrupt the stderr envelope.
-            eprint!(
-                "{}",
-                format_envelope(
-                    &err_env,
-                    if error_format == output::ErrorFormat::Json {
-                        output::OutputMode::Json
-                    } else {
-                        output
-                    },
-                    descriptor,
-                    output_limit,
-                )
-                .unwrap_or_else(|_| err_env.message.clone())
-            );
+            let rendered = format_envelope(
+                &err_env,
+                if error_format == output::ErrorFormat::Json {
+                    output::OutputMode::Json
+                } else {
+                    output
+                },
+                descriptor,
+                output_limit,
+            )
+            .unwrap_or_else(|_| err_env.message.clone());
+            // `--jq` applies to dispatcher-level failures too, not just the
+            // Ok(envelope) path -- a jq failure here still prints a
+            // validation envelope and exits with its code, exactly like the
+            // Ok(envelope) branch above.
+            let (rendered, exit_envelope) =
+                match apply_jq_or_passthrough(rendered, jq_filter.as_deref(), raw_output) {
+                    Ok(text) => (text, err_env),
+                    Err(jq_err_env) => (
+                        serde_json::to_string_pretty(&jq_err_env).unwrap_or_default(),
+                        *jq_err_env,
+                    ),
+                };
+            eprint!("{rendered}");
             eprintln!();
             let _ = io::stdout().lock().flush();
             let _ = io::stderr().lock().flush();
-            std::process::exit(exit_code_for_envelope(&err_env));
+            std::process::exit(exit_code_for_envelope(&exit_envelope));
         }
+    }
+}
+
+/// Apply `--jq` to a rendered JSON document, or pass it through. A filter
+/// failure becomes a validation envelope so the caller sees the standard shape.
+fn apply_jq_or_passthrough(
+    rendered: String,
+    jq_filter: Option<&str>,
+    raw_output: bool,
+) -> Result<String, Box<Envelope>> {
+    let Some(filter) = jq_filter else {
+        return Ok(rendered);
+    };
+    match jq::apply(filter, &rendered, raw_output) {
+        Ok(lines) => Ok(lines.join("\n")),
+        Err(err) => Err(Box::new(
+            Envelope::err_coded(
+                ayx_core::envelope::ErrorCode::Validation,
+                err.to_string(),
+                json!({ "jq": filter }),
+            )
+            .finalize_retryable(),
+        )),
     }
 }
 
@@ -6624,6 +6699,62 @@ fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static s
         }
         Internal => None,
     }
+}
+
+/// Structured remediation for dispatcher-classified failures. `command` is the
+/// descriptor's dotted command id (e.g. `one.flows.list`) so product-specific
+/// advice is only given to the product it applies to.
+fn remediation_for_error_code(
+    code: ayx_core::envelope::ErrorCode,
+    command: &str,
+) -> Option<(String, Vec<String>)> {
+    use ayx_core::envelope::ErrorCode::*;
+    let is_one = command == "one" || command.starts_with("one.");
+    let cmds = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+    if code == NotFound {
+        // `command` is the descriptor's dotted id, e.g. `one.flows.detail`.
+        // Only name a `<family> list` command when the live command tree
+        // still exposes one at `one/<family>/list` -- never fabricate a
+        // command that doesn't exist.
+        let mut parts = command.split('.');
+        if let (Some("one"), Some(family), Some(_verb), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        {
+            let list_path = format!("one/{family}/list");
+            if crate::cmd::command_surface::visible_command_paths().contains(&list_path) {
+                return Some((
+                    "The id was not found in this workspace; list the family to find a valid one."
+                        .to_string(),
+                    vec![format!("ayx one {family} list --output json")],
+                ));
+            }
+        }
+        return None;
+    }
+
+    Some(match code {
+        ConfigMissing => (
+            "No usable profile was found; onboard or select an existing one.".to_string(),
+            cmds(&["ayx onboard", "ayx profile list --output json"]),
+        ),
+        AuthFailed if is_one => (
+            "The stored One credential was rejected; log in again.".to_string(),
+            cmds(&["ayx one login", "ayx one auth status --output json"]),
+        ),
+        AuthFailed => (
+            "The stored credential was rejected; refresh it for this product.".to_string(),
+            Vec::new(),
+        ),
+        WorkspaceMismatch => (
+            "The token belongs to a different workspace than the profile expects.".to_string(),
+            cmds(&[
+                "ayx one workspace current --output json",
+                "ayx one workspace switch",
+            ]),
+        ),
+        _ => return None,
+    })
 }
 
 /// Best-effort classification of an anyhow error chain into an `ErrorCode`.

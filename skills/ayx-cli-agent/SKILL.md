@@ -36,7 +36,10 @@ Read the standard envelope carefully:
 - normalized paginated results are commonly in `data.items`;
 - inspect `data.page_envelopes[].status_code` before treating a list as live-success;
 - preserve `error_code`, `status_code`, `surface`, `operation`, and request IDs in findings;
-- never print or retain access tokens, passwords, cookies, or secret bodies.
+- never print or retain access tokens, passwords, cookies, or secret bodies;
+- on failure, branch on `error_code` and `retryable`; when `remediation.commands`
+  is present, run those commands before re-attempting the original;
+- on paginated successes, `next[0]` is the exact command for the next page.
 
 ## Mutations
 

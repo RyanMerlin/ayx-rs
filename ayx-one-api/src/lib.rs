@@ -3105,13 +3105,27 @@ fn apply_jitter(base_ms: u64, pct: u64) -> u64 {
     base_ms.saturating_add(offset).saturating_sub(span)
 }
 
-/// Resolve the One API base URL for this profile.
+/// The One base URL a profile actually configures, or `None` when nothing
+/// configures one.
 ///
 /// Precedence for SP mode: active workspace credential's `api_base_url`, then
-/// the profile `base_url`, then env var, then the `us1` default.
-/// For user mode (and as the SP fallback): profile `base_url` → env var →
-/// `https://us1.alteryxcloud.com`.
-pub fn resolve_one_base_url(config: &Config) -> String {
+/// the profile `base_url`, then the `AYX_ONE_API_BASE_URL` env var.
+/// For user mode (and as the SP fallback): profile `base_url` → env var.
+///
+/// Two different env vars can satisfy this, at two different points:
+/// `AYX_ONE_BASE_URL` is folded into `config.alteryx_one.base_url` at
+/// profile *load* time (`apply_env_fallbacks`, `ayx-core/src/profile.rs`),
+/// so by the time this function runs it's indistinguishable from a
+/// profile-file `base_url`; `AYX_ONE_API_BASE_URL` is read directly, right
+/// here, as the final fallback. Both work as the remediation for "no base
+/// URL configured" — see the `cli_smoke.rs` tests proving `one open`'s
+/// no-base-URL guard and the `AYX_ONE_BASE_URL` remedy end to end.
+///
+/// Unlike `resolve_one_base_url`, this never falls back to the built-in
+/// `us1` default host, so a caller that must not guess a tenant — a browser
+/// deep link, for instance — can refuse instead of silently opening or
+/// printing a URL for the wrong regional console.
+pub fn configured_one_base_url(config: &Config) -> Option<String> {
     use ayx_core::profile::AuthMode;
     // In SP mode, honour the per-credential api_base_url if set (allows
     // routing to the regional cell that trusts the SP issuer's signing key).
@@ -3126,7 +3140,7 @@ pub fn resolve_one_base_url(config: &Config) -> String {
     {
         let trimmed = url.trim().trim_end_matches('/').to_string();
         if !trimmed.is_empty() {
-            return trimmed;
+            return Some(trimmed);
         }
     }
     if let Some(one) = config.alteryx_one.as_ref()
@@ -3134,16 +3148,24 @@ pub fn resolve_one_base_url(config: &Config) -> String {
     {
         let trimmed = url.trim().trim_end_matches('/').to_string();
         if !trimmed.is_empty() {
-            return trimmed;
+            return Some(trimmed);
         }
     }
     if let Ok(env_url) = std::env::var("AYX_ONE_API_BASE_URL") {
         let trimmed = env_url.trim().trim_end_matches('/').to_string();
         if !trimmed.is_empty() {
-            return trimmed;
+            return Some(trimmed);
         }
     }
-    ONE_API_BASE_URL.to_string()
+    None
+}
+
+/// Resolve the One API base URL for this profile, falling back to the
+/// built-in `us1` default (`https://us1.alteryxcloud.com`) when nothing is
+/// configured. Used by every live API call. See `configured_one_base_url`
+/// for the strict variant that refuses to guess a tenant.
+pub fn resolve_one_base_url(config: &Config) -> String {
+    configured_one_base_url(config).unwrap_or_else(|| ONE_API_BASE_URL.to_string())
 }
 
 #[cfg(test)]
@@ -3154,6 +3176,52 @@ mod tests {
     use httpmock::prelude::*;
     use serde_yaml::from_str;
     use std::collections::BTreeMap;
+    use std::sync::{Mutex, OnceLock};
+
+    static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    /// Hold for the duration of any test that mutates process env vars, so
+    /// parallel tests in this file never observe each other's env state.
+    /// Mirrors the `test_env_lock`/`EnvGuard` convention in
+    /// `ayx-core/src/profile.rs` (not reusable across crates, since it's
+    /// private to that module's tests).
+    fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        TEST_ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    /// Env-isolation guard for tests that touch `AYX_ONE_API_BASE_URL`.
+    /// Callers must hold `test_env_lock()` for the duration of the test.
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn unset(key: &'static str) -> Self {
+            let old = std::env::var(key).ok();
+            // Tests serialize env access with TEST_ENV_LOCK.
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(old) = &self.old {
+                // Tests serialize env access with TEST_ENV_LOCK.
+                unsafe {
+                    std::env::set_var(self.key, old);
+                }
+            } else {
+                // Tests serialize env access with TEST_ENV_LOCK.
+                unsafe {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+    }
 
     fn one_profile(base_url: &str) -> Config {
         let mut config: Config = from_str(
@@ -3194,6 +3262,32 @@ mongo:
             auth_mode: AuthMode::default(),
         });
         config
+    }
+
+    #[test]
+    fn configured_one_base_url_is_none_without_any_source() {
+        let _lock = test_env_lock();
+        let _env = EnvGuard::unset("AYX_ONE_API_BASE_URL");
+        let mut config = one_profile("https://us1.example.test");
+        config.alteryx_one.as_mut().expect("one profile").base_url = None;
+
+        assert!(configured_one_base_url(&config).is_none());
+        assert_eq!(resolve_one_base_url(&config), ONE_API_BASE_URL);
+    }
+
+    #[test]
+    fn configured_one_base_url_returns_the_profile_value() {
+        let _lock = test_env_lock();
+        let _env = EnvGuard::unset("AYX_ONE_API_BASE_URL");
+        // Trailing slash on input mirrors `normalized_base_url()`'s own
+        // stripping, and the fixture stores it verbatim in `base_url`.
+        let config = one_profile("https://eu1.example.test/");
+
+        assert_eq!(
+            configured_one_base_url(&config).as_deref(),
+            Some("https://eu1.example.test")
+        );
+        assert_eq!(resolve_one_base_url(&config), "https://eu1.example.test");
     }
 
     #[test]

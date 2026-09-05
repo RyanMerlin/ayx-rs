@@ -392,95 +392,6 @@ fn serialize_workspace_to(path: &Path, workspace: &WorkspaceConfig) -> Result<()
     Ok(())
 }
 
-/// Persist a workspace, secretizing each environment's secrets first.
-///
-/// Secure by default: a secret that was loaded into a workspace environment
-/// (e.g. an `env:`/`keyring:` ref resolved to a concrete value, or a freshly
-/// minted token) is moved behind a secret ref rather than serialized as
-/// plaintext YAML. Without this pass the workspace-save path materialized
-/// resolved secrets to disk in the clear (red-team High #2). Use
-/// [`serialize_workspace_to`] for the template path, which keeps placeholders.
-///
-/// Returns the merged [`SecretizeOutput`] across all environments so callers
-/// can surface the `inline_fields` warning when the OS keyring is unavailable.
-///
-/// Keyring scope: each environment's secrets are stored under the account
-/// `workspace_name.env_key` (e.g. `myws.prod`), not the mutable
-/// `profile_name`.  Two environments that share a `profile_name` (a common
-/// template pattern) would otherwise write to the same keyring account —
-/// last-writer-wins silently discards the first environment's secrets.
-pub(crate) fn write_workspace_config(
-    path: &Path,
-    workspace: &WorkspaceConfig,
-) -> Result<SecretizeOutput> {
-    let lock = SensitiveFileLock::acquire(path).map_err(anyhow::Error::from)?;
-    recover_keyring_transaction_locked(path, &lock).map_err(anyhow::Error::from)?;
-    let transaction = KeyringTransaction::begin(&lock);
-    let mut secured = workspace.clone();
-    let mut merged = SecretizeOutput::default();
-    // Same `.env` view the loader used, so an `env:`-referenced credential is
-    // recognised as covered instead of being re-stored into the file.
-    let workspace_env_files = ayx_core::profile::env_file_values(path);
-    for (env_key, config) in secured.environments.iter_mut() {
-        let scope = format!("{}.{env_key}", workspace.workspace_name);
-        let out = match secretize_config_with_binding(
-            config,
-            &scope,
-            InlineSecretPolicy::Allow,
-            None,
-            None,
-            Some(&transaction),
-            &workspace_env_files,
-        ) {
-            Ok(out) => out,
-            Err(err) => {
-                let rollback = transaction.rollback_and_abort();
-                return Err(if let Err(rollback) = rollback {
-                    anyhow::anyhow!("{err}; {rollback}")
-                } else {
-                    err
-                });
-            }
-        };
-        merged.refs.extend(out.refs);
-        merged.inline_fields.extend(out.inline_fields);
-        merged.keyring_previous.extend(out.keyring_previous);
-        merged.scopes_used.extend(out.scopes_used);
-    }
-    let canonical = match canonical_workspace_value(&secured) {
-        Ok(canonical) => canonical,
-        Err(err) => {
-            if let Err(rollback) = transaction.rollback_and_abort() {
-                return Err(anyhow::anyhow!("{err}; {rollback}"));
-            }
-            return Err(err.into());
-        }
-    };
-    let body = match serde_yaml::to_string(&canonical) {
-        Ok(body) => body,
-        Err(err) => {
-            if let Err(rollback) = transaction.rollback_and_abort() {
-                return Err(anyhow::anyhow!("{err}; {rollback}"));
-            }
-            return Err(err.into());
-        }
-    };
-    if let Err(err) = transaction.set_target_digest(body.as_bytes()) {
-        if let Err(rollback) = transaction.rollback_and_abort() {
-            return Err(anyhow::anyhow!("{err}; {rollback}"));
-        }
-        return Err(err.into());
-    }
-    if let Err(err) = lock.write(body.as_bytes()) {
-        if let Err(rollback) = transaction.rollback_and_abort() {
-            return Err(anyhow::anyhow!("{err}; {rollback}"));
-        }
-        return Err(err.into());
-    }
-    transaction.commit().map_err(anyhow::Error::from)?;
-    Ok(merged)
-}
-
 fn template_config_with_profile(profile_name: &str) -> Config {
     let mut config = default_config_with_profile(profile_name);
     config.server = Some(ServerProfile {
@@ -541,9 +452,7 @@ pub(crate) struct SecretizeOutput {
     /// The keyring scope string(s) the writer passed to `secretize_config`.
     ///
     /// Single-profile writes (`write_config_with_policy`) populate exactly one
-    /// entry (the on-disk file stem).  Workspace writes (`write_workspace_config`)
-    /// accumulate one entry per environment.  In-memory only — not serialized to
-    /// disk.
+    /// entry (the on-disk file stem). In-memory only — not serialized to disk.
     pub scopes_used: Vec<String>,
 }
 
@@ -1500,19 +1409,6 @@ fn prompt_sql_connection(
     Ok(conn)
 }
 
-/// Write a profile and return the full [`SecretizeOutput`] (refs + inline-fallback fields).
-///
-/// The `_secret_refs` parameter is kept for call-site compatibility but is no longer
-/// used; refs come from the returned `SecretizeOutput`. Callers should check
-/// [`inline_secret_warning`] on `output.inline_fields` to surface the advisory to users.
-pub(crate) fn write_config(
-    path: &Path,
-    config: &Config,
-    _secret_refs: &BTreeMap<String, String>,
-) -> Result<SecretizeOutput> {
-    write_config_with_policy(path, config, InlineSecretPolicy::Allow)
-}
-
 /// Write a profile file under `path`. Returns refs + inline-fallback warnings.
 ///
 /// The file is created with restrictive permissions (0o600 on Unix) so secrets
@@ -1750,9 +1646,9 @@ pub(crate) fn binding_for_auth_config(
         .alteryx_one
         .as_ref()
         .context("config missing alteryx_one section")?;
-    let base_url = one
-        .normalized_base_url()
-        .context("alteryx_one.base_url is required for credential binding")?;
+    let base_url = one.normalized_base_url().context(
+        "alteryx_one.base_url is required for credential binding; set it in the profile or export AYX_ONE_BASE_URL",
+    )?;
     let issuer = one
         .effective_token_endpoint_url_for_workspace(workspace_id)
         .unwrap_or_else(|| base_url.clone());
@@ -2241,7 +2137,7 @@ mod tests {
     use ayx_core::profile::{
         ApiAuth, ApiAuthMode, ApiProfile, Config, MongoDatabases, MongoEmbedded, MongoMode,
         MongoProfile, ServerApiProfile, ServerProfile, SqlServerConnectionProfile,
-        SqlServerProfile, WorkspaceConfig, detect_secret_conflict, load_workspace_config,
+        SqlServerProfile, detect_secret_conflict,
     };
     use ayx_core::secrets::install_test_keyring_store;
     use std::collections::HashMap;
@@ -2454,30 +2350,6 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("workspace_name"));
         assert!(content.contains("active_environment"));
-    }
-
-    #[test]
-    fn workspace_config_save_preserves_environment_shape() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("environments.yaml");
-        let workspace = WorkspaceConfig {
-            workspace_name: "lab".to_string(),
-            active_environment: "dev".to_string(),
-            environments: HashMap::from([
-                ("dev".to_string(), template_config_with_profile("dev")),
-                ("prod".to_string(), template_config_with_profile("prod")),
-            ]),
-        };
-        write_workspace_config(&path, &workspace).unwrap();
-
-        let loaded = load_workspace_config(&path).unwrap();
-        assert_eq!(loaded.active_environment, "dev");
-        assert_eq!(loaded.environments.len(), 2);
-        assert_eq!(loaded.environments["prod"].profile_name, "prod");
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("environments:"));
-        assert!(content.contains("dev:"));
-        assert!(content.contains("prod:"));
     }
 
     #[test]
@@ -2700,6 +2572,56 @@ alteryx_one:
     }
 
     #[test]
+    fn profile_save_surfaces_inline_fields_when_keyring_unavailable() {
+        // Force the keyring-store step to fail deterministically so the inline
+        // fallback path always runs, regardless of whether the host has a live
+        // D-Bus Secret Service. The scoped test seam is thread-local, so this
+        // test remains safe under `cargo test`'s concurrent execution.
+        //
+        // This guards the property five live production sites depend on:
+        // `write_config_with_policy` (and friends) must both fall back to
+        // inline storage AND surface that fact in `SecretizeOutput::inline_fields`
+        // so callers (onboard::run_onboarding, `profile migrate`,
+        // `one_platform::auth`, `one_platform::workspace`) can warn the operator
+        // instead of silently persisting a plaintext-inline credential.
+        let _force_keyring_unavailable =
+            ayx_core::secrets::ForcedKeyringUnavailable::for_current_thread();
+        let _home = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::set_var("AYX_CONFIG_HOME", _home.path());
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("profile-inline-fallback.yaml");
+        std::fs::write(
+            &path,
+            r#"profile_name: inline-fallback-test
+alteryx_one:
+  account_email: test@example.com
+  base_url: https://us1.alteryxcloud.com
+  access_token: plaintext-fallback-token
+"#,
+        )
+        .unwrap();
+        let config = Config::load_from_path_with_environment(&path, None).unwrap();
+        let out = write_config_with_policy(&path, &config, InlineSecretPolicy::Allow).unwrap();
+        // With the keyring forced unavailable, the writer must fall back to
+        // inline storage AND surface that fact in SecretizeOutput.
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains("inline:"),
+            "forced-unavailable keyring must produce inline: ref on disk"
+        );
+        assert!(
+            !out.inline_fields.is_empty(),
+            "inline fallback must be reported in SecretizeOutput, not swallowed"
+        );
+        assert!(
+            out.inline_fields.iter().any(|f| f.contains("access_token")),
+            "inline_fields must name the secretized field (access_token)"
+        );
+    }
+
+    #[test]
     fn workspace_password_is_saved_under_workspace_credential() {
         let _home = isolated_config_home();
         let temp = tempfile::tempdir().unwrap();
@@ -2734,40 +2656,6 @@ alteryx_one:
                 .and_then(|one| one.workspace_credentials.get("42"))
                 .and_then(|credential| credential.workspace_password.as_deref()),
             Some("workspace-password-secret")
-        );
-    }
-
-    #[test]
-    fn write_workspace_config_secretizes_secrets() {
-        // The workspace-save path must secretize secrets, not serialize resolved
-        // plaintext straight to disk (red-team High #2).
-        let _home = isolated_config_home();
-        let temp = tempfile::tempdir().unwrap();
-        let env_path = temp.path().join("env.yaml");
-        std::fs::write(
-            &env_path,
-            r#"profile_name: dev
-alteryx_one:
-  account_email: test@example.com
-  base_url: https://us1.alteryxcloud.com
-  access_token: ws-plaintext-token
-"#,
-        )
-        .unwrap();
-        let env_config = Config::load_from_path_with_environment(&env_path, None).unwrap();
-
-        let workspace = WorkspaceConfig {
-            workspace_name: "lab".to_string(),
-            active_environment: "dev".to_string(),
-            environments: HashMap::from([("dev".to_string(), env_config)]),
-        };
-        let ws_path = temp.path().join("workspace.yaml");
-        write_workspace_config(&ws_path, &workspace).unwrap();
-
-        let on_disk = std::fs::read_to_string(&ws_path).unwrap();
-        assert!(
-            !on_disk.contains("access_token: ws-plaintext-token"),
-            "write_workspace_config must secretize secrets, not write plaintext:\n{on_disk}"
         );
     }
 
@@ -3065,65 +2953,6 @@ server_api:
     }
 
     // ---------------------------------------------------------------------------
-    // Task 3: write_workspace_config must return SecretizeOutput — no silent discard.
-    // ---------------------------------------------------------------------------
-
-    /// Build a WorkspaceConfig with a single environment that carries one secret.
-    fn workspace_with_one_env_secret(secret_value: &str) -> WorkspaceConfig {
-        // Embed the secret as an inline access_token so secretize_config has
-        // something to secretize (and fall back to inline when keyring absent).
-        let yaml = format!(
-            "profile_name: ws-env\nalteryx_one:\n  account_email: test@example.com\n  base_url: https://us1.alteryxcloud.com\n  access_token: {secret_value}\n"
-        );
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(tmp.path(), yaml).unwrap();
-        let env_cfg = Config::load_from_path_with_environment(tmp.path(), None).unwrap();
-        WorkspaceConfig {
-            workspace_name: "test-ws".to_string(),
-            active_environment: "env".to_string(),
-            environments: HashMap::from([("env".to_string(), env_cfg)]),
-        }
-    }
-
-    #[test]
-    fn workspace_save_surfaces_inline_fields_when_keyring_unavailable() {
-        // Force the keyring-store step to fail deterministically so the inline
-        // fallback path always runs, regardless of whether the host has a live
-        // D-Bus Secret Service. The scoped test seam is thread-local, so this
-        // test remains safe under `cargo test`'s concurrent execution.
-        let _force_keyring_unavailable =
-            ayx_core::secrets::ForcedKeyringUnavailable::for_current_thread();
-        let _home = tempfile::tempdir().unwrap();
-        unsafe {
-            std::env::set_var("AYX_CONFIG_HOME", _home.path());
-        }
-        let ws = workspace_with_one_env_secret("shh");
-        let tmp = tempfile::tempdir().unwrap();
-        let ws_path = tmp.path().join("ws.yaml");
-        let out = write_workspace_config(&ws_path, &ws).unwrap();
-        // With the keyring forced unavailable, write_workspace_config must fall
-        // back to inline storage AND surface that fact in SecretizeOutput.
-        let on_disk = std::fs::read_to_string(&ws_path).unwrap();
-        assert!(
-            on_disk.contains("inline:"),
-            "forced-unavailable keyring must produce inline: ref on disk"
-        );
-        assert!(
-            !out.inline_fields.is_empty(),
-            "inline fallback must be reported in SecretizeOutput, not swallowed"
-        );
-        assert!(
-            out.inline_fields.iter().any(|f| f.contains("access_token")),
-            "inline_fields must name the secretized field (access_token)"
-        );
-        // refs must always be populated (at least the one secretized field).
-        assert!(
-            !out.refs.is_empty(),
-            "SecretizeOutput::refs must be populated on workspace save"
-        );
-    }
-
-    // ---------------------------------------------------------------------------
     // Task 4: mixed-state secret conflict detection helpers + tests
     // ---------------------------------------------------------------------------
 
@@ -3280,170 +3109,6 @@ server_api:
         );
     }
 
-    // ---------------------------------------------------------------------------
-    // Task 5: keyring scope must be stable workspace+env, not mutable profile_name
-    // ---------------------------------------------------------------------------
-
-    /// Build a WorkspaceConfig with two envs that share the same `profile_name`
-    /// ("default") but hold different secrets.  Used by the collision test.
-    fn workspace_two_envs_same_profile_name(
-        workspace_name: &str,
-        prod_secret: &str,
-        staging_secret: &str,
-    ) -> WorkspaceConfig {
-        let make_env = |profile_name: &str, secret: &str| -> Config {
-            let yaml = format!(
-                "profile_name: {profile_name}\nalteryx_one:\n  account_email: test@example.com\n  base_url: https://us1.alteryxcloud.com\n  access_token: {secret}\n"
-            );
-            let tmp = tempfile::NamedTempFile::new().unwrap();
-            std::fs::write(tmp.path(), yaml).unwrap();
-            Config::load_from_path_with_environment(tmp.path(), None).unwrap()
-        };
-        WorkspaceConfig {
-            workspace_name: workspace_name.to_string(),
-            active_environment: "prod".to_string(),
-            environments: std::collections::HashMap::from([
-                ("prod".to_string(), make_env("default", prod_secret)),
-                ("staging".to_string(), make_env("default", staging_secret)),
-            ]),
-        }
-    }
-
-    /// Resolve the access_token for the named environment from a WorkspaceConfig
-    /// that has been saved and secretized.  Returns the resolved secret value.
-    fn resolve_env_secret(workspace: &WorkspaceConfig, env_key: &str) -> String {
-        let config = workspace.environments.get(env_key).expect("env must exist");
-        let one = config
-            .alteryx_one
-            .as_ref()
-            .expect("alteryx_one must be set");
-        // access_token was taken by secretize; resolve from the ref.
-        let reference = one
-            .access_token_ref
-            .as_deref()
-            .expect("access_token_ref must be set after secretize");
-        ayx_core::secrets::resolve_secret_ref(reference)
-            .expect("ref resolution must not error")
-            .expect("ref must resolve to a value")
-    }
-
-    /// Derive the workspace-scoped keyring account name for a given env+field.
-    /// This mirrors `secret_scope` post-Task-5 — used by the lazy-rekey test to
-    /// assert on the NEW account name without needing a live keyring.
-    fn new_scope_account(workspace_name: &str, env_key: &str, field: &str) -> String {
-        keyring_account(&format!("{workspace_name}.{env_key}"), field)
-    }
-
-    #[test]
-    fn two_envs_sharing_profile_name_do_not_collide() {
-        // With keyring storage, two envs that share profile_name="default" would
-        // both write to `keyring:default/alteryx_one.access_token` — last writer
-        // wins, silently discarding the first env's secret.
-        //
-        // After Task 5, the scope is `workspace_name.env_key`, so the two accounts
-        // become `keyring:myws-collision.prod/...` and
-        // `keyring:myws-collision.staging/...` — distinct.
-        //
-        // We verify this by inspecting the secret refs written into the saved
-        // workspace YAML: the two envs must hold DIFFERENT ref strings for their
-        // access_token (not the same keyring account name).
-        //
-        let _home = isolated_config_home();
-        let tmp = tempfile::tempdir().unwrap();
-        let ws_path = tmp.path().join("workspace-collision.yaml");
-        // Two envs both have profile_name="default" but distinct secrets.
-        let ws =
-            workspace_two_envs_same_profile_name("myws-collision", "prod-secret", "staging-secret");
-        write_workspace_config(&ws_path, &ws).unwrap();
-
-        // Load the secretized workspace and resolve both envs' secrets.
-        let loaded = load_workspace_config(&ws_path).unwrap();
-        assert_eq!(
-            resolve_env_secret(&loaded, "prod"),
-            "prod-secret",
-            "prod env secret must resolve to its own value after round-trip"
-        );
-        assert_eq!(
-            resolve_env_secret(&loaded, "staging"),
-            "staging-secret",
-            "staging env secret must resolve to its own value after round-trip"
-        );
-
-        // Key invariant: the two envs' access_token_ref values must be DISTINCT.
-        // With the OLD code (profile_name scope): both would be the SAME keyring
-        // account (`keyring:default/alteryx_one.access_token`), last-writer-wins.
-        // With the NEW code (workspace_name.env_key scope): they must differ.
-        let prod_ref = loaded.environments["prod"]
-            .alteryx_one
-            .as_ref()
-            .unwrap()
-            .access_token_ref
-            .as_deref()
-            .unwrap_or("")
-            .to_string();
-        let staging_ref = loaded.environments["staging"]
-            .alteryx_one
-            .as_ref()
-            .unwrap()
-            .access_token_ref
-            .as_deref()
-            .unwrap_or("")
-            .to_string();
-        assert_ne!(
-            prod_ref, staging_ref,
-            "prod and staging must use DISTINCT secret refs (not the same keyring account); \
-             prod_ref={prod_ref} staging_ref={staging_ref}"
-        );
-    }
-
-    #[test]
-    fn secret_lazily_rekeys_to_new_scope_on_save() {
-        // Asserts on account-NAME derivation without requiring a live keyring.
-        //
-        // Old (buggy) scope: keyring_account(profile_name, field)
-        //   → `default/alteryx_one.access_token`
-        // New (stable) scope: keyring_account("workspace_name.env_key", field)
-        //   → `myws-rekey.prod/alteryx_one.access_token`
-        //
-        // After Task 5, `write_workspace_config` must call `secret_scope` with
-        // `format!("{ws_name}.{env_key}")`, not `config.profile_name`.  We verify
-        // that the NEW derived account name encodes the workspace+env identity, not
-        // the mutable profile_name, and differs from the old profile_name-scoped name.
-        let old_account = keyring_account("default", "alteryx_one.access_token");
-        let new_account = new_scope_account("myws-rekey", "prod", "alteryx_one.access_token");
-        assert_ne!(
-            old_account, new_account,
-            "new scope must differ from old profile_name scope; \
-             old={old_account} new={new_account}"
-        );
-        assert!(
-            new_account.starts_with("myws-rekey.prod/"),
-            "new account must start with `workspace_name.env_key/`; got {new_account}"
-        );
-        assert!(
-            !new_account.starts_with("default/"),
-            "new account must NOT use the mutable profile_name as scope; got {new_account}"
-        );
-
-        // Verify round-trip with the in-memory keyring store: the saved YAML must
-        // point at the new workspace+env-scoped accounts.
-        let _home = isolated_config_home();
-        let tmp = tempfile::tempdir().unwrap();
-        let ws_path = tmp.path().join("workspace-rekey.yaml");
-        let ws = workspace_two_envs_same_profile_name("myws-rekey", "shh-prod", "shh-staging");
-        write_workspace_config(&ws_path, &ws).unwrap();
-
-        let on_disk = std::fs::read_to_string(&ws_path).unwrap();
-        assert!(
-            on_disk.contains("keyring:myws-rekey.prod/alteryx_one.access_token"),
-            "prod env must point at the new workspace+env-scoped keyring account; disk:\n{on_disk}"
-        );
-        assert!(
-            on_disk.contains("keyring:myws-rekey.staging/alteryx_one.access_token"),
-            "staging env must point at the new workspace+env-scoped keyring account; disk:\n{on_disk}"
-        );
-    }
-
     // -------------------------------------------------------------------------
     // Task 5 follow-up: standalone-profile rename-stability (Finding 2)
     // -------------------------------------------------------------------------
@@ -3520,81 +3185,6 @@ server_api:
         assert_ne!(
             "name-alpha", "myprofile",
             "precondition: old profile_name scope differs from file-stem scope"
-        );
-    }
-
-    #[test]
-    fn workspace_env_keyring_accounts_are_distinct_regardless_of_profile_name() {
-        // Verify that the writer uses DISTINCT scopes for two workspace envs that
-        // share profile_name="default", by asserting on the writer-surfaced
-        // `scopes_used` field in the returned `SecretizeOutput`.
-        //
-        // This guards the actual write path: if `write_workspace_config` were
-        // reverted to use `config.profile_name` as scope, both envs would report
-        // the SAME scope ("default") in `scopes_used` and the assertion would fail.
-        let _home = isolated_config_home();
-        let tmp = tempfile::tempdir().unwrap();
-        let ws_path = tmp.path().join("workspace-distinct-scopes.yaml");
-        // Two envs both have profile_name="default" but distinct env_keys.
-        let ws = workspace_two_envs_same_profile_name(
-            "myws-distinct-scopes",
-            "prod-secret",
-            "staging-secret",
-        );
-        let out = write_workspace_config(&ws_path, &ws).unwrap();
-
-        // The writer must have used two DISTINCT scopes (one per env).
-        assert_eq!(
-            out.scopes_used.len(),
-            2,
-            "write_workspace_config must record one scope per environment; \
-             got {:?}",
-            out.scopes_used
-        );
-        let scope_set: std::collections::HashSet<_> = out.scopes_used.iter().collect();
-        assert_eq!(
-            scope_set.len(),
-            2,
-            "scopes for two envs sharing profile_name must be DISTINCT; \
-             got {:?}",
-            out.scopes_used
-        );
-
-        // Verify the scopes encode workspace_name.env_key, not profile_name.
-        // (HashMap iteration order is non-deterministic, so check set membership.)
-        let expected_scopes: std::collections::HashSet<String> = [
-            "myws-distinct-scopes.prod".to_string(),
-            "myws-distinct-scopes.staging".to_string(),
-        ]
-        .into_iter()
-        .collect();
-        let actual_scopes: std::collections::HashSet<String> =
-            out.scopes_used.into_iter().collect();
-        assert_eq!(
-            actual_scopes, expected_scopes,
-            "scopes must be workspace_name.env_key, not profile_name"
-        );
-
-        // Sanity: distinctness at the keyring_account level (complements the scope
-        // check above without requiring a live keyring).
-        let prod_account = keyring_account("myws-distinct-scopes.prod", "alteryx_one.access_token");
-        let staging_account =
-            keyring_account("myws-distinct-scopes.staging", "alteryx_one.access_token");
-        let old_shared_account = keyring_account("default", "alteryx_one.access_token");
-        assert_ne!(
-            prod_account, staging_account,
-            "two workspace envs must produce DISTINCT keyring accounts; \
-             prod={prod_account} staging={staging_account}"
-        );
-        assert_ne!(
-            prod_account, old_shared_account,
-            "workspace-scoped prod account must differ from old profile_name scope; \
-             prod={prod_account} old={old_shared_account}"
-        );
-        assert_ne!(
-            staging_account, old_shared_account,
-            "workspace-scoped staging account must differ from old profile_name scope; \
-             staging={staging_account} old={old_shared_account}"
         );
     }
 
