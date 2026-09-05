@@ -158,7 +158,14 @@ fn workspace_descriptor(command: &OneWorkspaceCommand) -> OutputDescriptor {
         OneWorkspaceCommand::Current => {
             detail_with("one.workspace.current", WORKSPACE_CURRENT_FIELDS)
         }
-        OneWorkspaceCommand::Detail { .. } => detail("one.workspace.detail"),
+        // Same resource as `current`, just addressed by id, so it gets the same
+        // projection. The generic detail fields omit `state`, `gid`,
+        // `workspace_member_count`, `workspace_tier`, and `custom_url`, which
+        // would hand an agent a thinner object here than `workspace current`
+        // returns for the very same workspace.
+        OneWorkspaceCommand::Detail { .. } => {
+            detail_with("one.workspace.detail", WORKSPACE_CURRENT_FIELDS)
+        }
         OneWorkspaceCommand::CurrentConfiguration => detail("one.workspace.current-configuration"),
         OneWorkspaceCommand::ConfigurationV4 { .. } => detail("one.workspace.configuration-v4"),
         OneWorkspaceCommand::Configuration { .. } => detail("one.workspace.configuration"),
