@@ -289,9 +289,12 @@ after the old roadmap notes are cleaned up.
   catalog assets, workflow/session sharing, reusable plans, and orchestration
   across multiple systems. Treat the current Orchestrator-plan milestone as an
   open design item until its contract is published.
-- Add an optional AYX-owned MCP server only for AYX-owned orchestration tools
+- ~~Add an optional AYX-owned MCP server only for AYX-owned orchestration tools
   such as promotion plans, environment drift, and audited remediation. It must
-  not be a transparent Designer-tool proxy.
+  not be a transparent Designer-tool proxy.~~ **Superseded 2026-09-04:** shape
+  and timing are fixed by ADR 0005 and tracked as Wave 2 of
+  `agent-first-substrate.md` (three meta-tools over the live clap tree plus
+  curated `ayx.*` tools; still not a proxy).
 - Add opt-in product canary tests on installed Windows AOA/Designer hosts and
   keep direct One API tests as a separate auth/trust path.
 
