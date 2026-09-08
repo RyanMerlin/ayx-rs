@@ -42,7 +42,7 @@ The client must:
 - send the protocol initialization notification before listing tools
 
 Initialization output is diagnostic metadata, not a credential or a product
-entitlement assertion. AOA remains the source of truth for authentication and
+entitlement assertion. The product agent runtime remains the source of truth for authentication and
 licensing.
 
 ## Tool discovery
@@ -78,7 +78,7 @@ normalized for the agent envelope while retaining a redacted raw diagnostic.
 The compatibility profile is derived from:
 
 - negotiated protocol version
-- product server and Designer/AOA versions
+- product server, Designer, and product agent runtime versions
 - required tool names
 - required input/output schema fields
 - known behavior flags captured by contract fixtures
@@ -105,7 +105,7 @@ JSON output should include transport, server provenance, negotiated protocol,
 tool name, backend, and redacted errors. Correlation IDs, schema validation,
 and product-specific corrective guidance remain follow-up contract work. Human
 output should explain the next corrective action, such as installing .NET 8
-Desktop Runtime, restarting an agent after an AOA update, or selecting an
+Desktop Runtime, restarting an agent after a product agent runtime update, or selecting an
 explicit power-lane backend.
 
 ## Contract fixtures and tests
@@ -113,7 +113,7 @@ explicit power-lane backend.
 Commit only redacted fixtures. The fake-server suite must cover initialization
 ordering, malformed JSON-RPC, pagination, stderr noise, timeout, cancellation,
 child crash, schema variation, structured content, and large-result handling.
-Opt-in Windows canaries may validate an installed AOA/Designer host with one
+Opt-in Windows canaries may validate an installed product agent runtime / Designer host with one
 harmless inspection and one isolated mutation/run test.
 
 ## Open product-contract questions

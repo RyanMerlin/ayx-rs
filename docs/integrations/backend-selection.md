@@ -11,7 +11,7 @@ guarantee. This document defines how the CLI chooses and reports a backend.
 
 | Backend | Owner | Best use | Important limitation |
 | --- | --- | --- | --- |
-| `product_mcp` | AOA/Designer | Designer-compatible local inspect, mutate, validate, run, and anchor operations | Requires compatible AOA/Designer installation and product auth/licensing |
+| `product_mcp` | product agent runtime / Designer | Designer-compatible local inspect, mutate, validate, run, and anchor operations | Requires compatible product agent runtime / Designer installation and product auth/licensing |
 | `one_api` | AYX-RS integration | Cloud control plane, bulk/admin operations, diagnostics, and published REST capabilities | Does not imply arbitrary visual workflow authoring or local Designer semantics |
 | `direct_xml` | AYX-RS power lane | Offline inspection, experimentation, unsupported product versions, and capabilities not exposed by MCP | XML mutation is not automatically equivalent to DesignerCore behavior |
 | `engine_cmd` | AYX-RS power lane | Explicit local execution through `AlteryxEngineCmd.exe` | Requires local engine installation; lifecycle and output behavior differ from MCP |

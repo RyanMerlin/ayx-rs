@@ -1,4 +1,4 @@
-//! Bounded client for a product-owned local Headless Alteryx MCP server.
+//! Bounded client for a product-owned local product-owned MCP server.
 //!
 //! The product server owns Designer semantics and authentication. This module
 //! only owns the STDIO JSON-RPC lifecycle, bounded transport handling, and

@@ -405,7 +405,7 @@ enum Command {
         command: OneCommand,
     },
     #[command(
-        about = "Local product-owned Headless Alteryx diagnostics",
+        about = "Local product MCP server diagnostics",
         arg_required_else_help = true
     )]
     Headless {

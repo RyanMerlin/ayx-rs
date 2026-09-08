@@ -46,9 +46,9 @@ research behind them is in
 | 2 | Agent packaging: `ayx agent init` (host config for product MCP, generated `SKILL.md` installed per the Agent Skills spec), `ayx mcp serve` per ADR 0005, `one capabilities` (cached probe of what the current token and tier can reach) | decided (ADR 0005); spec to follow | — |
 | 3 | Plans, policy, receipts: `--plan-out` on every mutating command and `ayx apply <plan>` with idempotency keys, `ayx policy check --rules`, a receipts ledger behind `ayx audit last\|since\|failed`; then curated `ayx.*` MCP tools over these | tracked; spec to follow | — |
 
-The Headless product-MCP client track continues on its own file,
-`headless-alteryx-integration.md`; its P4 "optional AYX-owned MCP server" item
-is superseded by Wave 2 and ADR 0005.
+The product-MCP client track is described by ADR 0003 and the integration
+contract; its former P4 "optional AYX-owned MCP server" item is superseded by
+Wave 2 and ADR 0005.
 
 ## Deliberately deferred
 
@@ -66,15 +66,13 @@ is superseded by Wave 2 and ADR 0005.
 - Run the Wave 1 live re-verification checklist against a real tenant before
   its implementation plan is written; several source endpoints were last
   probed in August.
-- ~~Confirm internally whether Agent Studio / AOA accepts third-party MCP
-  servers.~~ **Checked 2026-09-04 (internal Confluence):** Agent Studio and
-  Copilot Service consume only Alteryx-owned toolsets (`insights`, `apps`,
-  `designer`) in a hub-and-spoke model; the Alteryx MCP Server exposes those
-  toolsets *outward* to external hosts (scoped with `?toolsets=`). No page
-  describes registering a third-party server. The AOA positioning of Wave 2 is
-  therefore deferred; the design stands on external hosts registering both the
-  Alteryx MCP Server and `ayx mcp serve`. Re-check if the "RBAC-First Asset
-  Access for Alteryx Agents and MCP" or "MCP Server Asset Scope" pages change.
+- ~~Confirm whether the vendor's own agent surface accepts third-party MCP
+  servers.~~ **Resolved 2026-09-04:** no available material describes
+  registering one. That surface consumes vendor-owned toolsets, and the vendor
+  MCP server exposes those outward to external hosts rather than accepting
+  inbound registrations. Positioning Wave 2 against it is therefore deferred;
+  the design stands on external hosts registering both the vendor MCP server
+  and `ayx mcp serve`. Re-check if that changes.
 - Write the Wave 2 and Wave 3 design specs after Wave 1's collector exists;
   the curated MCP tools and the plan artifact both consume it.
 

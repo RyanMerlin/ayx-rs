@@ -4,6 +4,26 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.20.1 — 2026-09-08
+
+### Changed
+
+- `ayx headless` is described as "Local product MCP server diagnostics". The
+  previous wording named a vendor program that has no public announcement, so
+  it did not belong in a published CLI. No command names, arguments, or
+  behavior changed.
+- Documentation no longer names that program or cites vendor-internal sources.
+  The integration boundary itself is unchanged and still documented in ADR
+  0003; only the naming and the citations were neutralized.
+
+### Removed
+
+- `docs/roadmap/headless-alteryx-integration.md` and
+  `docs/integrations/headless-mcp-architecture.md`. Both were written from
+  vendor-internal material, including third-party roadmap dates, and should not
+  have been published. ADR 0003 and the integration contract carry the parts
+  that are actually ours.
+
 ## 0.20.0 — 2026-09-04
 
 Breaking. The bundled terminal UI is removed, and `ayx` now picks its output

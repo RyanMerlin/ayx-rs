@@ -1,4 +1,4 @@
-//! CLI access to the product-owned local Headless Alteryx MCP server.
+//! CLI access to the product-owned local product-owned MCP server.
 
 use std::path::PathBuf;
 use std::time::Duration;

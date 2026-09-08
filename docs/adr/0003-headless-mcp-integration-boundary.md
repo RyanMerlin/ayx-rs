@@ -1,12 +1,12 @@
-# ADR 0003: Headless Alteryx MCP Integration Boundary
+# ADR 0003: Product MCP Integration Boundary
 
 Status: accepted
 Date: 2026-08-28
 
 ## Context
 
-Alteryx is delivering a product-owned local MCP server through AOA/AI
-Services. The server owns Designer-compatible workflow semantics, licensing,
+The vendor is delivering a product-owned local MCP server through its own
+agent runtime and AI services. That server owns Designer-compatible workflow semantics, licensing,
 authentication, and the private Designer bridge. AYX-RS already has useful
 direct One API, local XML, package, and EngineCmd capabilities, and it is also
 the repository's agent-oriented orchestration and audit substrate.
@@ -25,7 +25,7 @@ semantics.
 
 Product MCP owns:
 
-- AOA authentication, licensing, entitlements, updates, and local installation
+- Product agent runtime authentication, licensing, entitlements, updates, and local installation
 - DesignerCore and Designer-compatible workflow mutation and run behavior
 - the local `alteryx-mcp-server.exe` process and its `alteryx_local.*` contract
 - the Alteryx One MCP Gateway and its cloud toolsets when those are published
@@ -81,7 +81,7 @@ Positive:
 Costs and constraints:
 
 - The MCP client must handle product version and schema drift.
-- AOA credentials and AYX One credentials remain separate trust domains.
+- Product agent runtime credentials and AYX One credentials remain separate trust domains.
 - Direct XML/EngineCmd operations need explicit warnings, policy, audit, and
   compatibility tests.
 - An `auto` backend choice must be observable and must not silently substitute
@@ -97,6 +97,5 @@ cloud Gateway.
 
 See:
 
-- [Headless MCP architecture](../integrations/headless-mcp-architecture.md)
 - [Headless MCP contract](../integrations/headless-mcp-contract.md)
 - [Backend selection](../integrations/backend-selection.md)

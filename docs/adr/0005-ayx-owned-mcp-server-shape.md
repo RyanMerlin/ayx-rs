@@ -15,7 +15,7 @@ Three things have changed since ADR 0003 was written:
 1. **The hosts that matter are known.** Shell-capable coding agents (Claude
    Code, Codex CLI, Gemini CLI, the Aria fleet) can run `ayx --output json`
    directly, so the CLI plus a shipped skill is their primary interface.
-   Alteryx's own agent surface (Agent Studio / AOA) and no-shell chat or IDE
+   Alteryx's own agent surface and no-shell chat or IDE
    hosts can only reach `ayx` through an MCP server.
 2. **Alteryx's official MCP effort is Alteryx One only.** The Agent Studio and
    Alteryx MCP Server preview (announced 2026-05-20) exposes governed One
@@ -37,8 +37,8 @@ HTTP transports with `schemars`-derived tool schemas.
 
 ## Decision
 
-Add `ayx mcp serve`, an AYX-owned MCP server, and promote it from the P4 slot
-in `docs/roadmap/headless-alteryx-integration.md` to Wave 2 of
+Add `ayx mcp serve`, an AYX-owned MCP server, and promote it from its former
+P4 slot on the product-MCP client track to Wave 2 of
 `docs/roadmap/agent-first-substrate.md`.
 
 Its shape is fixed by this ADR:
@@ -91,7 +91,7 @@ tools remain as an additive layer.
 
 ### No AYX-owned server; CLI and skill only
 
-Rejected. It leaves AOA and no-shell hosts with no path to AYX-owned
+Rejected. It leaves that surface and no-shell hosts with no path to AYX-owned
 capabilities, which is exactly the white space Alteryx's One-only MCP leaves
 open. The CLI stays primary for shell-capable agents regardless.
 
@@ -100,9 +100,9 @@ open. The CLI stays primary for shell-capable agents regardless.
 - `rmcp` becomes a dependency of `ayx-rs`.
 - `discover` and `catalog` output shapes become a compatibility surface for the
   server; they already carry `schema_version` and must keep it.
-- Whether AOA/Agent Studio accepts third-party MCP servers is a precondition
-  for the AOA positioning, not for building the server; the no-shell-host case
-  stands on its own. Verify it internally before marketing the AOA angle.
+- Whether the vendor's own agent surface accepts third-party MCP servers is a precondition
+  for that positioning, not for building the server; the no-shell-host case
+  stands on its own. Verify it before marketing that angle.
 - ADR 0003 is not superseded. This ADR fixes the shape and timing of the
   server ADR 0003 anticipated.
 

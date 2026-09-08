@@ -23,7 +23,7 @@ registration, and the disposable-agent prompt path.
 | Mutation safety | Pass | Raw calls are dry-run by default; applied calls require `--apply` and the existing TTY/`--yes` confirmation policy. |
 | Agent Studio prompt safety | Pass with live-validation block | Prompt submission is preview-first, applied prompts require `--apply`, prompt input is non-empty and capped at 32 KiB, and prompt text is sent in the JSON body rather than a URL. The disposable-agent live attempt stopped before sending because the saved `local-dev` refresh token returned HTTP 400 from PingAuth. |
 | Agent Studio asset scope | Pass with follow-up | Agent CRUD, dataset Insights registration, and workflow Apps-shortcut registration are explicitly labeled private-preview and inventoried in the endpoint matrix; no public OpenAPI support is claimed. |
-| Product authorization | Not claimed | Product entitlements, Gateway scopes, tool permissions, and AOA authentication remain the product's responsibility. |
+| Product authorization | Not claimed | Product entitlements, Gateway scopes, tool permissions, and the product agent runtime authentication remain the product's responsibility. |
 | Schema/contract validation | Follow-up | The demo preserves and describes the observed tool schema but does not yet validate input/output schemas or product versions. |
 | Cancellation/telemetry | Follow-up | Child cleanup and HTTP timeouts exist; protocol cancellation, MCP correlation fields, and MCP lifecycle telemetry remain to be added. |
 

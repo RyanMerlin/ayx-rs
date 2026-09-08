@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-05 02:00:57 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-08 18:32:01 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -99,7 +99,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 | Name | Path | Safety | Mutating | Summary |
 | --- | --- | --- | --- | --- |
-| headless | `headless` | unclassified |  | Local product-owned Headless Alteryx diagnostics |
+| headless | `headless` | unclassified |  | Local product MCP server diagnostics |
 | headless doctor | `headless/doctor` | unclassified |  | Check the local product MCP server, protocol handshake, and tool inventory |
 
 ### `license`
