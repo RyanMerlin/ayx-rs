@@ -309,7 +309,26 @@ pub fn run_onboarding(
     } else {
         resolved_path.clone()
     };
-    let secretize = write_config_with_policy(&save_path, &config, InlineSecretPolicy::Allow)?;
+    // Secretize One credentials under their canonical credential binding, not
+    // the legacy `<profile>/<field>` keyring accounts the unbound write uses.
+    // `OneCredentialStore` accepts only `v1/<binding>-<field>` references, so an
+    // unbound write here leaves a profile whose every One command fails with
+    // "not backed by a canonical keyring reference". That was survivable only
+    // because the login this wizard runs next rewrote the references, and it
+    // must not depend on that login running: the user can decline the "Log in
+    // now" prompt, or the login can fail, and the profile has to stay usable.
+    //
+    // A profile with no `alteryx_one` section or no base URL cannot produce a
+    // binding; it also has no One credential to protect, so the legacy path is
+    // correct there. Only `alteryx_one.*` fields consult the binding, so server,
+    // mongo, and SQL secrets are unaffected either way.
+    let onboard_binding = onboard_credential_binding(&config);
+    let secretize = write_config_with_binding(
+        &save_path,
+        &config,
+        InlineSecretPolicy::Allow,
+        onboard_binding.as_ref(),
+    )?;
     let _ = secret_refs; // Preserved for API stability; refs come from secretize.
     if central {
         let mut state = load_ayx_state().unwrap_or_default();
@@ -1638,6 +1657,22 @@ pub(crate) fn migrate_inline_auth_secrets(path: &Path) -> Result<SecretizeOutput
 /// Build the same binding used by authentication writes and doctor migration.
 /// Keeping this at the profile-write boundary prevents migration from falling
 /// back to the old unbound `profile/field` keyring namespace.
+/// The credential binding the onboarding wizard should secretize One credentials
+/// under, or `None` when this profile cannot produce one.
+///
+/// `None` means the profile has no `alteryx_one` section or no base URL, which
+/// also means it has no One credential to protect, so the legacy keyring scope
+/// is the right answer there. Any other profile must get canonical
+/// `v1/<binding>-<field>` references, because `OneCredentialStore` rejects
+/// everything else.
+pub(crate) fn onboard_credential_binding(config: &Config) -> Option<CredentialBinding> {
+    let workspace_id = config
+        .alteryx_one
+        .as_ref()
+        .and_then(|one| one.active_workspace_id().map(str::to_string));
+    binding_for_auth_config(config, workspace_id.as_deref()).ok()
+}
+
 pub(crate) fn binding_for_auth_config(
     config: &Config,
     workspace_id: Option<&str>,
@@ -3233,6 +3268,53 @@ server_api:
         assert!(
             debug_output.contains("env:AYX_REFRESH_TOKEN"),
             "env refs (var names, not values) must not be redacted; got: {debug_output}"
+        );
+    }
+
+    /// The wizard must secretize One credentials under the canonical binding.
+    /// When it did not, it wrote legacy `<profile>/<field>` keyring accounts and
+    /// every later One command failed with "not backed by a canonical keyring
+    /// reference" — survivable only while the login that follows rewrote them.
+    #[test]
+    fn onboard_binds_one_credentials_to_canonical_keyring_accounts() {
+        let mut config = base_config();
+        config.alteryx_one = Some(ayx_core::profile::AlteryxOneProfile {
+            account_email: "person@example.com".to_string(),
+            base_url: Some("https://us1.alteryxcloud.com".to_string()),
+            access_token: Some("some-access-secret".to_string()),
+            ..Default::default()
+        });
+
+        let binding =
+            onboard_credential_binding(&config).expect("a One profile with a base URL binds");
+        assert!(
+            binding
+                .keyring_account("alteryx_one.access_token")
+                .starts_with("v1/"),
+            "onboard must produce canonical v1 accounts, not the legacy profile scope"
+        );
+    }
+
+    /// No `alteryx_one` section and no base URL both mean there is no One
+    /// credential to protect, so the legacy scope is correct and the wizard must
+    /// not fail trying to bind one.
+    #[test]
+    fn onboard_binding_is_absent_when_the_profile_cannot_produce_one() {
+        let config = base_config();
+        assert!(
+            onboard_credential_binding(&config).is_none(),
+            "a profile with no alteryx_one section has nothing to bind"
+        );
+
+        let mut without_base_url = base_config();
+        without_base_url.alteryx_one = Some(ayx_core::profile::AlteryxOneProfile {
+            account_email: "person@example.com".to_string(),
+            base_url: None,
+            ..Default::default()
+        });
+        assert!(
+            onboard_credential_binding(&without_base_url).is_none(),
+            "a One profile without a base URL cannot produce a binding"
         );
     }
 

@@ -4,6 +4,22 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.20.3 — 2026-09-08
+
+### Fixed
+
+- `ayx onboard` now writes One credentials under their canonical credential
+  binding instead of the legacy `<profile>/<field>` keyring accounts. Those
+  legacy references are the ones the One credential store rejects with "not
+  backed by a canonical keyring reference".
+
+  0.20.2 fixed the symptom by restoring the login that rewrote the references
+  afterwards. This removes the dependency on that login running at all, so
+  declining the "Log in now" prompt, or a login that fails partway, no longer
+  leaves an unusable profile. Profiles with no `alteryx_one` section or no base
+  URL are unaffected, and server, Mongo, and SQL secrets never consulted the
+  binding.
+
 ## 0.20.2 — 2026-09-08
 
 ### Fixed
