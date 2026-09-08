@@ -62,7 +62,14 @@ const WORKFLOW_LIST_FIELDS: &[&str] =
 const GROUP_LIST_COLLECTION_KEYS: &[&str] = &["groups"];
 /// People are identified and disambiguated by email, not only a display name.
 /// These are deliberately distinct from the generic list columns.
-const PEOPLE_LIST_FIELDS: &[&str] = &["id", "name", "fullName", "email", "isAdmin", "isDisabled"];
+///
+/// `isAdmin` and `isDisabled` are deliberately NOT projected. `/v4/people` sets
+/// `isAdmin` only on the caller's own record (see `docs/one-endpoint-matrix.md`),
+/// so the column rendered blank for every other person and, for the caller,
+/// contradicted `one workspace admins` — which is the authoritative answer to
+/// who administers a workspace. A column that is empty 17 rows out of 18 and
+/// wrong on the 18th is worse than no column.
+const PEOPLE_LIST_FIELDS: &[&str] = &["id", "name", "fullName", "email"];
 const WORKSPACE_ADMIN_LIST_FIELDS: &[&str] = &["id", "name", "email", "createdAt", "updatedAt"];
 const WORKSPACE_CURRENT_FIELDS: &[&str] = &[
     "id",
@@ -733,7 +740,15 @@ mod tests {
         });
         assert_eq!(people.command, "one.workspace.people");
         assert!(people.fields.contains(&"email"));
-        assert!(people.fields.contains(&"isAdmin"));
+        // `/v4/people` decorates only the caller's own record with `isAdmin`, so
+        // projecting it rendered blank for everyone else and disagreed with
+        // `one workspace admins` for the caller. `admins` is the authoritative
+        // answer; this list must not imply a second, contradictory one.
+        assert!(
+            !people.fields.contains(&"isAdmin"),
+            "workspace people must not project an admin flag the endpoint does not populate"
+        );
+        assert!(!people.fields.contains(&"isDisabled"));
 
         let admins = output_descriptor(&OneCommand::Workspace {
             command: OneWorkspaceCommand::Admins,

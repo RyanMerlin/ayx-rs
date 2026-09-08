@@ -5,6 +5,11 @@
 //! immediate login or points at the next command. They never answer "yes" to
 //! the login prompt, so no network call or OTP flow is ever triggered.
 //!
+//! The login offer now defaults to **Yes**, and an empty line (including stdin
+//! EOF) is read as the default. Every script here must therefore answer the
+//! login prompt with an explicit `n`; running off the end of the script would
+//! send a real OTP.
+//!
 //! Spawn-based; runs on all platforms now that the `ayx-rs` build script
 //! reserves a 16 MiB main-thread stack on Windows (issue #59 Part 2).
 
@@ -105,6 +110,56 @@ fn enter_at_configure_server_defaults_to_no() {
     assert!(
         !out.contains("Storage backend:"),
         "skipping Server must also skip the storage-backend flow; output:\n{out}"
+    );
+}
+
+/// The Server default must not depend on the profile. It used to be derived from
+/// `config.server.is_some()`, so the prompt rendered `[Y/n]` for anyone who had
+/// already configured Server and `[y/N]` for anyone who had not — the same
+/// keystroke meant opposite things on different machines. It is now always No.
+#[test]
+fn configure_server_defaults_to_no_even_when_server_is_already_configured() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let profiles = home.path().join("profiles");
+    std::fs::create_dir_all(&profiles).expect("profiles dir");
+    // A profile that already has a Server section — the case that used to flip
+    // the default to Yes.
+    std::fs::write(
+        profiles.join("default.yaml"),
+        "profile_name: default\n\
+         server:\n\
+        \x20 webapi_url: https://server.example.com\n\
+        \x20 curator_api_key: key\n\
+        \x20 curator_api_secret: secret\n",
+    )
+    .expect("write profile");
+
+    // profile name (default), email, blank workspace URL, Enter at the Server
+    // prompt.
+    let out = run_onboard_in(home.path(), "\nuser@example.com\n\n\n");
+
+    assert!(
+        out.contains("Configure Alteryx Server [y/N]"),
+        "an existing Server section must not flip the default to Yes; output:\n{out}"
+    );
+    assert!(
+        !out.contains("Is the Server localhost"),
+        "Enter must skip Server config even when one is already configured; output:\n{out}"
+    );
+}
+
+/// Connecting is the point of the wizard, so Enter at the final prompt must
+/// complete it. This asserts only the advertised default; it answers `n` so no
+/// OTP is ever sent.
+#[test]
+fn log_in_now_advertises_yes_as_the_default() {
+    let script = format!(
+        "\nuser@example.com\nhttps://us1.alteryxcloud.com/auth-portal/workspaces/{SAMPLE_GID}\nn\nn\n"
+    );
+    let out = run_onboard(&script);
+    assert!(
+        out.contains("Log in now [Y/n]"),
+        "the login offer must default to Yes; output:\n{out}"
     );
 }
 

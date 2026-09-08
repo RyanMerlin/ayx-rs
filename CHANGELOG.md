@@ -4,6 +4,30 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.20.4 — 2026-09-08
+
+### Changed
+
+- **`ayx onboard` prompt defaults are now fixed, not derived.** "Configure
+  Alteryx Server" always defaults to No, including on a profile that already has
+  a Server section. It previously took its default from the current profile, so
+  the same prompt rendered `[Y/n]` on one machine and `[y/N]` on another and the
+  same keystroke meant opposite things. Declining leaves an existing Server
+  section untouched.
+- **"Log in now" now defaults to Yes.** Connecting is the point of the wizard,
+  and the prompt is preceded by an explicit description of what happens next, so
+  Enter should finish the job rather than abandon it one step from the end.
+  Automation is unaffected: `--non-interactive` returns long before this prompt
+  and `--no-input` refuses interactive input.
+
+### Fixed
+
+- `ayx one workspace people` no longer shows `isAdmin` and `isDisabled`. The
+  `/v4/people` endpoint decorates only the caller's own record with `isAdmin`,
+  so the columns were blank for everyone else and, for the caller, contradicted
+  `ayx one workspace admins`. That command remains the authoritative answer to
+  who administers a workspace.
+
 ## 0.20.3 — 2026-09-08
 
 ### Fixed

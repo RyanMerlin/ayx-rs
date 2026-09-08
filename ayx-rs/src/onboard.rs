@@ -114,7 +114,14 @@ pub fn run_onboarding(
         }
     }
 
-    let configure_server = prompt_yes_no("Configure Alteryx Server", config.server.is_some())?;
+    // Always default to No, including for a profile that already has a Server
+    // section. Deriving the default from the current value made the prompt flip
+    // between [y/N] and [Y/n] depending on the profile, so the same keystroke
+    // meant different things on different runs. Enter now always skips Server
+    // configuration. Answering No leaves any existing `config.server` untouched
+    // — it is only read and rewritten inside the branch below — so declining
+    // never discards a Server profile you already had.
+    let configure_server = prompt_yes_no("Configure Alteryx Server", false)?;
     if configure_server {
         let local_server = prompt_yes_no("Is the Server localhost", true)?;
         let mut server = config.server.take().unwrap_or_else(default_server);
@@ -1268,7 +1275,12 @@ fn offer_login_now(config: &Config, saved_path: &Path, environment: Option<&str>
     eprintln!(
         "Credentials use the operating-system secure store by default; use `--secret-policy session` on a temporary or constrained host."
     );
-    if !prompt_yes_no("Log in now", false)? {
+    // Default Yes. Connecting is the entire point of this wizard, and the lines
+    // above already state exactly what happens next, so Enter should complete
+    // the job rather than abandon it one step from the end. Declining is a
+    // single `n`. Automation never reaches here: `--non-interactive` returns
+    // long before this, and `--no-input` refuses interactive input outright.
+    if !prompt_yes_no("Log in now", true)? {
         eprintln!("Skipped. Connect any time with `{NEXT_STEP}`.");
         return Ok(json!({ "offered": true, "ran": false }));
     }
