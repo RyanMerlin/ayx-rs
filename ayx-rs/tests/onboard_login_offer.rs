@@ -163,6 +163,58 @@ fn log_in_now_advertises_yes_as_the_default() {
     );
 }
 
+/// A customer on Alteryx Server with no Alteryx One account must be able to
+/// reach the Server section. The email prompt was `required`, so a blank answer
+/// looped "A value is required." forever — at stdin EOF, unrecoverably — and the
+/// only way through was to invent an address, which then became a real
+/// `alteryx_one` section in their profile.
+#[test]
+fn server_only_customer_can_skip_alteryx_one_entirely() {
+    let home = tempfile::tempdir().expect("tempdir");
+    // profile name (default), BLANK email, then Y at the Server prompt.
+    let out = run_onboard_in(home.path(), "\n\ny\nn\nhttp://server.example.com\n");
+
+    assert!(
+        out.contains("Configure Alteryx Server"),
+        "a blank email must still reach the Server section; output:\n{out}"
+    );
+    assert!(
+        out.contains("Is the Server localhost"),
+        "answering Y must enter Server configuration; output:\n{out}"
+    );
+    // The One workspace question is not asked of a Server-only customer.
+    assert!(
+        !out.contains("Workspace URL or id"),
+        "must not ask a Server-only customer for a One workspace URL; output:\n{out}"
+    );
+
+    // The real invariant, independent of output mode: no One section was
+    // written, and the Server section was.
+    let saved = std::fs::read_to_string(home.path().join("profiles/local.yaml"))
+        .expect("onboard must save the profile");
+    assert!(
+        !saved.contains("alteryx_one"),
+        "a skipped email must leave no alteryx_one section; profile:\n{saved}"
+    );
+    assert!(
+        saved.contains("server"),
+        "the Server section must be saved; profile:\n{saved}"
+    );
+}
+
+/// stdin EOF must terminate the wizard, not spin. A required prompt rejects an
+/// empty answer and loops, and every read after EOF is empty, so onboard used to
+/// print "A value is required." forever.
+#[test]
+fn stdin_eof_terminates_instead_of_looping() {
+    let out = run_onboard("");
+    let required_complaints = out.matches("A value is required.").count();
+    assert!(
+        required_complaints < 3,
+        "EOF must not loop on a required prompt; saw {required_complaints} complaints:\n{out}"
+    );
+}
+
 /// Regression guard for the profile-split bug: onboard must save the profile
 /// under its *name* and make it active, so a later `auth login` (which writes
 /// the token to `profile_storage_path(profile_name)`) targets the very same

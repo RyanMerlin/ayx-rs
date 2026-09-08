@@ -83,8 +83,17 @@ pub fn run_onboarding(
         .alteryx_one
         .as_ref()
         .map(|one| one.account_email.as_str());
-    let account_email = prompt_text("Email address", email_default, None, true)?;
-    config.alteryx_one = Some(update_or_create_one(config.alteryx_one, account_email));
+    // Optional on purpose. A customer on Alteryx Server who has no Alteryx One
+    // account must be able to reach the Server section, and requiring this
+    // forced them to invent an address that then became a real `alteryx_one`
+    // section in their profile. Blank leaves the One section absent entirely,
+    // which every later step already handles: the workspace prompt below is
+    // guarded, and `offer_login_now` returns "no alteryx_one section".
+    eprintln!("Your Alteryx One account email. Leave blank if you only use Alteryx Server.");
+    let account_email = prompt_text("Email address", email_default, None, false)?;
+    if !account_email.trim().is_empty() {
+        config.alteryx_one = Some(update_or_create_one(config.alteryx_one, account_email));
+    }
 
     // Alteryx One workspace: the workspace gid (a ULID) and region base URL both
     // live in the workspace URL the user sees in their browser. Parsing them here
@@ -94,22 +103,26 @@ pub fn run_onboarding(
         .alteryx_one
         .as_ref()
         .and_then(|one| one.workspace_gid.as_deref());
-    eprintln!("Paste your Alteryx One workspace URL (from your browser's address bar),");
-    eprintln!("e.g. https://us1.alteryxcloud.com/auth-portal/workspaces/01ABC…  — or just the");
-    eprintln!("workspace id. Leave blank to skip (you can set it later at login).");
-    let workspace_input = prompt_text("Workspace URL or id", gid_default, None, false)?;
-    if !workspace_input.trim().is_empty() {
-        let parsed = parse_workspace_url(&workspace_input);
-        if let Some(one) = config.alteryx_one.as_mut() {
-            match &parsed.workspace_gid {
-                Some(gid) => one.workspace_gid = Some(gid.clone()),
-                None => eprintln!(
-                    "Note: no workspace id found in that input. Set it later with \
-                     `ayx one login --workspace-gid <id>`."
-                ),
-            }
-            if let Some(base) = parsed.base_url {
-                one.base_url = Some(base);
+    // Skip the whole One workspace step when there is no One account. Asking a
+    // Server-only customer to paste an Alteryx One workspace URL is noise.
+    if config.alteryx_one.is_some() {
+        eprintln!("Paste your Alteryx One workspace URL (from your browser's address bar),");
+        eprintln!("e.g. https://us1.alteryxcloud.com/auth-portal/workspaces/01ABC…  — or just the");
+        eprintln!("workspace id. Leave blank to skip (you can set it later at login).");
+        let workspace_input = prompt_text("Workspace URL or id", gid_default, None, false)?;
+        if !workspace_input.trim().is_empty() {
+            let parsed = parse_workspace_url(&workspace_input);
+            if let Some(one) = config.alteryx_one.as_mut() {
+                match &parsed.workspace_gid {
+                    Some(gid) => one.workspace_gid = Some(gid.clone()),
+                    None => eprintln!(
+                        "Note: no workspace id found in that input. Set it later with \
+                         `ayx one login --workspace-gid <id>`."
+                    ),
+                }
+                if let Some(base) = parsed.base_url {
+                    one.base_url = Some(base);
+                }
             }
         }
     }
@@ -2046,7 +2059,24 @@ fn prompt_text(
         prompt_label.push_str(&format!(" [{}]", default));
     }
     loop {
-        let input = prompt_raw(&prompt_label)?;
+        // EOF must not be treated as another empty line here. A required prompt
+        // rejects empty and loops, and at EOF every further read is empty too,
+        // so this printed "A value is required." forever with no way out.
+        let Some(input) = prompt_raw_opt(&prompt_label)? else {
+            if let Some(current) = current {
+                return Ok(current.to_string());
+            }
+            if let Some(default) = default {
+                return Ok(default.to_string());
+            }
+            if !required {
+                return Ok(String::new());
+            }
+            return Err(anyhow::anyhow!(
+                "interactive input ended while \"{prompt}\" still needed a value; \
+                 pass --non-interactive for a non-interactive run, or supply an answer on stdin"
+            ));
+        };
         let trimmed = input.trim();
         if trimmed.is_empty() {
             if let Some(current) = current {
@@ -2063,6 +2093,26 @@ fn prompt_text(
         }
         eprintln!("A value is required.");
     }
+}
+
+/// Read one interactive answer. `Ok(None)` means stdin reached EOF.
+///
+/// EOF has to be distinguishable from an empty line. A prompt with a default
+/// treats both the same, but a *required* prompt loops until it gets a value —
+/// and at EOF every subsequent read returns empty forever, so the wizard spun
+/// printing "A value is required." with no way out. Returning `None` lets the
+/// required path fail with an actionable error instead of hanging.
+fn prompt_raw_opt(prompt: &str) -> Result<Option<String>> {
+    eprint!("{prompt}: ");
+    io::stderr().flush().ok();
+    let mut buf = String::new();
+    let read = io::stdin()
+        .read_line(&mut buf)
+        .context("failed to read interactive input")?;
+    if read == 0 {
+        return Ok(None);
+    }
+    Ok(Some(buf))
 }
 
 fn prompt_raw(prompt: &str) -> Result<String> {

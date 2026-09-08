@@ -4,6 +4,22 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.20.5 — 2026-09-08
+
+### Fixed
+
+- **An Alteryx Server customer with no Alteryx One account can now complete
+  `ayx onboard`.** The email prompt was required, so a blank answer looped "A
+  value is required." and the only way to reach the Server section was to invent
+  an address — which then became a real `alteryx_one` section in the profile.
+  The email is now optional; leaving it blank skips the One workspace question
+  too and writes no One section at all.
+- **`ayx onboard` no longer spins forever at stdin EOF.** A required prompt
+  rejects an empty answer and loops, and every read after EOF is empty, so the
+  wizard printed "A value is required." indefinitely with no way out. EOF is now
+  distinguished from an empty line: prompts with a default take it, and a
+  genuinely required prompt fails with a message naming the flag to use instead.
+
 ## 0.20.4 — 2026-09-08
 
 ### Changed
