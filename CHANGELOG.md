@@ -4,6 +4,28 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.20.2 — 2026-09-08
+
+### Fixed
+
+- `ayx onboard` left the profile unusable. It reported "Connected." and saved,
+  but every later One command failed with "One credential store refresh-token
+  slot is not backed by a canonical keyring reference".
+
+  Onboarding an existing profile rewrites its stored secrets using the legacy
+  `<profile>/<field>` keyring accounts, then runs a login that used to repair
+  them by writing canonical `v1/<binding>` references. In 0.20.0 that login
+  began short-circuiting: because the wizard passes no explicit flags, the
+  new existing-credential guard treated it as a bare `ayx one login`, returned
+  "already configured" without contacting the server, and left the legacy
+  references in place. The credential store requires the canonical form, so
+  every subsequent One command failed.
+
+  The wizard now tells login that a human already agreed to authenticate, so
+  it authenticates. Typing `ayx one login` yourself still gets the
+  short-circuit, which is what it is for. Introduced in 0.20.0; 0.19.1 and
+  earlier are unaffected.
+
 ## 0.20.1 — 2026-09-08
 
 ### Changed

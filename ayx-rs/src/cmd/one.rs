@@ -545,9 +545,15 @@ pub(crate) fn run_otp_login(
     profile: Option<String>,
 ) -> Result<Envelope> {
     let runtime = crate::cmd::RuntimeCtx::new(environment);
+    // `explicit_reauth: true`. The onboarding wizard only reaches here after a
+    // human answered its "Log in now" prompt, so this must actually
+    // authenticate. Treating it as a bare `ayx one login` let the
+    // existing-credential short-circuit return "already configured" without
+    // contacting the server, which left the profile holding the legacy keyring
+    // references onboard had just written and broke every later One command.
     super::one_platform::auth::login(
         &runtime, profile, None, false, false, None, None, None, None, None, None, None, false,
-        None, false, None, None, false, None, false,
+        None, false, None, None, false, None, false, true,
     )
 }
 
@@ -614,6 +620,9 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             refresh_token_stdin,
             access_token_env,
             access_token_stdin,
+            // A user typing `ayx one login` gets the existing-credential
+            // short-circuit; only the onboarding wizard opts out of it.
+            false,
         )?,
         OneCommand::Logout { profile } => {
             super::one_platform::auth::logout(&runtime, profile.as_deref())?

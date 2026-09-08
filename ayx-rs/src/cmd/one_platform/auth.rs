@@ -80,6 +80,10 @@ pub(crate) fn login(
     refresh_token_stdin: bool,
     access_token_env: Option<String>,
     access_token_stdin: bool,
+    // The caller already asked a human to authenticate, so this is not the bare
+    // `ayx one login` that the existing-credential short-circuit exists to
+    // protect. `ayx onboard` sets this after its "Log in now" prompt.
+    explicit_reauth: bool,
 ) -> Result<Envelope> {
     use ayx_core::auth::{AuthRollout, SecretPersistencePolicy};
     use ayx_core::profile::{
@@ -208,7 +212,8 @@ pub(crate) fn login(
     });
     let has_explicit_oauth_flow = refresh_token_arg.is_some() || browser || device;
     let has_explicit_token_input = refresh_token_arg.is_some() || access_token_arg.is_some();
-    let has_explicit_login_setup = client_id.is_some()
+    let has_explicit_login_setup = explicit_reauth
+        || client_id.is_some()
         || browser
         || device
         || refresh_token_arg.is_some()
@@ -2083,6 +2088,18 @@ mod tests {
         assert!(should_report_existing_oauth_login(true, false));
         assert!(!should_report_existing_oauth_login(true, true));
         assert!(!should_report_existing_oauth_login(false, false));
+        // The onboarding wizard reaches login only after a human answered its
+        // "Log in now" prompt, so it passes `explicit_reauth: true` and lands
+        // on the second case above. When it did not, onboard printed
+        // "Connected." without contacting the server and left the profile on
+        // the legacy keyring references it had just written, which made every
+        // later One command fail with "not backed by a canonical keyring
+        // reference".
+        let onboard_explicit_reauth = true;
+        assert!(
+            !should_report_existing_oauth_login(true, onboard_explicit_reauth),
+            "the onboarding wizard must actually authenticate, never short-circuit"
+        );
     }
 
     /// The clear stays scoped to the selected credential, with one deliberate
