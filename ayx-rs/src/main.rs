@@ -262,6 +262,7 @@ fn auth_token_health(access_token: Option<&str>) -> &'static str {
                   See `ayx <command> --help` for branch-specific help, `ayx discover` for the \
                   live CLI tree, and `ayx catalog list` for the machine-readable registry.",
     disable_help_subcommand = true,
+    max_term_width = 120,
     styles = AYX_STYLES
 )]
 struct Cli {
@@ -275,8 +276,7 @@ struct Cli {
     /// Universal One workspace selector: numeric ID, GID, or exact saved name.
     #[arg(long, global = true)]
     workspace: Option<String>,
-    /// Refuse all interactive input. Login then requires explicit token-based
-    /// credentials and ambiguous workspace selections fail closed.
+    /// Never prompt; fail if a selector, credential, secret, or confirmation is required.
     #[arg(long, global = true)]
     no_input: bool,
     /// Preferred per-page size for list requests. `--limit` remains supported

@@ -325,6 +325,27 @@ fn one_workspace_help_renders_governance_actions() {
 }
 
 #[test]
+fn compact_help_wraps_option_descriptions_in_the_description_column() {
+    // Running a command group without a subcommand renders compact help to
+    // stderr.  `wrap_help` must insert the continuation indent itself rather
+    // than leaving PowerShell to physically wrap a one-line description back
+    // under the option column.
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "workspace"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "--output <OUTPUT>              Output format. Defaults to `text` on a terminal and `json` when\n                                     stdout is not a terminal"
+        ),
+        "option description should wrap inside its aligned description column:\n{stderr}"
+    );
+}
+
+#[test]
 fn one_role_help_renders_assignments() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(["one", "role", "--help"])
