@@ -13,7 +13,6 @@ sidebar:
 |---|---|
 | `person list` | List all users |
 | `person current` | Show the user tied to the active profile |
-| `person count` | Return the total user count |
 | `person detail <id>` | Show detail for a specific user |
 | `person create --body <json>` | Create a new user |
 | `person update <id> --body <json>` | Replace a user record (PUT) |
@@ -34,8 +33,6 @@ ayx one person list --all
 # Limit page size
 ayx one person list --limit 100
 
-# Total user count
-ayx one person count
 
 # The authenticated caller
 ayx one person current
