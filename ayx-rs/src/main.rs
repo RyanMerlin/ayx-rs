@@ -775,6 +775,18 @@ mongo:
         assert_eq!(auth_product_status(false, false), "not_configured");
     }
 
+    #[test]
+    fn auth_summary_skips_with_one_message_when_neither_product_is_configured() {
+        // Neither product configured yields an empty `clauses` vec, which is
+        // the single source of truth for the skip path — there must not be a
+        // second, earlier-returning condition duplicating this check with a
+        // different wording.
+        let (status, summary) = doctor_auth_status_summary("not_configured", false, false, false);
+
+        assert_eq!(status, "skip");
+        assert_eq!(summary, "No Alteryx One or Server auth configured");
+    }
+
     /// `ayx-server-api` embeds the code it already computed as
     /// `error_code=<code>`; the dispatcher must read that rather than scanning
     /// prose. It previously did not: the prose scan looks for `"not found"`
@@ -5843,9 +5855,6 @@ fn doctor_auth_status_summary(
     server_api_secret_present: bool,
 ) -> (&'static str, String) {
     let one_configured = one_status != "not_configured";
-    if !one_configured && !server_configured {
-        return ("skip", "One and Server auth not configured".to_string());
-    }
 
     // `one_status` already accounts for credential kind; do not re-derive
     // readiness here or OTP will be called incomplete again.

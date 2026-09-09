@@ -110,6 +110,15 @@ alteryx_one:
     )
 }
 
+/// Neither product configured: no `alteryx_one:` and no `server:` section.
+fn neither_configured_home() -> TempDir {
+    home_with_profile(
+        "neither-configured",
+        r#"profile_name: neither-configured
+"#,
+    )
+}
+
 /// Alteryx Server only. No `alteryx_one:` section at all.
 fn server_only_home() -> TempDir {
     home_with_profile(
@@ -350,6 +359,23 @@ fn otp_only_profile_ok_summary_keeps_the_time_limited_nuance() {
     assert_eq!(auth["status"], "ok", "{auth:#}");
     assert_eq!(
         auth["summary"], "One auth configured (time-limited login)",
+        "{auth:#}"
+    );
+}
+
+#[test]
+fn neither_product_configured_reports_a_single_skip_with_one_message() {
+    // There must be exactly one skip path for "neither product configured",
+    // reached through the clause builder itself (an empty `clauses` vec)
+    // rather than a separate, earlier-returning condition with different
+    // wording. This exercises that path end-to-end through the real profile
+    // loader and `ayx doctor auth`, not just the unit-level function.
+    let home = neither_configured_home();
+    let auth = doctor_check(&home, "auth");
+
+    assert_eq!(auth["status"], "skip", "{auth:#}");
+    assert_eq!(
+        auth["summary"], "No Alteryx One or Server auth configured",
         "{auth:#}"
     );
 }
