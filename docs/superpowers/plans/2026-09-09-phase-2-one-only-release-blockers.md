@@ -714,7 +714,7 @@ cargo nextest run --workspace --locked
 ```
 Expected: all green.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add ayx-rs/tests/product_boundary.rs ayx-rs/src/main.rs
@@ -1115,8 +1115,41 @@ Task 6B is the expected outcome. Both branches share the same OTP relabelling an
 **Files:**
 - Modify: `ayx-rs/src/main.rs` (`ayx one login` long help and the `--oauth-api-token` / OTP flag help)
 - Modify: `ayx-rs/src/onboard.rs` (wizard prompt and completion copy)
-- Modify: `README.md`, `site/src/content/docs/one/` login and auth pages
+- Modify: `README.md`
+- Modify: `site/src/content/docs/getting-started.md` — the first-run path and the
+  API-token section
+- Modify: `site/src/content/docs/connecting.md` — the login flows in detail
+- Audit and correct as needed: `site/src/content/docs/configuration.md`,
+  `one/index.md`, `one/identity.md`, `one/token.md`, `one/workspace.md`,
+  `one/diagnostics/index.md`, `troubleshooting.md` — every page that currently
+  mentions `onboard`, `one login`, OTP, or `--oauth-api-token`
 - Test: `ayx-rs/tests/product_boundary.rs`
+
+**Verified site-doc drift — fix each of these; they were confirmed against the
+binary at this plan's HEAD, not inferred:**
+
+- `getting-started.md:82` prints the login offer as `Log in now [y/N]:`. The code
+  is `prompt_yes_no("Log in now", true)` (`ayx-rs/src/onboard.rs:1346`) — the
+  default is **Yes**, so it renders `[Y/n]`. The documented default is not just
+  stale, it is backwards: a reader who presses Enter expecting to decline gets a
+  login and a real OTP email.
+- `getting-started.md:72` says the wizard "asks for two things" — email and
+  workspace URL. It now asks up to four: email (`onboard.rs:111`), workspace URL
+  or id (`:130`), **the Alteryx One regional base URL** when the input was a bare
+  id (`:163`, added by the onboarding fix merged into this base), and whether to
+  configure Alteryx Server (`:182`). The regional-URL step exists precisely
+  because a workspace id does not identify its region; omitting it from the docs
+  hides the fix operators most need to know about.
+- `getting-started.md` frames the API token as being for "unattended automation,
+  CI, or agents" only, under a heading named *Using an API token for automation*.
+  Per this plan's auth decision that is now wrong-headed: `--oauth-api-token` is
+  the **durable path for anyone**, machine or human, who does not want to
+  re-authenticate every 30 days. Present it as a first-class choice alongside
+  email OTP — not as a machine-only appendix — while keeping OTP as the default
+  first-run path.
+- Confirmed **accurate**, do not "fix" these: `--auth-method oauth-refresh`,
+  `--refresh-token-env`, and `--refresh-token-stdin` all exist as documented, and
+  `--output` genuinely works both before and after the subcommand.
 
 **Interfaces:**
 - Consumes: Task 1's fixtures; Task 2's `credential_kind` / `renews_automatically` doctor fields.
@@ -1200,22 +1233,49 @@ In every location listed under **Files**, make these true:
 - No copy anywhere states or implies that secure storage keeps the user signed in. Secure storage protects the credential at rest; it does not extend its lifetime.
 - `doctor` guidance may recommend moving to `--oauth-api-token`, phrased as an upgrade, never as a repair.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 4: Bring the site docs in line with the code**
+
+Work through the verified drift list above. For `getting-started.md` specifically:
+
+- Correct the login-offer prompt to `[Y/n]` and say plainly that pressing Enter
+  logs you in and sends a real one-time passcode.
+- Rewrite "It asks for two things" to describe the real sequence, including the
+  regional base-URL step and when it appears (a pasted workspace URL supplies the
+  region; a bare workspace id does not, so the wizard asks).
+- Restructure the auth section so the two credential kinds are presented as peers
+  under one heading — e.g. **Choose how you sign in** — with email OTP as the
+  quickest first run (and its 30-day, non-renewing lifetime stated in the same
+  breath) and the OAuth API token as the durable option that renews silently and
+  suits humans, CI, and agents alike. Rename the machine-only heading.
+- Re-read `connecting.md` end to end against `ayx one login --help` and correct
+  any flow it describes that the binary no longer offers in that form.
+
+Verify every command you leave in the docs actually runs. For each fenced
+`ayx …` example on the pages you touch, run it against a scratch
+`AYX_CONFIG_HOME` and confirm it does not fail with a usage or unknown-flag
+error. Do not paste a command you have not executed.
+
+- [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `cargo nextest run -p ayx-rs --test product_boundary`
 Expected: PASS
 
-- [ ] **Step 5: Run the full suite and lints**
+- [ ] **Step 6: Run the full suite, lints, and the docs build**
 
 Run:
 ```bash
 cargo fmt --all
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo nextest run --workspace --locked
+cd site && npm ci && npm run build
 ```
-Expected: all green. `ayx-rs/tests/onboard_login_offer.rs` drives the wizard with piped stdin; if the prompt text changes, update its scripts. Its header warns that running off the end of a script sends a real OTP, so every script must answer the login prompt explicitly.
+Expected: all green, including the Astro build — a broken internal link in the
+pages you edited fails it. `ayx-rs/tests/onboard_login_offer.rs` drives the wizard
+with piped stdin; if the prompt text changes, update its scripts. Its header warns
+that running off the end of a script sends a real OTP, so every script must answer
+the login prompt explicitly.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add -A
