@@ -5689,8 +5689,9 @@ fn doctor_network_envelope(profile: Option<&str>, environment: Option<&str>) -> 
                 "server_base_url": server_base_url,
                 "server_api_base_url": server_api_base_url,
             },
+            "probes_run": false,
             "notes": [
-                "Network checks currently validate configured endpoints rather than performing invasive probes",
+                "Endpoint configuration is validated; no invasive live probe is performed.",
             ],
         }),
     ))
@@ -5760,11 +5761,14 @@ fn doctor_one_envelope(profile: Option<&str>, environment: Option<&str>) -> Resu
 fn doctor_server_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
     let config = Config::load_runtime_profile_with_environment(profile, environment)?;
     let server_ready = config.server.is_some() || config.server_api.is_some();
-    let status = if server_ready { "warn" } else { "skip" };
+    // `doctor` deliberately validates configured endpoints rather than making
+    // invasive probes. That is the designed behaviour, so a fully configured
+    // Alteryx Server is `ok`, not a warning.
+    let status = if server_ready { "ok" } else { "skip" };
     let summary = if server_ready {
-        "Server configured; live validation not run"
+        "Alteryx Server configured; live validation not run"
     } else {
-        "Server not configured"
+        "Alteryx Server not configured"
     };
     Ok(Envelope::ok_with_data(
         "doctor server completed",
@@ -5958,21 +5962,23 @@ fn doctor_network_status_summary(
     one_configured: bool,
     server_configured: bool,
 ) -> (&'static str, String) {
-    match (one_configured, server_configured) {
-        (false, false) => ("skip", "No One or Server endpoints configured".to_string()),
-        (true, true) => (
-            "warn",
-            "One and Server endpoints configured; no live probes run".to_string(),
-        ),
-        (true, false) => (
-            "warn",
-            "One endpoints configured; no live probes run".to_string(),
-        ),
-        (false, true) => (
-            "warn",
-            "Server endpoints configured; no live probes run".to_string(),
-        ),
+    // `doctor` deliberately validates configured endpoints rather than making
+    // invasive probes. That is the designed behaviour, so it is `ok`, not a
+    // warning — and each product speaks only for itself.
+    let mut clauses: Vec<&str> = Vec::new();
+    if one_configured {
+        clauses.push("Alteryx One endpoints configured");
     }
+    if server_configured {
+        clauses.push("Alteryx Server endpoints configured");
+    }
+    if clauses.is_empty() {
+        return (
+            "skip",
+            "No Alteryx One or Server endpoints configured".to_string(),
+        );
+    }
+    ("ok", clauses.join("; "))
 }
 
 fn doctor_status_from_data(data: &Value) -> &str {
