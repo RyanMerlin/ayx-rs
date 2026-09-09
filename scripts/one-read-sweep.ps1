@@ -20,7 +20,12 @@ param(
     [string]$PlanId = "128557",
     [string]$ScheduleId = "39506",
     [string]$ConnectorSlug = "gsheetsuser",
-    [string]$LogDirectory = $env:TEMP
+    [string]$LogDirectory = $env:TEMP,
+
+    # Assert that the profile is an administrator. Permission-boundary
+    # leniency is switched off: a 403 anywhere then counts as a real failure,
+    # because an administrator should not be denied.
+    [switch]$AdministratorFixture
 )
 
 <#
@@ -68,7 +73,14 @@ function Invoke-OneRead {
         [Parameter(Mandatory = $true)]
         [string[]]$Arguments,
 
-        [int[]]$ExpectedExitCodes = @(0)
+        [int[]]$ExpectedExitCodes = @(0),
+
+        # This command reads a resource the sweep profile may legitimately not
+        # be entitled to. A denial here is a real permission boundary, not a
+        # defect in the CLI, so it is recorded as its own outcome rather than
+        # counted as an undifferentiated failure. It is NOT counted as a pass:
+        # the sweep must never report success for a request that was refused.
+        [switch]$PermissionBoundary
     )
 
     Write-Host "`n=== $Label ===" -ForegroundColor Cyan
@@ -78,29 +90,58 @@ function Invoke-OneRead {
     try {
         # Native stderr is diagnostic output, not a PowerShell exception.
         $ErrorActionPreference = "Continue"
-        if ($Quiet) {
-            & $resolvedBinary @Arguments *>&1 | Out-Null
-        } else {
-            & $resolvedBinary @Arguments
-        }
+        # Capture rather than stream, so a denial can be told apart from an
+        # unrelated failure. Response bodies still reach the console below.
+        $captured = & $resolvedBinary @Arguments *>&1
         $exitCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
     }
 
+    $outputText = ($captured | Out-String)
+    if (-not $Quiet) {
+        Write-Host $outputText
+    }
+
     $passed = $ExpectedExitCodes -contains $exitCode
+    # Only an actual denial qualifies. Without this the switch would swallow a
+    # network outage or a parse error at the same command and call it expected.
+    $denied = $outputText -match '(?i)\b403\b|AccessControlException|forbidden|permission denied|not authorized'
+    $isBoundary = (-not $passed) -and $PermissionBoundary -and $denied -and (-not $AdministratorFixture)
+
+    if ($passed) {
+        $status = "passed"
+    } elseif ($isBoundary) {
+        $status = "expected_unprivileged"
+    } else {
+        $status = "failed"
+    }
+
     $results.Add([pscustomobject]@{
         label = $Label
         command = "ayx " + ($Arguments -join " ")
         exit_code = $exitCode
         expected_exit_codes = $ExpectedExitCodes
         passed = $passed
+        status = $status
+        permission_boundary = [bool]$PermissionBoundary
         elapsed_ms = [int][Math]::Round(((Get-Date) - $started).TotalMilliseconds)
     })
-    if ($passed) {
-        Write-Host "PASS ($exitCode)" -ForegroundColor Green
-    } else {
-        Write-Warning "FAILED: exit code $exitCode; expected $($ExpectedExitCodes -join ', ')"
+
+    switch ($status) {
+        "passed" { Write-Host "PASS ($exitCode)" -ForegroundColor Green }
+        "expected_unprivileged" {
+            Write-Host "EXPECTED-UNPRIVILEGED ($exitCode): access denied for this profile; not a CLI defect" -ForegroundColor Yellow
+        }
+        default {
+            if ($PermissionBoundary -and (-not $denied) -and (-not $AdministratorFixture)) {
+                Write-Warning "FAILED: exit code $exitCode; expected $($ExpectedExitCodes -join ', '). Marked as a permission boundary, but the output is not a denial, so this is a different failure."
+            } elseif ($PermissionBoundary -and $AdministratorFixture -and $denied) {
+                Write-Warning "FAILED: exit code $exitCode; an administrator fixture was asserted, so a denial here is a real failure."
+            } else {
+                Write-Warning "FAILED: exit code $exitCode; expected $($ExpectedExitCodes -join ', ')"
+            }
+        }
     }
 }
 
@@ -127,7 +168,10 @@ Invoke-OneRead "One doctor discovery" (OneArgs @("doctor", "discover"))
 Invoke-OneRead "workspace current" (OneArgs @("workspace", "current"))
 Invoke-OneRead "workspace current via GID selector" (OneArgs @("workspace", "current", "--workspace", $WorkspaceGid))
 Invoke-OneRead "workspace list" (OneArgs @("workspace", "list"))
-Invoke-OneRead "workspace detail" (OneArgs @("workspace", "detail", $WorkspaceId))
+# Known live 403 on the standard sweep profile: reading this workspace's
+# detail record is an administrator entitlement. Re-run the sweep with
+# -AdministratorFixture to require it to succeed instead.
+Invoke-OneRead "workspace detail" (OneArgs @("workspace", "detail", $WorkspaceId)) -PermissionBoundary
 Invoke-OneRead "workspace current configuration" (OneArgs @("workspace", "current-configuration"))
 Invoke-OneRead "workspace configuration schema" (OneArgs @("workspace", "current-configuration-schema"))
 Invoke-OneRead "workspace people" (OneArgs @("workspace", "people"))
@@ -210,23 +254,35 @@ Invoke-OneRead "One API diagnose" (OneArgs @("api", "diagnose"))
 Invoke-OneRead "One API coverage" (OneArgs @("api", "coverage"))
 
 $runFinished = Get-Date
+$passedCount = @($results | Where-Object { $_.status -eq "passed" }).Count
+$boundaryCount = @($results | Where-Object { $_.status -eq "expected_unprivileged" }).Count
+$failedCount = @($results | Where-Object { $_.status -eq "failed" }).Count
 $summary = [pscustomobject]@{
-    schema = "ayx.one-read-sweep.v1"
+    schema = "ayx.one-read-sweep.v2"
     started_at = $runStarted.ToString("o")
     finished_at = $runFinished.ToString("o")
     binary = $resolvedBinary
     config_home = $env:AYX_CONFIG_HOME
     profile = $Profile
     output = $Output
-    passed = @($results | Where-Object passed).Count
-    failed = @($results | Where-Object { -not $_.passed }).Count
+    administrator_fixture = [bool]$AdministratorFixture
+    total = $results.Count
+    passed = $passedCount
+    expected_unprivileged = $boundaryCount
+    failed = $failedCount
     results = $results
 }
 $summaryPath = Join-Path $LogDirectory ("ayx-one-read-sweep-" + $runStarted.ToString("yyyyMMdd-HHmmss") + ".json")
 $summary | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $summaryPath -Encoding utf8
 
-Write-Host "`nSummary: $($summary.passed) passed, $($summary.failed) failed" -ForegroundColor Cyan
+Write-Host "`nSummary: $passedCount passed, $boundaryCount expected-unprivileged, $failedCount failed (of $($results.Count))" -ForegroundColor Cyan
+if ($boundaryCount -gt 0) {
+    Write-Host "Expected-unprivileged commands are NOT counted as passes. The tenant refused them for this profile:" -ForegroundColor Yellow
+    foreach ($item in @($results | Where-Object { $_.status -eq "expected_unprivileged" })) {
+        Write-Host "  - $($item.label)" -ForegroundColor Yellow
+    }
+}
 Write-Host "Safe command/timing summary: $summaryPath"
-if ($summary.failed -gt 0) {
+if ($failedCount -gt 0) {
     exit 1
 }

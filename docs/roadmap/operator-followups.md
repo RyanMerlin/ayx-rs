@@ -464,13 +464,32 @@ emit credentials. It intentionally does not attempt interactive OTP.
 
 The latest completed full sweep of the release-candidate binary covered 74
 read-only command invocations: 71 passed and three were classified for follow
-up.
+up. That run predates the `ayx one api` fix and the classification change
+below; the next live run is expected to report 73 passed, 1
+expected-unprivileged, 0 failed, and it has not been run yet.
 
-- [ ] `ayx one workspace detail 91946` received a live 403
+- [x] `ayx one workspace detail 91946` received a live 403
   `AccessControlException`. This is a real permission boundary, not evidence
-  that the endpoint path is wrong. Re-run with an administrator fixture to
-  validate a 200 result; teach the sweep to classify the expected unprivileged
-  result instead of treating it as an undifferentiated failure.
+  that the endpoint path is wrong. **Done (2026-09-09):** the sweep now
+  classifies it rather than counting it as an undifferentiated failure. Both
+  halves of the original item are available:
+  - `-PermissionBoundary` marks the command. A denial there is recorded as
+    `expected_unprivileged` — a third outcome, deliberately **not** folded
+    into the pass count, because the sweep must never report success for a
+    request the tenant refused. It does not fail the run.
+  - The classification applies only when the output is genuinely a denial
+    (`403`, `AccessControlException`, `forbidden`, `permission denied`,
+    `not authorized`). Any other failure at the same command is still a
+    failure, and says so: a network outage there cannot hide behind the flag.
+  - `-AdministratorFixture` asserts the profile is an administrator and
+    switches the leniency off, so a denial anywhere counts as a real failure.
+    That is the "re-run with an administrator fixture" half.
+
+  The summary log is now `ayx.one-read-sweep.v2`, adding `status` and
+  `permission_boundary` per result and `total` / `expected_unprivileged` /
+  `administrator_fixture` to the header. Verified against a stub binary in
+  three cases — expected denial, administrator assertion, and a non-denial
+  failure at the same command — since a live tenant was not available.
 - [ ] `ayx one api status` and `ayx one api diagnose` failed before the
   network call because they require `api/server_api`; this is the separate
   One-versus-Server defect recorded below.
