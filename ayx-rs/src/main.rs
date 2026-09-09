@@ -756,8 +756,12 @@ mongo:
 
     #[test]
     fn auth_summary_keeps_one_and_server_readiness_independent() {
+        // One is configured but incomplete, and Server is fully configured:
+        // both products ARE configured here, so both legitimately contribute
+        // a clause. That is not conflation — conflation would be a clause for
+        // a product that was never configured at all (see the
+        // `product_boundary` integration tests for that guarantee).
         let (status, summary) = doctor_auth_status_summary(
-            true,
             "incomplete", // One is configured but incomplete.
             true,
             true,
@@ -765,7 +769,7 @@ mongo:
         );
 
         assert_eq!(status, "warn");
-        assert_eq!(summary, "One incomplete; Server configured");
+        assert_eq!(summary, "One auth incomplete; Server auth configured");
         assert_eq!(auth_product_status(true, false), "incomplete");
         assert_eq!(auth_product_status(true, true), "configured");
         assert_eq!(auth_product_status(false, false), "not_configured");
@@ -5590,7 +5594,6 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
         one_oauth_client_id_present,
     );
     let (status, summary) = doctor_auth_status_summary(
-        one_configured,
         one_status,
         server_configured,
         server_api_key_present,
@@ -5834,12 +5837,12 @@ fn doctor_config_status_summary(
 }
 
 fn doctor_auth_status_summary(
-    one_configured: bool,
     one_status: &str,
     server_configured: bool,
     server_api_key_present: bool,
     server_api_secret_present: bool,
 ) -> (&'static str, String) {
+    let one_configured = one_status != "not_configured";
     if !one_configured && !server_configured {
         return ("skip", "One and Server auth not configured".to_string());
     }
@@ -5848,30 +5851,45 @@ fn doctor_auth_status_summary(
     // readiness here or OTP will be called incomplete again.
     let one_ready = !one_configured || one_status != "incomplete";
     let server_ready = !server_configured || (server_api_key_present && server_api_secret_present);
-    if !one_ready || !server_ready {
-        let one_label = match one_status {
-            "not_configured" => "One not configured",
-            "configured" => "One configured",
-            "configured_time_limited" => "One configured (time-limited login)",
-            _ => "One incomplete",
-        };
-        let server_label = if !server_configured {
-            "Server not configured"
-        } else if server_ready {
-            "Server configured"
-        } else {
-            "Server incomplete"
-        };
-        return ("warn", format!("{one_label}; {server_label}"));
+
+    // Each product contributes its own clause, and only when it is configured.
+    // A product that is not configured contributes nothing: it is that
+    // product's own `skip` row, not a warning attached to its neighbour.
+    let mut clauses: Vec<String> = Vec::new();
+    if one_configured {
+        clauses.push(
+            match one_status {
+                "configured" => "One auth configured",
+                "configured_time_limited" => "One auth configured (time-limited login)",
+                _ => "One auth incomplete",
+            }
+            .to_string(),
+        );
+    }
+    if server_configured {
+        clauses.push(
+            if server_ready {
+                "Server auth configured"
+            } else {
+                "Server auth incomplete"
+            }
+            .to_string(),
+        );
     }
 
-    let summary = match (one_configured, server_configured) {
-        (true, true) => "One and Server auth configured",
-        (true, false) => "One auth configured",
-        (false, true) => "Server auth configured",
-        (false, false) => "One and Server auth not configured",
+    if clauses.is_empty() {
+        return (
+            "skip",
+            "No Alteryx One or Server auth configured".to_string(),
+        );
+    }
+
+    let status = if !one_ready || !server_ready {
+        "warn"
+    } else {
+        "ok"
     };
-    ("ok", summary.to_string())
+    (status, clauses.join("; "))
 }
 
 /// One's auth readiness, judged against what the profile's credential kind can
