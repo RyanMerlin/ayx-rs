@@ -78,7 +78,15 @@ fn trailing_json_output_is_supported_for_discovery_and_help() {
     let help = run(&["one", "workflows", "--help"]);
     assert!(help.status.success());
     let help_text = String::from_utf8_lossy(&help.stdout);
-    assert!(help_text.contains("Put it after the complete command path"));
+    // Clap wraps long option descriptions, so the guidance sentence may span
+    // lines.  Collapse whitespace before matching rather than pinning the test
+    // to a particular terminal width.
+    let unwrapped = help_text.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        unwrapped.contains("Put it after the complete command path"),
+        "--output help should tell agents where to place the flag:
+{help_text}"
+    );
 }
 
 #[test]
