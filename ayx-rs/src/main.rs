@@ -5553,15 +5553,20 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
     let one = config.alteryx_one.as_ref();
     let server = config.server.as_ref();
     let one_configured = one.is_some();
+    // Read through the workspace-scoped credential that `ayx one login` writes.
+    // `resolved_*` falls back to the legacy top-level field for older profiles.
     let one_access_token_present = one
-        .and_then(|v| v.access_token.as_ref())
+        .and_then(|v| v.resolved_access_token())
         .is_some_and(|v| !v.trim().is_empty());
     let one_refresh_token_present = one
-        .and_then(|v| v.refresh_token.as_ref())
+        .and_then(|v| v.resolved_refresh_token())
         .is_some_and(|v| !v.trim().is_empty());
     let one_oauth_client_id_present = one
-        .and_then(|v| v.oauth_client_id.as_ref())
+        .and_then(|v| v.resolved_oauth_client_id())
         .is_some_and(|v| !v.trim().is_empty());
+    // The active workspace credential also carries the `*_ref` secure-storage
+    // pointers used for source reporting below.
+    let one_credential = one.and_then(|v| v.active_workspace_credential());
     let server_configured = server.is_some();
     let server_api_key_present = server.is_some_and(|v| !v.curator_api_key.trim().is_empty());
     let server_api_secret_present = server.is_some_and(|v| !v.curator_api_secret.trim().is_empty());
@@ -5601,12 +5606,16 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
                 "refresh_token_present": one_refresh_token_present,
                 "oauth_client_id_present": one_oauth_client_id_present,
                 "access_token_source": secret_source(
-                    one.and_then(|v| v.access_token_ref.as_ref()),
-                    one.and_then(|v| v.access_token.as_deref()),
+                    one_credential
+                        .and_then(|c| c.access_token_ref.as_ref())
+                        .or_else(|| one.and_then(|v| v.access_token_ref.as_ref())),
+                    one.and_then(|v| v.resolved_access_token()),
                 ),
                 "refresh_token_source": secret_source(
-                    one.and_then(|v| v.refresh_token_ref.as_ref()),
-                    one.and_then(|v| v.refresh_token.as_deref()),
+                    one_credential
+                        .and_then(|c| c.refresh_token_ref.as_ref())
+                        .or_else(|| one.and_then(|v| v.refresh_token_ref.as_ref())),
+                    one.and_then(|v| v.resolved_refresh_token()),
                 ),
             },
             "server": {
