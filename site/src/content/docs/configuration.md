@@ -80,7 +80,7 @@ alteryx_one:
       refresh_token_ref: env:AYX_ONE_API_REFRESH_TOKEN
 ```
 
-For OAuth automation, prefer the one-time import command in [Connecting](/connecting/#oauth-api-accessrefresh-credentials) and secure keyring persistence. An environment-backed pair is useful when the runtime intentionally supplies credentials on every process start; it is not a local rotation store.
+For OAuth automation, prefer the one-time import command in [Connecting](/connecting/#the-durable-path-oauth-api-accessrefresh-credentials) and secure keyring persistence. An environment-backed pair is useful when the runtime intentionally supplies credentials on every process start; it is not a local rotation store.
 
 ## Multiple workspaces in one profile
 

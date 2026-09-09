@@ -58,6 +58,18 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneAuthCommand) -> Resu
     })
 }
 
+/// `ayx one login` refuses `--secret-policy session`: the process exits as soon
+/// as it returns, so a session-only credential could never be used. Both the
+/// refusal and the storage-unavailable fallback advice below are stated once,
+/// here, so the advice can never drift into recommending the policy the very
+/// same function rejects.
+const SESSION_POLICY_REFUSAL: &str = "--secret-policy session is not supported by the standalone `ayx one login` command: the process exits after login and cannot retain a usable session; use secure or plaintext explicitly";
+
+/// Advice given when the OS keyring cannot be written. It may name only the
+/// policies `login` actually accepts.
+const SECURE_STORAGE_UNAVAILABLE: &str =
+    "secure credential storage is unavailable; pass --secret-policy plaintext explicitly";
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn login(
     runtime: &RuntimeCtx<'_>,
@@ -369,9 +381,7 @@ pub(crate) fn login(
         .or(remembered_policy)
         .unwrap_or(SecretPersistencePolicy::Secure);
     if persistence_policy == SecretPersistencePolicy::SessionOnly {
-        bail!(
-            "--secret-policy session is not supported by the standalone `ayx one login` command: the process exits after login and cannot retain a usable session; use secure or plaintext explicitly"
-        );
+        bail!(SESSION_POLICY_REFUSAL);
     }
     // A Client ID supplied on the command line, or pasted at the prompt, must
     // win over whatever the selected workspace credential already holds.
@@ -939,8 +949,8 @@ pub(crate) fn login(
         Ok(output) => output,
         Err(_err)
             if persistence_policy == SecretPersistencePolicy::Secure
-            && !runtime.no_input
-            && interactive_secret_fallback()? =>
+                && !runtime.no_input
+                && interactive_secret_fallback()? =>
         {
             let output =
                 crate::onboard::write_config_with_binding_for_rollout_and_delete_keyring_accounts(
@@ -956,14 +966,12 @@ pub(crate) fn login(
                 SecretPersistencePolicy::PlaintextFallback,
             );
             effective_persistence_policy = SecretPersistencePolicy::PlaintextFallback;
-            eprintln!("warning: secure credential storage was unavailable; using the profile-file fallback by explicit consent");
+            eprintln!(
+                "warning: secure credential storage was unavailable; using the profile-file fallback by explicit consent"
+            );
             output
         }
-        Err(err) => {
-            return Err(err).context(
-                "secure credential storage is unavailable; pass --secret-policy plaintext or --secret-policy session explicitly",
-            )
-        }
+        Err(err) => return Err(err).context(SECURE_STORAGE_UNAVAILABLE),
     };
 
     if persistence_policy_to_remember(requested_policy, effective_persistence_policy).is_some()
@@ -1755,13 +1763,14 @@ fn workspace_password_for_login(
 #[cfg(test)]
 mod tests {
     use super::{
-        AuthenticatedWorkspace, BrowserCallback, accepts_plaintext_fallback,
-        accepts_workspace_password_save, authenticated_workspace_from_value,
-        clear_explicit_refresh_token_references, explicit_refresh_keyring_accounts,
-        oauth_client_id_for_login, parse_browser_callback, persist_verified_workspace_credential,
-        persistence_policy_to_remember, read_refresh_token_source,
-        should_offer_workspace_password_save, should_prompt_for_oauth_refresh_token,
-        should_report_existing_oauth_login, workspace_password_for_login,
+        AuthenticatedWorkspace, BrowserCallback, SECURE_STORAGE_UNAVAILABLE,
+        SESSION_POLICY_REFUSAL, accepts_plaintext_fallback, accepts_workspace_password_save,
+        authenticated_workspace_from_value, clear_explicit_refresh_token_references,
+        explicit_refresh_keyring_accounts, oauth_client_id_for_login, parse_browser_callback,
+        persist_verified_workspace_credential, persistence_policy_to_remember,
+        read_refresh_token_source, should_offer_workspace_password_save,
+        should_prompt_for_oauth_refresh_token, should_report_existing_oauth_login,
+        workspace_password_for_login,
     };
     use ayx_core::profile::{
         AlteryxOneProfile, WorkspaceCredential, WorkspaceResolutionSource, WorkspaceTarget,
@@ -2447,5 +2456,27 @@ mod tests {
         let (result, response) = callback_request("/callback?state=expected", "expected");
         assert!(matches!(result, BrowserCallback::Ignore));
         assert!(response.starts_with("HTTP/1.1 400 Bad Request"));
+    }
+
+    /// `login` bails on `--secret-policy session` long before it can reach the
+    /// storage-unavailable fallback, so advice naming `session` there could
+    /// never be actionable: it tells the operator to pass a flag this same
+    /// function rejects. Both callers of `login` (`ayx one login` and the
+    /// onboarding wizard's "Log in now" step) go through that bail, so there is
+    /// no caller for which the suggestion would have been correct.
+    #[test]
+    fn storage_fallback_advice_never_names_a_policy_login_rejects() {
+        assert!(
+            SESSION_POLICY_REFUSAL.contains("--secret-policy session is not supported"),
+            "login must still refuse session: {SESSION_POLICY_REFUSAL}"
+        );
+        assert!(
+            !SECURE_STORAGE_UNAVAILABLE.contains("session"),
+            "the fallback must not recommend the policy login rejects: {SECURE_STORAGE_UNAVAILABLE}"
+        );
+        assert!(
+            SECURE_STORAGE_UNAVAILABLE.contains("--secret-policy plaintext"),
+            "the fallback must still name the policy that does work: {SECURE_STORAGE_UNAVAILABLE}"
+        );
     }
 }
