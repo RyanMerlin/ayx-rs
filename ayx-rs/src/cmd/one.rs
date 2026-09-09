@@ -231,7 +231,6 @@ fn person_descriptor(command: Option<&OnePersonCommand>) -> OutputDescriptor {
             list_with("one.person.list", PEOPLE_LIST_FIELDS)
         }
         Some(OnePersonCommand::Current) => detail("one.person.current"),
-        Some(OnePersonCommand::Count) => detail("one.person.count"),
         Some(OnePersonCommand::Detail { .. }) => detail("one.person.detail"),
         Some(OnePersonCommand::Create { .. }) => result("one.person.create"),
         Some(OnePersonCommand::Update { .. }) => result("one.person.update"),

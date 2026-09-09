@@ -591,6 +591,22 @@ fn old_top_level_workflows_command_no_longer_resolves() {
 }
 
 #[test]
+fn retired_one_person_count_command_no_longer_resolves() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "person", "count"])
+        .output()
+        .expect("ayx binary should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unexpected argument 'count'")
+            || stderr.contains("unrecognized subcommand 'count'"),
+        "expected the retired command to be rejected; stderr:\n{stderr}"
+    );
+}
+
+#[test]
 fn workflow_help_renders() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(["designer", "workflow", "--help"])

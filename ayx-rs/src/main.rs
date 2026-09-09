@@ -2183,8 +2183,6 @@ pub(crate) enum OnePersonCommand {
     },
     /// Inspect the current One person record.
     Current,
-    /// Count One people.
-    Count,
     /// Inspect a One person record by id.
     Detail {
         #[arg(long)]

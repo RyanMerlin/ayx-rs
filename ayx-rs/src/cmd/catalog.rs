@@ -436,14 +436,6 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         notes: &["Maps to GET /v4/people/current in the One API docs."],
     },
     CatalogMetadata {
-        path: "one/person/count",
-        output: "one person count envelope",
-        safety: "read-only",
-        mutating: false,
-        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
-        notes: &["Maps to GET /v4/people/count in the One API docs."],
-    },
-    CatalogMetadata {
         path: "one/person/detail",
         output: "one person detail envelope",
         safety: "read-only",
