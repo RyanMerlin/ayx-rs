@@ -462,11 +462,25 @@ for an already-authenticated One profile. It carries overridable safe fixture
 identifiers, writes only labels/exit codes/timings to a JSON log, and must not
 emit credentials. It intentionally does not attempt interactive OTP.
 
-The latest completed full sweep of the release-candidate binary covered 74
-read-only command invocations: 71 passed and three were classified for follow
-up. That run predates the `ayx one api` fix and the classification change
-below; the next live run is expected to report 73 passed, 1
-expected-unprivileged, 0 failed, and it has not been run yet.
+### Live sweep result, 2026-09-09
+
+Run on Windows against the `windows-otp` profile, `--output json`, release
+binary built from this branch:
+
+**74 invocations: 72 passed, 2 expected-unprivileged, 0 failed. Exit 0.**
+
+That clears the sweep half of the Phase 2 exit gate. The prior baseline was
+71 passed with three classified for follow up; the two `ayx one api` commands
+that previously failed before the network call now pass, and the two denials
+are classified rather than counted as undifferentiated failures.
+
+The two expected-unprivileged rows are `ayx one workspace detail 91946` and
+`ayx one connections connector-metadata publish-info gsheetsuser`. Both exit 5
+(`permission_denied`). Neither is counted as a pass.
+
+Four rows pass while carrying a declared non-zero exit code of 2
+(`job-groups inputs`, `profile`, `profile-results`, `pdf-results`). See the
+open finding below before reading `72 passed` as 72 clean successes.
 
 - [x] `ayx one workspace detail 91946` received a live 403
   `AccessControlException`. This is a real permission boundary, not evidence
@@ -497,6 +511,27 @@ expected-unprivileged, 0 failed, and it has not been run yet.
   onboarding, One dispatch, profiles/credentials, output, or command help.
   Pair it with the interactive OTP scenario in the preceding authentication
   section; neither test alone covers the other.
+
+- [ ] **A 400 that means "no such data" is reported as `validation`, which
+  sends the operator to the wrong place.** Found while classifying the sweep,
+  2026-09-09. `ayx one job-groups profile 4087561` exits 2 with
+  `error_code: validation`. The upstream response is HTTP 400 carrying
+  `ProfilingDataNotFoundException` / "Job group 4087561 does not have
+  profiling data" — an absent-resource condition, not malformed input. The
+  CLI maps 400 to `Validation` unconditionally, and `validation`'s remediation
+  tells the user to check their flags and `--help`, which cannot help here.
+  This is the same misdirection `mapped_client_errors_land_in_an_actionable_bucket`
+  in `ayx-core/src/envelope.rs` already guards against for 408/423/428.
+  Consider consulting the upstream exception name, or the response body, when
+  a 400 is classified. Affects `job-groups inputs`, `profile`,
+  `profile-results`, and `pdf-results` on a fixture with no profiling data.
+
+- [ ] **Two `job-groups` subcommands report the wrong `command` in their
+  envelope.** Found the same way. `ayx one job-groups profile <id>` emits
+  `"command": "one.job-groups.detail"`, and `ayx one job-groups inputs <id>`
+  emits `"command": "one.job-groups.list"`. The envelope's `command` field is
+  part of the machine-readable contract, so an agent correlating a failure
+  back to the invocation that caused it is told the wrong one.
 
 ## Windows onboarding and credential setup
 

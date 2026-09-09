@@ -65,6 +65,11 @@ $env:AYX_CONFIG_HOME = (Resolve-Path -LiteralPath $ConfigHome).Path
 $runStarted = Get-Date
 $results = [System.Collections.Generic.List[object]]::new()
 
+# `exit_code_for_envelope` in ayx-rs/src/main.rs maps ErrorCode::PermissionDenied
+# to process exit code 5. This is the published CLI contract and the only
+# denial signal that survives every --output mode.
+$PERMISSION_DENIED_EXIT_CODE = 5
+
 function Invoke-OneRead {
     param(
         [Parameter(Mandatory = $true)]
@@ -106,7 +111,19 @@ function Invoke-OneRead {
     $passed = $ExpectedExitCodes -contains $exitCode
     # Only an actual denial qualifies. Without this the switch would swallow a
     # network outage or a parse error at the same command and call it expected.
-    $denied = $outputText -match '(?i)\b403\b|AccessControlException|forbidden|permission denied|not authorized'
+    #
+    # Classify on the CLI's own typed signals, not on prose. `--output json`
+    # emits the compact envelope, which lists `status_code` under
+    # `omitted_fields` -- the string "403" never appears in the output at all,
+    # so text matching cannot see the denial it is looking for. The exit code
+    # is the authoritative contract (`exit_code_for_envelope` in
+    # `ayx-rs/src/main.rs` maps PermissionDenied to 5), with `error_code` as a
+    # direct confirmation and the text patterns as a fallback for `--output
+    # text` and for the Server surface, which words it as `forbidden`.
+    $deniedByExitCode = ($exitCode -eq $PERMISSION_DENIED_EXIT_CODE)
+    $deniedByErrorCode = $outputText -match '"error_code"\s*:\s*"permission_denied"'
+    $deniedByText = $outputText -match '(?i)\b403\b|AccessControlException|forbidden|permission denied|not authorized'
+    $denied = $deniedByExitCode -or $deniedByErrorCode -or $deniedByText
     $isBoundary = (-not $passed) -and $PermissionBoundary -and $denied -and (-not $AdministratorFixture)
 
     if ($passed) {
@@ -125,6 +142,7 @@ function Invoke-OneRead {
         passed = $passed
         status = $status
         permission_boundary = [bool]$PermissionBoundary
+        denial_signal = if (-not $denied) { $null } elseif ($deniedByExitCode) { "exit_code" } elseif ($deniedByErrorCode) { "error_code" } else { "text" }
         elapsed_ms = [int][Math]::Round(((Get-Date) - $started).TotalMilliseconds)
     })
 
@@ -135,7 +153,7 @@ function Invoke-OneRead {
         }
         default {
             if ($PermissionBoundary -and (-not $denied) -and (-not $AdministratorFixture)) {
-                Write-Warning "FAILED: exit code $exitCode; expected $($ExpectedExitCodes -join ', '). Marked as a permission boundary, but the output is not a denial, so this is a different failure."
+                Write-Warning "FAILED: exit code $exitCode; expected $($ExpectedExitCodes -join ', '). Marked as a permission boundary, but this is not a denial (a denial exits $PERMISSION_DENIED_EXIT_CODE or reports error_code permission_denied), so it is a different failure."
             } elseif ($PermissionBoundary -and $AdministratorFixture -and $denied) {
                 Write-Warning "FAILED: exit code $exitCode; an administrator fixture was asserted, so a denial here is a real failure."
             } else {
@@ -203,7 +221,10 @@ Invoke-OneRead "connection detail" (OneArgs @("connections", "detail", $Connecti
 Invoke-OneRead "connection status" (OneArgs @("connections", "status", $ConnectionId))
 Invoke-OneRead "connection permissions" (OneArgs @("connections", "permissions", "list", $ConnectionId))
 Invoke-OneRead "connector defaults" (OneArgs @("connections", "connector-metadata", "defaults", $ConnectorSlug))
-Invoke-OneRead "connector publish info (may be scope denied)" (OneArgs @("connections", "connector-metadata", "publish-info", $ConnectorSlug)) @(0, 5)
+# Scope-denied on the standard sweep profile. Classified rather than accepted
+# as a pass: exit 5 here is the same denial signal as workspace detail, and
+# counting it as a pass would report success for a refused request.
+Invoke-OneRead "connector publish info (may be scope denied)" (OneArgs @("connections", "connector-metadata", "publish-info", $ConnectorSlug)) -PermissionBoundary
 Invoke-OneRead "connector metadata" (OneArgs @("connections", "connector-metadata", "detail", $ConnectorSlug))
 
 # The current command label is intentionally retained for this run so its live
