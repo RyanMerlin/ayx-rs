@@ -646,7 +646,7 @@ live_unexpected_case!(
     one_api_status_live,
     args = ["--output", "json-full", "one", "api", "status"],
     ok = [
-        "\"product\": \"one\"",
+        "\"product\": \"Alteryx One\"",
         "\"base_url\":",
         "\"has_credentials\":"
     ]

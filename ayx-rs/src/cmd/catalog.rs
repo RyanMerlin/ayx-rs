@@ -1067,7 +1067,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one api status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &[
             "Use this to inspect One API posture before diagnostics.",
             "Treat this as the One managed IAM posture check.",
@@ -1078,7 +1078,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one api diagnostic envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &[
             "Use before future One API call-style workflows.",
             "Route workflow guidance through the orchestration layer once the symptom is known.",
