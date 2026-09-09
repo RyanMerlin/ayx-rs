@@ -2108,13 +2108,6 @@ pub(crate) enum OneCommand {
     /// from the Alteryx One UI; the CLI verifies them, stores them securely,
     /// and renews access tokens silently from then on.
     ///
-    /// With --device: device-code flow — prints a short URL and code; open
-    /// the URL on any device, enter the code, and the CLI stores your tokens
-    /// automatically.
-    ///
-    /// With --browser: PKCE authorization-code flow — opens your default
-    /// browser and captures tokens via a local redirect.
-    ///
     /// With --auth-method email-otp: use the email OTP login flow.
     /// With --refresh-token / --access-token: import tokens you already have.
     Login {
@@ -2124,10 +2117,21 @@ pub(crate) enum OneCommand {
         #[arg(long)]
         client_id: Option<String>,
         /// Use the browser-redirect PKCE flow instead of email OTP.
-        #[arg(long)]
+        ///
+        /// Hidden: never validated against a live Alteryx One tenant. The
+        /// implementation is correct OAuth and becomes usable the moment the
+        /// Alteryx OAuth client enables the authorization_code grant and
+        /// registers a localhost redirect URI. See
+        /// `docs/roadmap/operator-followups.md`.
+        #[arg(long, hide = true)]
         browser: bool,
         /// Use device-code grant instead of email OTP.
-        #[arg(long)]
+        ///
+        /// Hidden: never validated against a live Alteryx One tenant, and the
+        /// device authorization endpoint is derived by string substitution on
+        /// the token endpoint with no OIDC discovery lookup. See
+        /// `docs/roadmap/operator-followups.md`.
+        #[arg(long, hide = true)]
         device: bool,
         /// Set up the durable OAuth API-token credential, not email OTP.
         /// Prompts for the visible Client ID and hidden Refresh Token from the

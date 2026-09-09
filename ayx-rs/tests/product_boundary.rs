@@ -753,3 +753,25 @@ fn server_api_status_reports_credential_presence_as_booleans() {
         "the secret value must never appear: {text}"
     );
 }
+
+#[test]
+fn unverified_auth_flows_are_not_advertised() {
+    // --browser and --device were never validated against a live Alteryx One
+    // tenant, and the device authorization endpoint is derived by string
+    // substitution on the token endpoint with no discovery lookup. Until a
+    // live run proves them, they must not appear in help as though they are
+    // supported: an operator who tries one and fails at the identity provider
+    // concludes the failure is theirs, and every agent reading the help
+    // surface treats it as a capability the CLI has.
+    let home = one_only_otp_home();
+    let help = unwrapped_help(&home, &["one", "login"]);
+
+    assert!(
+        !help.contains("--browser"),
+        "an unverified flow must not be advertised:\n{help}"
+    );
+    assert!(
+        !help.contains("--device"),
+        "an unverified flow must not be advertised:\n{help}"
+    );
+}
