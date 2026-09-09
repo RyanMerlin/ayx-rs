@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-03 19:08:35 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-04 00:03:57 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 416
+- Commands: 417
 - Capabilities: 6
 
 ## Commands
@@ -338,6 +338,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one workflows delete | `one/workflows/delete` | mutating | yes | Delete a cloud-native workflow. Irreversible — no known restore/trash endpoint exists |
 | one workflows dependencies | `one/workflows/dependencies` | read-only | no | List the connections, datasets, and macros a workflow depends on |
 | one workflows detail | `one/workflows/detail` | read-only | no | Inspect one cloud-native workflow |
+| one workflows download | `one/workflows/download` | read-only | no | Download one cloud-native workflow version as portable JSON |
 | one workflows engines | `one/workflows/engines` | read-only | no | Show which execution engines a workflow can run on |
 | one workflows list | `one/workflows/list` | read-only | no | List Alteryx One cloud-native workflows |
 | one workflows run | `one/workflows/run` | mutating | yes | Queue a cloud-native workflow run |

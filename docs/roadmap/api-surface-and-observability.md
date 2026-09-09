@@ -11,6 +11,19 @@ Status: active
 
 ## Next Steps
 
+- **Cloud-native workflow download validation.** `ayx one workflows download`
+  is wired to the documented Workflow Service version-download endpoint and
+  writes the exact validated JSON artifact, but the current OAuth profile
+  receives HTTP 401 while asset listing succeeds. Re-probe with an authorized
+  API token, record the required permission/scope and the authoritative source
+  of version IDs, then promote the endpoint-matrix row from documented to
+  live-verified. Do not call it operationally ready until that succeeds.
+- **Cloud-native lifecycle and views.** Keep the public vocabulary accurate:
+  the current surface supports list/detail, copy, upload, and delete, not
+  blank-workflow creation or general update. Document `one workflows list` as
+  the normal enriched governance view and `one workflows assets` as the raw
+  Workflow Service projection used for detail/version resolution; retain both
+  until real users show that the overlap causes harmful confusion.
 - **CI still makes no live call to Alteryx One, and that stays true by deliberate choice, not
   neglect.** `live-smoke.yml` skips every meaningful step because no `AYX_ONE_API_ACCESS_TOKEN`
   secret is configured; local `one_live_smoke` tests behave the same way, passing in milliseconds

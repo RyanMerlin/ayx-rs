@@ -24,6 +24,17 @@ Status: active
 
 ## Next Steps
 
+- **Decision: do not create a `discover` schema v2.** Keep schema v1 stable
+  and preserve its narrow role as live command-tree discovery. If a concrete
+  agent failure justifies it, make only additive v1 fields: exact long-option
+  spelling beside the internal Clap id, canonical-versus-alias/deprecation
+  markers, and references to catalog metadata. Do not turn discovery into a
+  claim about tenant capability, authorization, safety, or provider response
+  shape; those belong to catalog, doctor/capability checks, and dry-run.
+- Add independent black-box discovery coverage for exact long-option spelling,
+  inherited global options, and `--help` agreement. The current live-tree
+  parity tests are valuable drift guards, but shared-source tests cannot catch
+  a wrong rendering or an accidentally hidden command.
 - Enrich `CATALOG_METADATA` for commands that currently show
   `metadata_status: unclassified` in `catalog list --scope all`,
   prioritizing mutating/destructive commands so their safety classification

@@ -282,6 +282,11 @@ const WORKFLOW_ENDPOINTS: &[EndpointSpec] = &[
     },
     EndpointSpec {
         method: "GET",
+        path: "/svc-workflow/api/v1/workflows/{id}/versions/{version}",
+        commands: &["one workflows download"],
+    },
+    EndpointSpec {
+        method: "GET",
         path: "/svc-workflow/api/v0/workflows/{id}/availableEngines",
         commands: &["one workflows engines"],
     },

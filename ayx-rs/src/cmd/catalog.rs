@@ -2034,6 +2034,22 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         ],
     },
     CatalogMetadata {
+        path: "one/workflows/download",
+        output: "one workflows download envelope",
+        safety: "read-only",
+        mutating: false,
+        prerequisites: &[
+            "central runtime profile",
+            "server_api",
+            "workflow download permission",
+        ],
+        notes: &[
+            "Maps to GET /svc-workflow/api/v1/workflows/{id}/versions/{version}.",
+            "Defaults to the current version resolved from the workflow asset record and writes the exact downloaded JSON after validating it is JSON.",
+            "Alteryx One rejects workflow JSON modified outside the product; treat the downloaded file as a portable, immutable artifact.",
+        ],
+    },
+    CatalogMetadata {
         path: "one/workflows/assets",
         output: "one workflows assets envelope",
         safety: "read-only",

@@ -320,6 +320,7 @@ fn workflows_descriptor(command: &OneWorkflowsCommand) -> OutputDescriptor {
         OneWorkflowsCommand::Tools { .. } => list("one.workflows.tools"),
         OneWorkflowsCommand::Upload { .. } => result("one.workflows.upload"),
         OneWorkflowsCommand::Dependencies { .. } => list("one.workflows.dependencies"),
+        OneWorkflowsCommand::Download { .. } => result("one.workflows.download"),
         OneWorkflowsCommand::Count { .. } => detail("one.workflows.count"),
         OneWorkflowsCommand::Detail { .. } => detail("one.workflows.detail"),
         OneWorkflowsCommand::Engines { .. } => detail("one.workflows.engines"),

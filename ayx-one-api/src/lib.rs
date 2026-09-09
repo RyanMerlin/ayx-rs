@@ -2187,6 +2187,230 @@ pub fn flow_export_package_envelope(
     Ok(envelope)
 }
 
+/// Download one immutable cloud-native workflow version as its portable JSON
+/// artifact. The Workflow Service rejects JSON modified outside Alteryx One, so
+/// this helper deliberately validates but does not normalize or reserialize the
+/// response before writing it.
+pub fn workflow_download_json_envelope(
+    config: &Config,
+    workflow_id: &str,
+    version: u64,
+    output_path: &Path,
+) -> Result<Envelope> {
+    let observability = config.observability.as_ref();
+    let client = build_client()?;
+    let access_token = resolve_one_access_token(config, &client)?;
+    let endpoint = "/svc-workflow/api/v1/workflows/{id}/versions/{version}";
+    let url = format!(
+        "{}{}",
+        resolve_one_base_url(config),
+        endpoint
+            .replace("{id}", &percent_encode_path_segment(workflow_id))
+            .replace("{version}", &version.to_string())
+    );
+    let workspace_context = workspace_context_header_value(config);
+    let workspace_gid = config
+        .alteryx_one
+        .as_ref()
+        .and_then(|one| one.resolved_workspace_gid())
+        .map(str::to_string);
+    let started = Instant::now();
+
+    let mut request = client
+        .get(&url)
+        .header(AUTHORIZATION, bearer_authorization_value(&access_token))
+        .header(
+            reqwest::header::ACCEPT,
+            "application/octet-stream, application/json",
+        );
+    if let Some(gid) = workspace_gid {
+        request = request.header("x-alteryx-workspace-gid", gid);
+    }
+    if let Some(workspace_context) = workspace_context {
+        request = request.header("x-trifacta-person-workspace-id", workspace_context);
+    }
+    let response = request
+        .send()
+        .with_context(|| format!("workflow download request to '{url}' failed"))?;
+    let status = response.status();
+    let request_id = response
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned);
+
+    if status.is_success() {
+        let bytes = response
+            .bytes()
+            .with_context(|| format!("failed to read workflow download from '{url}'"))?;
+        serde_json::from_slice::<Value>(&bytes).with_context(|| {
+            format!(
+                "workflow download for '{workflow_id}' version {version} was not valid JSON; refusing to write a non-portable artifact"
+            )
+        })?;
+        if let Some(parent) = output_path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create workflow download parent directory '{}'",
+                    parent.display()
+                )
+            })?;
+        }
+        write_sensitive_file(output_path, &bytes).with_context(|| {
+            format!(
+                "failed to write workflow JSON to '{}'",
+                output_path.display()
+            )
+        })?;
+        let envelope = Envelope::ok_with_data(
+            "workflow JSON downloaded",
+            Value::Object({
+                let mut data = one_response_metadata(
+                    "workflow",
+                    "download",
+                    "GET",
+                    &url,
+                    endpoint,
+                    1,
+                    Some(status.as_u16()),
+                    request_id.clone(),
+                    true,
+                    "json_file",
+                    None,
+                    false,
+                    false,
+                );
+                data.insert(
+                    "workflow_id".to_string(),
+                    Value::String(workflow_id.to_string()),
+                );
+                data.insert("version".to_string(), Value::from(version));
+                data.insert(
+                    "path".to_string(),
+                    Value::String(output_path.display().to_string()),
+                );
+                data.insert("bytes".to_string(), Value::from(bytes.len() as u64));
+                data.insert(
+                    "elapsed_ms".to_string(),
+                    Value::from(started.elapsed().as_millis() as u64),
+                );
+                data.insert("response".to_string(), Value::Null);
+                data
+            }),
+        );
+        let _ = record_api_event(
+            observability,
+            ApiEvent {
+                product: "one",
+                surface: "workflow",
+                operation: "download",
+                method: "GET",
+                endpoint_template: endpoint,
+                resolved_url: &url,
+                status_code: Some(status.as_u16()),
+                duration_ms: started.elapsed().as_millis(),
+                attempt: 1,
+                retry_after_seconds: None,
+                request_id: request_id.as_deref(),
+                ok: true,
+                error_class: None,
+                response_shape: Some("json_file"),
+                mutating: false,
+                dry_run: false,
+            },
+        );
+        return Ok(envelope);
+    }
+
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let text = response.text().unwrap_or_else(|_| String::new());
+    let parsed = parse_one_response(&content_type, &text);
+    let parsed_response_shape = match &parsed {
+        ParsedOneResponse::Json { response_shape, .. } => *response_shape,
+        ParsedOneResponse::NonJson { response_kind, .. } => *response_kind,
+    };
+    let envelope = match parsed {
+        ParsedOneResponse::Json {
+            body: response_body,
+            response_shape: body_shape,
+        } => one_http_envelope(
+            status,
+            "workflow download failed".to_string(),
+            Value::Object({
+                let mut data = one_response_metadata(
+                    "workflow",
+                    "download",
+                    "GET",
+                    &url,
+                    endpoint,
+                    1,
+                    Some(status.as_u16()),
+                    request_id.clone(),
+                    false,
+                    body_shape,
+                    None,
+                    false,
+                    false,
+                );
+                data.insert(
+                    "workflow_id".to_string(),
+                    Value::String(workflow_id.to_string()),
+                );
+                data.insert("version".to_string(), Value::from(version));
+                data.insert(
+                    "elapsed_ms".to_string(),
+                    Value::from(started.elapsed().as_millis() as u64),
+                );
+                data.insert("response".to_string(), response_body);
+                data
+            }),
+        ),
+        ParsedOneResponse::NonJson { .. } => one_transport_failure_envelope(
+            Some(status),
+            "workflow",
+            "download",
+            "GET",
+            &url,
+            endpoint,
+            1,
+            None,
+            &parsed,
+            false,
+            false,
+        ),
+    };
+    let _ = record_api_event(
+        observability,
+        ApiEvent {
+            product: "one",
+            surface: "workflow",
+            operation: "download",
+            method: "GET",
+            endpoint_template: endpoint,
+            resolved_url: &url,
+            status_code: Some(status.as_u16()),
+            duration_ms: started.elapsed().as_millis(),
+            attempt: 1,
+            retry_after_seconds: None,
+            request_id: request_id.as_deref(),
+            ok: false,
+            error_class: None,
+            response_shape: Some(parsed_response_shape),
+            mutating: false,
+            dry_run: false,
+        },
+    );
+    Ok(envelope)
+}
+
 fn build_client() -> Result<Client> {
     ONE_HTTP_CLIENT.with(|cache| {
         if let Some(client) = cache.borrow().as_ref() {
@@ -3130,6 +3354,41 @@ mongo:
             auth_mode: AuthMode::default(),
         });
         config
+    }
+
+    #[test]
+    fn workflow_download_writes_the_exact_json_artifact() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(GET)
+                .path("/svc-workflow/api/v1/workflows/workflow-1/versions/7")
+                .header("authorization", "Bearer bearer-token");
+            then.status(200)
+                .header("content-type", "application/octet-stream")
+                .body(r#"{"workflow":{"name":"example","nodes":[{"id":"a"}]}}"#);
+        });
+        let output_path = std::env::temp_dir().join(format!(
+            "ayx-one-api-workflow-download-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos()
+        ));
+        let config = one_profile(&server.base_url());
+
+        let envelope = workflow_download_json_envelope(&config, "workflow-1", 7, &output_path)
+            .expect("download should produce an envelope");
+
+        mock.assert();
+        assert!(envelope.ok, "{envelope:?}");
+        assert_eq!(envelope.data["workflow_id"], "workflow-1");
+        assert_eq!(envelope.data["version"], 7);
+        assert_eq!(
+            fs::read(&output_path).expect("downloaded workflow JSON"),
+            br#"{"workflow":{"name":"example","nodes":[{"id":"a"}]}}"#
+        );
+        fs::remove_file(&output_path).expect("remove test artifact");
     }
 
     #[test]

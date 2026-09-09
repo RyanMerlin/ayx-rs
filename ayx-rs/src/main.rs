@@ -3400,6 +3400,19 @@ pub(crate) enum OneWorkflowsCommand {
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Download one cloud-native workflow version as portable JSON.
+    Download {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ID")]
+        id: String,
+        /// Workflow version to download. Defaults to the current version.
+        #[arg(long)]
+        version: Option<u64>,
+        /// Destination JSON file.
+        #[arg(long, value_name = "FILE")]
+        output_file: PathBuf,
+    },
     /// List workflow assets with the richer svc-workflow projection.
     Assets {
         #[arg(long)]

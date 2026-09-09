@@ -22,7 +22,7 @@ use anyhow::{Result, bail};
 use ayx_core::envelope::{Envelope, ErrorCode};
 use ayx_one_api::{
     OneListParams, one_api_list_request, one_api_live_request, one_api_live_request_with_body,
-    one_api_multipart_file_request,
+    one_api_multipart_file_request, workflow_download_json_envelope,
 };
 use serde_json::{Value, json};
 use url::form_urlencoded::Serializer;
@@ -632,6 +632,19 @@ pub(crate) fn execute(
         OneWorkflowsCommand::Dependencies { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             fetch_dependencies(&config, &id)?
+        }
+        OneWorkflowsCommand::Download {
+            profile,
+            id,
+            version,
+            output_file,
+        } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let version = match version {
+                Some(version) => version,
+                None => resolve_workflow_version(&config, &id)?,
+            };
+            workflow_download_json_envelope(&config, &id, version, &output_file)?
         }
         OneWorkflowsCommand::Engines { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
