@@ -92,12 +92,25 @@ alteryx_one:
     )
 }
 
+/// One-only, onboarded but never logged in: an `alteryx_one` section exists
+/// (account email, base url, active workspace id) but there is no
+/// `workspace_credentials` entry at all. This is a valid, realistic profile
+/// shape — a profile that was set up but never authenticated — and it must
+/// not be confused with a credential missing required fields (which fails
+/// validation before `doctor` ever runs).
+fn one_only_never_logged_in_home() -> TempDir {
+    home_with_profile(
+        "one-nologin",
+        r#"profile_name: one-nologin
+alteryx_one:
+  account_email: operator@example.com
+  base_url: https://us1.alteryxcloud.com
+  active_workspace_id: '91946'
+"#,
+    )
+}
+
 /// Alteryx Server only. No `alteryx_one:` section at all.
-///
-/// Not yet used by this file's own test; a later task in this plan consumes
-/// it. Kept here (rather than added later) because this file is the shared
-/// harness every later task builds on.
-#[allow(dead_code)]
 fn server_only_home() -> TempDir {
     home_with_profile(
         "server-only",
@@ -111,11 +124,6 @@ server:
 }
 
 /// Both products configured in one profile.
-///
-/// Not yet used by this file's own test; a later task in this plan consumes
-/// it. Kept here (rather than added later) because this file is the shared
-/// harness every later task builds on.
-#[allow(dead_code)]
 fn combined_home() -> TempDir {
     home_with_profile(
         "combined",
@@ -249,5 +257,99 @@ fn doctor_reports_renewal_capability_not_label_for_legacy_oauth_profile() {
     assert_eq!(
         auth["one"]["renews_automatically"], true,
         "a stored refresh token and client id are what renewal actually uses:\n{auth:#}"
+    );
+}
+
+#[test]
+fn one_only_profile_does_not_report_server_state_in_the_one_row() {
+    // Alteryx Server being unconfigured is a Server fact. It must never appear
+    // in the One auth row, and it must never make a valid One profile fail.
+    let home = one_only_oauth_home();
+    let auth = doctor_check(&home, "auth");
+
+    let summary = auth["summary"].as_str().expect("summary string");
+    assert!(
+        !summary.contains("Server"),
+        "the auth summary for a One-only profile must not mention Server: {summary}"
+    );
+    assert_eq!(
+        auth["status"], "ok",
+        "a complete One credential with no Server configured is not a warning:\n{auth:#}"
+    );
+    assert_eq!(
+        doctor_check(&home, "server")["status"],
+        "skip",
+        "an unconfigured Server is a Server-only skip"
+    );
+}
+
+#[test]
+fn server_only_profile_does_not_warn_about_one() {
+    // The mirror case: configuring Server must not make One look broken.
+    let home = server_only_home();
+    let auth = doctor_check(&home, "auth");
+
+    assert_eq!(auth["one_status"], "not_configured", "{auth:#}");
+    assert_eq!(auth["server_status"], "configured", "{auth:#}");
+    assert_eq!(
+        auth["status"], "ok",
+        "a complete Server credential with no One configured is not a warning:\n{auth:#}"
+    );
+    let summary = auth["summary"].as_str().expect("summary string");
+    assert!(
+        !summary.contains("incomplete"),
+        "nothing here is incomplete: {summary}"
+    );
+}
+
+#[test]
+fn combined_profile_reports_both_products_configured() {
+    let home = combined_home();
+    let auth = doctor_check(&home, "auth");
+    assert_eq!(auth["one_status"], "configured", "{auth:#}");
+    assert_eq!(auth["server_status"], "configured", "{auth:#}");
+    assert_eq!(auth["status"], "ok", "{auth:#}");
+}
+
+#[test]
+fn one_incomplete_profile_does_not_report_server_state_in_the_one_row() {
+    // Defect 3a: a One profile that was onboarded but never logged in has no
+    // `workspace_credentials` at all. It is configured-but-incomplete, and
+    // Server is unconfigured here too — but the warn branch must still speak
+    // only about One. Splicing in "Server not configured" blames a product
+    // the operator never touched for a warning that belongs entirely to One.
+    let home = one_only_never_logged_in_home();
+    let auth = doctor_check(&home, "auth");
+
+    assert_eq!(auth["one_status"], "incomplete", "{auth:#}");
+    assert_eq!(auth["server_status"], "not_configured", "{auth:#}");
+    assert_eq!(auth["status"], "warn", "{auth:#}");
+
+    let summary = auth["summary"].as_str().expect("summary string");
+    assert!(
+        !summary.contains("Server"),
+        "a One-only warning must not mention Server, which was never configured: {summary}"
+    );
+    assert!(
+        summary.contains("One"),
+        "the warning should still say something about One: {summary}"
+    );
+}
+
+#[test]
+fn otp_only_profile_ok_summary_keeps_the_time_limited_nuance() {
+    // Defect 3b: after the OTP classification fix, an OTP-only profile with no
+    // Server reaches the ok branch — but plain "One auth configured" loses the
+    // fact that this is a time-limited login, not a durable credential. The
+    // clause builder must render the same nuance in the ok branch that the
+    // warn branch already carried.
+    let home = one_only_otp_home();
+    let auth = doctor_check(&home, "auth");
+
+    assert_eq!(auth["one_status"], "configured_time_limited", "{auth:#}");
+    assert_eq!(auth["status"], "ok", "{auth:#}");
+    assert_eq!(
+        auth["summary"], "One auth configured (time-limited login)",
+        "{auth:#}"
     );
 }
