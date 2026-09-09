@@ -16,6 +16,7 @@ use std::env;
 use std::io::IsTerminal;
 
 use ayx_core::envelope::Envelope;
+use chrono::{DateTime, SecondsFormat};
 use clap::builder::styling::{AnsiColor, Color, RgbColor, Style};
 use serde_json::Value;
 
@@ -269,11 +270,7 @@ fn render_data_text(data: &Value) -> String {
         if obj.is_empty() {
             return String::new();
         }
-        let mut lines = Vec::with_capacity(obj.len());
-        for (k, v) in obj {
-            lines.push(format!("  {k}: {}", scalar_or_compact(v)));
-        }
-        return lines.join("\n");
+        return render_object_fields(obj, 2).join("\n");
     }
 
     // Scalar / null — nothing to add.
@@ -297,6 +294,67 @@ fn title_case(key: &str) -> String {
     match chars.next() {
         Some(first) => first.to_uppercase().chain(chars).collect(),
         None => String::new(),
+    }
+}
+
+/// Render a JSON object as indented terminal fields. JSON output remains the
+/// lossless interface; this projection exists so a person does not have to
+/// parse a serialized object embedded inside a `key: value` line.
+fn render_object_fields(object: &serde_json::Map<String, Value>, indent: usize) -> Vec<String> {
+    let mut lines = Vec::with_capacity(object.len());
+    for (key, value) in object {
+        render_human_field(&mut lines, key, value, indent);
+    }
+    lines
+}
+
+fn render_human_field(lines: &mut Vec<String>, key: &str, value: &Value, indent: usize) {
+    let prefix = " ".repeat(indent);
+    match value {
+        Value::Object(object) if object.is_empty() => {
+            lines.push(format!("{prefix}{key}: {{}}"));
+        }
+        Value::Object(object) => {
+            lines.push(format!("{prefix}{key}:"));
+            lines.extend(render_object_fields(object, indent + 2));
+        }
+        Value::Array(items) if items.is_empty() => {
+            lines.push(format!("{prefix}{key}: []"));
+        }
+        Value::Array(items)
+            if items
+                .iter()
+                .all(|item| !item.is_object() && !item.is_array()) =>
+        {
+            lines.push(format!("{prefix}{key}: {}", scalar_or_compact(value)));
+        }
+        Value::Array(items) => {
+            lines.push(format!("{prefix}{key}:"));
+            for item in items {
+                match item {
+                    Value::Object(object) if object.is_empty() => {
+                        lines.push(format!("{}- {{}}", " ".repeat(indent + 2)));
+                    }
+                    Value::Object(object) => {
+                        lines.push(format!("{}-", " ".repeat(indent + 2)));
+                        lines.extend(render_object_fields(object, indent + 4));
+                    }
+                    Value::Array(_) => {
+                        lines.push(format!(
+                            "{}- {}",
+                            " ".repeat(indent + 2),
+                            scalar_or_compact(item)
+                        ));
+                    }
+                    _ => lines.push(format!(
+                        "{}- {}",
+                        " ".repeat(indent + 2),
+                        scalar_or_compact(item)
+                    )),
+                }
+            }
+        }
+        _ => lines.push(format!("{prefix}{key}: {}", scalar_or_compact(value))),
     }
 }
 
@@ -439,14 +497,15 @@ fn render_scalar_array(items: &[Value]) -> String {
         .join("\n")
 }
 
-/// Render a JSON value as a compact, terminal-friendly string. Strings
-/// are unquoted, arrays/objects are flattened to one-liners.
+/// Render a JSON scalar as a compact terminal cell. Nested structures are
+/// summarized here because tables need one line per cell; vertical detail
+/// output expands those structures through `render_human_field` instead.
 fn scalar_or_compact(v: &Value) -> String {
     match v {
         Value::Null => "-".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
-        Value::String(s) => s.clone(),
+        Value::String(s) => human_timestamp_or_original(s),
         Value::Array(arr) => {
             // For short arrays of scalars, render comma-separated.
             if arr.iter().all(|v| !v.is_object() && !v.is_array()) {
@@ -455,11 +514,20 @@ fn scalar_or_compact(v: &Value) -> String {
                     .collect::<Vec<_>>()
                     .join(",")
             } else {
-                serde_json::to_string(v).unwrap_or_else(|_| "[?]".to_string())
+                format!("[{} items]", arr.len())
             }
         }
-        Value::Object(_) => serde_json::to_string(v).unwrap_or_else(|_| "{?}".to_string()),
+        Value::Object(object) => format!("{{{} fields}}", object.len()),
     }
+}
+
+/// Keep exact timestamp values in JSON, but omit visual noise below a second
+/// in human-facing output. A failed parse is deliberately not an error: this
+/// renderer must faithfully display arbitrary service strings.
+fn human_timestamp_or_original(value: &str) -> String {
+    DateTime::parse_from_rfc3339(value)
+        .map(|timestamp| timestamp.to_rfc3339_opts(SecondsFormat::Secs, true))
+        .unwrap_or_else(|_| value.to_string())
 }
 
 fn display_width(s: &str) -> usize {
@@ -492,6 +560,58 @@ mod tests {
         let env = Envelope::ok("done");
         let text = render_text(&env);
         assert_eq!(text, "done");
+    }
+
+    #[test]
+    fn nested_objects_render_as_indented_human_fields() {
+        let env = env_with(
+            "auth status",
+            json!({
+                "access_token_claims": {"exp": 1_791_546_160u64, "expired": false},
+                "workspace_probe": {
+                    "ok": true,
+                    "response": {"count": 0, "data": []}
+                },
+                "recommendations": ["Use one auth status", "Run one workspace current"],
+            }),
+        );
+        let text = render_text(&env);
+        assert!(text.contains("  access_token_claims:\n    exp: 1791546160\n    expired: false"));
+        assert!(text.contains(
+            "  workspace_probe:\n    ok: true\n    response:\n      count: 0\n      data: []"
+        ));
+        assert!(text.contains("  recommendations: Use one auth status,Run one workspace current"));
+        assert!(!text.contains("\"access_token_claims\""));
+        assert!(!text.contains("\"workspace_probe\""));
+    }
+
+    #[test]
+    fn nested_table_cells_are_summarized_not_serialized_json() {
+        let env = env_with(
+            "one item",
+            json!({"items": [{"id": "a", "metadata": {"nested": true}}]}),
+        );
+        let text = render_text(&env);
+        assert!(text.contains("{1 fields}"));
+        assert!(!text.contains("{\"nested\":true}"));
+    }
+
+    #[test]
+    fn human_output_omits_fractional_timestamp_seconds() {
+        let env = env_with(
+            "status",
+            json!({
+                "created_at": "2026-09-09T13:14:15.987654Z",
+                "updated_at": "2026-09-09T13:14:15.123+02:00",
+                "unparseable": "2026-09-09T13:14:15.not-a-time",
+            }),
+        );
+        let text = render_text(&env);
+        assert!(text.contains("created_at: 2026-09-09T13:14:15Z"));
+        assert!(text.contains("updated_at: 2026-09-09T13:14:15+02:00"));
+        assert!(text.contains("unparseable: 2026-09-09T13:14:15.not-a-time"));
+        assert!(!text.contains(".987654"));
+        assert!(!text.contains(".123+02:00"));
     }
 
     #[test]

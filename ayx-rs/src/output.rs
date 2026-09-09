@@ -810,6 +810,7 @@ fn is_metadata_key(key: &str) -> bool {
         "_risks",
         "_posture",
         "_length",
+        "_expires_at",
         "_type",
         "_claims",
         "_endpoint",
@@ -1387,6 +1388,8 @@ mod tests {
                 "has_access_token": true,
                 "token_type": "Bearer",
                 "token_length": 128,
+                "access_token_expires_at": 1_791_546_160u64,
+                "token_expires_at": 1_791_546_160u64,
                 "secret_posture": "secure",
                 "secret_refs": ["keyring:acct"],
                 "inline_secret_fields": ["client_secret"],
@@ -1406,6 +1409,8 @@ mod tests {
             "has_access_token",
             "token_type",
             "token_length",
+            "access_token_expires_at",
+            "token_expires_at",
             "secret_posture",
             "secret_refs",
             "inline_secret_fields",
@@ -1711,6 +1716,8 @@ mod tests {
             "has_refresh_token",
             "has-refresh-token",
             "token_length",
+            "access_token_expires_at",
+            "token_expires_at",
         ] {
             assert!(!is_sensitive_key(key), "metadata key redacted: {key}");
         }
