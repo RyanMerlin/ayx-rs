@@ -49,7 +49,7 @@ pub fn execute(command: CatalogCommand) -> Result<Envelope> {
 /// the join key against `command_surface::visible_commands()`. Deliberately
 /// carries no `name`/`summary`/independent existence flag: those are
 /// clap-derived and would drift if duplicated here.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct CatalogMetadata {
     path: &'static str,
     output: &'static str,
@@ -2427,6 +2427,17 @@ fn validate_metadata<'a>(
     Ok(map)
 }
 
+/// The Designer Cloud/Trifacta flow commands only exist in an explicit legacy
+/// build. Keep their metadata beside the historic surface, but never let it
+/// leak into a default build's catalog or generated command documentation.
+fn active_catalog_metadata() -> Vec<CatalogMetadata> {
+    CATALOG_METADATA
+        .iter()
+        .copied()
+        .filter(|row| cfg!(feature = "legacy-flows") || !row.path.starts_with("one/flows/"))
+        .collect()
+}
+
 /// Every command path in the live tree, hidden or not -- unlike
 /// `command_surface::visible_commands()`, this does not stop descending
 /// into a hidden node's children. Used only by `validate_metadata` to
@@ -2461,7 +2472,8 @@ fn catalog_command_records(scope: CatalogScope) -> Result<Vec<CatalogCommandReco
     let live = command_surface::visible_commands();
     let visible_paths: BTreeSet<String> = live.iter().map(|cmd| cmd.path.clone()).collect();
     let all_paths = all_command_paths(&command_surface::root_command());
-    let metadata_map = validate_metadata(CATALOG_METADATA, &visible_paths, &all_paths)?;
+    let metadata = active_catalog_metadata();
+    let metadata_map = validate_metadata(&metadata, &visible_paths, &all_paths)?;
 
     let records: Vec<CatalogCommandRecord> = live
         .into_iter()
@@ -2665,14 +2677,15 @@ mod tests {
     fn curated_scope_matches_metadata_key_set_and_preserves_legacy_values() {
         let records = catalog_command_records(CatalogScope::Curated).expect("curated records");
         let record_paths: BTreeSet<&str> = records.iter().map(|r| r.path.as_str()).collect();
-        let metadata_paths: BTreeSet<&str> = CATALOG_METADATA.iter().map(|m| m.path).collect();
+        let active_metadata = active_catalog_metadata();
+        let metadata_paths: BTreeSet<&str> = active_metadata.iter().map(|m| m.path).collect();
         assert_eq!(
             record_paths, metadata_paths,
             "curated scope must be exactly the CATALOG_METADATA key set, no more, no less"
         );
         assert_eq!(
             records.len(),
-            CATALOG_METADATA.len(),
+            active_metadata.len(),
             "no duplicate/dropped curated records"
         );
         assert!(
@@ -2757,7 +2770,7 @@ mod tests {
             .expect("catalog list curated should succeed");
         assert_eq!(env.data["scope"], "curated");
         let commands = env.data["commands"].as_array().expect("commands array");
-        assert_eq!(commands.len(), CATALOG_METADATA.len());
+        assert_eq!(commands.len(), active_catalog_metadata().len());
     }
 
     // ─── catalog describe ────────────────────────────────────────────────

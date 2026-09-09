@@ -20,11 +20,12 @@ use crate::{
     OneApiCommand, OneAuthCommand, OneCommand, OneConnectionPermissionCommand,
     OneConnectionsCommand, OneConnectorMetadataCommand, OneConnectorMetadataOverridesCommand,
     OneDatasetsCommand, OneDatasetsImportedCommand, OneDatasetsWrangledCommand,
-    OneFlowFolderFlowsCommand, OneFlowFoldersCommand, OneFlowLibraryCommand, OneFlowsCommand,
     OneJobGroupCommand, OneOutputObjectCommand, OnePersonCommand, OnePlansCommand, OneRoleCommand,
     OneSchedulingCommand, OneTokenCommand, OneWebhookFlowTaskCommand, OneWorkflowsCommand,
     OneWorkspaceCommand, OneWriteSettingCommand,
 };
+#[cfg(feature = "legacy-flows")]
+use crate::{OneFlowFolderFlowsCommand, OneFlowFoldersCommand, OneFlowLibraryCommand, OneFlowsCommand};
 
 use crate::output::{OutputDescriptor, ViewKind};
 
@@ -112,6 +113,7 @@ fn result(command: &'static str) -> OutputDescriptor {
 /// inference in the outer CLI.
 pub(crate) fn output_descriptor(command: &OneCommand) -> OutputDescriptor {
     match command {
+        #[cfg(feature = "legacy-flows")]
         OneCommand::Flows { command } => flows_descriptor(command),
         OneCommand::Workflows { command } => workflows_descriptor(command),
         OneCommand::Connections { command } => connections_descriptor(command),
@@ -284,6 +286,7 @@ fn auth_descriptor(command: &OneAuthCommand) -> OutputDescriptor {
     OutputDescriptor::new(name, ViewKind::Diagnostic)
 }
 
+#[cfg(feature = "legacy-flows")]
 fn flows_descriptor(command: &OneFlowsCommand) -> OutputDescriptor {
     match command {
         OneFlowsCommand::List { .. } => list("one.flows.list"),
@@ -677,6 +680,7 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
         OneCommand::AgentAssets { command } => {
             super::one_agent_assets::execute(&runtime, cli.apply, cli.yes, command)?
         }
+        #[cfg(feature = "legacy-flows")]
         OneCommand::Flows { command } => {
             super::one_flows::execute(&runtime, cli.apply, cli.yes, command)?
         }
@@ -694,15 +698,20 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{OneFlowsCommand, OnePlansCommand, OneWorkflowsCommand};
+    use crate::{OnePlansCommand, OneWorkflowsCommand};
+    #[cfg(feature = "legacy-flows")]
+    use crate::OneFlowsCommand;
 
     #[test]
     fn descriptors_name_one_leaf_commands_and_views() {
-        let flow = output_descriptor(&OneCommand::Flows {
-            command: OneFlowsCommand::Count { profile: None },
-        });
-        assert_eq!(flow.command, "one.flows.count");
-        assert_eq!(flow.kind, ViewKind::Detail);
+        #[cfg(feature = "legacy-flows")]
+        {
+            let flow = output_descriptor(&OneCommand::Flows {
+                command: OneFlowsCommand::Count { profile: None },
+            });
+            assert_eq!(flow.command, "one.flows.count");
+            assert_eq!(flow.kind, ViewKind::Detail);
+        }
 
         let workflow = output_descriptor(&OneCommand::Workflows {
             command: OneWorkflowsCommand::List {

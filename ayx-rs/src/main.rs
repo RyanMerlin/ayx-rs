@@ -944,6 +944,7 @@ mongo:
         assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
     }
 
+    #[cfg(feature = "legacy-flows")]
     #[test]
     fn parses_env_after_nested_subcommand() {
         let cli = Cli::try_parse_from(["ayx", "one", "flows", "list", "--env", "prod"])
@@ -2038,6 +2039,7 @@ pub(crate) enum OneCommand {
         #[command(subcommand)]
         command: OnePlansCommand,
     },
+    #[cfg(feature = "legacy-flows")]
     #[command(
         about = "Alteryx One flows — list, run, import, and export",
         arg_required_else_help = true
@@ -2711,6 +2713,7 @@ pub(crate) enum OnePlansCommand {
     },
 }
 
+#[cfg(feature = "legacy-flows")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneFlowsCommand {
     /// List One flows (flat — no folder structure; see `flows library` for a folder-aware view).
@@ -3000,6 +3003,7 @@ pub(crate) enum OneDatasetsImportedCommand {
     },
 }
 
+#[cfg(feature = "legacy-flows")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneFlowLibraryCommand {
     /// List the One flow library — a folder-aware view combining flows and folders, unlike the flat `flows list`.
@@ -3018,6 +3022,7 @@ pub(crate) enum OneFlowLibraryCommand {
     },
 }
 
+#[cfg(feature = "legacy-flows")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneFlowFoldersCommand {
     /// List flow folders.
@@ -3072,6 +3077,7 @@ pub(crate) enum OneFlowFoldersCommand {
     },
 }
 
+#[cfg(feature = "legacy-flows")]
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneFlowFolderFlowsCommand {
     /// List flows in a folder.

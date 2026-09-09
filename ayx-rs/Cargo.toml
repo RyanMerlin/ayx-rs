@@ -10,6 +10,10 @@ homepage.workspace = true
 
 [features]
 ui = []
+# Opt-in support for the phased-out Designer Cloud/Trifacta `/v4/flows`
+# surface. Cloud-native Alteryx One workflows remain available by default as
+# `ayx one workflows`.
+legacy-flows = []
 
 [dependencies]
 anyhow.workspace = true
