@@ -24,6 +24,8 @@ letting stale notes accumulate.
 
 - [Public release hygiene](public-release-and-doc-hygiene.md)
 - [Post-v0.17.0 follow-ups](post-v0.17.0-follow-ups.md)
+- [Operator follow-ups](operator-followups.md) — live-testing observations and
+  UX items awaiting issue triage
 - [Discovery substrate and command surface](discovery-and-catalog.md)
 - [Workspace and environment tooling](workspace-and-registry-tooling.md)
 - [Mongo registry and remediation](mongo-registry-and-remediation.md)
