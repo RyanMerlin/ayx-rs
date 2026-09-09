@@ -605,7 +605,7 @@ mod tests {
                 },
                 "auth": {
                     "status": "skip",
-                    "summary": "One and Server auth not configured",
+                    "summary": "No Alteryx One or Server auth configured",
                 },
                 "network": {
                     "status": "fail",
@@ -624,7 +624,7 @@ mod tests {
         assert!(text.contains("skip"));
         assert!(text.contains("fail"));
         assert!(text.contains("profile 'default' resolved; no inline secrets"));
-        assert!(text.contains("One and Server auth not configured"));
+        assert!(text.contains("No Alteryx One or Server auth configured"));
         assert!(text.contains("One workspace probe failed"));
         assert!(text.contains("fixes applied: created missing config dirs/state"));
         assert!(config_pos < auth_pos);
