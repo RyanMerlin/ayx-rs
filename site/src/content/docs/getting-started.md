@@ -88,6 +88,11 @@ Ready to connect. A one-time passcode will be emailed to you@example.com,
 and you'll be asked for your workspace password.
 This is a time-limited login: the token lasts 30 days, does not renew
 automatically, and you'll sign in again when it runs out.
+Prefer not to? `ayx one login --oauth-api-token` is the durable path — paste a
+Client ID and Refresh Token once from the Alteryx One UI and access tokens renew
+silently from then on. It suits people as well as CI and agents.
+Credentials are kept in the operating-system secure store by default (this protects
+them at rest; it does not extend how long they last).
 Log in now [Y/n]:
 ```
 
@@ -112,8 +117,8 @@ both work for a person at a keyboard:
 |---|---|---|
 | Set up with | `ayx one login` (the default) | `ayx one login --oauth-api-token` |
 | You supply | A 6-digit emailed code and your workspace password | A Client ID and Refresh Token, pasted once from the Alteryx One UI |
-| Lifetime | The access token expires after **30 days** | Access tokens renew **silently**, indefinitely |
-| Renews itself | **No** — you sign in again | **Yes** |
+| Lifetime | The access token expires after **30 days** | Access tokens renew **silently** for as long as the refresh token stays valid |
+| Renews itself | **No** — you sign in again | **Yes**, until the refresh token is revoked or reaches the lifetime your provider configured (up to 365 days) |
 | Best for | The quickest first run | Anyone who doesn't want to re-authenticate monthly, plus CI and agents |
 
 Email OTP is the default because it is the fastest way to a working setup: no
@@ -121,8 +126,10 @@ administration page, nothing to copy. Its cost is the 30-day cycle.
 
 ### The durable path: an OAuth API token
 
-Do this once, and `ayx` keeps itself signed in by renewing access tokens for
-you. It suits a person on a laptop just as well as an unattended job.
+Do this once, and `ayx` renews access tokens for you without asking. It suits a
+person on a laptop just as well as an unattended job. You should not have to
+paste anything again until the refresh token is revoked or reaches the lifetime
+your provider configured (up to 365 days).
 
 1. In the Alteryx One UI, open the **OAuth2.0 API Tokens** page and generate a
    token. Note the visible **Client ID** and copy the **Refresh Token** from
@@ -152,7 +159,8 @@ an environment variable and import it without exposing the value in command
 arguments or shell history:
 
 ```bash
-ayx one login --auth-method oauth-refresh   --refresh-token-env AYX_ONE_API_REFRESH_TOKEN
+ayx one login --auth-method oauth-refresh \
+  --refresh-token-env AYX_ONE_API_REFRESH_TOKEN
 ```
 
 The CLI stores the pair in the operating-system keyring, refreshes short-lived
@@ -161,7 +169,6 @@ selected workspace. It does not silently fall back to OTP when the refresh
 credential is unavailable. You can also pipe the token with
 `--refresh-token-stdin`; see [Connecting](/connecting/#the-durable-path-oauth-api-accessrefresh-credentials)
 for PowerShell, macOS, and Linux examples.
-
 
 ## Verify
 
