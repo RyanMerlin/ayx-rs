@@ -1089,7 +1089,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one api open-api-spec envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/open-api-spec in the One API docs."],
     },
     CatalogMetadata {
@@ -1097,7 +1097,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one api coverage envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &[
             "Fetches GET /v4/open-api-spec (or --spec <file>) and diffs it against the ayx-one-api inventory.",
             "--check exits non-zero when endpoints are missing.",
