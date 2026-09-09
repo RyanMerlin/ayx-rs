@@ -408,6 +408,51 @@ that can renew access silently.
   OTP state accurately rather than treating its intentional lack of a refresh
   token as a malformed configuration.
 
+### `--browser` and `--device` are hidden, not removed (2026-09-09)
+
+Decision: both flags carry `hide = true` on `ayx one login` as of this date.
+They no longer appear in `--help` or in the generated command surface.
+
+Why: **neither flow has ever been run against a live Alteryx One tenant.** This
+is an absence of evidence, not a recorded live failure — the live auth-flow
+gate was deliberately skipped and no IdP error code was captured. What is known
+from the code is concrete enough to act on:
+
+- `ayx-rs/src/cmd/one_platform/auth.rs` derives the device authorization
+  endpoint by **string substitution on the token endpoint**, with no OIDC
+  discovery lookup and no verification that the endpoint exists. If the tenant
+  does not happen to serve `/device_authorization` at the substituted path, the
+  flow 404s before it reaches the identity provider.
+- Both grants must additionally be enabled on the Alteryx OAuth client:
+  `device_code` for `--device`, `authorization_code` plus a registered
+  `http://localhost:<port>` redirect URI for `--browser`.
+
+A flag advertised in help that fails at the identity provider is worse than no
+flag: the operator burns an afternoon concluding the failure is theirs, and
+every agent reading the help surface treats it as a supported capability.
+
+Hidden rather than deleted — the implementation is correct OAuth and becomes
+usable the moment those grants are enabled upstream. It stays reachable for
+re-testing by typing the flag.
+
+To reopen this decision:
+
+1. Run `ayx one login --browser` and `ayx one login --device` against the
+   reference tenant. Record the CLI version, tenant region, date, the exact
+   error text, and any IdP error code (`unauthorized_client`,
+   `invalid_redirect_uri`), plus whether the derived `/device_authorization`
+   endpoint existed at all. Redact every credential value.
+2. If either works: remove its `hide = true`, replace the string-substituted
+   device endpoint with an OIDC discovery lookup (falling back to substitution
+   only when discovery is unavailable), and document the flow as a durable
+   convenience path.
+
+Meanwhile `--oauth-api-token` remains the proven durable path: it persists a
+refresh credential and renews access tokens silently, with Windows evidence.
+
+Pinned by `unverified_auth_flows_are_not_advertised` in
+`ayx-rs/tests/product_boundary.rs`.
+
 ## Windows One read-validation harness
 
 Priority: release evidence and regression protection
