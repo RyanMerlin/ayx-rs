@@ -49,14 +49,28 @@ ayx onboard
 
 `ayx onboard` is the fastest path to a working setup: it reuses existing values on later runs, masks stored secrets in its summary, and auto-discovers embedded Server settings when `RuntimeSettings.xml` is available.  For automation or agents, add `--non-interactive` to validate an existing profile without prompting.  If you'd rather hand-edit YAML or wire up multiple environments, see [Configuration](#configuration) below.
 
-For Alteryx One email-OTP login, `ayx one login` uses the Wizard flow by
-default. If an internal rollout needs the compatibility path, use
-`ayx one login --auth-flow legacy` or set `AYX_AUTH_ROLLOUT=legacy`. The Wizard
-does not silently retry an ambiguous OTP or PAT operation through Legacy;
-preserve the profile and choose the rollback explicitly.
+Alteryx One offers two user-credential methods, and both are first-class:
 
-For unattended CLI, CI, or agent use, prefer an OAuth2.0 API access/refresh
-pair. Import it once through a secret-safe path, for example:
+- **Email one-time passcode** is the default interactive login and the quickest
+  first run — `ayx one login` with no flags. It is **time-limited**: the access
+  token it returns expires after 30 days, does not renew automatically, and you
+  will sign in again. `ayx one login` uses the Wizard flow by default; if an
+  internal rollout needs the compatibility path, use
+  `ayx one login --auth-flow legacy` or set `AYX_AUTH_ROLLOUT=legacy`. The
+  Wizard does not silently retry an ambiguous OTP or PAT operation through
+  Legacy; preserve the profile and choose the rollback explicitly.
+- **An OAuth2.0 API access/refresh pair** is the **durable** path. Paste a
+  Client ID and Refresh Token once from the Alteryx One UI and the CLI renews
+  access tokens silently from then on. Choose it if you would rather not
+  re-authenticate every 30 days — it suits a person at a keyboard as much as
+  CI, unattended jobs, and agents.
+
+```bash
+ayx one login --oauth-api-token
+```
+
+For CI or a secret manager, import the same credential without an interactive
+paste:
 
 ```bash
 ayx one login --auth-method oauth-refresh \
@@ -69,7 +83,8 @@ silently falls back to OTP. See the [site authentication guide](site/src/content
 for the full setup and cross-platform instructions.
 
 If you are new to the CLI, the beginner path is simply: run `ayx onboard`,
-answer **y**, enter the emailed code and workspace password, then run
+press Enter at `Log in now [Y/n]:` (the default is Yes, and it sends a real
+one-time passcode), enter the emailed code and workspace password, then run
 `ayx one workspace current`.
 
 Login defaults are designed for the normal interactive case: the profile is
@@ -80,7 +95,8 @@ asks whether to save the workspace password in the operating-system keyring;
 the default is **Yes** (`[Y/n]`). Press Enter to save it, or answer `n` to
 decline. Later `ayx one login` runs reuse that securely stored password for the
 selected profile. Use `--save-workspace-password` only as an optional
-non-interactive shorthand.
+non-interactive shorthand. Secure storage protects credentials at rest; it does
+not extend how long an email-OTP token lasts.
 
 3. Run a first quick query:
 

@@ -1884,6 +1884,17 @@ pub(crate) enum OneCommand {
     /// workspace handshake via a pure-HTTP reqwest flow (no browser or Python
     /// required). Use --auth-flow legacy for the compatibility rollback lane.
     ///
+    /// Email OTP is a time-limited login: the access token it returns expires
+    /// after 30 days, does not renew automatically, and you will sign in
+    /// again. Storing it in the operating-system keyring protects it at rest;
+    /// it does not extend its lifetime.
+    ///
+    /// With --oauth-api-token: the durable path, and the one to choose if you
+    /// would rather not re-authenticate every 30 days — for people just as
+    /// much as for CI and agents. Paste a Client ID and Refresh Token once
+    /// from the Alteryx One UI; the CLI verifies them, stores them securely,
+    /// and renews access tokens silently from then on.
+    ///
     /// With --device: device-code flow — prints a short URL and code; open
     /// the URL on any device, enter the code, and the CLI stores your tokens
     /// automatically.
@@ -1891,10 +1902,6 @@ pub(crate) enum OneCommand {
     /// With --browser: PKCE authorization-code flow — opens your default
     /// browser and captures tokens via a local redirect.
     ///
-    /// With --oauth-api-token: set up the long-lived OAuth API-token path,
-    /// not the email OTP path. Paste the visible Client ID and hidden Refresh
-    /// Token once; the CLI verifies them, stores them securely, and renews
-    /// access tokens.
     /// With --auth-method email-otp: use the email OTP login flow.
     /// With --refresh-token / --access-token: import tokens you already have.
     Login {
@@ -1909,9 +1916,12 @@ pub(crate) enum OneCommand {
         /// Use device-code grant instead of email OTP.
         #[arg(long)]
         device: bool,
-        /// Set up a long-lived OAuth API token, not email OTP. Prompts for the
-        /// visible Client ID and hidden Refresh Token, then saves the verified
-        /// credential under this profile's secret policy for automatic renewal.
+        /// Set up the durable OAuth API-token credential, not email OTP.
+        /// Prompts for the visible Client ID and hidden Refresh Token from the
+        /// Alteryx One UI, then saves the verified pair under this profile's
+        /// secret policy. Access tokens renew silently from then on, so this
+        /// is the path for anyone — person, CI job, or agent — who does not
+        /// want to re-authenticate every 30 days.
         #[arg(long, conflicts_with_all = ["auth_method", "browser", "device"])]
         oauth_api_token: bool,
         /// Select the user credential method: email-otp or oauth-refresh.
@@ -5595,6 +5605,22 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
         != Some(ayx_core::profile::OneCredentialKind::EmailOtp)
         && one_refresh_token_present
         && one_oauth_client_id_present;
+    // An OTP credential that is present and unexpired is the flow working as
+    // designed, so this is phrased as an upgrade to a credential that renews
+    // silently — never as a repair to something broken. Alteryx One only; the
+    // Server row below carries no such guidance.
+    let one_guidance: Option<&str> =
+        if one_credential_kind == Some(ayx_core::profile::OneCredentialKind::EmailOtp) {
+            Some(
+                "Email OTP is a time-limited login: this access token lasts 30 days and will \
+                 not renew on its own. To stop signing in again on that cycle, upgrade to the \
+                 durable credential with `ayx one login --oauth-api-token`.",
+            )
+        } else if one_configured && one_renews_automatically {
+            Some("This credential renews access tokens automatically; no periodic sign-in.")
+        } else {
+            None
+        };
     let server_configured = server.is_some();
     let server_api_key_present = server.is_some_and(|v| !v.curator_api_key.trim().is_empty());
     let server_api_secret_present = server.is_some_and(|v| !v.curator_api_secret.trim().is_empty());
@@ -5648,6 +5674,7 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
                 "credential_kind": one_credential_kind.map(ayx_core::profile::OneCredentialKind::as_str),
                 "renews_automatically": one_renews_automatically,
                 "access_token_expires_at": one_access_token_expires_at,
+                "guidance": one_guidance,
             },
             "server": {
                 "configured": server_configured,

@@ -7,9 +7,12 @@ sidebar:
 
 `ayx one` is the primary command surface for Alteryx One. It gives you programmatic access to every major area of the platform: browsing and sharing cloud-native canvas workflows, managing data connections and datasets, running and inspecting jobs, orchestrating schedules and plans, and administering users and workspaces.
 
-For authentication, choose the method that matches the runtime: OAuth2.0 API
-access/refresh credentials are the recommended path for automation and agents,
-while email OTP remains the default interactive path. Both are workspace-scoped
+For authentication there are two first-class methods. Email OTP is the default
+interactive path and the quickest first run, but it is time-limited: its access
+token expires after 30 days and does not renew itself. OAuth2.0 API
+access/refresh credentials are the durable path — set up once, renewed silently
+from then on — and suit a person who would rather not re-authenticate monthly
+as much as they suit CI and agents. Both are workspace-scoped
 and documented in [Identity & auth](/one/identity/) and [Connecting](/connecting/).
 
 ## Three workflow surfaces, deliberately kept separate

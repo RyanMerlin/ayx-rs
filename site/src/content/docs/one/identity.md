@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-`ayx one` handles authentication and identity through a small set of commands: `login` and `logout` manage credentials, `whoami` shows who you're signed in as, `auth status` / `auth diagnose` check token posture, `doctor identity` runs a deeper identity health check, and `inventory` summarizes the current One API surface registry. OAuth2.0 API access/refresh credentials are the recommended method for automation, CI, and agents; email OTP remains the default interactive method. Both are selected per workspace and secure persistence uses the operating-system keyring.
+`ayx one` handles authentication and identity through a small set of commands: `login` and `logout` manage credentials, `whoami` shows who you're signed in as, `auth status` / `auth diagnose` check token posture, `doctor identity` runs a deeper identity health check, and `inventory` summarizes the current One API surface registry. Email OTP is the default interactive method and the quickest first run, but it is a time-limited login: its access token expires after 30 days and does not renew automatically. OAuth2.0 API access/refresh credentials are the durable method — they renew access tokens silently — and are the right choice for anyone who does not want to re-authenticate monthly, as well as for CI and agents. Both are selected per workspace, and secure persistence uses the operating-system keyring to protect the credential at rest; it does not extend how long a credential lasts.
 
 All mutating commands (anything that creates, updates, suspends, removes, or deletes) are dry-run by default. Add `--apply` to commit the change. Add `--yes` to skip the TTY confirmation in scripts.
 
@@ -13,7 +13,7 @@ All mutating commands (anything that creates, updates, suspends, removes, or del
 
 | Area | Command | What you do |
 |---|---|---|
-| Sign in | `ayx one login` | Authenticate and store credentials (OAuth API access/refresh for automation; email OTP by default for interactive use) |
+| Sign in | `ayx one login` | Authenticate and store credentials (email OTP by default, time-limited to 30 days; `--oauth-api-token` for a credential that renews silently) |
 | Sign out | `ayx one logout` | Clear stored credentials from the active profile |
 | Identity | `ayx one whoami` | Show the current One user profile |
 | Auth status | `ayx one auth status` | Summarize One API token posture for managed IAM |
@@ -25,11 +25,17 @@ Workspace, user, token, and role administration all build on the identity establ
 
 ## Signing in
 
-Choose the credential method deliberately. For unattended use, prefer the
-OAuth API access/refresh method below. It is a one-time import of a pair issued
-by Alteryx One; subsequent access-token renewal is automatic while the refresh
-credential remains valid. Use email OTP when a human is available for the
-passcode and workspace-password prompts.
+Choose the credential method deliberately.
+
+Email OTP needs a human at the passcode and workspace-password prompts, and it
+is time-limited: the access token it stores expires after 30 days, does not
+renew automatically, and you will sign in again.
+
+The OAuth API access/refresh method below is the durable alternative — a
+one-time import of a pair issued by Alteryx One, after which access-token
+renewal is automatic while the refresh credential remains valid. Prefer it for
+unattended use, and equally for a person who would rather not re-authenticate
+every 30 days.
 
 ```bash
 # Email OTP flow
@@ -108,7 +114,7 @@ The default email-OTP login prompts for the workspace password when it is not al
 Save this workspace password securely for future logins? [Y/n]
 ```
 
-Press Enter to save it in the operating system's secure keyring, or answer `n` to keep it for this login only. Later logins for the selected profile reuse the saved password. On Windows, this uses Windows Credential Manager; it is not written into the profile YAML or an environment file.
+Press Enter to save it in the operating system's secure keyring, or answer `n` to keep it for this login only. Later logins for the selected profile reuse the saved password. On Windows, this uses Windows Credential Manager; it is not written into the profile YAML or an environment file. Saving the password means the next sign-in does not prompt for it; it does not keep the 30-day access token from expiring.
 
 `--save-workspace-password` remains an optional automation shorthand for the default email-OTP flow. If secure storage is unavailable, `--secret-policy plaintext` is an explicit fallback that requires affirmative consent. The standalone login command rejects `--secret-policy session` because it cannot preserve a session after the process exits.
 

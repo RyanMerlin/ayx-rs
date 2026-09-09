@@ -14,7 +14,7 @@ used by `ayx one login --auth-method oauth-refresh`:
 
 | Credential/resource | Used for | Lifecycle |
 |---|---|---|
-| OAuth2.0 API access/refresh pair | CLI authentication, especially unattended automation | Import the pair once; the CLI refreshes access tokens and persists rotated refresh tokens in the secure keyring |
+| OAuth2.0 API access/refresh pair | CLI authentication — the durable path for people, CI, and agents alike | Import the pair once; the CLI refreshes access tokens and persists rotated refresh tokens in the secure keyring |
 | `ayx one token` API-token resource | Creating, listing, inspecting, and revoking API-token resources through the One API | Created and deleted explicitly; the returned secret is shown once and must be captured securely |
 
 The two flows may have different scopes and issuance policies. A token created

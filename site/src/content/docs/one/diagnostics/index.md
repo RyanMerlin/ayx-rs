@@ -41,8 +41,12 @@ ayx one doctor auth
 ```
 
 The result reports the selected workspace credential method without printing
-token values. OAuth credentials are normally renewed automatically; email-OTP
-credentials require an interactive login when their stored token expires. If
+token values, along with `credential_kind`, `renews_automatically`, and the
+access-token expiry. OAuth credentials are normally renewed automatically;
+email-OTP credentials are time-limited and require an interactive login when
+their 30-day token expires. For an email-OTP credential the check also suggests
+`ayx one login --oauth-api-token` — that is an upgrade to a credential that
+renews itself, not a repair to a broken one. If
 an OAuth refresh token is expired or revoked, re-import a newly issued pair
 with `ayx one login --auth-method oauth-refresh` using the env/stdin input
 options described in [Identity & auth](/one/identity/).

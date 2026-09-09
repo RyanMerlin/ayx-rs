@@ -1332,11 +1332,21 @@ fn offer_login_now(config: &Config, saved_path: &Path, environment: Option<&str>
         one.account_email
     );
     eprintln!("and you'll be asked for your workspace password.");
+    // Say the lifetime out loud where the flow is offered. Secure storage
+    // protects this credential at rest; it does not extend its 30 days, and no
+    // copy here may imply otherwise.
     eprintln!(
-        "Authentication flow: Wizard by default (use `ayx one login --auth-flow legacy` for rollback)."
+        "This is a time-limited login: the token lasts 30 days, does not renew\n\
+         automatically, and you'll sign in again when it runs out."
     );
     eprintln!(
-        "Credentials use the operating-system secure store by default; use `--secret-policy session` on a temporary or constrained host."
+        "Prefer not to? `ayx one login --oauth-api-token` is the durable path — paste a\n\
+         Client ID and Refresh Token once from the Alteryx One UI and access tokens renew\n\
+         silently from then on. It suits people as well as CI and agents."
+    );
+    eprintln!(
+        "Credentials are kept in the operating-system secure store by default (this protects\n\
+         them at rest; it does not extend how long they last)."
     );
     // Default Yes. Connecting is the entire point of this wizard, and the lines
     // above already state exactly what happens next, so Enter should complete
@@ -1353,6 +1363,11 @@ fn offer_login_now(config: &Config, saved_path: &Path, environment: Option<&str>
             eprintln!("\nConnected. Verify any time with:");
             eprintln!("  ayx one auth status");
             eprintln!("  ayx one workspace current");
+            eprintln!(
+                "\nThis token lasts 30 days and won't renew itself — run `ayx one login` again\n\
+                 when it runs out, or switch to the durable credential once with\n\
+                 `ayx one login --oauth-api-token`."
+            );
             Ok(json!({ "offered": true, "ran": true, "ok": true }))
         }
         Err(err) => {
