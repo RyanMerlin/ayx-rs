@@ -53,10 +53,6 @@ alteryx_one:
 /// deliberately no refresh token and no client id. That is what the OTP flow
 /// returns; it is a valid credential, not an incomplete one.
 ///
-/// Not yet used by this file's own test; a later task in this plan consumes
-/// it. Kept here (rather than added later) because this file is the shared
-/// harness every later task builds on.
-#[allow(dead_code)]
 fn one_only_otp_home() -> TempDir {
     home_with_profile(
         "one-otp",
@@ -180,5 +176,37 @@ fn doctor_reads_workspace_scoped_one_credentials() {
     assert_eq!(
         auth["one_status"], "configured",
         "a complete OAuth refresh credential is configured, not incomplete:\n{auth:#}"
+    );
+}
+
+#[test]
+fn doctor_calls_email_otp_time_limited_not_incomplete() {
+    // An email-OTP credential intentionally has no refresh token and no client
+    // id.  That is the flow working as designed, not a malformed profile.  It
+    // is time-limited and non-rotating, and doctor must say exactly that.
+    let home = one_only_otp_home();
+    let auth = doctor_check(&home, "auth");
+
+    assert_eq!(
+        auth["one_status"], "configured_time_limited",
+        "OTP is a valid, time-limited credential kind:\n{auth:#}"
+    );
+    assert_eq!(
+        auth["one"]["credential_kind"], "email_otp",
+        "the credential kind must be reported:\n{auth:#}"
+    );
+    assert_eq!(
+        auth["one"]["renews_automatically"], false,
+        "OTP cannot refresh silently and must not imply it can:\n{auth:#}"
+    );
+    assert_eq!(
+        auth["one"]["access_token_expires_at"], 4_102_444_800u64,
+        "expiry is safe operational metadata and must not be redacted:\n{auth:#}"
+    );
+
+    let summary = auth["summary"].as_str().expect("summary string");
+    assert!(
+        !summary.contains("incomplete"),
+        "a valid OTP profile must not be called incomplete: {summary}"
     );
 }

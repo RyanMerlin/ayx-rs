@@ -757,8 +757,11 @@ mongo:
     #[test]
     fn auth_summary_keeps_one_and_server_readiness_independent() {
         let (status, summary) = doctor_auth_status_summary(
-            true, false, false, false, // One is configured but incomplete.
-            true, true, true, // Server is fully configured.
+            true,
+            "incomplete", // One is configured but incomplete.
+            true,
+            true,
+            true, // Server is fully configured.
         );
 
         assert_eq!(status, "warn");
@@ -5567,21 +5570,28 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
     // The active workspace credential also carries the `*_ref` secure-storage
     // pointers used for source reporting below.
     let one_credential = one.and_then(|v| v.active_workspace_credential());
+    let one_credential_kind = one.and_then(|v| v.resolved_credential_kind());
+    let one_access_token_expires_at = one.and_then(|v| v.resolved_access_token_expires_at());
+    let one_renews_automatically = one_credential_kind
+        == Some(ayx_core::profile::OneCredentialKind::OAuthRefresh)
+        && one_refresh_token_present
+        && one_oauth_client_id_present;
     let server_configured = server.is_some();
     let server_api_key_present = server.is_some_and(|v| !v.curator_api_key.trim().is_empty());
     let server_api_secret_present = server.is_some_and(|v| !v.curator_api_secret.trim().is_empty());
-    let (status, summary) = doctor_auth_status_summary(
+    let one_status = one_auth_product_status(
         one_configured,
+        one_credential_kind,
         one_access_token_present,
         one_refresh_token_present,
         one_oauth_client_id_present,
+    );
+    let (status, summary) = doctor_auth_status_summary(
+        one_configured,
+        one_status,
         server_configured,
         server_api_key_present,
         server_api_secret_present,
-    );
-    let one_status = auth_product_status(
-        one_configured,
-        one_access_token_present && one_refresh_token_present && one_oauth_client_id_present,
     );
     let server_status = auth_product_status(
         server_configured,
@@ -5617,6 +5627,12 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
                         .or_else(|| one.and_then(|v| v.refresh_token_ref.as_ref())),
                     one.and_then(|v| v.resolved_refresh_token()),
                 ),
+                "credential_kind": one_credential_kind.map(|kind| match kind {
+                    ayx_core::profile::OneCredentialKind::EmailOtp => "email_otp",
+                    ayx_core::profile::OneCredentialKind::OAuthRefresh => "oauth_refresh",
+                }),
+                "renews_automatically": one_renews_automatically,
+                "access_token_expires_at": one_access_token_expires_at,
             },
             "server": {
                 "configured": server_configured,
@@ -5819,9 +5835,7 @@ fn doctor_config_status_summary(
 
 fn doctor_auth_status_summary(
     one_configured: bool,
-    one_access_token_present: bool,
-    one_refresh_token_present: bool,
-    one_oauth_client_id_present: bool,
+    one_status: &str,
     server_configured: bool,
     server_api_key_present: bool,
     server_api_secret_present: bool,
@@ -5830,16 +5844,16 @@ fn doctor_auth_status_summary(
         return ("skip", "One and Server auth not configured".to_string());
     }
 
-    let one_ready = !one_configured
-        || (one_access_token_present && one_refresh_token_present && one_oauth_client_id_present);
+    // `one_status` already accounts for credential kind; do not re-derive
+    // readiness here or OTP will be called incomplete again.
+    let one_ready = !one_configured || one_status != "incomplete";
     let server_ready = !server_configured || (server_api_key_present && server_api_secret_present);
     if !one_ready || !server_ready {
-        let one_label = if !one_configured {
-            "One not configured"
-        } else if one_ready {
-            "One configured"
-        } else {
-            "One incomplete"
+        let one_label = match one_status {
+            "not_configured" => "One not configured",
+            "configured" => "One configured",
+            "configured_time_limited" => "One configured (time-limited login)",
+            _ => "One incomplete",
         };
         let server_label = if !server_configured {
             "Server not configured"
@@ -5858,6 +5872,51 @@ fn doctor_auth_status_summary(
         (false, false) => "One and Server auth not configured",
     };
     ("ok", summary.to_string())
+}
+
+/// One's auth readiness, judged against what the profile's credential kind can
+/// actually provide. An email-OTP credential has no refresh token and no
+/// client id by design: it is valid but time-limited, and reporting it as
+/// incomplete sends operators looking for a configuration error that does not
+/// exist.
+fn one_auth_product_status(
+    configured: bool,
+    credential_kind: Option<ayx_core::profile::OneCredentialKind>,
+    access_token_present: bool,
+    refresh_token_present: bool,
+    oauth_client_id_present: bool,
+) -> &'static str {
+    use ayx_core::profile::OneCredentialKind;
+    if !configured {
+        return "not_configured";
+    }
+    match credential_kind {
+        Some(OneCredentialKind::EmailOtp) => {
+            if access_token_present {
+                "configured_time_limited"
+            } else {
+                "incomplete"
+            }
+        }
+        Some(OneCredentialKind::OAuthRefresh) => {
+            if access_token_present && refresh_token_present && oauth_client_id_present {
+                "configured"
+            } else {
+                "incomplete"
+            }
+        }
+        // An unlabelled profile predates credential_kind. Judge it by what it
+        // holds: a complete OAuth triple is durable, a lone access token is not.
+        None => {
+            if access_token_present && refresh_token_present && oauth_client_id_present {
+                "configured"
+            } else if access_token_present {
+                "configured_time_limited"
+            } else {
+                "incomplete"
+            }
+        }
+    }
 }
 
 fn auth_product_status(configured: bool, ready: bool) -> &'static str {
