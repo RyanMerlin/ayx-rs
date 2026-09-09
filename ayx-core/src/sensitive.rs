@@ -78,6 +78,14 @@ fn sibling_with_suffix(path: &Path, suffix: &str) -> PathBuf {
     path.with_file_name(file_name)
 }
 
+/// `Path::parent` returns an empty path for a bare filename. That denotes the
+/// current directory and must not be passed to `create_dir_all`: Windows
+/// rejects the empty path with `ERROR_INVALID_NAME`.
+fn nonempty_parent(path: &Path) -> Option<&Path> {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+}
+
 /// Maps an I/O error from writing, syncing, or renaming the temp file into
 /// `SensitiveIoError::Write`, and best-effort removes the temp file first --
 /// so a write/sync/rename failure partway through doesn't leave partial
@@ -117,7 +125,7 @@ pub fn write_sensitive_file(path: &Path, contents: &[u8]) -> Result<(), Sensitiv
 }
 
 fn write_atomic_contents(path: &Path, contents: &[u8]) -> Result<(), SensitiveIoError> {
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = nonempty_parent(path) {
         ensure_sensitive_dir(parent)?;
     }
 
@@ -165,7 +173,7 @@ fn write_atomic_contents(path: &Path, contents: &[u8]) -> Result<(), SensitiveIo
         // Linux requires an explicit fsync of the parent directory for a
         // rename to be crash-durable: the directory-entry update has its own
         // dirty state, independent of the renamed file's own fsync above.
-        if let Some(parent) = path.parent() {
+        if let Some(parent) = nonempty_parent(path) {
             let dir = std::fs::File::open(parent).map_err(|source| SensitiveIoError::Write {
                 path: path.display().to_string(),
                 source,
@@ -242,7 +250,7 @@ pub struct SensitiveFileLock {
 
 impl SensitiveFileLock {
     pub fn acquire(path: &Path) -> Result<Self, SensitiveIoError> {
-        if let Some(parent) = path.parent() {
+        if let Some(parent) = nonempty_parent(path) {
             ensure_sensitive_dir(parent)?;
         }
         let lock_path = sibling_with_suffix(path, ".lock");
@@ -331,7 +339,7 @@ impl std::fmt::Debug for SensitiveFileLock {
 }
 
 pub fn append_sensitive_file(path: &Path, contents: &[u8]) -> Result<(), SensitiveIoError> {
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = nonempty_parent(path) {
         ensure_sensitive_dir(parent)?;
     }
     #[cfg(unix)]

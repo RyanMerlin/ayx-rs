@@ -69,6 +69,123 @@ fn offers_login_when_workspace_gid_is_present() {
     );
 }
 
+/// A bare workspace GID does not encode its regional endpoint. Onboard must
+/// collect that endpoint before offering OTP login; otherwise the credential
+/// binding fails before an OTP is even sent. Enter accepts the visible US1
+/// default, while a person in another region can override it.
+#[test]
+fn bare_workspace_gid_prompts_for_base_url_before_offering_login() {
+    let home = tempfile::tempdir().expect("tempdir");
+    // Profile name (default), email, bare workspace GID, Enter to accept the
+    // explicit US1 base URL default, no Server, decline login.
+    let script = format!("\nuser@example.com\n{SAMPLE_GID}\n\nn\nn\n");
+    let out = run_onboard_in(home.path(), &script);
+
+    assert!(
+        out.contains("Alteryx One base URL [https://us1.alteryxcloud.com]"),
+        "a bare workspace GID must prompt for its regional base URL; output:\n{out}"
+    );
+    assert!(
+        out.contains("Log in now"),
+        "login is offered only after a base URL has been collected; output:\n{out}"
+    );
+    assert!(
+        out.contains("Skipped. Connect any time"),
+        "the test must decline login rather than trigger a real OTP; output:\n{out}"
+    );
+
+    let saved = std::fs::read_to_string(home.path().join("profiles/local.yaml"))
+        .expect("onboard must save the profile");
+    assert!(
+        saved.contains("base_url: https://us1.alteryxcloud.com"),
+        "the accepted region must be persisted for credential binding; profile:\n{saved}"
+    );
+    assert!(
+        saved.contains(&format!("workspace_gid: {SAMPLE_GID}")),
+        "the bare workspace GID must still be persisted; profile:\n{saved}"
+    );
+}
+
+/// A previous run may have saved a bare workspace GID before the wizard knew
+/// to collect a regional base URL. That profile fails strict live validation,
+/// but onboarding must load and repair it rather than replace it with a new
+/// `local` profile and discard the user's email/GID.
+#[test]
+fn onboarding_repairs_an_existing_bare_gid_profile_without_overwriting_it() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let profiles = home.path().join("profiles");
+    std::fs::create_dir_all(&profiles).expect("profiles dir");
+    let existing = profiles.join("local.yaml");
+    std::fs::write(
+        &existing,
+        format!(
+            "profile_name: local\n\
+             alteryx_one:\n\
+            \x20 schema_version: 1\n\
+            \x20 account_email: user@example.com\n\
+            \x20 workspace_gid: {SAMPLE_GID}\n"
+        ),
+    )
+    .expect("write incomplete profile");
+
+    // Existing profile name/email/GID, Enter to accept the explicit US1 base
+    // URL default, no Server, decline login. `--profile` is deliberately the
+    // exact existing path: the default onboarding target is a first-run
+    // `config.yaml`, not the active central-profile pointer.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["onboard", "--profile"])
+        .arg(&existing)
+        .env("AYX_CONFIG_HOME", home.path())
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn ayx onboard");
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(b"\n\n\n\nn\nn\n")
+        .expect("write stdin");
+    let result = child.wait_with_output().expect("wait");
+    assert!(
+        result.status.success(),
+        "onboard must repair the incomplete profile: {}{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let out = format!(
+        "{}{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+
+    assert!(
+        out.contains("Alteryx One base URL [https://us1.alteryxcloud.com]"),
+        "onboard must repair the existing incomplete profile; output:\n{out}"
+    );
+    assert!(
+        out.contains("Log in now"),
+        "login may be offered only after the repair; output:\n{out}"
+    );
+    let saved = std::fs::read_to_string(&existing).expect("repaired profile");
+    assert!(
+        saved.contains("account_email: user@example.com"),
+        "the existing email must be preserved; profile:\n{saved}"
+    );
+    assert!(
+        saved.contains(&format!("workspace_gid: {SAMPLE_GID}")),
+        "the existing workspace GID must be preserved; profile:\n{saved}"
+    );
+    assert!(
+        saved.contains("base_url: https://us1.alteryxcloud.com"),
+        "the prompted regional URL must repair the profile; profile:\n{saved}"
+    );
+}
+
 #[test]
 fn points_at_next_step_when_workspace_gid_absent() {
     // profile name (default), email, blank workspace URL, no server.
@@ -308,5 +425,46 @@ fn ayx_profile_env_does_not_divert_onboard_or_login_target() {
     assert!(
         combined.contains("Log in now"),
         "login should still be offered for the onboarded profile; output:\n{combined}"
+    );
+}
+
+/// `--profile` accepts a file path. A bare filename has an empty parent path,
+/// which Windows rejects if the sensitive writer attempts `create_dir_all("")`.
+/// It must instead write beside the current working directory.
+#[test]
+fn onboard_accepts_a_bare_profile_filename() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["onboard", "--profile", "portable.yaml"])
+        .current_dir(home.path())
+        .env("AYX_CONFIG_HOME", home.path())
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn ayx onboard");
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(b"\n\nn\n")
+        .expect("write stdin");
+    let out = child.wait_with_output().expect("wait");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    assert!(
+        out.status.success(),
+        "a bare --profile filename must not fail; output:\n{combined}"
+    );
+    assert!(
+        home.path().join("portable.yaml").exists(),
+        "onboard must save the requested relative profile file; output:\n{combined}"
     );
 }
