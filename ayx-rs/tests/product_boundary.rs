@@ -52,7 +52,6 @@ alteryx_one:
 /// One-only, authenticated with email OTP: an access token and an expiry, and
 /// deliberately no refresh token and no client id. That is what the OTP flow
 /// returns; it is a valid credential, not an incomplete one.
-///
 fn one_only_otp_home() -> TempDir {
     home_with_profile(
         "one-otp",
@@ -67,6 +66,28 @@ alteryx_one:
       credential_kind: email_otp
       access_token: test-access-token
       access_token_expires_at: 4102444800
+"#,
+    )
+}
+
+/// One-only, a full OAuth triple (access token, refresh token, client id)
+/// under `workspace_credentials`, but with no `credential_kind` at all. This
+/// is the shape a profile written before `credential_kind` existed still has:
+/// it predates the label, not the capability.
+fn one_only_legacy_oauth_home_without_credential_kind() -> TempDir {
+    home_with_profile(
+        "one-legacy-oauth",
+        r#"profile_name: one-legacy-oauth
+alteryx_one:
+  account_email: operator@example.com
+  base_url: https://us1.alteryxcloud.com
+  active_workspace_id: '91946'
+  workspace_credentials:
+    '91946':
+      workspace_id: '91946'
+      access_token: test-access-token
+      refresh_token: test-refresh-token
+      oauth_client_id: test-client-id
 "#,
     )
 }
@@ -208,5 +229,25 @@ fn doctor_calls_email_otp_time_limited_not_incomplete() {
     assert!(
         !summary.contains("incomplete"),
         "a valid OTP profile must not be called incomplete: {summary}"
+    );
+}
+
+#[test]
+fn doctor_reports_renewal_capability_not_label_for_legacy_oauth_profile() {
+    // A profile written before `credential_kind` existed still has a full
+    // OAuth triple: it predates the label, not the renewal capability. The
+    // refresh machinery keys off the tokens, not the label, so
+    // `renews_automatically` must agree with the durable `one_status` this
+    // profile already gets.
+    let home = one_only_legacy_oauth_home_without_credential_kind();
+    let auth = doctor_check(&home, "auth");
+
+    assert_eq!(
+        auth["one_status"], "configured",
+        "a full OAuth triple is durable even without a credential_kind label:\n{auth:#}"
+    );
+    assert_eq!(
+        auth["one"]["renews_automatically"], true,
+        "a stored refresh token and client id are what renewal actually uses:\n{auth:#}"
     );
 }
