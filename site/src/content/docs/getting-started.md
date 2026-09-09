@@ -45,13 +45,14 @@ ayx --version
 
 ## The very short version
 
-If you are new to command-line tools, follow these four steps:
+If you are new to command-line tools, follow these five steps:
 
 1. Open **PowerShell** on Windows, or **Terminal** on macOS/Linux.
 2. Type `ayx onboard` and press Enter.
-3. Say **y** when it asks whether to log in. Type the 6-digit code sent to
+3. Answer its questions — your email, then your workspace URL.
+4. Press Enter at `Log in now [Y/n]:` to log in. Type the 6-digit code sent to
    your email, then type your Alteryx One workspace password.
-4. When it asks whether to save the password, press Enter to choose **Yes**.
+5. When it asks whether to save the password, press Enter to choose **Yes**.
 
 You are connected. Try this to see your workspace:
 
@@ -59,9 +60,11 @@ You are connected. Try this to see your workspace:
 ayx one workspace current
 ```
 
-If you were given an OAuth2.0 API access/refresh pair for a computer, CI job,
-or agent, use the [automation checklist](#using-an-api-token-for-automation)
-instead of the email-code step. You only need to do that setup once.
+That sign-in lasts **30 days**. It does not renew itself, so you will run
+`ayx one login` again when it runs out. If you would rather not do that — or
+you are setting up a computer, CI job, or agent — see
+[Choose how you sign in](#choose-how-you-sign-in) for the durable alternative.
+You only need to do that setup once.
 
 ## Connect
 
@@ -71,66 +74,94 @@ Run the setup wizard:
 ayx onboard
 ```
 
-It asks for two things:
+It asks up to four things:
 
 - **Your email** — the account you sign in to Alteryx One with.
-- **Your workspace URL** — paste it straight from your browser's address bar while you're in the workspace, e.g. `https://us1.alteryxcloud.com/auth-portal/workspaces/01ABC…`. `ayx` reads your **workspace id** and **region** out of it. (You can also paste just the id, or leave it blank and add it later.)
+- **Your workspace URL or id** — paste the URL straight from your browser's address bar while you're in the workspace, e.g. `https://us1.alteryxcloud.com/auth-portal/workspaces/01ABC…`. `ayx` reads your **workspace id** and **region** out of it. (You can also paste just the id, or leave it blank and add it later.)
+- **Your Alteryx One base URL** — asked only when you gave a bare workspace id. A workspace id does not say which region it lives in, so the wizard has to ask. Press Enter to accept the `https://us1.alteryxcloud.com` default it shows, or type your own region's host. Pasting the full workspace URL supplies the region and skips this question.
+- **Whether to configure Alteryx Server** — answer `n` if you only use Alteryx One. Alteryx Server is a separate product with its own host and credentials.
 
 The wizard saves this as a **profile** — your named, reusable connection — and makes it active. It then offers to log you in right away:
 
 ```text
 Ready to connect. A one-time passcode will be emailed to you@example.com,
 and you'll be asked for your workspace password.
-Log in now [y/N]:
+This is a time-limited login: the token lasts 30 days, does not renew
+automatically, and you'll sign in again when it runs out.
+Log in now [Y/n]:
 ```
 
-Answer **y** and you'll be prompted for the **6-digit passcode** emailed to you and your **workspace password**. `ayx` completes the sign-in and stores a 30-day token in your profile. On the first interactive login, it then asks:
+**The default is Yes.** Pressing Enter logs you in — a real one-time passcode is emailed to you, and you'll be prompted for that **6-digit code** and your **workspace password**. Answer `n` if you'd rather do it later; the wizard prints the exact command to run when you're ready.
+
+On the first interactive login, it then asks:
 
 ```text
 Save this workspace password securely for future logins? [Y/n]
 ```
 
-Press Enter to save it in your operating system's secure keyring, or answer `n` to keep it for this login only. Later `ayx one login` runs reuse the securely saved password without asking again. (Prefer to do it later? Answer **n** at the onboarding prompt — the wizard prints the exact command to run when you're ready.)
+Press Enter to save it in your operating system's secure keyring, or answer `n` to keep it for this login only. Later `ayx one login` runs reuse the securely saved password without asking again. The keyring protects the password and the token at rest; it does not extend how long the token lasts.
 
 For a normal human login, no auth flags are needed: `ayx one login` uses the active profile, the Wizard email-OTP flow, and secure persistence by default. Use `--profile <name>` when you want a different profile.
 
-You won't need another passcode until the stored token expires (about 30 days); it's reused for every command in between.
+## Choose how you sign in
 
-For unattended automation, CI, or agents, use an OAuth2.0 API access/refresh
-pair instead of OTP. Create the API-token credential in Alteryx One, configure
-its client ID and token endpoint in the profile, and import the refresh token
-without putting its value in command arguments:
+Alteryx One gives you two kinds of user credential. Both are first-class, and
+both work for a person at a keyboard:
 
-### Using an API token for automation
+| | **Email one-time passcode** | **OAuth API token** |
+|---|---|---|
+| Set up with | `ayx one login` (the default) | `ayx one login --oauth-api-token` |
+| You supply | A 6-digit emailed code and your workspace password | A Client ID and Refresh Token, pasted once from the Alteryx One UI |
+| Lifetime | The access token expires after **30 days** | Access tokens renew **silently**, indefinitely |
+| Renews itself | **No** — you sign in again | **Yes** |
+| Best for | The quickest first run | Anyone who doesn't want to re-authenticate monthly, plus CI and agents |
 
-This is the simple machine-login checklist:
+Email OTP is the default because it is the fastest way to a working setup: no
+administration page, nothing to copy. Its cost is the 30-day cycle.
 
-1. Get the OAuth **client ID**, **token endpoint**, and **refresh token** from
-   your Alteryx One administrator. Keep the token private, like a house key.
-2. Put the refresh token in the environment variable named
-   `AYX_ONE_API_REFRESH_TOKEN`, or ask your administrator to configure that
-   variable for you. The client ID and token endpoint go in the selected
-   profile.
-3. Run the command below. It reads the token without showing it in the
-   command itself:
+### The durable path: an OAuth API token
+
+Do this once, and `ayx` keeps itself signed in by renewing access tokens for
+you. It suits a person on a laptop just as well as an unattended job.
+
+1. In the Alteryx One UI, open the **OAuth2.0 API Tokens** page and generate a
+   token. Note the visible **Client ID** and copy the **Refresh Token** from
+   the dialog. Keep the refresh token private, like a house key.
+2. Run the setup command. It shows the Client ID prompt, then a hidden prompt
+   for the refresh token, verifies the pair, and stores it in your operating
+   system's keyring:
 
 ```bash
-ayx one login --auth-method oauth-refresh \
-  --refresh-token-env AYX_ONE_API_REFRESH_TOKEN
+ayx one login --oauth-api-token
 ```
 
-4. Check that it worked:
+3. Check that it worked:
 
 ```bash
 ayx one workspace current
 ```
 
-With secure persistence, the CLI stores the pair in the operating-system
-keyring, refreshes short-lived access tokens automatically, and keeps the OAuth
-method attached to the selected workspace. It does not silently fall back to
-OTP when the refresh credential is unavailable. You can also pipe the token
-with `--refresh-token-stdin`; see [Connecting](/connecting/#oauth-api-accessrefresh-credentials)
+From then on, run ordinary `ayx one ...` commands — they renew access
+automatically. Don't run `login` as a routine step; a bare `ayx one login`
+just reports that OAuth is already configured.
+
+### Unattended setup for CI and agents
+
+Same credential, entered without an interactive paste. Put the refresh token in
+an environment variable and import it without exposing the value in command
+arguments or shell history:
+
+```bash
+ayx one login --auth-method oauth-refresh   --refresh-token-env AYX_ONE_API_REFRESH_TOKEN
+```
+
+The CLI stores the pair in the operating-system keyring, refreshes short-lived
+access tokens automatically, and keeps the OAuth method attached to the
+selected workspace. It does not silently fall back to OTP when the refresh
+credential is unavailable. You can also pipe the token with
+`--refresh-token-stdin`; see [Connecting](/connecting/#the-durable-path-oauth-api-accessrefresh-credentials)
 for PowerShell, macOS, and Linux examples.
+
 
 ## Verify
 

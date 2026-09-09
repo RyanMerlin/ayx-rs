@@ -25,7 +25,10 @@ ayx one auth diagnose
 ayx doctor auth
 ```
 
-For an email-OTP credential, run `ayx one login` interactively. For an
+For an email-OTP credential, run `ayx one login` interactively — its access
+token lasts 30 days and does not renew itself, so this is expected rather than
+a fault. If you would rather not repeat it, `ayx one login --oauth-api-token`
+sets up the durable credential once and renews access silently thereafter. For an
 `oauth_refresh` credential, the CLI normally refreshes automatically. If the
 refresh token was revoked or expired, import a newly issued pair with
 `--auth-method oauth-refresh` and `--refresh-token-env NAME` or

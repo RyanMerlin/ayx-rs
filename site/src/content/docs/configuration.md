@@ -58,7 +58,7 @@ alteryx_one:
       refresh_token_ref: keyring:v1/<workspace-refresh-account>
 ```
 
-You don't write token values in by hand — `ayx one login` obtains or imports them and stores them for you (in your OS keyring where available; see [Connecting](/connecting/)). The `credential_kind` is workspace-scoped: `oauth_refresh` selects durable OAuth API access/refresh authentication, while `email_otp` selects the interactive OTP flow. `base_url` and `workspace_gid` come from the workspace URL you paste during onboarding.
+You don't write token values in by hand — `ayx one login` obtains or imports them and stores them for you (in your OS keyring where available; see [Connecting](/connecting/)). The `credential_kind` is workspace-scoped: `oauth_refresh` selects durable OAuth API access/refresh authentication, whose access tokens renew silently, while `email_otp` selects the interactive OTP flow, whose access token expires after 30 days and does not renew. `base_url` and `workspace_gid` come from the workspace URL you paste during onboarding.
 
 ### Secret references
 

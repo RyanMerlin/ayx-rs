@@ -495,3 +495,79 @@ fn no_one_catalog_entry_declares_a_server_api_prerequisite() {
         "one/... catalog entries falsely require Alteryx Server config: {offenders:?}"
     );
 }
+
+/// Run any command's `--help` against an isolated home and return it with
+/// whitespace collapsed, so assertions do not depend on the terminal width
+/// clap wrapped at.
+fn unwrapped_help(home: &TempDir, args: &[&str]) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(args)
+        .arg("--help")
+        .env("AYX_CONFIG_HOME", home.path())
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .output()
+        .expect("ayx binary should run");
+    String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[test]
+fn one_login_help_states_the_otp_lifetime_and_names_the_durable_path() {
+    // The OTP flow returns no refresh token and expires after 30 days. Help
+    // must say so where the flow is offered, and must point at the path that
+    // does renew silently.
+    let home = one_only_otp_home();
+    let help = unwrapped_help(&home, &["one", "login"]);
+
+    assert!(
+        help.contains("30 days") || help.contains("time-limited"),
+        "OTP's lifetime must be stated where it is offered:\n{help}"
+    );
+    assert!(
+        help.contains("--oauth-api-token"),
+        "the durable path must be named alongside it:\n{help}"
+    );
+    assert!(
+        !help.contains("stay signed in") && !help.contains("stays signed in"),
+        "secure storage protects a time-limited credential; it does not make \
+         it durable:\n{help}"
+    );
+}
+
+#[test]
+fn doctor_guidance_recommends_the_durable_path_without_calling_otp_invalid() {
+    // doctor may recommend upgrading to a renewing credential. It must not
+    // describe the configured OTP credential as invalid or malformed.
+    //
+    // RULING P2 (see `doctor_check`): the brief wrote `doctor_checks(&home)`,
+    // which does not exist and would have shelled out to bare `ayx doctor` and
+    // its live workspace probe. `doctor auth` is the hermetic equivalent.
+    let home = one_only_otp_home();
+    let auth = doctor_check(&home, "auth");
+    let text = serde_json::to_string(&auth).expect("serialize");
+
+    assert!(
+        !text.contains("malformed") && !text.contains("invalid"),
+        "a working OTP credential is neither malformed nor invalid:\n{auth:#}"
+    );
+    assert_eq!(
+        auth["one"]["renews_automatically"], false,
+        "state plainly that OTP does not renew:\n{auth:#}"
+    );
+    // The recommendation is an upgrade, not a repair.
+    let guidance = auth["one"]["guidance"]
+        .as_str()
+        .expect("OTP guidance must be present");
+    assert!(
+        guidance.contains("--oauth-api-token"),
+        "doctor should name the durable path: {guidance}"
+    );
+    assert!(
+        !guidance.contains("fix") && !guidance.contains("repair") && !guidance.contains("expired"),
+        "the OTP credential is working as designed; this is an upgrade, not a \
+         repair: {guidance}"
+    );
+}

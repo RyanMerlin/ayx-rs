@@ -5,10 +5,12 @@ sidebar:
   order: 2
 ---
 
-`ayx` talks to Alteryx One over its `/v4` REST API. There are two supported user-credential methods:
+`ayx` talks to Alteryx One over its `/v4` REST API. There are two supported user-credential methods, and both are first-class:
 
-- **OAuth API access/refresh credentials** are the preferred method for automation, agents, CI, and users who want a long-lived machine login. Import the pair once; `ayx` stores it in the operating-system keyring, refreshes short-lived access tokens automatically, and does not fall back to OTP.
-- **Email one-time passcode (OTP)** is the default interactive method. It asks for a 6-digit code and workspace password, then stores the resulting workspace credential securely.
+- **Email one-time passcode (OTP)** is the default interactive method and the quickest first run. It asks for a 6-digit code and your workspace password. It is a **time-limited login**: the access token it returns expires after 30 days, does not renew automatically, and you will sign in again.
+- **OAuth API access/refresh credentials** are the **durable** method. Paste a Client ID and Refresh Token once from the Alteryx One UI; `ayx` stores the pair in the operating-system keyring and renews short-lived access tokens silently from then on, without falling back to OTP. This suits a person who would rather not re-authenticate every 30 days just as much as it suits automation, CI, and agents.
+
+Secure storage protects either credential **at rest**. It does not extend how long a credential lasts.
 
 These are different credential types. An OAuth refresh token is not an OTP, and an API token managed by `ayx one token` is not automatically the same thing as the OAuth access/refresh pair used by `ayx one login --auth-method oauth-refresh`.
 
@@ -18,19 +20,24 @@ These are different credential types. An OAuth refresh token is not an OTP, and 
 ayx onboard
 ```
 
-The wizard collects your email and workspace URL and offers to log you in on the spot — see [Getting started](/getting-started/). It uses email OTP for the interactive path. For automation, configure an OAuth API access/refresh pair as described below.
+The wizard collects your email and workspace URL (and, if you give it a bare workspace id, your regional base URL) and offers to log you in on the spot — see [Getting started](/getting-started/). It uses email OTP for the interactive path, which is time-limited to 30 days. For a login that renews itself, configure an OAuth API access/refresh pair as described below — that is the right choice for people and automation alike.
 
 ### A beginner's checklist
 
 1. Open PowerShell on Windows, or Terminal on macOS/Linux.
 2. Run `ayx onboard`.
-3. Paste the workspace URL from your browser when asked.
-4. For a normal human login, answer **y**, enter the emailed 6-digit code,
-   and enter your workspace password. Press Enter when asked to save it.
+3. Paste the workspace URL from your browser when asked. (If you paste a bare
+   workspace id instead, the wizard also asks for your Alteryx One regional
+   base URL, because an id does not identify its region.)
+4. At `Log in now [Y/n]:` the default is **Yes** — pressing Enter signs you in
+   and sends a real one-time passcode. Enter the emailed 6-digit code and your
+   workspace password, then press Enter when asked to save the password.
 5. Run `ayx one workspace current` to confirm the connection.
 
-For a computer, CI job, or agent, use the OAuth checklist below. It uses a
-refresh token instead of asking a person for a new email code every time.
+That sign-in lasts 30 days and will not renew itself. To avoid the monthly
+re-authentication — and for any computer, CI job, or agent — use the OAuth
+checklist below instead. It renews access tokens from a stored refresh token
+rather than asking a person for a new email code.
 
 ## Signing in
 
@@ -42,8 +49,8 @@ With no flags this runs the **email-OTP flow**:
 
 1. A 6-digit passcode is emailed to your account address.
 2. `ayx` prompts you for the passcode, then for your **workspace password**.
-3. On success it stores a 30-day token in the active profile.
-4. On the first interactive login, it asks whether to save the workspace password securely for future logins. Press Enter for the default **Yes**, or answer `n` to decline.
+3. On success it stores a 30-day access token in the active profile. This token **does not renew automatically**; when it expires you run `ayx one login` again.
+4. On the first interactive login, it asks whether to save the workspace password securely for future logins. Press Enter for the default **Yes**, or answer `n` to decline. Saving it means the next sign-in does not prompt for the password — it does not keep the token from expiring.
 
 The successful login prints an `Authentication Successful!` confirmation only after the credentials and profile state have been persisted. It also reports token expiry and, when available, the authenticated workspace id and name.
 
@@ -57,16 +64,18 @@ It reads three fields from your profile — your email (from the onboarding prom
 | `workspace_gid` | The workspace id (a ULID) in your workspace URL — required by the sign-in handshake |
 | `base_url` | Your Alteryx One region host, e.g. `https://us1.alteryxcloud.com` (also read from the URL) |
 
-If the token later expires, just run `ayx one login` again.
+If the token later expires, just run `ayx one login` again. If signing in every
+30 days is not what you want, set up the durable OAuth credential below instead.
 
 For an OAuth credential, access-token renewal is automatic. If the provider has
 expired or revoked the refresh token, import a newly issued pair using the
 OAuth instructions below; the CLI will not silently send an OTP instead.
 
-### OAuth API access/refresh credentials
+### The durable path: OAuth API access/refresh credentials
 
-Use this method when the CLI must run unattended or when you want to avoid
-daily interactive authentication. Create or obtain an OAuth2.0 API-token pair
+Use this method whenever you want a login that keeps working: a person who
+would rather not re-authenticate every 30 days, and any CLI that must run
+unattended. Create or obtain an OAuth2.0 API-token pair
 from the Alteryx One administration experience. Run one command, paste the
 visible **Client ID** shown on the OAuth2.0 API Tokens page, then paste the
 hidden **Refresh Token** from the generated-token dialog. The CLI verifies the
@@ -78,6 +87,10 @@ ayx one login --profile local-dev --workspace-id <workspace-id> \
   --oauth-api-token \
   --secret-policy secure
 ```
+
+The `--profile`, `--workspace-id`, and `--secret-policy` flags above are
+optional; `ayx one login --oauth-api-token` on its own uses the active profile
+and its defaults.
 
 After that one-time setup, use `ayx` normally. `--oauth-api-token` is not the
 email one-time-passcode flow. The access token lasts only a
@@ -137,7 +150,7 @@ the env/stdin forms are the release-safe choices.
 
 ### Credential persistence
 
-Secure operating-system storage is the default. The first interactive workspace-password login offers to save the password in the OS keyring; Enter accepts the save, while `n` keeps the password session-only. `--save-workspace-password` remains an optional automation shorthand for the default email-OTP flow.
+Secure operating-system storage is the default. It protects credentials at rest; it does not change how long any credential remains valid. The first interactive workspace-password login offers to save the password in the OS keyring; Enter accepts the save, while `n` keeps the password session-only. `--save-workspace-password` remains an optional automation shorthand for the default email-OTP flow.
 
 If secure storage is unavailable, `--secret-policy plaintext` is an explicit fallback and requires affirmative consent. The standalone login command rejects `--secret-policy session` because its process exits immediately and cannot retain a usable session. OAuth refresh rotation is automatic only when the refresh credential is stored in a supported secure keyring; environment-backed or inline credentials are not rewritten in place.
 
@@ -159,6 +172,12 @@ The `--browser` and `--device` flows use an OAuth client, so they need an `oauth
 ayx doctor auth     # checks the token path end to end
 ayx whoami          # shows the workspace you're connected to
 ```
+
+`ayx doctor auth` reports each One credential's `credential_kind`, whether it
+`renews_automatically`, and when its access token expires. For an email-OTP
+credential it also suggests the upgrade to `--oauth-api-token`. That is an
+upgrade, not a repair: an unexpired OTP credential is working exactly as
+designed.
 
 If `doctor auth` passes but a command later fails with an auth error, check `ayx one auth status` and `ayx one auth diagnose`. An OTP credential may need a new `ayx one login`; an OAuth credential usually needs no action unless its refresh token has expired or been revoked, in which case import a newly issued pair with `--auth-method oauth-refresh`.
 
