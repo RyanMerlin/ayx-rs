@@ -15,6 +15,17 @@ ayx doctor auth     # just authentication
 ayx doctor network  # just connectivity
 ```
 
+Reading the JSON: a full run puts each row under `data.checks.<name>`, and two
+of those nodes are easy to confuse. `data.checks.one` is the Alteryx One probe
+row — its own `status`, `summary`, and `workspace_probe`. `data.checks.auth.one`
+is the One section of the *auth* row, and it is the one that carries
+`credential_kind`, `renews_automatically`, `access_token_expires_at`, and
+`guidance`. A scoped run returns its own payload at the data root instead, so
+the same node is `data.one` under `ayx doctor auth`.
+
+`probes_run: false` in the `network` row speaks only for that row's targets.
+The `one` check does make a live request when an access token is present.
+
 ## When an Alteryx One command fails
 
 If a One command fails, it's often the **credential**, not the endpoint — the `/v4` API is reached directly, and an expired or stale bearer token is a common cause. First inspect the selected method without printing secrets:

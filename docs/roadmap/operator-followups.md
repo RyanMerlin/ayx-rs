@@ -58,7 +58,7 @@ against the current integration base.
 - `b25b1b7 fix(cli): wrap help descriptions` sets a 120-column clap help
   width, improves `--no-input` wording, and adds a help-wrap smoke test.
   `cargo test -p ayx-rs --test cli_smoke` passed (65 tests).
-- `5590167 fix(one): remove retired person count` removes `ayx one person
+- `1a91ab6 fix(one): remove retired person count` removes `ayx one person
   count` across CLI, inventory, catalog, docs, and tests. The CLI smoke suite
   (65 tests), One API inventory tests (3 tests), formatting, and generated-doc
   checks passed.
@@ -223,6 +223,18 @@ credential.
     retain per-product statuses in structured output.
   - Add snapshots or integration tests for One-only, Server-only, and combined
     profiles.
+  - Structured output uses two distinct nodes and they must not be confused:
+    `data.checks.one` is the One probe row (its own `status`, `summary`, and
+    `workspace_probe`), while `data.checks.auth.one` is the auth row's One
+    section (`credential_kind`, `renews_automatically`,
+    `access_token_expires_at`, `guidance`). An agent reading guidance wants
+    `data.checks.auth.one.guidance`; there is no `guidance` under
+    `data.checks.one`. Under the scoped `ayx doctor auth` the same node is at
+    `data.one`, because a scoped check returns its own payload at the data
+    root.
+  - `probes_run` in the `network` row is scoped to that row's own targets.
+    A full `ayx doctor` run still probes: the `one` check calls
+    `GET /v4/apiAccessTokens` when an access token is present.
 
 ## `ayx one api` must be a One surface, not a Server API dependency
 

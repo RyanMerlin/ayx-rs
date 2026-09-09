@@ -179,6 +179,13 @@ credential it also suggests the upgrade to `--oauth-api-token`. That is an
 upgrade, not a repair: an unexpired OTP credential is working exactly as
 designed.
 
+Once that expiry has passed, `doctor auth` says so: `one_status` becomes
+`expired`, the row warns, and the guidance names the remedy — sign in again
+with `ayx one login`. The credential is out of date, not malformed. An
+`oauth_refresh` credential is judged differently, because it mints a new access
+token on demand; an expired access token there is self-healing and is not
+reported as a problem.
+
 If `doctor auth` passes but a command later fails with an auth error, check `ayx one auth status` and `ayx one auth diagnose`. An OTP credential may need a new `ayx one login`; an OAuth credential usually needs no action unless its refresh token has expired or been revoked, in which case import a newly issued pair with `--auth-method oauth-refresh`.
 
 ## Multiple workspaces

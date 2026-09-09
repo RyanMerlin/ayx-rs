@@ -816,10 +816,18 @@ pub fn api_status_envelope(config: &Config, product: &str) -> Result<Envelope> {
             "product": product,
             "profile": config.profile_name,
             "base_url": api.base_url,
+            // `_present` suffixes for the same reason as `one_api_status_envelope`:
+            // redaction recurses into `has_credentials` and matches children on
+            // their own names, so a bare `client_secret` became the truthy
+            // string "[REDACTED]" and stopped answering present-or-absent.
             "has_credentials": {
-                "client_id": api.auth.client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
-                "client_secret": api.auth.client_secret.as_ref().is_some_and(|v| !v.trim().is_empty()),
-                "pat": api.auth.pat.as_ref().is_some_and(|v| !v.trim().is_empty()),
+                "client_id_present": api.auth.client_id.as_ref().is_some_and(|v| !v.trim().is_empty()),
+                "client_secret_present": api
+                    .auth
+                    .client_secret
+                    .as_ref()
+                    .is_some_and(|v| !v.trim().is_empty()),
+                "pat_present": api.auth.pat.as_ref().is_some_and(|v| !v.trim().is_empty()),
             },
             "timeout_ms": api.timeout_ms,
             "message": format!("{} api surface ready", product),
@@ -906,10 +914,21 @@ pub fn one_api_status_envelope(config: &Config) -> Result<Envelope> {
                 ayx_core::profile::OneCredentialKind::OAuthRefresh => "oauth_refresh",
             }),
             "access_token_expires_at": one.resolved_access_token_expires_at(),
+            // These keys carry the `_present` suffix deliberately. Output
+            // redaction recurses into `has_credentials` and matches each child
+            // on its own name, so `access_token` and `refresh_token` were
+            // rewritten to the string "[REDACTED]" -- a truthy value that made
+            // an absent credential indistinguishable from a present one. The
+            // `_present` suffix is metadata-exempt and is the same spelling
+            // `ayx doctor auth` emits, so the two surfaces agree.
             "has_credentials": {
-                "access_token": one.resolved_access_token().is_some_and(|v| !v.trim().is_empty()),
-                "refresh_token": one.resolved_refresh_token().is_some_and(|v| !v.trim().is_empty()),
-                "oauth_client_id": one
+                "access_token_present": one
+                    .resolved_access_token()
+                    .is_some_and(|v| !v.trim().is_empty()),
+                "refresh_token_present": one
+                    .resolved_refresh_token()
+                    .is_some_and(|v| !v.trim().is_empty()),
+                "oauth_client_id_present": one
                     .resolved_oauth_client_id()
                     .is_some_and(|v| !v.trim().is_empty()),
             },
