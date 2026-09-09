@@ -775,6 +775,219 @@ mongo:
         assert_eq!(auth_product_status(false, false), "not_configured");
     }
 
+    /// Finding 1: the `one` row's own status chain was not credential-kind
+    /// aware. An email-OTP profile has neither a refresh token nor a client id
+    /// **by design**, so it hit the "refresh token and client id missing"
+    /// branch before ever reaching the successful-probe branch, and
+    /// `doctor_rollup_status` turned that into `overall: warn`.
+    ///
+    /// Bare `ayx doctor` performs a live One workspace probe, so the
+    /// integration suite cannot exercise this path hermetically. Extracting
+    /// the decision into `doctor_one_status_summary` -- a pure function over
+    /// (credential kind, token presence, expiry, probe outcome) -- makes the
+    /// classification testable with no network call at all.
+    #[test]
+    fn one_row_does_not_warn_that_an_otp_credential_lacks_oauth_credentials() {
+        use ayx_core::profile::OneCredentialKind;
+
+        // Email OTP, healthy, live probe succeeded: this is the flow working
+        // exactly as designed.
+        let (status, summary) = doctor_one_status_summary(
+            Some(OneCredentialKind::EmailOtp),
+            true,
+            false,
+            false,
+            false,
+            OneWorkspaceProbe::Succeeded,
+        );
+        assert_eq!(status, "ok");
+        assert_eq!(summary, "One workspace probe succeeded");
+
+        // An unlabelled legacy profile holding only an access token is the
+        // same situation: judged by capability, not by a missing label.
+        let (status, _) = doctor_one_status_summary(
+            None,
+            true,
+            false,
+            false,
+            false,
+            OneWorkspaceProbe::Succeeded,
+        );
+        assert_eq!(status, "ok");
+    }
+
+    #[test]
+    fn one_row_still_reports_genuine_problems() {
+        use ayx_core::profile::OneCredentialKind;
+
+        // A failed probe outranks everything else.
+        let (status, summary) = doctor_one_status_summary(
+            Some(OneCredentialKind::EmailOtp),
+            true,
+            false,
+            false,
+            false,
+            OneWorkspaceProbe::Failed,
+        );
+        assert_eq!(status, "fail");
+        assert_eq!(summary, "One workspace probe failed");
+
+        // No access token at all.
+        let (status, summary) = doctor_one_status_summary(
+            Some(OneCredentialKind::EmailOtp),
+            false,
+            false,
+            false,
+            false,
+            OneWorkspaceProbe::NotRun,
+        );
+        assert_eq!(status, "warn");
+        assert_eq!(summary, "One access token missing");
+
+        // An OAuth-refresh credential really is missing its renewal pieces.
+        let (status, summary) = doctor_one_status_summary(
+            Some(OneCredentialKind::OAuthRefresh),
+            true,
+            false,
+            false,
+            false,
+            OneWorkspaceProbe::Succeeded,
+        );
+        assert_eq!(status, "warn");
+        assert_eq!(summary, "One refresh token and client id missing");
+
+        let (status, summary) = doctor_one_status_summary(
+            Some(OneCredentialKind::OAuthRefresh),
+            true,
+            true,
+            false,
+            false,
+            OneWorkspaceProbe::Succeeded,
+        );
+        assert_eq!(status, "warn");
+        assert_eq!(summary, "One OAuth client id missing");
+
+        let (status, summary) = doctor_one_status_summary(
+            Some(OneCredentialKind::OAuthRefresh),
+            true,
+            false,
+            true,
+            false,
+            OneWorkspaceProbe::Succeeded,
+        );
+        assert_eq!(status, "warn");
+        assert_eq!(summary, "One refresh token missing");
+
+        // Probe never executed: still not a clean bill of health.
+        let (status, summary) = doctor_one_status_summary(
+            Some(OneCredentialKind::EmailOtp),
+            true,
+            false,
+            false,
+            false,
+            OneWorkspaceProbe::NotRun,
+        );
+        assert_eq!(status, "warn");
+        assert_eq!(summary, "One auth diagnostic incomplete");
+
+        // An expired time-limited credential is out of date, not malformed.
+        let (status, summary) = doctor_one_status_summary(
+            Some(OneCredentialKind::EmailOtp),
+            true,
+            false,
+            false,
+            true,
+            OneWorkspaceProbe::Succeeded,
+        );
+        assert_eq!(status, "warn");
+        assert_eq!(
+            summary,
+            "One access token expired; sign in again with `ayx one login`"
+        );
+    }
+
+    /// Finding 3: `one_auth_product_status` judged credential *presence* only,
+    /// so a 40-day-old OTP profile reported `configured_time_limited` -> `ok`
+    /// while its expiry sat in the past.
+    #[test]
+    fn expired_time_limited_credentials_are_not_reported_as_configured() {
+        use ayx_core::profile::OneCredentialKind;
+
+        assert_eq!(
+            one_auth_product_status(
+                true,
+                Some(OneCredentialKind::EmailOtp),
+                true,
+                false,
+                false,
+                false
+            ),
+            "configured_time_limited"
+        );
+        assert_eq!(
+            one_auth_product_status(
+                true,
+                Some(OneCredentialKind::EmailOtp),
+                true,
+                false,
+                false,
+                true
+            ),
+            "expired"
+        );
+        // A legacy unlabelled profile with only an access token is equally
+        // time-limited, and equally expirable.
+        assert_eq!(
+            one_auth_product_status(true, None, true, false, false, true),
+            "expired"
+        );
+        // An OAuth-refresh credential renews its own access token, so an
+        // expired one is self-healing rather than a problem to report.
+        assert_eq!(
+            one_auth_product_status(
+                true,
+                Some(OneCredentialKind::OAuthRefresh),
+                true,
+                true,
+                true,
+                true
+            ),
+            "configured"
+        );
+
+        let (status, summary) = doctor_auth_status_summary("expired", false, false, false);
+        assert_eq!(status, "warn");
+        assert_eq!(summary, "One auth expired (sign in again)");
+    }
+
+    /// Minor finding: `MongoMode` defaults to `Embedded`, so a One-only
+    /// profile reported an active healthy Mongo check for a Server-side
+    /// domain that does not exist here.
+    #[test]
+    fn mongo_check_skips_when_nothing_mongo_related_is_configured() {
+        use ayx_core::profile::MongoMode;
+
+        assert_eq!(
+            doctor_mongo_status_summary(MongoMode::Embedded, false, false, false, false).0,
+            "skip"
+        );
+        // A configured Alteryx Server means embedded Mongo is a real domain.
+        assert_eq!(
+            doctor_mongo_status_summary(MongoMode::Embedded, true, false, false, false).0,
+            "ok"
+        );
+        // Explicit embedded paths are a genuine local Mongo setup even with no
+        // Server section; never hide that behind `skip`.
+        assert_eq!(
+            doctor_mongo_status_summary(MongoMode::Embedded, false, false, false, true).0,
+            "ok"
+        );
+        assert_eq!(
+            doctor_mongo_status_summary(MongoMode::Managed, false, false, false, false).0,
+            "warn"
+        );
+    }
+
     #[test]
     fn auth_summary_skips_with_one_message_when_neither_product_is_configured() {
         // Neither product configured yields an empty `clauses` vec, which is
@@ -5605,19 +5818,36 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
         != Some(ayx_core::profile::OneCredentialKind::EmailOtp)
         && one_refresh_token_present
         && one_oauth_client_id_present;
+    let one_access_token_expired = one_access_token_expired(one_access_token_expires_at);
     // An OTP credential that is present and unexpired is the flow working as
     // designed, so this is phrased as an upgrade to a credential that renews
-    // silently — never as a repair to something broken. Alteryx One only; the
-    // Server row below carries no such guidance.
+    // silently — never as a repair to something broken. Once the expiry has
+    // passed the present tense would be a lie, so the wording changes to name
+    // the lapse and the remedy. Alteryx One only; the Server row below carries
+    // no such guidance.
     let one_guidance: Option<&str> =
         if one_credential_kind == Some(ayx_core::profile::OneCredentialKind::EmailOtp) {
-            Some(
-                "Email OTP is a time-limited login: this access token lasts 30 days and will \
-                 not renew on its own. To stop signing in again on that cycle, upgrade to the \
-                 durable credential with `ayx one login --oauth-api-token`.",
-            )
+            if one_access_token_expired {
+                Some(
+                    "Email OTP is a time-limited login and this access token has passed its \
+                     expiry. Sign in again with `ayx one login`, or set up the durable \
+                     credential once with `ayx one login --oauth-api-token` so access renews \
+                     on its own.",
+                )
+            } else {
+                Some(
+                    "Email OTP is a time-limited login: this access token lasts 30 days and will \
+                     not renew on its own. To stop signing in again on that cycle, upgrade to the \
+                     durable credential with `ayx one login --oauth-api-token`.",
+                )
+            }
         } else if one_configured && one_renews_automatically {
             Some("This credential renews access tokens automatically; no periodic sign-in.")
+        } else if one_configured && one_access_token_expired {
+            Some(
+                "This access token has passed its expiry and this credential cannot renew it. \
+                 Sign in again with `ayx one login`.",
+            )
         } else {
             None
         };
@@ -5630,6 +5860,7 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
         one_access_token_present,
         one_refresh_token_present,
         one_oauth_client_id_present,
+        one_access_token_expired,
     );
     let (status, summary) = doctor_auth_status_summary(
         one_status,
@@ -5674,6 +5905,7 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
                 "credential_kind": one_credential_kind.map(ayx_core::profile::OneCredentialKind::as_str),
                 "renews_automatically": one_renews_automatically,
                 "access_token_expires_at": one_access_token_expires_at,
+                "access_token_expired": one_access_token_expired,
                 "guidance": one_guidance,
             },
             "server": {
@@ -5716,9 +5948,18 @@ fn doctor_network_envelope(profile: Option<&str>, environment: Option<&str>) -> 
                 "server_base_url": server_base_url,
                 "server_api_base_url": server_api_base_url,
             },
+            // Scoped to this row: `probes_run` speaks only for the `network`
+            // check's own targets above. The `one` check in a full `ayx doctor`
+            // run does issue a live request (GET /v4/apiAccessTokens), and
+            // reading this field as a statement about the whole run would
+            // contradict it.
             "probes_run": false,
+            "probes_run_scope": "network check targets only",
             "notes": [
-                "Endpoint configuration is validated; no invasive live probe is performed.",
+                "The targets listed above are validated as configuration; the `network` check \
+                 issues no request to any of them.",
+                "Other `ayx doctor` checks may probe: `one` calls GET /v4/apiAccessTokens \
+                 against Alteryx One when an access token is present.",
             ],
         }),
     ))
@@ -5739,6 +5980,16 @@ fn doctor_one_envelope(profile: Option<&str>, environment: Option<&str>) -> Resu
         ));
     }
 
+    // The credential kind and recorded expiry come from the profile rather
+    // than from the diagnose payload: they are what decides whether an absent
+    // refresh token is a defect or the designed shape of the credential.
+    let one = config
+        .alteryx_one
+        .as_ref()
+        .expect("alteryx_one is present; the None case returned above");
+    let credential_kind = one.resolved_credential_kind();
+    let access_token_expired = one_access_token_expired(one.resolved_access_token_expires_at());
+
     let mut envelope = one_platform_auth_diagnose_envelope(&config)?;
     let access_token_present = envelope
         .data
@@ -5755,32 +6006,31 @@ fn doctor_one_envelope(profile: Option<&str>, environment: Option<&str>) -> Resu
         .get("oauth_client_id_present")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let diagnosis = envelope
+    let probe = match envelope
         .data
         .get("diagnosis")
         .and_then(Value::as_str)
-        .unwrap_or_default();
-    let (status, summary) = if diagnosis == "token present but workspace probe failed" {
-        ("fail", "One workspace probe failed".to_string())
-    } else if !access_token_present {
-        ("warn", "One access token missing".to_string())
-    } else if !refresh_token_present && !oauth_client_id_present {
-        (
-            "warn",
-            "One refresh token and client id missing".to_string(),
-        )
-    } else if !refresh_token_present {
-        ("warn", "One refresh token missing".to_string())
-    } else if !oauth_client_id_present {
-        ("warn", "One OAuth client id missing".to_string())
-    } else if diagnosis == "token present and workspace probe executed" {
-        ("ok", "One workspace probe succeeded".to_string())
-    } else {
-        ("warn", "One auth diagnostic incomplete".to_string())
+        .unwrap_or_default()
+    {
+        "token present but workspace probe failed" => OneWorkspaceProbe::Failed,
+        "token present and workspace probe executed" => OneWorkspaceProbe::Succeeded,
+        _ => OneWorkspaceProbe::NotRun,
     };
+    let (status, summary) = doctor_one_status_summary(
+        credential_kind,
+        access_token_present,
+        refresh_token_present,
+        oauth_client_id_present,
+        access_token_expired,
+        probe,
+    );
     if let Some(data) = envelope.data.as_object_mut() {
         data.insert("status".to_string(), json!(status));
         data.insert("summary".to_string(), json!(summary));
+        data.insert(
+            "access_token_expired".to_string(),
+            json!(access_token_expired),
+        );
     }
     Ok(envelope)
 }
@@ -5829,18 +6079,28 @@ fn doctor_mongo_envelope(profile: Option<&str>, environment: Option<&str>) -> Re
         .as_ref()
         .and_then(|managed| managed.url.as_ref())
         .is_some_and(|v| !v.trim().is_empty());
-    let (status, summary) = match config.mongo.mode {
-        ayx_core::profile::MongoMode::Embedded => {
-            ("ok", "Mongo embedded mode selected".to_string())
-        }
-        ayx_core::profile::MongoMode::Managed if !managed_host_present && !managed_url_present => {
-            ("warn", "Managed Mongo missing host/url".to_string())
-        }
-        ayx_core::profile::MongoMode::Managed => (
-            "warn",
-            "Managed Mongo configured; connection not verified".to_string(),
-        ),
-    };
+    // `runtime_settings_path` carries a default ("RuntimeSettings.xml") for
+    // every profile, so it says nothing about intent. The service and restore
+    // paths are only ever set deliberately, which makes them the honest signal
+    // that someone configured embedded Mongo here.
+    let embedded_paths_configured = config.mongo.embedded.as_ref().is_some_and(|embedded| {
+        embedded
+            .alteryx_service_path
+            .as_ref()
+            .is_some_and(|v| !v.trim().is_empty())
+            || embedded
+                .restore_target_path
+                .as_ref()
+                .is_some_and(|v| !v.trim().is_empty())
+    });
+    let server_configured = config.server.is_some() || config.server_api.is_some();
+    let (status, summary) = doctor_mongo_status_summary(
+        config.mongo.mode.clone(),
+        server_configured,
+        managed_host_present,
+        managed_url_present,
+        embedded_paths_configured,
+    );
     Ok(Envelope::ok_with_data(
         "doctor mongo completed",
         json!({
@@ -5853,6 +6113,8 @@ fn doctor_mongo_envelope(profile: Option<&str>, environment: Option<&str>) -> Re
             "service_database": config.mongo.databases.service_name,
             "managed_host_present": managed_host_present,
             "managed_url_present": managed_url_present,
+            "embedded_paths_configured": embedded_paths_configured,
+            "server_configured": server_configured,
             "status": status,
             "summary": summary,
         }),
@@ -5887,9 +6149,9 @@ fn doctor_auth_status_summary(
 ) -> (&'static str, String) {
     let one_configured = one_status != "not_configured";
 
-    // `one_status` already accounts for credential kind; do not re-derive
-    // readiness here or OTP will be called incomplete again.
-    let one_ready = !one_configured || one_status != "incomplete";
+    // `one_status` already accounts for credential kind and expiry; do not
+    // re-derive readiness here or OTP will be called incomplete again.
+    let one_ready = !one_configured || !matches!(one_status, "incomplete" | "expired");
     let server_ready = !server_configured || (server_api_key_present && server_api_secret_present);
 
     // Each product contributes its own clause, and only when it is configured.
@@ -5901,6 +6163,9 @@ fn doctor_auth_status_summary(
             match one_status {
                 "configured" => "One auth configured",
                 "configured_time_limited" => "One auth configured (time-limited login)",
+                // Expired is a distinct, plainly-stated state: the credential
+                // is well formed and simply out of date.
+                "expired" => "One auth expired (sign in again)",
                 _ => "One auth incomplete",
             }
             .to_string(),
@@ -5937,12 +6202,21 @@ fn doctor_auth_status_summary(
 /// client id by design: it is valid but time-limited, and reporting it as
 /// incomplete sends operators looking for a configuration error that does not
 /// exist.
+///
+/// `access_token_expired` is the profile's `access_token_expires_at` measured
+/// against now (see `one_access_token_expired`). It only changes the verdict
+/// for a credential that cannot renew: an OAuth-refresh credential mints a new
+/// access token on demand, so an expired one there is self-healing and not
+/// worth reporting. A time-limited credential has no such recourse - reporting
+/// it as `ok` while its expiry sits in the past is the dishonesty this exists
+/// to prevent.
 fn one_auth_product_status(
     configured: bool,
     credential_kind: Option<ayx_core::profile::OneCredentialKind>,
     access_token_present: bool,
     refresh_token_present: bool,
     oauth_client_id_present: bool,
+    access_token_expired: bool,
 ) -> &'static str {
     use ayx_core::profile::OneCredentialKind;
     if !configured {
@@ -5950,10 +6224,12 @@ fn one_auth_product_status(
     }
     match credential_kind {
         Some(OneCredentialKind::EmailOtp) => {
-            if access_token_present {
-                "configured_time_limited"
-            } else {
+            if !access_token_present {
                 "incomplete"
+            } else if access_token_expired {
+                "expired"
+            } else {
+                "configured_time_limited"
             }
         }
         Some(OneCredentialKind::OAuthRefresh) => {
@@ -5968,12 +6244,137 @@ fn one_auth_product_status(
         None => {
             if access_token_present && refresh_token_present && oauth_client_id_present {
                 "configured"
-            } else if access_token_present {
-                "configured_time_limited"
-            } else {
+            } else if !access_token_present {
                 "incomplete"
+            } else if access_token_expired {
+                "expired"
+            } else {
+                "configured_time_limited"
             }
         }
+    }
+}
+
+/// Has the profile's stored access token passed its recorded expiry?
+///
+/// `ayx_core::auth::credential_health` is the one expiry notion in this
+/// codebase (`auth_token_health` reads the same function off the token's own
+/// JWT claims); this reads the profile's recorded `access_token_expires_at`
+/// through it rather than inventing a third comparison. An absent expiry is
+/// `UnknownExpiry`, which is not evidence of expiry and must not warn.
+fn one_access_token_expired(access_token_expires_at: Option<u64>) -> bool {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or_default();
+    matches!(
+        ayx_core::auth::credential_health(access_token_expires_at.map(|v| v as i64), now),
+        ayx_core::auth::CredentialHealth::Stale
+    )
+}
+
+/// The outcome of the live One workspace probe that `doctor one` runs, as a
+/// value the status decision can be tested against without a network call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OneWorkspaceProbe {
+    Succeeded,
+    Failed,
+    NotRun,
+}
+
+/// The `one` row's status and summary, extracted from `doctor_one_envelope` so
+/// the classification can be exercised without the live workspace probe that
+/// makes bare `ayx doctor` unusable in a hermetic test.
+///
+/// This chain used to be credential-blind: it warned "One refresh token and
+/// client id missing" for any profile lacking both, which is every email-OTP
+/// profile **by design**. It now defers to `one_auth_product_status`, the same
+/// classification `doctor auth` uses, so the two rows cannot disagree about
+/// whether a credential is healthy.
+fn doctor_one_status_summary(
+    credential_kind: Option<ayx_core::profile::OneCredentialKind>,
+    access_token_present: bool,
+    refresh_token_present: bool,
+    oauth_client_id_present: bool,
+    access_token_expired: bool,
+    probe: OneWorkspaceProbe,
+) -> (&'static str, String) {
+    if probe == OneWorkspaceProbe::Failed {
+        return ("fail", "One workspace probe failed".to_string());
+    }
+    if !access_token_present {
+        return ("warn", "One access token missing".to_string());
+    }
+    match one_auth_product_status(
+        true,
+        credential_kind,
+        access_token_present,
+        refresh_token_present,
+        oauth_client_id_present,
+        access_token_expired,
+    ) {
+        "expired" => (
+            "warn",
+            "One access token expired; sign in again with `ayx one login`".to_string(),
+        ),
+        // Reachable only for an OAuth-refresh credential missing part of its
+        // triple: the two time-limited kinds are `incomplete` only when the
+        // access token itself is absent, which returned above.
+        "incomplete" => (
+            "warn",
+            match (refresh_token_present, oauth_client_id_present) {
+                (false, false) => "One refresh token and client id missing",
+                (false, true) => "One refresh token missing",
+                (true, false) => "One OAuth client id missing",
+                (true, true) => "One auth incomplete",
+            }
+            .to_string(),
+        ),
+        _ => match probe {
+            OneWorkspaceProbe::Succeeded => ("ok", "One workspace probe succeeded".to_string()),
+            _ => ("warn", "One auth diagnostic incomplete".to_string()),
+        },
+    }
+}
+
+/// The `mongo` row's status and summary.
+///
+/// `MongoMode` defaults to `Embedded`, so a profile that never mentions Mongo
+/// used to report an active, healthy check for an Alteryx Server-side domain
+/// that does not exist in a One-only profile. `skip` is only chosen when there
+/// is nothing Mongo-related to speak for: no Alteryx Server section, no
+/// managed host or url, and no explicit embedded paths. A genuine local
+/// embedded Mongo carries at least one of those and is still reported.
+fn doctor_mongo_status_summary(
+    mode: ayx_core::profile::MongoMode,
+    server_configured: bool,
+    managed_host_present: bool,
+    managed_url_present: bool,
+    embedded_paths_configured: bool,
+) -> (&'static str, String) {
+    match mode {
+        ayx_core::profile::MongoMode::Embedded
+            if !server_configured
+                && !managed_host_present
+                && !managed_url_present
+                && !embedded_paths_configured =>
+        {
+            (
+                "skip",
+                "Mongo not configured; no Alteryx Server in this profile".to_string(),
+            )
+        }
+        ayx_core::profile::MongoMode::Embedded => {
+            ("ok", "Mongo embedded mode selected".to_string())
+        }
+        ayx_core::profile::MongoMode::Managed if !managed_host_present && !managed_url_present => {
+            ("warn", "Managed Mongo missing host/url".to_string())
+        }
+        ayx_core::profile::MongoMode::Managed => (
+            "warn",
+            "Managed Mongo configured; connection not verified".to_string(),
+        ),
     }
 }
 

@@ -57,13 +57,26 @@ pub fn run_onboarding(
     // no regional base URL). That is exactly what this wizard is meant to
     // repair. Do not silently replace it with `default_config`, which loses
     // the customer's answers before they can be fixed.
+    //
+    // A profile that will not parse at all is a different case, and it must
+    // not abort the wizard: onboarding is the escape hatch for repairing a
+    // corrupt profile, so failing here would lock the customer out of the one
+    // tool that can fix it. Say plainly what could not be read, then start
+    // from defaults.
     let mut config = if resolved_path.exists() {
-        load_existing_config(&resolved_path, environment).with_context(|| {
-            format!(
-                "could not load existing onboarding profile '{}'",
-                resolved_path.display()
-            )
-        })?
+        match load_existing_config(&resolved_path, environment) {
+            Ok(config) => config,
+            Err(err) => {
+                eprintln!(
+                    "Warning: could not read the existing profile '{}': {err}",
+                    resolved_path.display()
+                );
+                eprintln!(
+                    "Continuing with defaults. Answering the prompts below will overwrite it."
+                );
+                default_config()
+            }
+        }
     } else {
         default_config()
     };

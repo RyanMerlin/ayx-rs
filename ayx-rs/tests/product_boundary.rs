@@ -70,6 +70,28 @@ alteryx_one:
     )
 }
 
+/// One-only email OTP whose access token has already expired:
+/// `access_token_expires_at` is 2001-09-09T01:46:40Z, comfortably in the past.
+/// The credential is well formed — it is simply out of date, and the remedy is
+/// to sign in again, not to repair the profile.
+fn one_only_expired_otp_home() -> TempDir {
+    home_with_profile(
+        "one-otp-expired",
+        r#"profile_name: one-otp-expired
+alteryx_one:
+  account_email: operator@example.com
+  base_url: https://us1.alteryxcloud.com
+  active_workspace_id: '91946'
+  workspace_credentials:
+    '91946':
+      workspace_id: '91946'
+      credential_kind: email_otp
+      access_token: test-access-token
+      access_token_expires_at: 1000000000
+"#,
+    )
+}
+
 /// One-only, a full OAuth triple (access token, refresh token, client id)
 /// under `workspace_credentials`, but with no `credential_kind` at all. This
 /// is the shape a profile written before `credential_kind` existed still has:
@@ -457,6 +479,32 @@ fn one_api_status_reports_the_one_surface() {
     assert_eq!(data["workspace_id"], "91946", "{data:#}");
     assert_eq!(data["credential_kind"], "oauth_refresh", "{data:#}");
 
+    // `has_credentials` exists to answer present/absent. Redaction recurses
+    // into it and matches children on their own names, so keys spelled
+    // `access_token` / `refresh_token` were rewritten to the string
+    // "[REDACTED]" -- a truthy value that reports an absent credential as
+    // present. The `_present` suffix is metadata-exempt and matches what
+    // `doctor auth` emits, so the two surfaces agree.
+    let has = &data["has_credentials"];
+    assert_eq!(
+        has["access_token_present"],
+        Value::Bool(true),
+        "has_credentials must survive redaction as real booleans:
+{data:#}"
+    );
+    assert_eq!(
+        has["refresh_token_present"],
+        Value::Bool(true),
+        "has_credentials must survive redaction as real booleans:
+{data:#}"
+    );
+    assert_eq!(
+        has["oauth_client_id_present"],
+        Value::Bool(true),
+        "has_credentials must survive redaction as real booleans:
+{data:#}"
+    );
+
     // No credential value may appear anywhere in the envelope.
     let text = serde_json::to_string(&envelope).expect("serialize");
     assert!(!text.contains("test-access-token"), "access token leaked");
@@ -569,5 +617,131 @@ fn doctor_guidance_recommends_the_durable_path_without_calling_otp_invalid() {
         !guidance.contains("fix") && !guidance.contains("repair") && !guidance.contains("expired"),
         "the OTP credential is working as designed; this is an upgrade, not a \
          repair: {guidance}"
+    );
+}
+
+#[test]
+fn one_api_status_reports_absent_credentials_as_false_not_a_redaction_marker() {
+    // An email-OTP profile has no refresh token and no client id. An agent
+    // reading `has_credentials` must see `false`, not the truthy string
+    // "[REDACTED]" that recursive key-name redaction used to substitute.
+    let home = one_only_otp_home();
+    let envelope = run_ayx(&home, &["one", "api", "status"]);
+    assert_eq!(envelope["ok"], true, "{envelope:#}");
+
+    let has = &envelope["data"]["has_credentials"];
+    assert_eq!(has["access_token_present"], Value::Bool(true), "{has:#}");
+    assert_eq!(has["refresh_token_present"], Value::Bool(false), "{has:#}");
+    assert_eq!(
+        has["oauth_client_id_present"],
+        Value::Bool(false),
+        "{has:#}"
+    );
+
+    let text = serde_json::to_string(has).expect("serialize");
+    assert!(
+        !text.contains("REDACTED"),
+        "presence booleans must not be redacted: {text}"
+    );
+}
+
+#[test]
+fn expired_email_otp_credential_is_reported_as_expired_not_as_healthy() {
+    // Before this, `configured_time_limited` was unconditionally `ok`: a
+    // 40-day-old OTP profile reported green while its expiry sat in the past.
+    // Expiry is operational metadata that doctor already emits; it must also
+    // be judged.
+    let home = one_only_expired_otp_home();
+    let auth = doctor_check(&home, "auth");
+
+    assert_eq!(
+        auth["one_status"], "expired",
+        "an expired OTP access token is not `configured_time_limited`:
+{auth:#}"
+    );
+    assert_eq!(
+        auth["status"], "warn",
+        "an expired credential must not report `ok`:
+{auth:#}"
+    );
+    let summary = auth["summary"].as_str().unwrap_or_default();
+    assert!(
+        summary.contains("expired"),
+        "say plainly that it expired: {summary}"
+    );
+    let text = serde_json::to_string(&auth).expect("serialize");
+    assert!(
+        !text.contains("malformed") && !text.contains("invalid"),
+        "an expired credential is out of date, not malformed:
+{auth:#}"
+    );
+    let guidance = auth["one"]["guidance"]
+        .as_str()
+        .expect("expired OTP guidance must be present");
+    assert!(
+        guidance.contains("ayx one login"),
+        "the remedy for an expired OTP credential is to sign in again: {guidance}"
+    );
+}
+
+#[test]
+fn unexpired_email_otp_credential_stays_ok() {
+    // The other side of the expiry check: a live OTP credential must keep
+    // reporting `configured_time_limited` and `ok`.
+    let home = one_only_otp_home();
+    let auth = doctor_check(&home, "auth");
+
+    assert_eq!(auth["one_status"], "configured_time_limited", "{auth:#}");
+    assert_eq!(auth["status"], "ok", "{auth:#}");
+}
+
+#[test]
+fn a_one_only_profile_does_not_report_a_healthy_mongo_check() {
+    // Mongo is an Alteryx Server-side domain. `MongoMode` defaults to
+    // `Embedded`, so a profile that never mentions Mongo -- and configures no
+    // Server at all -- used to report an active, healthy Mongo check.
+    let home = one_only_oauth_home();
+    let mongo = doctor_check(&home, "mongo");
+
+    assert_eq!(
+        mongo["status"], "skip",
+        "nothing Mongo-related is configured here:
+{mongo:#}"
+    );
+
+    // A Server-only profile still gets a real embedded-Mongo check.
+    let server_home = server_only_home();
+    let server_mongo = doctor_check(&server_home, "mongo");
+    assert_eq!(
+        server_mongo["status"], "ok",
+        "an Alteryx Server profile has a genuine embedded Mongo:
+{server_mongo:#}"
+    );
+}
+
+#[test]
+fn server_api_status_reports_credential_presence_as_booleans() {
+    // The same redaction defect fixed for `ayx one api status` lived in the
+    // Server sibling: `curator_api_secret` matched the `secret` needle on its
+    // own name and became the truthy string "[REDACTED]".
+    let home = server_only_home();
+    let envelope = run_ayx(&home, &["server", "api", "status"]);
+    assert_eq!(envelope["ok"], true, "{envelope:#}");
+
+    let has = &envelope["data"]["has_credentials"];
+    assert_eq!(has["curator_api_key_present"], Value::Bool(true), "{has:#}");
+    assert_eq!(
+        has["curator_api_secret_present"],
+        Value::Bool(true),
+        "{has:#}"
+    );
+    let text = serde_json::to_string(has).expect("serialize");
+    assert!(
+        !text.contains("REDACTED"),
+        "presence booleans must not be redacted: {text}"
+    );
+    assert!(
+        !text.contains("test-secret"),
+        "the secret value must never appear: {text}"
     );
 }

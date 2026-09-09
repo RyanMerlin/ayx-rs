@@ -109,9 +109,13 @@ pub fn execute(environment: Option<&str>, command: ServerCommand) -> Result<Enve
                         "base_url": server.webapi_url,
                         "verify_tls": server.verify_tls(),
                         "observability": api_logging,
+                        // `_present` suffixes: redaction matches children on
+                        // their own names, so a bare `curator_api_secret`
+                        // became the truthy string "[REDACTED]" and could no
+                        // longer report an absent secret as absent.
                         "has_credentials": {
-                            "curator_api_key": !server.curator_api_key.is_empty(),
-                            "curator_api_secret": !server.curator_api_secret.is_empty()
+                            "curator_api_key_present": !server.curator_api_key.is_empty(),
+                            "curator_api_secret_present": !server.curator_api_secret.is_empty()
                         }
                     }),
                 )
