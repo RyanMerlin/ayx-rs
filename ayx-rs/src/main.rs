@@ -5572,8 +5572,11 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
     let one_credential = one.and_then(|v| v.active_workspace_credential());
     let one_credential_kind = one.and_then(|v| v.resolved_credential_kind());
     let one_access_token_expires_at = one.and_then(|v| v.resolved_access_token_expires_at());
+    // An OTP credential never renews. Otherwise a stored refresh token and
+    // client id are what the renewal path actually uses, so judge by
+    // capability rather than by a label an older profile may not carry.
     let one_renews_automatically = one_credential_kind
-        == Some(ayx_core::profile::OneCredentialKind::OAuthRefresh)
+        != Some(ayx_core::profile::OneCredentialKind::EmailOtp)
         && one_refresh_token_present
         && one_oauth_client_id_present;
     let server_configured = server.is_some();
@@ -5627,10 +5630,7 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
                         .or_else(|| one.and_then(|v| v.refresh_token_ref.as_ref())),
                     one.and_then(|v| v.resolved_refresh_token()),
                 ),
-                "credential_kind": one_credential_kind.map(|kind| match kind {
-                    ayx_core::profile::OneCredentialKind::EmailOtp => "email_otp",
-                    ayx_core::profile::OneCredentialKind::OAuthRefresh => "oauth_refresh",
-                }),
+                "credential_kind": one_credential_kind.map(ayx_core::profile::OneCredentialKind::as_str),
                 "renews_automatically": one_renews_automatically,
                 "access_token_expires_at": one_access_token_expires_at,
             },

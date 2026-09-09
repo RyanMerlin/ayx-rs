@@ -1401,6 +1401,31 @@ mod tests {
         assert_eq!(clean.data["client_secret_source"], "[REDACTED]");
     }
 
+    /// `is_metadata_key` exempts `*_expires_at` so expiry timestamps like
+    /// `access_token_expires_at` survive redaction: an expiry is when a token
+    /// stops working, not the token itself. The neighboring `access_token`
+    /// field must still be redacted, so this pins the exemption to the
+    /// suffix rather than the field ever widening past it.
+    #[test]
+    fn expiry_timestamps_survive_redaction_but_the_token_itself_does_not() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({
+                "access_token": "hunter2",
+                "access_token_expires_at": 4_102_444_800u64,
+            }),
+        );
+        let clean = redacted_envelope(&env);
+        assert_eq!(
+            clean.data["access_token_expires_at"], 4_102_444_800u64,
+            "an expiry timestamp is safe operational metadata"
+        );
+        assert_eq!(
+            clean.data["access_token"], "[REDACTED]",
+            "the token value itself must still be redacted"
+        );
+    }
+
     /// A descriptor with no declared fields previously projected against a
     /// hardcoded name allowlist, so any command whose keys were not on it
     /// emitted `{}` and reported its whole payload as omitted.
