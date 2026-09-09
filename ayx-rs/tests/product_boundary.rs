@@ -379,3 +379,39 @@ fn neither_product_configured_reports_a_single_skip_with_one_message() {
         "{auth:#}"
     );
 }
+
+#[test]
+fn network_check_does_not_warn_merely_because_no_probe_ran() {
+    // Endpoints being configured with no live probe run is the normal, healthy
+    // state — `doctor` deliberately does not make invasive network calls.
+    // Reporting it as a warning trains operators to ignore warnings.
+    let home = one_only_oauth_home();
+    let network = doctor_check(&home, "network");
+
+    assert_eq!(
+        network["status"], "ok",
+        "configured endpoints with no probe are healthy, not a warning:\n{network:#}"
+    );
+    let summary = network["summary"].as_str().expect("summary string");
+    assert!(
+        !summary.contains("Server"),
+        "a One-only profile's network row must not mention Server: {summary}"
+    );
+    assert_eq!(
+        network["probes_run"], false,
+        "say plainly that no probe ran rather than implying a fault:\n{network:#}"
+    );
+}
+
+#[test]
+fn server_check_does_not_warn_merely_because_no_probe_ran() {
+    // Mirror of the network fix: a fully configured Alteryx Server with no
+    // live validation run is the normal, healthy state, not a warning.
+    let home = server_only_home();
+
+    assert_eq!(
+        doctor_check(&home, "server")["status"],
+        "ok",
+        "a fully configured Server with no live validation run is healthy, not a warning"
+    );
+}
