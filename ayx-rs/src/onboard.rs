@@ -23,6 +23,11 @@ use ayx_core::secrets::{
 use ayx_core::sensitive::{SensitiveFileLock, write_sensitive_file};
 use ayx_server::util::runtime_settings_summary;
 
+/// The normal regional endpoint to offer when a person supplies only a
+/// workspace ID. A workspace ID has no region encoded in it, so onboarding
+/// asks for confirmation instead of silently binding credentials to US1.
+const DEFAULT_ONE_BASE_URL: &str = "https://us1.alteryxcloud.com";
+
 pub fn run_onboarding(
     profile_path: &Path,
     environment: Option<&str>,
@@ -47,8 +52,21 @@ pub fn run_onboarding(
         let active_environment = environment.unwrap_or("dev");
         return write_workspace_template(&resolved_path, active_environment, "dev", "prod");
     }
-    let existing = load_existing_config(&resolved_path, environment).ok();
-    let mut config = existing.unwrap_or_else(default_config);
+    // An existing profile can be syntactically sound while incomplete for a
+    // live command (for example, an old onboard run saved a workspace GID but
+    // no regional base URL). That is exactly what this wizard is meant to
+    // repair. Do not silently replace it with `default_config`, which loses
+    // the customer's answers before they can be fixed.
+    let mut config = if resolved_path.exists() {
+        load_existing_config(&resolved_path, environment).with_context(|| {
+            format!(
+                "could not load existing onboarding profile '{}'",
+                resolved_path.display()
+            )
+        })?
+    } else {
+        default_config()
+    };
     let mut secret_refs = BTreeMap::new();
 
     if non_interactive {
@@ -112,6 +130,8 @@ pub fn run_onboarding(
         let workspace_input = prompt_text("Workspace URL or id", gid_default, None, false)?;
         if !workspace_input.trim().is_empty() {
             let parsed = parse_workspace_url(&workspace_input);
+            let has_bare_workspace_gid =
+                parsed.workspace_gid.is_some() && parsed.base_url.is_none();
             if let Some(one) = config.alteryx_one.as_mut() {
                 match &parsed.workspace_gid {
                     Some(gid) => one.workspace_gid = Some(gid.clone()),
@@ -122,6 +142,31 @@ pub fn run_onboarding(
                 }
                 if let Some(base) = parsed.base_url {
                     one.base_url = Some(base);
+                }
+            }
+            // A bare workspace GID identifies the workspace but carries no
+            // region. Email OTP credentials are bound to the regional base URL,
+            // so offering login before collecting it guarantees a later binding
+            // failure. Make the US1 fallback explicit, while allowing people in
+            // another region to provide the URL shown in their browser.
+            if has_bare_workspace_gid
+                && config
+                    .alteryx_one
+                    .as_ref()
+                    .and_then(|one| one.normalized_base_url())
+                    .is_none()
+            {
+                eprintln!(
+                    "A workspace ID does not identify its region. Enter the Alteryx One regional URL from your browser."
+                );
+                let base_url = prompt_text(
+                    "Alteryx One base URL",
+                    None,
+                    Some(DEFAULT_ONE_BASE_URL),
+                    true,
+                )?;
+                if let Some(one) = config.alteryx_one.as_mut() {
+                    one.base_url = Some(normalize_alteryx_base_url(&base_url));
                 }
             }
         }
@@ -448,7 +493,12 @@ pub(crate) fn load_existing_config(
     profile_path: &Path,
     environment: Option<&str>,
 ) -> Result<Config> {
-    ayx_core::profile::Config::load_from_path_with_environment(profile_path, environment)
+    // Live commands use the strict loader, which validates a complete
+    // credential configuration. Onboarding is a repair workflow, so it must
+    // retain a parseable but incomplete profile long enough to prompt for the
+    // missing fields. The lenient loader still rejects malformed YAML and
+    // preserves normal environment/secret-reference resolution.
+    ayx_core::profile::Config::load_from_path_with_environment_lenient(profile_path, environment)
         .map_err(|err| anyhow::anyhow!(err))
 }
 
