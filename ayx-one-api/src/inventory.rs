@@ -907,11 +907,6 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             },
             EndpointSpec {
                 method: "GET",
-                path: "/v4/people/count",
-                commands: &["one person count"],
-            },
-            EndpointSpec {
-                method: "GET",
                 path: "/v4/people/{id}",
                 commands: &["one person detail"],
             },
@@ -947,7 +942,7 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             },
         ],
         notes: &[
-            "Current lookup plus person list/count/detail/create/update/patch/delete/password workflows are wired; remaining person families stay documented-only.",
+            "Current lookup plus person list/detail/create/update/patch/delete/password workflows are wired; remaining person families stay documented-only.",
         ],
     },
     SurfaceSpec {

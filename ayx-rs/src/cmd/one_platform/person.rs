@@ -8,14 +8,6 @@ use crate::{
     load_payload,
 };
 
-pub(crate) fn person_count_deprecation_message() -> &'static str {
-    "one person count is deprecated and will be removed by the vendor (scream-test flag IAM_SCREAM_PEOPLE); there is no replacement count endpoint, so use 'one person list' for enumeration"
-}
-
-fn warn_person_count_deprecated() {
-    eprintln!("warning: {}", person_count_deprecation_message());
-}
-
 pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
     apply: bool,
@@ -57,19 +49,6 @@ pub(crate) fn execute(
                 "/v4/people",
                 &[],
                 &params,
-            )?
-        }
-        Some(OnePersonCommand::Count) => {
-            warn_person_count_deprecated();
-            let config = runtime.load_profile_lenient(None)?;
-            one_api_live_request(
-                &config,
-                "person",
-                "person-count",
-                "GET",
-                "/v4/people/count",
-                false,
-                &[],
             )?
         }
         Some(OnePersonCommand::Current) => current(runtime, None)?,
@@ -215,17 +194,4 @@ pub(crate) fn current(runtime: &RuntimeCtx<'_>, profile: Option<&str>) -> Result
         false,
         &[],
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::person_count_deprecation_message;
-
-    #[test]
-    fn person_count_warning_mentions_the_vendor_removal_and_list_fallback() {
-        let message = person_count_deprecation_message();
-        assert!(message.contains("IAM_SCREAM_PEOPLE"));
-        assert!(message.contains("no replacement count endpoint"));
-        assert!(message.contains("one person list"));
-    }
 }

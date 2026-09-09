@@ -211,7 +211,6 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `GET /v4/people/current`
   - `GET /v4/people`
   - `GET /v4/people/current`
-  - `GET /v4/people/count`
   - `GET /v4/people/{id}`
   - `POST /v4/people`
   - `PUT /v4/people/{id}`
@@ -338,7 +337,7 @@ Missing operations concentrate in a few resources:
 
 ### Reading these numbers correctly
 
-**`stale` does not mean broken.** It means the published spec does not describe an endpoint the CLI wires. Several entries on that list are live-verified working: `one connections dry-run` reaches `POST /v4/connections/dryRun` and returns body validation, `one person count` reaches `GET /v4/people/count` but is intentionally retired with HTTP 410 `gone`, and `GET /v4/workflows` is live while absent from the published spec. Treat `stale` as "the spec is incomplete here", and only investigate a row after confirming the route is genuinely dead.
+**`stale` does not mean broken.** It means the published spec does not describe an endpoint the CLI wires. Several entries on that list are live-verified working: `one connections dry-run` reaches `POST /v4/connections/dryRun` and returns body validation, and `GET /v4/workflows` is live while absent from the published spec. Treat `stale` as "the spec is incomplete here", and only investigate a row after confirming the route is genuinely dead.
 
 **`--check` currently exits 1.** It gates on `missing > 0`, and `missing` is 86. Wiring `ayx one api coverage --check` into CI — which `docs/one-roadmap.md` recommends — would red the build immediately. That is an honest signal rather than a bug, but it needs a decision first: either gate on a coverage threshold instead of `missing == 0`, or scope the gate to a resource allowlist expected to be complete. Do not wire it as-is.
 

@@ -69,7 +69,7 @@ Status is from `docs/one-endpoint-matrix.md` at `v0.19.1`. Every row marked
 
 | Source | Endpoint | Command today | Status | Notes |
 | --- | --- | --- | --- | --- |
-| People / membership | `GET /v4/people` (header-scoped to the workspace) | `one person list`, `one workspace people` | live 200 | `/v4/people/count` is `410 gone`; count client-side |
+| People / membership | `GET /v4/people` (header-scoped to the workspace) | `one person list`, `one workspace people` | live 200 | The former `/v4/people/count` endpoint is `410 gone`; enumerate client-side when a count is required |
 | Admins | `GET /v4/workspaces/{numericId}/admins` | `one workspace admins` | declared; *verify* (`dc739a3`, `290ae51` repointed it) | fallback: filter `isAdmin` client-side, labeled as such |
 | Groups | groups list | `one workspace groups`, `groups-global` | wired; *verify* live status and whether a members list exists (`add-group-users` exists; a `GET` of members is not in the matrix) | without a members list, `group_member` grants cannot be expanded |
 | Roles | `GET /v4/authorization/roles`, `/{id}` | `one role list`, `one role detail` | live 200 | Viewer policy `25704008` confirmed |
