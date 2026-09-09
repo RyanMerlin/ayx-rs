@@ -669,6 +669,14 @@ fn expired_email_otp_credential_is_reported_as_expired_not_as_healthy() {
         summary.contains("expired"),
         "say plainly that it expired: {summary}"
     );
+    // The field must answer the question, not be rewritten into a truthy
+    // "[REDACTED]" string by output redaction.
+    assert_eq!(
+        auth["one"]["access_token_expired"],
+        Value::Bool(true),
+        "access_token_expired must survive redaction as a real boolean:
+{auth:#}"
+    );
     let text = serde_json::to_string(&auth).expect("serialize");
     assert!(
         !text.contains("malformed") && !text.contains("invalid"),

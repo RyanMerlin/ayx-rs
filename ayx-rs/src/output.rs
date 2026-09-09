@@ -729,7 +729,8 @@ fn is_sensitive_key(key: &str) -> bool {
 /// `secret_refs`); `_url`, `_count`, `_mode` and `_enabled` cover
 /// `token_endpoint_url`, `token_count` and the credential-posture flags;
 /// `_expires_at` covers `access_token_expires_at`, an expiry timestamp rather
-/// than a token value. Do not widen this speculatively: each entry disables
+/// than a token value, and `_expired` its boolean companion
+/// (`access_token_expired`). Do not widen this speculatively: each entry disables
 /// key matching for every field ending that way, at any depth.
 fn is_metadata_key(key: &str) -> bool {
     // Header-style keys spell the same field with hyphens (`has-refresh-token`,
@@ -761,6 +762,12 @@ fn is_metadata_key(key: &str) -> bool {
         // does not disclose the token itself, and doctor/status diagnostics
         // exist specifically to surface it.
         "_expires_at",
+        // The same justification in boolean form (`access_token_expired`):
+        // *whether* a credential has expired discloses nothing about the
+        // credential, and the diagnostics exist to surface exactly that.
+        // Redacted it became the truthy string "[REDACTED]", which told every
+        // reader that every credential had expired.
+        "_expired",
     ];
     EXACT.contains(&key.as_str())
         || key.starts_with("has_")
@@ -1413,6 +1420,7 @@ mod tests {
             json!({
                 "access_token": "hunter2",
                 "access_token_expires_at": 4_102_444_800u64,
+                "access_token_expired": false,
             }),
         );
         let clean = redacted_envelope(&env);
@@ -1420,10 +1428,62 @@ mod tests {
             clean.data["access_token_expires_at"], 4_102_444_800u64,
             "an expiry timestamp is safe operational metadata"
         );
+        // `_expired` is the same exemption in boolean form. Redacted, it
+        // became the truthy string "[REDACTED]" and told every reader that
+        // every credential had expired -- worse than not emitting it at all.
+        assert_eq!(
+            clean.data["access_token_expired"],
+            Value::Bool(false),
+            "whether a credential has expired must survive as a real boolean"
+        );
         assert_eq!(
             clean.data["access_token"], "[REDACTED]",
             "the token value itself must still be redacted"
         );
+    }
+
+    /// The whole credential-posture vocabulary `doctor` emits, pinned in one
+    /// place. Redaction is a substring match on key names, so every field
+    /// added to report *about* a credential is one rename away from being
+    /// rewritten to the truthy string "[REDACTED]" -- which is worse than the
+    /// field not existing, because a reader cannot tell it apart from a real
+    /// answer. `access_token_expired` regressed exactly that way; this is the
+    /// guard that catches the next one.
+    #[test]
+    fn doctor_credential_posture_fields_survive_redaction() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({
+                "access_token_present": true,
+                "refresh_token_present": false,
+                "oauth_client_id_present": false,
+                "access_token_expires_at": 1_000_000_000u64,
+                "access_token_expired": true,
+                "renews_automatically": false,
+                "credential_kind": "email_otp",
+                "credential_health": "stale",
+                "access_token_source": "inline",
+                "probes_run": false,
+                "probes_run_scope": "network check targets only",
+                "server_configured": false,
+                "embedded_paths_configured": false,
+            }),
+        );
+        let clean = redacted_envelope(&env);
+        let object = clean.data.as_object().expect("object data");
+        for (key, value) in object {
+            assert_ne!(
+                value,
+                &Value::String("[REDACTED]".to_string()),
+                "`{key}` describes a credential; it does not carry one"
+            );
+        }
+        // Spot-check the types, not just the absence of the marker: a boolean
+        // that survives as a boolean is the whole point.
+        assert_eq!(object["access_token_expired"], Value::Bool(true));
+        assert_eq!(object["access_token_present"], Value::Bool(true));
+        assert_eq!(object["refresh_token_present"], Value::Bool(false));
+        assert_eq!(object["credential_kind"], "email_otp");
     }
 
     /// A descriptor with no declared fields previously projected against a
