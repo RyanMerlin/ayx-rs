@@ -415,3 +415,50 @@ fn server_check_does_not_warn_merely_because_no_probe_ran() {
         "a fully configured Server with no live validation run is healthy, not a warning"
     );
 }
+
+#[test]
+fn one_api_commands_never_require_server_configuration() {
+    // Every command under `ayx one` belongs to Alteryx One. Requiring the
+    // Server `api:` section under a One namespace is a product-boundary
+    // defect, not an incomplete One profile.
+    let home = one_only_oauth_home();
+
+    for command in [vec!["one", "api", "status"], vec!["one", "api", "diagnose"]] {
+        let envelope = run_ayx(&home, &command);
+        let label = command.join(" ");
+
+        if envelope["ok"] == false {
+            let code = envelope["error_code"].as_str().unwrap_or_default();
+            assert_ne!(
+                code, "config_missing",
+                "`ayx {label}` must not fail for missing Server config:\n{envelope:#}"
+            );
+            let text = serde_json::to_string(&envelope).unwrap_or_default();
+            assert!(
+                !text.contains("server_api"),
+                "`ayx {label}` must not mention the Server API section:\n{envelope:#}"
+            );
+        }
+    }
+}
+
+#[test]
+fn one_api_status_reports_the_one_surface() {
+    let home = one_only_oauth_home();
+    let envelope = run_ayx(&home, &["one", "api", "status"]);
+    assert_eq!(envelope["ok"], true, "{envelope:#}");
+
+    let data = &envelope["data"];
+    assert_eq!(data["product"], "Alteryx One", "{data:#}");
+    assert_eq!(
+        data["base_url"], "https://us1.alteryxcloud.com",
+        "the One base URL, not a Server one:\n{data:#}"
+    );
+    assert_eq!(data["workspace_id"], "91946", "{data:#}");
+    assert_eq!(data["credential_kind"], "oauth_refresh", "{data:#}");
+
+    // No credential value may appear anywhere in the envelope.
+    let text = serde_json::to_string(&envelope).expect("serialize");
+    assert!(!text.contains("test-access-token"), "access token leaked");
+    assert!(!text.contains("test-refresh-token"), "refresh token leaked");
+}

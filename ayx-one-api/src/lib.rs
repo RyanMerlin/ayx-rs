@@ -882,6 +882,78 @@ pub fn api_diagnose_envelope(config: &Config, product: &str) -> Result<Envelope>
     ))
 }
 
+/// Alteryx One's API-surface posture, read from the One profile. This is
+/// deliberately separate from `api_status_envelope`, which reports the Alteryx
+/// Server API section: they are different products and neither implies the
+/// other is configured.
+pub fn one_api_status_envelope(config: &Config) -> Result<Envelope> {
+    let one = config
+        .alteryx_one
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("no Alteryx One profile configured; run `ayx one login`"))?;
+
+    let workspace_id = one.active_workspace_id();
+    Ok(Envelope::ok_with_data(
+        "Alteryx One api status",
+        json!({
+            "product": "Alteryx One",
+            "profile": config.profile_name,
+            "base_url": one.normalized_base_url(),
+            "workspace_id": workspace_id,
+            "account_email": one.account_email,
+            "credential_kind": one.resolved_credential_kind().map(|kind| match kind {
+                ayx_core::profile::OneCredentialKind::EmailOtp => "email_otp",
+                ayx_core::profile::OneCredentialKind::OAuthRefresh => "oauth_refresh",
+            }),
+            "access_token_expires_at": one.resolved_access_token_expires_at(),
+            "has_credentials": {
+                "access_token": one.resolved_access_token().is_some_and(|v| !v.trim().is_empty()),
+                "refresh_token": one.resolved_refresh_token().is_some_and(|v| !v.trim().is_empty()),
+                "oauth_client_id": one
+                    .resolved_oauth_client_id()
+                    .is_some_and(|v| !v.trim().is_empty()),
+            },
+        }),
+    ))
+}
+
+/// Alteryx One's API-surface diagnosis: validates that the profile names a
+/// usable One endpoint and workspace before any call is attempted.
+pub fn one_api_diagnose_envelope(config: &Config) -> Result<Envelope> {
+    let one = config
+        .alteryx_one
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("no Alteryx One profile configured; run `ayx one login`"))?;
+
+    let base_url = one
+        .normalized_base_url()
+        .ok_or_else(|| anyhow::anyhow!("Alteryx One base_url is not set for this profile"))?;
+    let workspace_id = one.active_workspace_id();
+
+    let mut findings: Vec<String> = Vec::new();
+    if workspace_id.is_none() {
+        findings.push("no active workspace selected; run `ayx one workspace use <id>`".to_string());
+    }
+    if one
+        .resolved_access_token()
+        .is_none_or(|v| v.trim().is_empty())
+    {
+        findings.push("no access token stored; run `ayx one login`".to_string());
+    }
+
+    Ok(Envelope::ok_with_data(
+        "Alteryx One api diagnose",
+        json!({
+            "product": "Alteryx One",
+            "profile": config.profile_name,
+            "base_url": base_url,
+            "workspace_id": workspace_id,
+            "open_api_spec_path": "/v4/open-api-spec",
+            "findings": findings,
+        }),
+    ))
+}
+
 pub fn one_api_live_request(
     config: &Config,
     surface: &str,
