@@ -516,7 +516,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one workspace current envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/workspaces/current in the One API docs."],
     },
     CatalogMetadata {
@@ -927,7 +927,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one role assignments envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/authorization/roles/{id}/people in the One API docs."],
     },
     CatalogMetadata {
@@ -1108,7 +1108,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/plans in the One API docs."],
     },
     CatalogMetadata {
@@ -1116,7 +1116,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/plans in the One API docs."],
     },
     CatalogMetadata {
@@ -1124,7 +1128,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/plans/{id}/full in the One API docs."],
     },
     CatalogMetadata {
@@ -1132,7 +1136,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans run envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to POST /v4/plans/{id}/run in the One API docs."],
     },
     CatalogMetadata {
@@ -1140,7 +1144,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/plans/count in the One API docs."],
     },
     CatalogMetadata {
@@ -1148,7 +1152,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans full envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/plans/{id}/full in the One API docs."],
     },
     CatalogMetadata {
@@ -1156,7 +1160,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans run-parameters envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/plans/{id}/runParameters in the One API docs."],
     },
     CatalogMetadata {
@@ -1164,7 +1168,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans schedules envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/plans/{id}/schedules in the One API docs."],
     },
     CatalogMetadata {
@@ -1172,7 +1176,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans export envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/plans/{id}/package in the One API docs."],
     },
     CatalogMetadata {
@@ -1180,7 +1184,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans update envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to PATCH /v4/plans/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1188,7 +1196,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to DELETE /v4/plans/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1196,7 +1204,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans share envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/plans/{id}/permissions in the One API docs."],
     },
     CatalogMetadata {
@@ -1204,7 +1216,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans import envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to POST /v4/plans/package in the One API docs."],
     },
     CatalogMetadata {
@@ -1212,7 +1224,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one plans permissions envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &[
             "Maps to GET /v4/plans/{id}/permissions in the One API docs.",
             "When `--subject-id` is set, maps to DELETE /v4/plans/{id}/permissions/{subjectId}.",
@@ -1223,7 +1235,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/flows in the One API docs."],
     },
     CatalogMetadata {
@@ -1231,7 +1243,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/flows/count in the One API docs."],
     },
     CatalogMetadata {
@@ -1239,7 +1251,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows library list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/flowsLibrary in the One API docs."],
     },
     CatalogMetadata {
@@ -1247,7 +1259,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows library count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/flowsLibrary/count in the One API docs."],
     },
     CatalogMetadata {
@@ -1255,7 +1267,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows folders list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/folders in the One API docs."],
     },
     CatalogMetadata {
@@ -1263,7 +1275,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows folders count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/folders/count in the One API docs."],
     },
     CatalogMetadata {
@@ -1271,7 +1283,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows folders detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/folders/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1279,7 +1291,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows folders create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/folders in the One API docs."],
     },
     CatalogMetadata {
@@ -1287,7 +1303,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows folders update envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to PATCH /v4/folders/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1295,7 +1315,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows folders delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to DELETE /v4/folders/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1303,7 +1323,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows folders flows list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/folders/{id}/flows in the One API docs."],
     },
     CatalogMetadata {
@@ -1311,7 +1331,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows folders flows count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/folders/{id}/flows/count in the One API docs."],
     },
     CatalogMetadata {
@@ -1319,7 +1339,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/flows/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1327,7 +1347,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/flows in the One API docs."],
     },
     CatalogMetadata {
@@ -1335,7 +1359,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows update envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to PATCH /v4/flows/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1343,7 +1371,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to DELETE /v4/flows/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1351,7 +1379,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows copy envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/flows/{id}/copy in the One API docs."],
     },
     CatalogMetadata {
@@ -1359,7 +1391,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows run envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/flows/{id}/run in the One API docs."],
     },
     CatalogMetadata {
@@ -1367,7 +1403,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows validate envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/flows/{id}/validate in the One API docs."],
     },
     CatalogMetadata {
@@ -1375,7 +1411,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows parameters envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/flows/{id}/recipeParameters in the One API docs."],
     },
     CatalogMetadata {
@@ -1383,7 +1419,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows inputs envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/flows/{id}/inputs in the One API docs."],
     },
     CatalogMetadata {
@@ -1391,7 +1427,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows outputs envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/flows/{id}/outputs in the One API docs."],
     },
     CatalogMetadata {
@@ -1399,7 +1435,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows permissions-get envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/flows/{id}/permissions in the One API docs."],
     },
     CatalogMetadata {
@@ -1407,7 +1443,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows permissions envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/flows/{id}/permissions in the One API docs."],
     },
     CatalogMetadata {
@@ -1415,7 +1455,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows move envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/flows/{id}/move in the One API docs."],
     },
     CatalogMetadata {
@@ -1423,7 +1467,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows replace-dataset envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to PATCH /v4/flows/{id}/replaceDataset in the One API docs."],
     },
     CatalogMetadata {
@@ -1431,7 +1479,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows import envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "flow package"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "flow package",
+        ],
         notes: &["Maps to POST /v4/flows/package in the One API docs."],
     },
     CatalogMetadata {
@@ -1439,7 +1491,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows import dry-run envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api", "flow package"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "flow package",
+        ],
         notes: &["Maps to POST /v4/flows/package/dryRun in the One API docs."],
     },
     CatalogMetadata {
@@ -1447,7 +1503,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows export envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/flows/{id}/package in the One API docs."],
     },
     CatalogMetadata {
@@ -1455,7 +1511,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one flows export dry-run envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/flows/{id}/package/dryRun in the One API docs."],
     },
     CatalogMetadata {
@@ -1463,7 +1519,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one datasets list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/datasetLibrary in the One API docs."],
     },
     CatalogMetadata {
@@ -1471,7 +1527,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one datasets count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/datasetLibrary/count in the One API docs."],
     },
     CatalogMetadata {
@@ -1479,7 +1535,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one datasets wrangled list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/wrangledDatasets in the One API docs."],
     },
     CatalogMetadata {
@@ -1487,7 +1543,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one datasets wrangled count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/wrangledDatasets/count in the One API docs."],
     },
     CatalogMetadata {
@@ -1495,7 +1551,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one datasets wrangled detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/wrangledDatasets/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1503,7 +1559,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one datasets imported detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/importedDatasets/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1511,7 +1567,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/connections in the One API docs."],
     },
     CatalogMetadata {
@@ -1519,7 +1575,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/connections/count in the One API docs."],
     },
     CatalogMetadata {
@@ -1527,7 +1583,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/connections in the One API docs."],
     },
     CatalogMetadata {
@@ -1535,7 +1595,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections dry-run envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/connections/dryRun in the One API docs."],
     },
     CatalogMetadata {
@@ -1543,7 +1607,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/connections/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1551,7 +1615,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/connections/{id}/status in the One API docs."],
     },
     CatalogMetadata {
@@ -1559,7 +1623,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections update envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to PATCH /v4/connections/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1567,7 +1635,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to DELETE /v4/connections/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1575,7 +1643,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections permissions list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/connections/{id}/permissions/sharedSubjects."],
     },
     CatalogMetadata {
@@ -1583,7 +1651,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections permissions create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/connections/share; the connection id travels in the body."],
     },
     CatalogMetadata {
@@ -1591,7 +1663,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections permissions detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &[
             "Synthesized by filtering GET /v4/connections/{id}/permissions/sharedSubjects; no per-subject route exists.",
         ],
@@ -1601,7 +1673,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections permissions delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to DELETE /v4/connections/share?connectionId=&subjectId=&subjectType=."],
     },
     CatalogMetadata {
@@ -1609,7 +1681,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections connector-metadata defaults envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/connectorMetadata/{connector}/defaults in the One API docs."],
     },
     CatalogMetadata {
@@ -1617,7 +1689,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections connector-metadata detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/connectorMetadata/{connector} in the One API docs."],
     },
     CatalogMetadata {
@@ -1625,7 +1697,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections connector-metadata publish-info envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/connectorMetadata/{connector}/publish/info in the One API docs."],
     },
     CatalogMetadata {
@@ -1633,7 +1705,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections connector-metadata overrides create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/connectorMetadata/{connector}/overrides in the One API docs."],
     },
     CatalogMetadata {
@@ -1641,7 +1717,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections connector-metadata overrides list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/connectorMetadata/{connector}/overrides in the One API docs."],
     },
     CatalogMetadata {
@@ -1649,7 +1725,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one connections connector-metadata overrides delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to DELETE /v4/connectorMetadata/{connector}/overrides in the One API docs."],
     },
     CatalogMetadata {
@@ -1657,7 +1733,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/jobLibrary in the One API docs."],
     },
     CatalogMetadata {
@@ -1665,7 +1741,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/jobLibrary/count in the One API docs."],
     },
     CatalogMetadata {
@@ -1673,7 +1749,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group pdf-results envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/jobGroups/{id}/pdfResults in the One API docs."],
     },
     CatalogMetadata {
@@ -1681,7 +1757,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group run envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/jobGroups in the One API docs."],
     },
     CatalogMetadata {
@@ -1689,7 +1769,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group publish envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to PUT /v4/jobGroups/{id}/publish in the One API docs."],
     },
     CatalogMetadata {
@@ -1697,7 +1781,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/jobGroups/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1705,7 +1789,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group cancel envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to POST /v4/jobGroups/{id}/cancel in the One API docs."],
     },
     CatalogMetadata {
@@ -1713,7 +1797,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group status envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/jobGroups/{id}/status in the One API docs."],
     },
     CatalogMetadata {
@@ -1721,7 +1805,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group inputs envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/jobGroups/{id}/inputs in the One API docs."],
     },
     CatalogMetadata {
@@ -1729,7 +1813,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group outputs envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/jobGroups/{id}/outputs in the One API docs."],
     },
     CatalogMetadata {
@@ -1737,7 +1821,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group jobs envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/jobGroups/{id}/jobs in the One API docs."],
     },
     CatalogMetadata {
@@ -1745,7 +1829,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group publications envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/jobGroups/{id}/publications in the One API docs."],
     },
     CatalogMetadata {
@@ -1753,7 +1837,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group profile envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/jobGroups/{id}/profile in the One API docs."],
     },
     CatalogMetadata {
@@ -1761,7 +1845,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one job-group profile-results envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/jobGroups/{id}/profileResults in the One API docs."],
     },
     CatalogMetadata {
@@ -1769,7 +1853,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one output-object list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/outputObjects in the One API docs."],
     },
     CatalogMetadata {
@@ -1777,7 +1861,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one output-object count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/outputObjects/count in the One API docs."],
     },
     CatalogMetadata {
@@ -1785,7 +1869,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one output-object create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/outputObjects in the One API docs."],
     },
     CatalogMetadata {
@@ -1793,7 +1881,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one output-object detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/outputObjects/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1801,7 +1889,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one output-object update envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to PATCH /v4/outputObjects/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1809,7 +1901,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one output-object delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to DELETE /v4/outputObjects/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1817,7 +1909,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one output-object inputs envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/outputObjects/{id}/inputs in the One API docs."],
     },
     CatalogMetadata {
@@ -1825,7 +1917,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one output-object wrangle-to-python envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &[
             "Maps to POST /v4/outputObjects/{id}/wrangleToPython in the One API docs.",
             "Requires --apply.",
@@ -1836,7 +1928,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one webhook-flow-task create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/webhookFlowTasks in the One API docs."],
     },
     CatalogMetadata {
@@ -1844,7 +1940,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one webhook-flow-task detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/webhookFlowTasks/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1852,7 +1948,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one webhook-flow-task delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to DELETE /v4/webhookFlowTasks/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1860,7 +1956,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one webhook-flow-tasks test envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/webhooks/test in the One API docs."],
     },
     CatalogMetadata {
@@ -1868,7 +1968,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one write-setting list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/writeSettings in the One API docs."],
     },
     CatalogMetadata {
@@ -1876,7 +1976,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one write-setting count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/writeSettings/count in the One API docs."],
     },
     CatalogMetadata {
@@ -1884,7 +1984,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one write-setting create envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to POST /v4/writeSettings in the One API docs."],
     },
     CatalogMetadata {
@@ -1892,7 +1996,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one write-setting detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/writeSettings/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1900,7 +2004,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one write-setting update envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "payload json"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "payload json",
+        ],
         notes: &["Maps to PATCH /v4/writeSettings/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1908,7 +2016,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one write-setting delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to DELETE /v4/writeSettings/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1918,7 +2026,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         mutating: true,
         prerequisites: &[
             "central runtime profile",
-            "server_api",
+            "alteryx one credential",
             "payload json",
             "TTY confirmation",
         ],
@@ -1931,7 +2039,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one scheduling list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/schedules in the One API docs."],
     },
     CatalogMetadata {
@@ -1939,7 +2047,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one scheduling detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/schedules/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1949,7 +2057,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         mutating: true,
         prerequisites: &[
             "central runtime profile",
-            "server_api",
+            "alteryx one credential",
             "payload json",
             "TTY confirmation",
         ],
@@ -1962,7 +2070,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one scheduling enable envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "TTY confirmation"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "TTY confirmation",
+        ],
         notes: &[
             "Maps to POST /v4/schedules/{id}/enable in the One API docs; applied requests require confirmation.",
         ],
@@ -1972,7 +2084,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one scheduling disable envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "TTY confirmation"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "TTY confirmation",
+        ],
         notes: &[
             "Maps to POST /v4/schedules/{id}/disable in the One API docs; applied requests require confirmation.",
         ],
@@ -1982,7 +2098,11 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one scheduling delete envelope",
         safety: "destructive",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api", "TTY confirmation"],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx one credential",
+            "TTY confirmation",
+        ],
         notes: &["Maps to DELETE /v4/schedules/{id} in the One API docs."],
     },
     CatalogMetadata {
@@ -1990,7 +2110,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one scheduling count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/schedules/count in the One API docs."],
     },
     CatalogMetadata {
@@ -2009,7 +2129,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one workflows list envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /v4/workflows. Absent from the published /v4 OpenAPI spec."],
     },
     CatalogMetadata {
@@ -2017,7 +2137,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one workflows count envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &[
             "Synthesized from the GET /v4/workflows envelope total; no /v4/workflows/count route exists.",
         ],
@@ -2027,7 +2147,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one workflows detail envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &[
             "Synthesized by filtering GET /svc-workflow/api/v1/assets; no GET /v4/workflows/{id} route exists.",
             "Emits detail_source so callers can distinguish client-side assembly from a server lookup.",
@@ -2038,7 +2158,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one workflows dependencies envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &[
             "Maps to GET /svc-workflow/api/v1/assets/{id}/dependencies; returns connections, datasets, macros.",
         ],
@@ -2048,7 +2168,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one workflows assets envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /svc-workflow/api/v1/assets; a superset of `one workflows list`."],
     },
     CatalogMetadata {
@@ -2056,7 +2176,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one workflows engines envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /svc-workflow/api/v0/workflows/{id}/availableEngines."],
     },
     CatalogMetadata {
@@ -2064,7 +2184,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one workflows tools envelope",
         safety: "read-only",
         mutating: false,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &["Maps to GET /svc-workflow/api/v1/tools; workspace-scoped, not per-workflow."],
     },
     CatalogMetadata {
@@ -2074,7 +2194,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         mutating: true,
         prerequisites: &[
             "central runtime profile",
-            "server_api",
+            "alteryx one credential",
             "workflow execute permission",
         ],
         notes: &[
@@ -2089,7 +2209,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         mutating: true,
         prerequisites: &[
             "central runtime profile",
-            "server_api",
+            "alteryx one credential",
             "workflow run/job id",
         ],
         notes: &[
@@ -2102,7 +2222,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one workflows copy envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &[
             "Maps to POST /svc-workflow/api/v2/workflows/{id}/duplicate. Requires --apply.",
             "--version defaults to the workflow's current version, resolved via the assets listing.",
@@ -2113,7 +2233,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one workflows share envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &[
             "Maps to POST /svc-workflow/api/v2/workflows/{id}/share. Requires --apply.",
             "--to-person accepts an email (resolved via one GET /v4/people call) or a numeric id; \
@@ -2128,7 +2248,7 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one workflows delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "server_api"],
+        prerequisites: &["central runtime profile", "alteryx one credential"],
         notes: &[
             "Maps to DELETE /svc-workflow/api/v2/workflows/{id}. Requires --apply.",
             "Resolves the workflow's name from the assets listing before prompting and before \

@@ -462,3 +462,36 @@ fn one_api_status_reports_the_one_surface() {
     assert!(!text.contains("test-access-token"), "access token leaked");
     assert!(!text.contains("test-refresh-token"), "refresh token leaked");
 }
+
+#[test]
+fn no_one_catalog_entry_declares_a_server_api_prerequisite() {
+    // `ayx catalog list --format full` is local, machine-readable metadata --
+    // no network call, no live profile requirement. Every `one/...` entry's
+    // `prerequisites` list must never name `server_api`: Alteryx One and
+    // Alteryx Server are independent products, and no `ayx one` command may
+    // require Alteryx Server configuration.
+    let home = one_only_oauth_home();
+    let envelope = run_ayx(&home, &["catalog", "list", "--format", "full"]);
+    assert_eq!(envelope["ok"], true, "{envelope:#}");
+
+    let commands = envelope["data"]["commands"]
+        .as_array()
+        .expect("commands array");
+    assert!(!commands.is_empty(), "expected catalog entries");
+
+    let offenders: Vec<String> = commands
+        .iter()
+        .filter(|entry| {
+            let path = entry["path"].as_str().unwrap_or_default();
+            let prereqs = entry["prerequisites"].as_array();
+            path.starts_with("one/")
+                && prereqs.is_some_and(|list| list.iter().any(|p| p.as_str() == Some("server_api")))
+        })
+        .map(|entry| entry["path"].as_str().unwrap_or_default().to_string())
+        .collect();
+
+    assert!(
+        offenders.is_empty(),
+        "one/... catalog entries falsely require Alteryx Server config: {offenders:?}"
+    );
+}
