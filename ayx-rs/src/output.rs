@@ -727,9 +727,10 @@ fn is_sensitive_key(key: &str) -> bool {
 /// list is deliberately not a union of guesses. `_ref` and `_refs` are both
 /// required and neither implies the other (`access_token_ref` vs
 /// `secret_refs`); `_url`, `_count`, `_mode` and `_enabled` cover
-/// `token_endpoint_url`, `token_count` and the credential-posture flags. Do not
-/// widen this speculatively: each entry disables key matching for every field
-/// ending that way, at any depth.
+/// `token_endpoint_url`, `token_count` and the credential-posture flags;
+/// `_expires_at` covers `access_token_expires_at`, an expiry timestamp rather
+/// than a token value. Do not widen this speculatively: each entry disables
+/// key matching for every field ending that way, at any depth.
 fn is_metadata_key(key: &str) -> bool {
     // Header-style keys spell the same field with hyphens (`has-refresh-token`,
     // `token-count`). Normalise to one separator so a single rule covers both
@@ -755,6 +756,11 @@ fn is_metadata_key(key: &str) -> bool {
         "_mode",
         "_enabled",
         "_env",
+        // Expiry timestamps (`access_token_expires_at`) are operational
+        // metadata, not a credential value: knowing *when* a token expires
+        // does not disclose the token itself, and doctor/status diagnostics
+        // exist specifically to surface it.
+        "_expires_at",
     ];
     EXACT.contains(&key.as_str())
         || key.starts_with("has_")
