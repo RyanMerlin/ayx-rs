@@ -481,12 +481,16 @@ fn job_groups_descriptor(command: &OneJobGroupCommand) -> OutputDescriptor {
     match command {
         OneJobGroupCommand::List { .. } => list("one.job-groups.list"),
         OneJobGroupCommand::Inputs { .. } => list("one.job-groups.inputs"),
-        OneJobGroupCommand::Outputs { .. } => list("one.job-groups.outputs"),
+        // `{files: [...], tables: [...]}` -- two lists, both shown.
+        OneJobGroupCommand::Outputs { .. } => {
+            list("one.job-groups.outputs").with_named_collections(&["files", "tables"])
+        }
         OneJobGroupCommand::Jobs { .. } => list("one.job-groups.jobs"),
         OneJobGroupCommand::Publications { .. } => list("one.job-groups.publications"),
         OneJobGroupCommand::Count { .. } => detail("one.job-groups.count"),
         OneJobGroupCommand::Detail { .. } => detail("one.job-groups.detail"),
-        OneJobGroupCommand::Status { .. } => detail("one.job-groups.status"),
+        // The body is a bare string ("Complete"); the one field labels it.
+        OneJobGroupCommand::Status { .. } => detail_with("one.job-groups.status", &["status"]),
         OneJobGroupCommand::Profile { .. } => detail("one.job-groups.profile"),
         OneJobGroupCommand::ProfileResults { .. } => detail("one.job-groups.profile-results"),
         OneJobGroupCommand::PdfResults { .. } => detail("one.job-groups.pdf-results"),

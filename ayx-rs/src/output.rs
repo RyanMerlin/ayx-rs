@@ -111,8 +111,13 @@ pub struct OutputDescriptor {
     pub command: &'static str,
     pub kind: ViewKind,
     pub fields: &'static [&'static str],
-    /// Service-specific collection wrappers accepted by this command.
+    /// Service-specific collection wrappers accepted by this command. These are
+    /// alternatives: the first one present is the list.
     pub collection_keys: &'static [&'static str],
+    /// Sibling collections that together make up one response, such as
+    /// `{files, tables}`. Every one is shown. Opt-in per command, so a shape is
+    /// never guessed from "an object whose values happen to be arrays".
+    pub named_collections: &'static [&'static str],
 }
 
 impl OutputDescriptor {
@@ -122,7 +127,13 @@ impl OutputDescriptor {
             kind,
             fields: &[],
             collection_keys: &[],
+            named_collections: &[],
         }
+    }
+
+    pub const fn with_named_collections(mut self, keys: &'static [&'static str]) -> Self {
+        self.named_collections = keys;
+        self
     }
 
     pub const fn with_fields(mut self, fields: &'static [&'static str]) -> Self {
@@ -180,14 +191,21 @@ pub fn render_envelope(
                 )
             {
                 let data = match descriptor.kind {
-                    ViewKind::List => compact_data(
+                    ViewKind::List => compact_named_collections(
                         &clean.data,
-                        descriptor.kind,
-                        descriptor.fields,
-                        descriptor.collection_keys,
+                        descriptor.named_collections,
                         output_limit,
-                        false,
-                    ),
+                    )
+                    .unwrap_or_else(|| {
+                        compact_data(
+                            &clean.data,
+                            descriptor.kind,
+                            descriptor.fields,
+                            descriptor.collection_keys,
+                            output_limit,
+                            false,
+                        )
+                    }),
                     ViewKind::Detail | ViewKind::Result => {
                         human_resource_data(&clean.data, descriptor.fields)
                     }
@@ -221,6 +239,11 @@ fn compact_envelope(
     } else {
         ViewKind::Raw
     };
+    let named = (kind == ViewKind::List)
+        .then(|| {
+            compact_named_collections(&envelope.data, descriptor.named_collections, output_limit)
+        })
+        .flatten();
     CompactEnvelope {
         schema_version: COMPACT_SCHEMA_VERSION,
         command: descriptor.command.to_string(),
@@ -231,14 +254,16 @@ fn compact_envelope(
         remediation: envelope.remediation.clone(),
         retryable: envelope.retryable,
         next: envelope.next.clone(),
-        data: compact_data(
-            &envelope.data,
-            kind,
-            descriptor.fields,
-            descriptor.collection_keys,
-            output_limit,
-            !envelope.ok,
-        ),
+        data: named.unwrap_or_else(|| {
+            compact_data(
+                &envelope.data,
+                kind,
+                descriptor.fields,
+                descriptor.collection_keys,
+                output_limit,
+                !envelope.ok,
+            )
+        }),
     }
 }
 
@@ -278,6 +303,33 @@ fn compact_data(
         ViewKind::Export => compact_object("export", data, descriptor_fields),
         ViewKind::Raw => compact_object("raw", data, descriptor_fields),
     }
+}
+
+/// Project a response made of several sibling collections the command declared
+/// (`descriptor.named_collections`), each through the normal list projection.
+/// `None` when none of the declared collections is present, so the caller falls
+/// back to the single-list path and its honest "unrecognized" report.
+fn compact_named_collections(data: &Value, keys: &[&str], limit: usize) -> Option<Value> {
+    let body = presentation_body(data);
+    let object = body.as_object()?;
+    let mut collections = Map::new();
+    for key in keys {
+        if let Some(items) = object.get(*key).filter(|value| value.is_array()) {
+            collections.insert((*key).to_string(), compact_list(items, &[], &[], limit));
+        }
+    }
+    if collections.is_empty() {
+        return None;
+    }
+    let omitted: Vec<&String> = object
+        .keys()
+        .filter(|key| !keys.contains(&key.as_str()))
+        .collect();
+    Some(json!({
+        "kind": "list",
+        "collections": collections,
+        "omitted_fields": omitted,
+    }))
 }
 
 fn compact_list(
@@ -399,7 +451,19 @@ fn human_resource_data(data: &Value, descriptor_fields: &[&str]) -> Value {
     }
     let body = presentation_body(data);
     let Some(object) = body.as_object() else {
-        return scalar_projection(body);
+        if body.is_array() {
+            return scalar_projection(body);
+        }
+        // A bare scalar body has no key, and the key:value renderer prints
+        // nothing for a keyless value. Label it with the command's one declared
+        // field when it names exactly one, else a neutral `value`.
+        let label = match descriptor_fields {
+            [only] => *only,
+            _ => "value",
+        };
+        let mut labelled = Map::new();
+        labelled.insert(label.to_string(), scalar_projection(body));
+        return Value::Object(labelled);
     };
     let fields = if descriptor_fields.is_empty() {
         Vec::new()
@@ -1078,6 +1142,61 @@ mod tests {
         )
         .expect("compact JSON should parse");
         assert_eq!(compact["data"]["unrecognized_collection"], true);
+    }
+
+    #[test]
+    fn a_bare_scalar_body_renders_under_the_single_declared_field() {
+        // `GET /v4/jobGroups/{id}/status` returns the JSON string "Complete".
+        // Text mode used to print only the message line, because a scalar has
+        // no key for the key:value renderer to show.
+        let env = Envelope::ok_with_data(
+            "jobGroup status ok",
+            json!({ "attempts": 1, "status_code": 200, "response": "Complete" }),
+        );
+        let descriptor = OutputDescriptor::new("one.job-groups.status", ViewKind::Detail)
+            .with_fields(&["status"]);
+
+        let text = render_envelope(&env, OutputMode::Text, descriptor, DEFAULT_OUTPUT_LIMIT)
+            .expect("scalar detail should render");
+        assert!(text.contains("status: Complete"), "got: {text}");
+    }
+
+    #[test]
+    fn declared_named_collections_render_each_collection() {
+        // `GET /v4/jobGroups/{id}/outputs` returns `{files: [...], tables: [...]}`:
+        // two lists, neither a wrapper for the other. It was reported as an
+        // unrecognized shape even when the call succeeded.
+        let env = Envelope::ok_with_data(
+            "jobGroup outputs ok",
+            json!({
+                "attempts": 1,
+                "response": {
+                    "files": [{"id": 7, "name": "out.csv", "location": {"big": true}}],
+                    "tables": []
+                }
+            }),
+        );
+        let descriptor = OutputDescriptor::new("one.job-groups.outputs", ViewKind::List)
+            .with_named_collections(&["files", "tables"]);
+
+        let text = render_envelope(&env, OutputMode::Text, descriptor, DEFAULT_OUTPUT_LIMIT)
+            .expect("named collections should render");
+        assert!(!text.contains("does not recognize"), "got: {text}");
+        assert!(text.contains("Files (1)"), "got: {text}");
+        assert!(text.contains("out.csv"), "got: {text}");
+        assert!(text.contains("Tables (0)"), "got: {text}");
+
+        let compact: Value = serde_json::from_str(
+            &render_envelope(&env, OutputMode::Json, descriptor, DEFAULT_OUTPUT_LIMIT)
+                .expect("compact JSON should render"),
+        )
+        .expect("compact JSON should parse");
+        assert!(compact["data"].get("unrecognized_collection").is_none());
+        assert_eq!(
+            compact["data"]["collections"]["files"]["items"][0]["name"],
+            "out.csv"
+        );
+        assert_eq!(compact["data"]["collections"]["tables"]["shown_count"], 0);
     }
 
     #[test]
