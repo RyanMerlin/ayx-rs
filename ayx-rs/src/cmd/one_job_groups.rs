@@ -250,10 +250,9 @@ fn synthesize_job_group_names(data: &mut serde_json::Value) {
         let flow_id: Option<String> = obj
             .get("flowRun")
             .and_then(|fr| fr.get("flowId"))
-            .and_then(|v| v.as_str())
-            .or_else(|| obj.get("flowId").and_then(|v| v.as_str()))
-            .map(str::to_string);
-        let id: Option<String> = obj.get("id").and_then(|v| v.as_str()).map(str::to_string);
+            .and_then(id_text)
+            .or_else(|| obj.get("flowId").and_then(id_text));
+        let id: Option<String> = obj.get("id").and_then(id_text);
         let created_at: Option<String> = obj
             .get("createdAt")
             .and_then(|v| v.as_str())
@@ -267,6 +266,16 @@ fn synthesize_job_group_names(data: &mut serde_json::Value) {
             (None, None, _) => "job-?".to_string(),
         };
         obj.insert("name".to_string(), serde_json::Value::String(synthesized));
+    }
+}
+
+/// An identifier as display text. The live API sends job-group and flow ids
+/// as JSON numbers; accept strings too rather than assume either.
+fn id_text(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::String(s) => Some(s.clone()),
+        _ => None,
     }
 }
 
@@ -353,6 +362,30 @@ mod tests {
             "flowRun": { "flowId": "flow-ignored" }
         }]));
         assert_eq!(first_name(&data), "My Existing Group");
+    }
+
+    /// The live `/v4/jobLibrary` list sends `id` (and `flowRun.flowId`) as JSON
+    /// numbers. Every other fixture here uses strings, which is how a
+    /// `.as_str()` read shipped labelling every live row `job-?`.
+    #[test]
+    fn numeric_id_from_the_live_api_produces_job_id() {
+        let data = run(json!([{
+            "name": null,
+            "id": 3978581,
+            "flowRun": null,
+            "ranfrom": "ui"
+        }]));
+        assert_eq!(first_name(&data), "job-3978581");
+    }
+
+    #[test]
+    fn numeric_flow_id_and_numeric_id_produce_flow_label() {
+        let data = run(json!([{
+            "name": null,
+            "id": 3978581,
+            "flowRun": { "flowId": 77 }
+        }]));
+        assert_eq!(first_name(&data), "flow-77 (3978581)");
     }
 
     #[test]
