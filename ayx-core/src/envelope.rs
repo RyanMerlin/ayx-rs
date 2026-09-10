@@ -40,6 +40,31 @@ pub enum ErrorCode {
     Internal,
 }
 
+/// Does this upstream error body describe a resource that is not there?
+///
+/// Deliberately narrow: the exception name ends in `NotFoundException`, or a
+/// human-readable field says "not found". Anything looser would start
+/// reclassifying real validation failures, which would be the same
+/// misdirection in the opposite direction.
+fn body_reports_absent_resource(body: &Value) -> bool {
+    let exception = body.get("exception").unwrap_or(body);
+
+    if exception
+        .get("name")
+        .and_then(Value::as_str)
+        .is_some_and(|name| name.ends_with("NotFoundException"))
+    {
+        return true;
+    }
+
+    ["message", "details", "error"].iter().any(|field| {
+        exception
+            .get(*field)
+            .and_then(Value::as_str)
+            .is_some_and(|text| text.to_ascii_lowercase().contains("not found"))
+    })
+}
+
 impl ErrorCode {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -119,6 +144,31 @@ impl ErrorCode {
             500..=599 => Some(ErrorCode::Upstream),
             _ => Some(ErrorCode::Internal),
         }
+    }
+
+    /// Classify an HTTP failure, consulting the upstream response body where
+    /// the status alone is ambiguous.
+    ///
+    /// Only 400 is refined, and only towards `NotFound`. A 400 is the one
+    /// status this API uses for two unrelated meanings: "your input was
+    /// malformed" and "the thing you asked about has no data". Those need
+    /// different remediation -- one says check your flags, the other says the
+    /// resource is absent and no flag will change that -- so where the body
+    /// names an absent resource, believe the body over the status line.
+    ///
+    /// Everything else defers to [`Self::from_http_status`] unchanged. A
+    /// status with an unambiguous meaning must not be second-guessed by
+    /// whatever prose the upstream happened to include.
+    pub fn from_http_status_with_body(status: u16, body: Option<&Value>) -> Option<Self> {
+        let code = Self::from_http_status(status)?;
+        if status == 400
+            && code == ErrorCode::Validation
+            && let Some(body) = body
+            && body_reports_absent_resource(body)
+        {
+            return Some(ErrorCode::NotFound);
+        }
+        Some(code)
     }
 
     /// Whether re-running the identical command can reasonably succeed without
@@ -324,6 +374,76 @@ mod tests {
         // A timeout is a transport outcome and may succeed on retry; calling it
         // `Validation` would point the caller at their flags instead.
         assert_eq!(ErrorCode::from_http_status(408), Some(ErrorCode::Network));
+    }
+
+    /// A 400 whose body says the resource does not exist is a not-found
+    /// condition, whatever status the upstream chose to send it under.
+    ///
+    /// Found live: `ayx one job-groups profile <id>` returns HTTP 400 carrying
+    /// `ProfilingDataNotFoundException` / "Job group <id> does not have
+    /// profiling data". Classified purely by status that is `Validation`,
+    /// whose remediation tells the caller to check their flags and `--help` --
+    /// advice that cannot help, because the flags were correct and the data is
+    /// simply absent. That is the same misdirection
+    /// `mapped_client_errors_land_in_an_actionable_bucket` guards against for
+    /// 408, 423 and 428.
+    #[test]
+    fn a_400_that_means_absent_is_classified_as_not_found() {
+        let body = serde_json::json!({
+            "exception": {
+                "details": "Job group 4087561 does not have profiling data",
+                "message": "Profiling data not found",
+                "name": "ProfilingDataNotFoundException"
+            }
+        });
+        assert_eq!(
+            ErrorCode::from_http_status_with_body(400, Some(&body)),
+            Some(ErrorCode::NotFound),
+            "an absent resource is not malformed input"
+        );
+    }
+
+    /// The refinement must stay narrow. A real 400 is still a caller-side
+    /// input problem, and telling someone to look elsewhere would be the same
+    /// misdirection pointed the other way.
+    #[test]
+    fn a_genuine_400_is_still_validation() {
+        let body = serde_json::json!({
+            "exception": {
+                "message": "Invalid value for parameter 'limit'",
+                "name": "ValidationException"
+            }
+        });
+        assert_eq!(
+            ErrorCode::from_http_status_with_body(400, Some(&body)),
+            Some(ErrorCode::Validation)
+        );
+        assert_eq!(
+            ErrorCode::from_http_status_with_body(400, None),
+            Some(ErrorCode::Validation),
+            "with no body to read, the status is all there is"
+        );
+        assert_eq!(
+            ErrorCode::from_http_status_with_body(422, Some(&body)),
+            Some(ErrorCode::Validation),
+            "422 is unambiguous and is not refined"
+        );
+    }
+
+    /// Refinement applies only where status alone is ambiguous. Every other
+    /// status must classify exactly as it did before, body or no body.
+    #[test]
+    fn body_refinement_never_overrides_an_unambiguous_status() {
+        let not_found_body = serde_json::json!({
+            "exception": { "name": "SomethingNotFoundException", "message": "not found" }
+        });
+        for status in [401u16, 403, 404, 409, 410, 429, 500, 503] {
+            assert_eq!(
+                ErrorCode::from_http_status_with_body(status, Some(&not_found_body)),
+                ErrorCode::from_http_status(status),
+                "{status} is unambiguous; its body must not change the classification"
+            );
+        }
     }
 
     /// The statuses left on `Internal` are there on purpose, not by neglect.

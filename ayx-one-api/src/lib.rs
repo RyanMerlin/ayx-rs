@@ -365,7 +365,11 @@ fn one_dry_run_envelope(
 }
 
 fn one_http_envelope(status: StatusCode, message: String, data: Value) -> Envelope {
-    match ayx_core::envelope::ErrorCode::from_http_status(status.as_u16()) {
+    // `data` already carries the parsed upstream body under "response". Pass
+    // it to the classifier so a 400 that actually means "no such data" is not
+    // reported as malformed input.
+    let body = data.get("response");
+    match ayx_core::envelope::ErrorCode::from_http_status_with_body(status.as_u16(), body) {
         Some(code) => Envelope::err_coded(code, message, data),
         None => Envelope::ok_with_data(message, data),
     }
