@@ -211,7 +211,11 @@ earlier summaries conflate separate products. An email-OTP One profile is also
 reported as incomplete merely because it intentionally has no OAuth refresh
 credential.
 
-- [ ] Make root `doctor` report One, Server, and Mongo as independent domains.
+- [x] Make root `doctor` report One, Server, and Mongo as independent domains.
+  **Done and verified live in Gate V2.4** (see the authentication section):
+  every row named one domain, an unconfigured Server was a Server-only `skip`,
+  Mongo likewise, the OTP credential read as a time-limited login, and the
+  rollup was `ok`. Sub-bullets below record the original requirement.
   - Each row must name one product/domain and include only that domain's
     evidence and remediation.
   - An unconfigured Server is a Server-only `skip`; it must not make One auth
@@ -252,13 +256,25 @@ Both fail locally with `config missing api/server_api section`. That is an
 incorrect dependency under an `ayx one` namespace, not an incomplete One
 profile.
 
-- [ ] Rewire these commands to use the One configuration and endpoints, or
+- [x] Rewire these commands to use the One configuration and endpoints, or
   move/rename them under the actual Server API surface if their intent is
-  Server-only. Do not retain an ambiguous hybrid command.
+  Server-only. Do not retain an ambiguous hybrid command. **Done** in
+  `d28f295` / `9770be2`: `ayx one api status|diagnose` report
+  `product: "Alteryx One"` and no longer require an `api:` section. Both pass
+  in the live sweep.
 - [ ] Add a One-only integration test proving every `ayx one api ...` command
   either succeeds against One or fails with a clearly One-owned error.
+  **Partially done.** `one_api_commands_never_require_server_configuration`
+  covers `status` and `diagnose`. `open-api-spec` and `coverage` are not
+  covered, because both fetch the live OpenAPI document and adding them would
+  put a network call inside a suite that is deliberately hermetic. Closing
+  this needs a recorded spec fixture or an injected transport, not just two
+  more loop entries.
 - [ ] Update help, catalog, README, and testing documents to name the owning
-  product explicitly.
+  product explicitly. **Mostly done:** help, README and the site were updated
+  in Task 6, and 122 false `server_api` prerequisites were removed from the
+  `one/...` catalog in `5562991`. The testing documents under `docs/` have not
+  been swept for product ownership, so this stays open on that narrower scope.
 
 ## Product boundary and documentation architecture
 
@@ -599,14 +615,18 @@ that; it is fixed and covered by a stub test.
   upstream body names an absent resource, and `one_http_envelope` passes the
   parsed body it already held. The refinement is deliberately narrow -- only
   400, only towards `NotFound`, only on an exception name ending in
-  `NotFoundException` or a human-readable field saying "not found" -- so a
-  genuine 400 stays `validation`. Live proof of both directions on the same
-  fixture: `job-groups profile|profile-results|pdf-results` now report
-  `not_found` with the remediation "list the family to find a valid one",
+  `NotFoundException` -- the upstream exception *type* and nothing else -- so a
+  genuine 400 stays `validation`. An adversarial review showed the first
+  version also scanned prose for "not found", which reclassified real input
+  errors such as "Required parameter 'flowId' not found in request body"; that
+  scan is gone. Live proof of both directions on the same fixture:
+  `job-groups profile|profile-results|pdf-results` now report `not_found`,
   while `job-groups inputs` correctly stays `validation`, because its body
   says "Only Jdbc sources have connect String" -- a real caller-side problem.
-  The sweep's declared exit codes moved from 2 to 6 for the three that
-  changed. Original detail: Found while classifying the sweep,
+  The `NotFound` remediation no longer advises listing the family for
+  sub-resource reads, where the id is usually valid. The sweep matches those
+  rows on the exact `error_code`, not on an exit code, because exit 6 also
+  covers Gone, Conflict, RateLimited, Network and Upstream. Original detail: Found while classifying the sweep,
   2026-09-09. `ayx one job-groups profile 4087561` exits 2 with
   `error_code: validation`. The upstream response is HTTP 400 carrying
   `ProfilingDataNotFoundException` / "Job group 4087561 does not have
