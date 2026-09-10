@@ -364,12 +364,29 @@ fn one_dry_run_envelope(
     )
 }
 
-fn one_http_envelope(status: StatusCode, message: String, data: Value) -> Envelope {
+fn one_http_envelope(status: StatusCode, message: String, mut data: Value) -> Envelope {
     // `data` already carries the parsed upstream body under "response". Pass
     // it to the classifier so a 400 that actually means "no such data" is not
     // reported as malformed input.
-    let body = data.get("response");
-    match ayx_core::envelope::ErrorCode::from_http_status_with_body(status.as_u16(), body) {
+    let classified = ayx_core::envelope::ErrorCode::from_http_status_with_body(
+        status.as_u16(),
+        data.get("response"),
+    );
+
+    // Every call site fills `data.error_code` from the status alone, before
+    // this function refines it. Left alone, one envelope would carry
+    // `not_found` at the top and `validation` under `data` -- and `data` is
+    // the copy the compact renderer shows and callers read. Restate the
+    // classification here so the two can never disagree, whatever a call site
+    // put there.
+    if let Some(map) = data.as_object_mut() {
+        map.insert(
+            "error_code".to_string(),
+            classified.map_or(Value::Null, |code| Value::String(code.as_str().to_string())),
+        );
+    }
+
+    match classified {
         Some(code) => Envelope::err_coded(code, message, data),
         None => Envelope::ok_with_data(message, data),
     }

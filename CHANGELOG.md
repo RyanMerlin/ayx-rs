@@ -4,6 +4,32 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+### Changed — machine-readable contract
+
+These affect callers that match on envelope fields or process exit codes.
+
+- **BREAKING:** ten `ayx one` commands now report their own `command` value in
+  the envelope instead of sharing a family name. `job-groups inputs`,
+  `outputs`, `jobs` and `publications` previously reported
+  `one.job-groups.list`; `job-groups status`, `profile`, `profile-results` and
+  `pdf-results` previously reported `one.job-groups.detail`;
+  `output-objects inputs` previously reported `one.output-objects.list`; and
+  `plans schedules` previously reported `one.plans.list`. Each now reports
+  `one.<family>.<verb>`. `command` is how a caller correlates a result with the
+  invocation that produced it, so the shared names made a failure untraceable.
+- **BREAKING:** an HTTP 400 whose upstream body types itself as a not-found
+  (an exception name ending `NotFoundException`) is now classified
+  `not_found` (exit 6) instead of `validation` (exit 2). Observed on
+  `ayx one job-groups profile|profile-results|pdf-results` against a job group
+  with no profiling data. A 400 that is a genuine input error is unchanged.
+- `NotFound` remediation no longer advises listing the family for sub-resource
+  reads, where the id is usually valid and only the sub-resource is absent. The
+  advice is unchanged for `detail`, `status` and `full`, where the id itself is
+  the subject.
+- `--browser` and `--device` on `ayx one login` are hidden from help. Both
+  still parse and run; neither has been validated against a live tenant.
+
+
 ## 0.20.5 — 2026-09-08
 
 ### Fixed

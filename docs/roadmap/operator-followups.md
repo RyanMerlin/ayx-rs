@@ -431,9 +431,11 @@ A flag advertised in help that fails at the identity provider is worse than no
 flag: the operator burns an afternoon concluding the failure is theirs, and
 every agent reading the help surface treats it as a supported capability.
 
-Hidden rather than deleted — the implementation is correct OAuth and becomes
-usable the moment those grants are enabled upstream. It stays reachable for
-re-testing by typing the flag.
+Hidden rather than deleted. The code reads as a conventional OAuth
+implementation and would become usable if those grants were enabled upstream,
+but that is a reading of the source, not a tested claim -- by the same
+paragraph, it has never been run. It stays reachable for re-testing by typing
+the flag.
 
 To reopen this decision:
 
@@ -462,7 +464,7 @@ for an already-authenticated One profile. It carries overridable safe fixture
 identifiers, writes only labels/exit codes/timings to a JSON log, and must not
 emit credentials. It intentionally does not attempt interactive OTP.
 
-### Live sweep result, 2026-09-09
+### Live sweep result, 2026-09-10
 
 Run on Windows against the `windows-otp` profile, `--output json`, release
 binary built from this branch:
@@ -474,13 +476,27 @@ That clears the sweep half of the Phase 2 exit gate. The prior baseline was
 that previously failed before the network call now pass, and the two denials
 are classified rather than counted as undifferentiated failures.
 
-The two expected-unprivileged rows are `ayx one workspace detail 91946` and
-`ayx one connections connector-metadata publish-info gsheetsuser`. Both exit 5
-(`permission_denied`). Neither is counted as a pass.
+**What that number does and does not mean.** The sweep prints these caveats
+itself at the end of every run, so this paragraph cannot go stale the way an
+earlier version of it did:
 
-Four rows pass while carrying a declared non-zero exit code of 2
-(`job-groups inputs`, `profile`, `profile-results`, `pdf-results`). See the
-open finding below before reading `72 passed` as 72 clean successes.
+- **68 are clean successes** (exit 0).
+- **4 passes are an expected error, not a clean result:** `job-groups inputs`
+  reports `validation` (the fixture is not a JDBC source), and `job-groups
+  profile`, `profile-results` and `pdf-results` report `not_found` (the
+  fixture has no profiling data). Each is accepted only against that exact
+  `error_code`.
+- **2 are expected-unprivileged, and are not counted in the 72:**
+  `ayx one workspace detail 91946` and
+  `ayx one connections connector-metadata publish-info gsheetsuser`, both
+  `permission_denied`.
+
+Those four rows are matched on `error_code`, never on an exit code. Exit codes
+are lossy -- `exit_code_for_envelope` maps `NotFound`, `Gone`, `Conflict`,
+`RateLimited`, `Network` and `Upstream` all to 6 -- so accepting "exit 6" to
+allow an expected not-found would also silently accept a connection reset, a
+502 and a 429 on those rows. An earlier revision of this harness did exactly
+that; it is fixed and covered by a stub test.
 
 - [x] `ayx one workspace detail 91946` received a live 403
   `AccessControlException`. This is a real permission boundary, not evidence
@@ -491,22 +507,41 @@ open finding below before reading `72 passed` as 72 clean successes.
     `expected_unprivileged` — a third outcome, deliberately **not** folded
     into the pass count, because the sweep must never report success for a
     request the tenant refused. It does not fail the run.
-  - The classification applies only when the output is genuinely a denial
-    (`403`, `AccessControlException`, `forbidden`, `permission denied`,
-    `not authorized`). Any other failure at the same command is still a
-    failure, and says so: a network outage there cannot hide behind the flag.
+  - The classification applies only when the CLI itself reports the denial:
+    `error_code: permission_denied`, or exit 5 when no envelope was produced
+    at all. It does **not** read prose. An earlier revision also matched
+    `\b403\b` and words like "forbidden" anywhere in the output, which meant a
+    timed-out request whose body happened to carry `elapsed_ms: 403` was
+    classified as an expected denial. Three digits are not a status code.
   - `-AdministratorFixture` asserts the profile is an administrator and
     switches the leniency off, so a denial anywhere counts as a real failure.
     That is the "re-run with an administrator fixture" half.
 
-  The summary log is now `ayx.one-read-sweep.v2`, adding `status` and
-  `permission_boundary` per result and `total` / `expected_unprivileged` /
-  `administrator_fixture` to the header. Verified against a stub binary in
-  three cases — expected denial, administrator assertion, and a non-denial
-  failure at the same command — since a live tenant was not available.
-- [ ] `ayx one api status` and `ayx one api diagnose` failed before the
+  **Known limit, by design.** Without `-AdministratorFixture`, a permission
+  regression scoped to one of the two boundary commands -- a token scope
+  silently lost for that endpoint, a tenant policy change, the wrong workspace
+  selected -- reads as `expected_unprivileged` indefinitely. A *global* scope
+  loss is still caught, because every other row fails. The sweep prints a
+  reminder whenever it accepts a denial with the assertion unset; periodically
+  running with `-AdministratorFixture` is the only way to detect the
+  single-endpoint case.
+
+  Note also that exit 5 covers `402` and `451` as well as `403`
+  (`ayx-core/src/envelope.rs`): a plan-tier or policy refusal reads the same
+  way. All three are entitlement boundaries, so the classification holds, but
+  the console wording says "access denied" rather than naming the status.
+
+  The summary log is `ayx.one-read-sweep.v2`, adding `status`,
+  `permission_boundary`, `reported_error_code` and `expected_error_code` per
+  result, and `total` / `expected_unprivileged` / `administrator_fixture` to
+  the header. Verified both against stub binaries -- expected denial,
+  administrator assertion, a non-denial failure at a boundary row, a network
+  outage on an expected-error row, and a timeout carrying `403` in its body --
+  and against the live tenant.
+- [x] `ayx one api status` and `ayx one api diagnose` failed before the
   network call because they require `api/server_api`; this is the separate
-  One-versus-Server defect recorded below.
+  One-versus-Server defect recorded below. Fixed in `d28f295` / `9770be2`;
+  both pass in the live sweep above.
 - [ ] Keep the sweep as the Windows release gate after every change touching
   onboarding, One dispatch, profiles/credentials, output, or command help.
   Pair it with the interactive OTP scenario in the preceding authentication

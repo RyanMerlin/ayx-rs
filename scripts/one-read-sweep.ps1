@@ -80,6 +80,16 @@ function Invoke-OneRead {
 
         [int[]]$ExpectedExitCodes = @(0),
 
+        # The one error_code this command is allowed to report and still pass.
+        #
+        # Prefer this over widening $ExpectedExitCodes. Exit codes are lossy:
+        # `exit_code_for_envelope` maps NotFound, Gone, Conflict, RateLimited,
+        # Network AND Upstream all to 6, so accepting exit 6 to allow an
+        # expected not-found silently also accepts a connection reset, a 502
+        # and a 429. The error_code is exact and is reported in both --output
+        # text and --output json.
+        [string]$ExpectedErrorCode,
+
         # This command reads a resource the sweep profile may legitimately not
         # be entitled to. A denial here is a real permission boundary, not a
         # defect in the CLI, so it is recorded as its own outcome rather than
@@ -108,22 +118,34 @@ function Invoke-OneRead {
         Write-Host $outputText
     }
 
+    # The CLI reports its classification as `error_code` in every output mode:
+    # `"error_code": "not_found"` under --output json, `error_code: not_found`
+    # under --output text. That is the exact signal; read it first.
+    $reportedErrorCode = $null
+    if ($outputText -match 'error_code"?\s*:\s*"?([a-z_]+)') {
+        $reportedErrorCode = $Matches[1]
+    }
+
     $passed = $ExpectedExitCodes -contains $exitCode
+    if ((-not $passed) -and $ExpectedErrorCode -and ($reportedErrorCode -eq $ExpectedErrorCode)) {
+        # An expected, specific error. Not a transport failure wearing the same
+        # exit code.
+        $passed = $true
+    }
+
     # Only an actual denial qualifies. Without this the switch would swallow a
     # network outage or a parse error at the same command and call it expected.
     #
-    # Classify on the CLI's own typed signals, not on prose. `--output json`
-    # emits the compact envelope, which lists `status_code` under
-    # `omitted_fields` -- the string "403" never appears in the output at all,
-    # so text matching cannot see the denial it is looking for. The exit code
-    # is the authoritative contract (`exit_code_for_envelope` in
-    # `ayx-rs/src/main.rs` maps PermissionDenied to 5), with `error_code` as a
-    # direct confirmation and the text patterns as a fallback for `--output
-    # text` and for the Server surface, which words it as `forbidden`.
-    $deniedByExitCode = ($exitCode -eq $PERMISSION_DENIED_EXIT_CODE)
-    $deniedByErrorCode = $outputText -match '"error_code"\s*:\s*"permission_denied"'
-    $deniedByText = $outputText -match '(?i)\b403\b|AccessControlException|forbidden|permission denied|not authorized'
-    $denied = $deniedByExitCode -or $deniedByErrorCode -or $deniedByText
+    # Classify on the CLI's own typed signals, never on prose. An earlier
+    # version also matched \b403\b and words like "forbidden" anywhere in the
+    # output; a timed-out request whose body carried `elapsed_ms: 403` was
+    # therefore classified as an expected denial. Three digits are not a
+    # status code. `error_code` is exact, and the exit code
+    # (`exit_code_for_envelope` maps PermissionDenied to 5, uniquely) covers
+    # the case where no envelope was produced at all.
+    $deniedByErrorCode = ($reportedErrorCode -eq 'permission_denied')
+    $deniedByExitCode = ($null -eq $reportedErrorCode) -and ($exitCode -eq $PERMISSION_DENIED_EXIT_CODE)
+    $denied = $deniedByErrorCode -or $deniedByExitCode
     $isBoundary = (-not $passed) -and $PermissionBoundary -and $denied -and (-not $AdministratorFixture)
 
     if ($passed) {
@@ -142,7 +164,9 @@ function Invoke-OneRead {
         passed = $passed
         status = $status
         permission_boundary = [bool]$PermissionBoundary
-        denial_signal = if (-not $denied) { $null } elseif ($deniedByExitCode) { "exit_code" } elseif ($deniedByErrorCode) { "error_code" } else { "text" }
+        reported_error_code = $reportedErrorCode
+        expected_error_code = if ($ExpectedErrorCode) { $ExpectedErrorCode } else { $null }
+        denial_signal = if (-not $denied) { $null } elseif ($deniedByErrorCode) { "error_code" } else { "exit_code" }
         elapsed_ms = [int][Math]::Round(((Get-Date) - $started).TotalMilliseconds)
     })
 
@@ -153,9 +177,11 @@ function Invoke-OneRead {
         }
         default {
             if ($PermissionBoundary -and (-not $denied) -and (-not $AdministratorFixture)) {
-                Write-Warning "FAILED: exit code $exitCode; expected $($ExpectedExitCodes -join ', '). Marked as a permission boundary, but this is not a denial (a denial exits $PERMISSION_DENIED_EXIT_CODE or reports error_code permission_denied), so it is a different failure."
+                Write-Warning "FAILED: exit code $exitCode, error_code '$reportedErrorCode'; expected exit $($ExpectedExitCodes -join ', '). Marked as a permission boundary, but this is not a denial (a denial reports error_code permission_denied, or exits $PERMISSION_DENIED_EXIT_CODE with no envelope), so it is a different failure."
             } elseif ($PermissionBoundary -and $AdministratorFixture -and $denied) {
                 Write-Warning "FAILED: exit code $exitCode; an administrator fixture was asserted, so a denial here is a real failure."
+            } elseif ($ExpectedErrorCode) {
+                Write-Warning "FAILED: exit code $exitCode, error_code '$reportedErrorCode'; expected exit $($ExpectedExitCodes -join ', ') or error_code '$ExpectedErrorCode'"
             } else {
                 Write-Warning "FAILED: exit code $exitCode; expected $($ExpectedExitCodes -join ', ')"
             }
@@ -233,13 +259,13 @@ Invoke-OneRead "job-library list" (OneArgs @("job-groups", "list", "--all", "--o
 Invoke-OneRead "job-library count" (OneArgs @("job-groups", "count"))
 Invoke-OneRead "job-library detail" (OneArgs @("job-groups", "detail", $JobGroupId))
 Invoke-OneRead "job-library status" (OneArgs @("job-groups", "status", $JobGroupId))
-Invoke-OneRead "job-library inputs (fixture may not be JDBC)" (OneArgs @("job-groups", "inputs", $JobGroupId)) @(0, 2)
+Invoke-OneRead "job-library inputs (fixture may not be JDBC)" (OneArgs @("job-groups", "inputs", $JobGroupId)) -ExpectedErrorCode "validation"
 Invoke-OneRead "job-library outputs" (OneArgs @("job-groups", "outputs", $JobGroupId))
 Invoke-OneRead "job-library jobs" (OneArgs @("job-groups", "jobs", $JobGroupId))
 Invoke-OneRead "job-library publications" (OneArgs @("job-groups", "publications", $JobGroupId))
-Invoke-OneRead "job-library profile (fixture may have no profiling data)" (OneArgs @("job-groups", "profile", $JobGroupId)) @(0, 6)
-Invoke-OneRead "job-library profile results (fixture may have no profiling data)" (OneArgs @("job-groups", "profile-results", $JobGroupId)) @(0, 6)
-Invoke-OneRead "job-library PDF results (fixture may have no profiling data)" (OneArgs @("job-groups", "pdf-results", $JobGroupId)) @(0, 6)
+Invoke-OneRead "job-library profile (fixture may have no profiling data)" (OneArgs @("job-groups", "profile", $JobGroupId)) -ExpectedErrorCode "not_found"
+Invoke-OneRead "job-library profile results (fixture may have no profiling data)" (OneArgs @("job-groups", "profile-results", $JobGroupId)) -ExpectedErrorCode "not_found"
+Invoke-OneRead "job-library PDF results (fixture may have no profiling data)" (OneArgs @("job-groups", "pdf-results", $JobGroupId)) -ExpectedErrorCode "not_found"
 
 # Plans and schedules are tier-dependent. A nonzero result is a capability or
 # permissions finding to record, not a reason to retry with --apply.
@@ -296,12 +322,22 @@ $summary = [pscustomobject]@{
 $summaryPath = Join-Path $LogDirectory ("ayx-one-read-sweep-" + $runStarted.ToString("yyyyMMdd-HHmmss") + ".json")
 $summary | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $summaryPath -Encoding utf8
 
+$expectedErrorRows = @($results | Where-Object { $_.status -eq "passed" -and $_.exit_code -ne 0 })
 Write-Host "`nSummary: $passedCount passed, $boundaryCount expected-unprivileged, $failedCount failed (of $($results.Count))" -ForegroundColor Cyan
+if ($expectedErrorRows.Count -gt 0) {
+    Write-Host "$($expectedErrorRows.Count) of those passes are an expected error, not a clean result:" -ForegroundColor Yellow
+    foreach ($item in $expectedErrorRows) {
+        Write-Host "  - $($item.label): error_code '$($item.reported_error_code)'" -ForegroundColor Yellow
+    }
+}
 if ($boundaryCount -gt 0) {
     Write-Host "Expected-unprivileged commands are NOT counted as passes. The tenant refused them for this profile:" -ForegroundColor Yellow
     foreach ($item in @($results | Where-Object { $_.status -eq "expected_unprivileged" })) {
         Write-Host "  - $($item.label)" -ForegroundColor Yellow
     }
+}
+if ($boundaryCount -gt 0 -and -not $AdministratorFixture) {
+    Write-Host "Denials above were accepted because -AdministratorFixture was not set. A permission regression scoped to one of those commands would read as expected. Re-run with -AdministratorFixture to require them to succeed." -ForegroundColor Yellow
 }
 Write-Host "Safe command/timing summary: $summaryPath"
 if ($failedCount -gt 0) {
