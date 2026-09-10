@@ -8,13 +8,14 @@
 
 These affect callers that match on envelope fields or process exit codes.
 
-- **BREAKING:** ten `ayx one` commands now report their own `command` value in
+- **BREAKING:** eleven `ayx one` commands now report their own `command` value in
   the envelope instead of sharing a family name. `job-groups inputs`,
   `outputs`, `jobs` and `publications` previously reported
   `one.job-groups.list`; `job-groups status`, `profile`, `profile-results` and
   `pdf-results` previously reported `one.job-groups.detail`;
-  `output-objects inputs` previously reported `one.output-objects.list`; and
-  `plans schedules` previously reported `one.plans.list`. Each now reports
+  `output-objects inputs` previously reported `one.output-objects.list`; `plans schedules` previously reported
+  `one.plans.list`; and `role list-assignments` previously reported
+  `one.role.list`. Each now reports
   `one.<family>.<verb>`. `command` is how a caller correlates a result with the
   invocation that produced it, so the shared names made a failure untraceable.
 - **BREAKING:** an HTTP 400 whose upstream body types itself as a not-found
@@ -28,6 +29,15 @@ These affect callers that match on envelope fields or process exit codes.
   the subject.
 - `--browser` and `--device` on `ayx one login` are hidden from help. Both
   still parse and run; neither has been validated against a live tenant.
+
+### Removed
+
+- **BREAKING:** `ayx one person count`. The vendor endpoint `/v4/people/count`
+  is retired upstream and answers HTTP 410, so the command could not succeed.
+  Removed with no compatibility alias, across the CLI, inventory, catalog,
+  generated command surface, README, docs site and tests. The v0.16.0 note
+  below, which said the command "still functions and is not removed", no
+  longer describes the current release.
 
 
 ## 0.20.5 — 2026-09-08

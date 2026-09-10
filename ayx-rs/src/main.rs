@@ -7232,14 +7232,38 @@ fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static s
     }
 }
 
+/// Leaf verbs that read a *sub-resource* of an id, where a `NotFound` usually
+/// means the parent exists and this particular data does not.
+///
+/// `job-groups profile <id>` 404s on a job group that exists perfectly well
+/// but was never profiled; telling that caller to list the family and find a
+/// valid id sends them after something they already have.
+///
+/// This is deliberately a list of sub-resource reads rather than its inverse.
+/// An earlier version listed the verbs where the id *is* the subject and
+/// treated everything else as a sub-resource, which was wrong for every verb
+/// that takes no id at all: `count`, `list`, `current` and `create` were told
+/// that "the requested data does not exist for that id" when there was no id.
+/// Naming the narrow case leaves every other verb on the pre-existing path.
+const SUB_RESOURCE_VERBS: &[&str] = &[
+    "inputs",
+    "outputs",
+    "jobs",
+    "publications",
+    "profile",
+    "profile-results",
+    "pdf-results",
+    "schedules",
+    "run-parameters",
+    "permissions",
+    "dependencies",
+    "engines",
+    "cloud-configs",
+];
+
 /// Structured remediation for dispatcher-classified failures. `command` is the
 /// descriptor's dotted command id (e.g. `one.flows.list`) so product-specific
 /// advice is only given to the product it applies to.
-/// Leaf verbs whose subject *is* the id, so a `NotFound` really does mean the
-/// id was wrong. Every other verb reads a sub-resource of an id that may well
-/// be valid.
-const ID_IS_THE_SUBJECT_VERBS: &[&str] = &["detail", "status", "full"];
-
 fn remediation_for_error_code(
     code: ayx_core::envelope::ErrorCode,
     command: &str,
@@ -7265,7 +7289,7 @@ fn remediation_for_error_code(
             // them to go looking for an id they already have, which is the
             // same misdirection this classification exists to remove, only
             // pointed somewhere else.
-            if !ID_IS_THE_SUBJECT_VERBS.contains(&verb) {
+            if SUB_RESOURCE_VERBS.contains(&verb) {
                 return Some((
                     format!(
                         "The requested {verb} data does not exist for that id. The id itself may be valid; this read has nothing to return."
