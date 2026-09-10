@@ -395,18 +395,63 @@ workspace GID, and expiry only; its current lifetime is 2,592,000 seconds (30
 days). The OAuth API-token path, by contrast, persists the refresh credential
 that can renew access silently.
 
-- [ ] Correct all onboarding, login, doctor, help, and README wording so it
+- [x] Correct all onboarding, login, doctor, help, and README wording so it
   never suggests an OTP-created credential rotates or lasts indefinitely.
   Secure storage protects the time-limited credential; it does not make it
-  durable.
-- [ ] Make an explicit product decision for onboarding: either offer/guide the
+  durable. **Verified live 2026-09-10** -- see the interactive run below.
+- [x] Make an explicit product decision for onboarding: either offer/guide the
   durable OAuth API-token path, or label email OTP as a time-limited login and
   state that the user will repeat OTP after expiry. Do not invent a durable OTP
   claim without upstream evidence that the API now returns a refresh token.
-- [ ] Test the two paths separately: OTP persistence and expiry messaging;
+  **Decided and shipped:** email OTP stays the onboarding default and is
+  labelled a time-limited login; `--oauth-api-token` is named in the same
+  breath as the durable alternative.
+- [x] Test the two paths separately: OTP persistence and expiry messaging;
   OAuth refresh persistence and silent renewal. `doctor` must describe the
   OTP state accurately rather than treating its intentional lack of a refresh
-  token as a malformed configuration.
+  token as a malformed configuration. **Both tested:** OAuth API-token
+  persistence and silent renewal earlier in Phase 2; OTP below.
+
+### Gate V2.4 — interactive OTP onboarding, 2026-09-10
+
+Run by hand on Windows into an isolated `AYX_CONFIG_HOME`
+(`C:\code\ayx-otp-v24`), profile `otp-test`, against the release binary built
+from this branch. A real passcode was emailed and entered; the workspace
+password was saved to the OS secure store.
+
+`ayx doctor` on the resulting profile:
+
+| Row | Status | Summary |
+|---|---|---|
+| config | ok | profile 'otp-test' resolved; no inline secrets |
+| auth | ok | One auth configured (time-limited login) |
+| network | ok | Alteryx One endpoints configured |
+| one | ok | One workspace probe succeeded |
+| server | skip | Alteryx Server not configured |
+| mongo | skip | Mongo not configured; no Alteryx Server in this profile |
+| **overall** | **ok** | |
+
+This is the spec's requirement met end to end on a profile created from
+nothing: `one_status` is `configured_time_limited`, not `incomplete`; the
+credential is described as `email_otp` with `renews_automatically: false` and
+guidance naming `--oauth-api-token`; `access_token_expires_at` is reported as
+a plain epoch rather than redacted; and an unconfigured Server is a Server-only
+`skip` that does not drag the rollup to `fail`.
+
+Two details worth recording because they were open questions:
+
+- **The "inline secrets" caveat did not apply.** `config` reports "no inline
+  secrets" and `inline_secret_risks` is empty, because the wizard's default
+  put the credential in the OS secure store. The caveat stands only for a
+  profile carrying an inline `access_token`, where the warning is correct.
+- **The secret-posture slot table is consistent with the auth row.** The
+  legacy top-level `one.access-token` slot reads `missing`/`not_configured`
+  while `one.workspace.91946.access-token` reads `keyring`/`passed`. That is
+  right, not a repeat of the workspace-scoped-credential defect: the top-level
+  field genuinely is unset, and the workspace-scoped slot is where a modern
+  login writes.
+
+The wizard did not offer `--secret-policy session`, confirming its removal.
 
 ### `--browser` and `--device` are hidden, not removed (2026-09-09)
 
@@ -545,7 +590,8 @@ that; it is fixed and covered by a stub test.
 - [ ] Keep the sweep as the Windows release gate after every change touching
   onboarding, One dispatch, profiles/credentials, output, or command help.
   Pair it with the interactive OTP scenario in the preceding authentication
-  section; neither test alone covers the other.
+  section; neither test alone covers the other. (Ongoing by design. Both halves
+  were run for this branch: the sweep result above, and Gate V2.4.)
 
 - [x] **A 400 that means "no such data" is reported as `validation`, which
   sends the operator to the wrong place.** Fixed 2026-09-10:
