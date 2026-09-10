@@ -1184,6 +1184,15 @@ mongo:
     }
 
     #[test]
+    fn an_expired_one_login_classifies_as_auth_failed_by_type() {
+        // Typed, so the classification survives any rewording of the message
+        // or context added on the way up.
+        let err = anyhow::Error::new(ayx_one_api::OneLoginExpired)
+            .context("flow delete failed for workspace 91946");
+        assert_eq!(classify_anyhow_error(&err), ErrorCode::AuthFailed);
+    }
+
+    #[test]
     fn missing_argument_errors_classify_as_validation() {
         // A required-argument error must classify as Validation (not Internal)
         // so the user gets the input/`--help` hint instead of a fabricated
@@ -7341,6 +7350,12 @@ fn remediation_for_error_code(
 /// future code paths should build typed errors using `ErrorCode::*` directly
 /// rather than relying on this fallback.
 fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
+    if err
+        .chain()
+        .any(|cause| cause.is::<ayx_one_api::OneLoginExpired>())
+    {
+        return ErrorCode::AuthFailed;
+    }
     let chain = err
         .chain()
         .map(|c| c.to_string())

@@ -450,6 +450,9 @@ fn preflight_applied_mutation(
         )
     })?;
     if one_access_token_needs_refresh(config) {
+        if !one_can_renew_access_token(config) {
+            return Err(OneLoginExpired.into());
+        }
         let refresh_client = build_client()?;
         preflight_access_token = Some(refresh_one_access_token_for_request(
             config,
@@ -1479,7 +1482,13 @@ pub fn one_api_live_request_with_body(
                 let status = response.status();
                 last_status = Some(status);
                 retry_after_seconds = parse_retry_after(response.headers().get(RETRY_AFTER));
-                if status == StatusCode::UNAUTHORIZED && !mutating && !refreshed_once {
+                // Without a way to renew, fall through so the caller sees the
+                // 401 itself rather than a refresh-configuration error.
+                if status == StatusCode::UNAUTHORIZED
+                    && !mutating
+                    && !refreshed_once
+                    && one_can_renew_access_token(config)
+                {
                     let auth_mode = config
                         .alteryx_one
                         .as_ref()
@@ -2527,6 +2536,35 @@ fn one_access_token_needs_refresh(config: &Config) -> bool {
         .is_some_and(|expires_at| expires_at <= deadline)
 }
 
+/// The active One access token has expired and the profile holds nothing to
+/// renew it with -- an email-OTP login, which carries no refresh token by
+/// design. Typed so the CLI classifies it as `auth_failed` without reading
+/// the message.
+#[derive(Debug)]
+pub struct OneLoginExpired;
+
+impl std::fmt::Display for OneLoginExpired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "the Alteryx One login for this profile has expired and cannot renew itself \
+             (an email one-time-passcode login has no refresh token); run `ayx one login` \
+             to sign in again, or `ayx one login --oauth-api-token` for a credential that renews",
+        )
+    }
+}
+
+impl std::error::Error for OneLoginExpired {}
+
+/// Whether a rejected or stale token can be replaced without the user: a
+/// service principal re-runs client credentials, and a user credential needs
+/// a stored refresh token. An email-OTP login has neither.
+fn one_can_renew_access_token(config: &Config) -> bool {
+    config.alteryx_one.as_ref().is_some_and(|one| {
+        one.auth_mode == ayx_core::profile::AuthMode::ServicePrincipal
+            || one.resolved_refresh_token().is_some()
+    })
+}
+
 pub fn refresh_one_access_token(config: &Config, client: &Client) -> Result<String> {
     Ok(refresh_one_tokens(config, client)?.access_token)
 }
@@ -3288,7 +3326,8 @@ mod tests {
     use httpmock::prelude::*;
     use serde_yaml::from_str;
     use std::collections::BTreeMap;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex, OnceLock};
 
     static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -4586,5 +4625,159 @@ mongo:
     fn path_parameters_are_percent_encoded() {
         assert_eq!(percent_encode_path_segment("f/id?x=1"), "f%2Fid%3Fx%3D1");
         assert_eq!(percent_encode_path_segment("safe-_.~"), "safe-_.~");
+    }
+
+    /// Loopback server answering every request with `status` and a JSON body,
+    /// counting requests. httpmock hangs in this environment; a raw listener
+    /// does not. The accept thread is left to die with the test process.
+    fn spawn_fixed_status_server(status: u16) -> (String, Arc<AtomicUsize>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stub");
+        let base = format!("http://{}", listener.local_addr().expect("stub address"));
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&hits);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                counter.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0u8; 8192];
+                let mut seen = Vec::new();
+                while !seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => seen.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let body = r#"{"error":"unauthorized"}"#;
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} Stub\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        (base, hits)
+    }
+
+    fn otp_profile(base_url: &str, access_token_expires_at: Option<u64>) -> Config {
+        let mut config: Config = from_str(
+            r#"
+profile_name: test
+mongo:
+  mode: embedded
+  databases:
+    gallery_name: AlteryxGallery
+    service_name: AlteryxService
+  embedded: {}
+"#,
+        )
+        .expect("config parses");
+        let mut workspace_credentials = BTreeMap::new();
+        workspace_credentials.insert(
+            "91946".to_string(),
+            WorkspaceCredential {
+                workspace_id: Some("91946".to_string()),
+                workspace_name: Some("Test Workspace".to_string()),
+                credential_health: None,
+                access_token: Some("otp-access-token".to_string()),
+                access_token_ref: None,
+                refresh_token: None,
+                refresh_token_ref: None,
+                credential_kind: Some(ayx_core::profile::OneCredentialKind::EmailOtp),
+                access_token_expires_at,
+                workspace_password: None,
+                workspace_password_ref: None,
+                oauth_client_id: None,
+                client_secret: None,
+                client_secret_ref: None,
+                sp_client_secret: None,
+                sp_client_secret_ref: None,
+                token_endpoint_url: None,
+                sp_client_id: None,
+                workspace_gid: Some("01AAAAAAAAAAAAAAAAAAAAAAAA".to_string()),
+                api_base_url: None,
+            },
+        );
+        config.alteryx_one = Some(AlteryxOneProfile {
+            schema_version: ayx_core::profile::CURRENT_PROFILE_SCHEMA_VERSION,
+            account_email: "tester@example.com".to_string(),
+            base_url: Some(base_url.to_string()),
+            oauth_client_id: None,
+            client_secret: None,
+            client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
+            token_endpoint_url: None,
+            access_token: None,
+            access_token_ref: None,
+            refresh_token: None,
+            refresh_token_ref: None,
+            workspace_password: None,
+            workspace_password_ref: None,
+            workspace_credentials,
+            active_workspace_id: Some("91946".to_string()),
+            auth_rollout: None,
+            expected_workspace_id: None,
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
+        });
+        config
+    }
+
+    /// An email-OTP login has no refresh token by design. A 401 on a read
+    /// must reach the caller as the 401 it is -- `auth_failed`, whose One
+    /// remediation says to log in again -- not be replaced by the refresh
+    /// path's "oauth_client_id is required" configuration error.
+    #[test]
+    fn a_401_on_a_read_without_a_refresh_credential_is_reported_as_auth_failed() {
+        let (base, hits) = spawn_fixed_status_server(401);
+        let config = otp_profile(&base, None);
+
+        let envelope = one_api_live_request(
+            &config,
+            "agent-assets",
+            "agents-list",
+            "GET",
+            "/ai-agents/backend/agents",
+            false,
+            &[],
+        )
+        .expect("a rejected token is an envelope, not a local configuration error");
+
+        assert!(!envelope.ok);
+        assert_eq!(envelope.data["status_code"], serde_json::json!(401));
+        assert_eq!(
+            envelope.error_code,
+            Some(ayx_core::envelope::ErrorCode::AuthFailed)
+        );
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            1,
+            "nothing to refresh with, so the request must not be retried"
+        );
+    }
+
+    /// An applied mutation refreshes a stale token first. With no refresh
+    /// credential there is nothing to refresh, and the error must say the
+    /// login expired -- typed, so classification never depends on wording.
+    #[test]
+    fn an_expired_login_without_a_refresh_credential_fails_the_mutation_preflight_as_expired() {
+        let config = otp_profile("http://127.0.0.1:9", Some(1));
+
+        let err = preflight_applied_mutation(
+            &config,
+            "flow",
+            "delete",
+            "http://127.0.0.1:9/v4/flows/1",
+            true,
+        )
+        .expect_err("an expired login cannot pass the mutation preflight");
+
+        assert!(
+            err.downcast_ref::<OneLoginExpired>().is_some(),
+            "expected OneLoginExpired, got: {err:#}"
+        );
     }
 }
