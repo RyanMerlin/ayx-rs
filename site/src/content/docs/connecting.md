@@ -158,13 +158,24 @@ If secure storage is unavailable, `--secret-policy plaintext` is an explicit fal
 
 You usually won't need these, but they're there:
 
-- `ayx one login --device` — device-code grant: prints a URL and code to complete sign-in on any device.
-- `ayx one login --browser` — PKCE authorization-code flow in your browser.
 - `ayx one login --refresh-token-env NAME` / `--refresh-token-stdin` — import an OAuth refresh token without exposing its value in process arguments.
 - `ayx one login --access-token-env NAME` / `--access-token-stdin` — import an access token without exposing its value; this is a non-rotating compatibility path and cannot select `oauth-refresh` by itself.
 - `ayx one login --refresh-token <t>` / `--access-token <t>` — compatibility imports; avoid these forms in shared terminals and automation logs.
 
-The `--browser` and `--device` flows use an OAuth client, so they need an `oauth_client_id` in your profile (or `--client-id`). The default email-OTP flow does not.
+The OAuth refresh flows use an OAuth client, so they need an `oauth_client_id` in your profile (or `--client-id`). The default email-OTP flow does not.
+
+### Sign-in flows that are not documented as supported
+
+`ayx one login` also accepts `--browser` (PKCE authorization-code) and
+`--device` (device-code). Both are hidden from `--help` and are **not
+recommended**: neither has ever been validated against a live Alteryx One
+tenant, and the device authorization endpoint is derived by string
+substitution on the token endpoint with no discovery lookup. Both grants would
+also have to be enabled on the Alteryx OAuth client, with
+`http://localhost:<port>` registered as a redirect URI for the browser flow.
+
+They still run if you type them, so they can be re-tested. If you need a
+durable credential today, use `ayx one login --oauth-api-token`.
 
 ## Confirm it worked
 
