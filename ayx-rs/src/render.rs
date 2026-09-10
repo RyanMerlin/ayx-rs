@@ -191,6 +191,21 @@ fn render_data_text(data: &Value) -> String {
             .to_string();
     }
 
+    // A response the command declared as several sibling collections, already
+    // projected one list per key under `collections`.
+    if let Some(collections) = data.get("collections").and_then(Value::as_object) {
+        let sections: Vec<String> = collections
+            .iter()
+            .filter_map(|(key, list)| {
+                let items = list.get("items").and_then(Value::as_array)?;
+                Some(render_section(&title_case(key), items))
+            })
+            .collect();
+        if !sections.is_empty() {
+            return sections.join("\n\n");
+        }
+    }
+
     // Catalog uses named collections rather than the usual `items` wrapper.
     // Keep its operator view useful without changing the lossless JSON
     // contract consumed by agents and scripts.
@@ -198,14 +213,7 @@ fn render_data_text(data: &Value) -> String {
         let mut sections = Vec::new();
         for (key, label) in [("commands", "Commands"), ("capabilities", "Capabilities")] {
             if let Some(items) = data.get(key).and_then(Value::as_array) {
-                let body = if items.is_empty() {
-                    "(none)".to_string()
-                } else if items.iter().all(Value::is_object) {
-                    render_object_array(items)
-                } else {
-                    render_scalar_array(items)
-                };
-                sections.push(format!("{label} ({})\n{body}", items.len()));
+                sections.push(render_section(label, items));
             }
         }
         if !sections.is_empty() {
@@ -270,6 +278,26 @@ fn render_data_text(data: &Value) -> String {
 
     // Scalar / null — nothing to add.
     String::new()
+}
+
+/// A titled, counted section: `Label (n)` over a table, a list, or `(none)`.
+fn render_section(label: &str, items: &[Value]) -> String {
+    let body = if items.is_empty() {
+        "(none)".to_string()
+    } else if items.iter().all(Value::is_object) {
+        render_object_array(items)
+    } else {
+        render_scalar_array(items)
+    };
+    format!("{label} ({})\n{body}", items.len())
+}
+
+fn title_case(key: &str) -> String {
+    let mut chars = key.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 /// Render an array of objects as a tab-aligned table. Columns are
