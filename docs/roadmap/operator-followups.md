@@ -512,8 +512,20 @@ open finding below before reading `72 passed` as 72 clean successes.
   Pair it with the interactive OTP scenario in the preceding authentication
   section; neither test alone covers the other.
 
-- [ ] **A 400 that means "no such data" is reported as `validation`, which
-  sends the operator to the wrong place.** Found while classifying the sweep,
+- [x] **A 400 that means "no such data" is reported as `validation`, which
+  sends the operator to the wrong place.** Fixed 2026-09-10:
+  `ErrorCode::from_http_status_with_body` refines a 400 to `NotFound` when the
+  upstream body names an absent resource, and `one_http_envelope` passes the
+  parsed body it already held. The refinement is deliberately narrow -- only
+  400, only towards `NotFound`, only on an exception name ending in
+  `NotFoundException` or a human-readable field saying "not found" -- so a
+  genuine 400 stays `validation`. Live proof of both directions on the same
+  fixture: `job-groups profile|profile-results|pdf-results` now report
+  `not_found` with the remediation "list the family to find a valid one",
+  while `job-groups inputs` correctly stays `validation`, because its body
+  says "Only Jdbc sources have connect String" -- a real caller-side problem.
+  The sweep's declared exit codes moved from 2 to 6 for the three that
+  changed. Original detail: Found while classifying the sweep,
   2026-09-09. `ayx one job-groups profile 4087561` exits 2 with
   `error_code: validation`. The upstream response is HTTP 400 carrying
   `ProfilingDataNotFoundException` / "Job group 4087561 does not have
@@ -526,8 +538,18 @@ open finding below before reading `72 passed` as 72 clean successes.
   a 400 is classified. Affects `job-groups inputs`, `profile`,
   `profile-results`, and `pdf-results` on a fixture with no profiling data.
 
-- [ ] **Two `job-groups` subcommands report the wrong `command` in their
-  envelope.** Found the same way. `ayx one job-groups profile <id>` emits
+- [x] **Two `job-groups` subcommands report the wrong `command` in their
+  envelope.** Fixed 2026-09-10. The cause was broader than the two commands
+  that exposed it: `job_groups_descriptor` shared one name across whole groups
+  of leaves, so `inputs`, `outputs`, `jobs` and `publications` all reported
+  `one.job-groups.list`, and `status`, `profile`, `profile-results` and
+  `pdf-results` all reported `one.job-groups.detail`. Eight commands were
+  misnaming themselves, not two. The same pattern in
+  `output_objects_descriptor` (`inputs` reporting `one.output-objects.list`)
+  is fixed with it. The view *kind* is still legitimately shared; only the
+  name is now per-leaf. Pinned by
+  `every_job_group_leaf_reports_its_own_command_name`, which fails on any
+  duplicate rather than only on the two that were found. Original detail: Found the same way. `ayx one job-groups profile <id>` emits
   `"command": "one.job-groups.detail"`, and `ayx one job-groups inputs <id>`
   emits `"command": "one.job-groups.list"`. The envelope's `command` field is
   part of the machine-readable contract, so an agent correlating a failure

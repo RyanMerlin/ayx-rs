@@ -237,9 +237,9 @@ Invoke-OneRead "job-library inputs (fixture may not be JDBC)" (OneArgs @("job-gr
 Invoke-OneRead "job-library outputs" (OneArgs @("job-groups", "outputs", $JobGroupId))
 Invoke-OneRead "job-library jobs" (OneArgs @("job-groups", "jobs", $JobGroupId))
 Invoke-OneRead "job-library publications" (OneArgs @("job-groups", "publications", $JobGroupId))
-Invoke-OneRead "job-library profile (fixture may have no profiling data)" (OneArgs @("job-groups", "profile", $JobGroupId)) @(0, 2)
-Invoke-OneRead "job-library profile results (fixture may have no profiling data)" (OneArgs @("job-groups", "profile-results", $JobGroupId)) @(0, 2)
-Invoke-OneRead "job-library PDF results (fixture may have no profiling data)" (OneArgs @("job-groups", "pdf-results", $JobGroupId)) @(0, 2)
+Invoke-OneRead "job-library profile (fixture may have no profiling data)" (OneArgs @("job-groups", "profile", $JobGroupId)) @(0, 6)
+Invoke-OneRead "job-library profile results (fixture may have no profiling data)" (OneArgs @("job-groups", "profile-results", $JobGroupId)) @(0, 6)
+Invoke-OneRead "job-library PDF results (fixture may have no profiling data)" (OneArgs @("job-groups", "pdf-results", $JobGroupId)) @(0, 6)
 
 # Plans and schedules are tier-dependent. A nonzero result is a capability or
 # permissions finding to record, not a reason to retry with --apply.

@@ -473,18 +473,21 @@ fn agent_assets_descriptor(command: &OneAgentAssetsCommand) -> OutputDescriptor 
 }
 
 fn job_groups_descriptor(command: &OneJobGroupCommand) -> OutputDescriptor {
+    // The view *kind* is shared -- these really do render as lists or details.
+    // The `command` name is not: it is how a caller correlates a result back
+    // to the invocation that produced it, so each leaf names itself.
     match command {
-        OneJobGroupCommand::List { .. }
-        | OneJobGroupCommand::Inputs { .. }
-        | OneJobGroupCommand::Outputs { .. }
-        | OneJobGroupCommand::Jobs { .. }
-        | OneJobGroupCommand::Publications { .. } => list("one.job-groups.list"),
+        OneJobGroupCommand::List { .. } => list("one.job-groups.list"),
+        OneJobGroupCommand::Inputs { .. } => list("one.job-groups.inputs"),
+        OneJobGroupCommand::Outputs { .. } => list("one.job-groups.outputs"),
+        OneJobGroupCommand::Jobs { .. } => list("one.job-groups.jobs"),
+        OneJobGroupCommand::Publications { .. } => list("one.job-groups.publications"),
         OneJobGroupCommand::Count { .. } => detail("one.job-groups.count"),
-        OneJobGroupCommand::Detail { .. }
-        | OneJobGroupCommand::Status { .. }
-        | OneJobGroupCommand::Profile { .. }
-        | OneJobGroupCommand::ProfileResults { .. }
-        | OneJobGroupCommand::PdfResults { .. } => detail("one.job-groups.detail"),
+        OneJobGroupCommand::Detail { .. } => detail("one.job-groups.detail"),
+        OneJobGroupCommand::Status { .. } => detail("one.job-groups.status"),
+        OneJobGroupCommand::Profile { .. } => detail("one.job-groups.profile"),
+        OneJobGroupCommand::ProfileResults { .. } => detail("one.job-groups.profile-results"),
+        OneJobGroupCommand::PdfResults { .. } => detail("one.job-groups.pdf-results"),
         OneJobGroupCommand::Run { .. } => result("one.job-groups.run"),
         OneJobGroupCommand::Publish { .. } => result("one.job-groups.publish"),
         OneJobGroupCommand::Cancel { .. } => result("one.job-groups.cancel"),
@@ -493,9 +496,8 @@ fn job_groups_descriptor(command: &OneJobGroupCommand) -> OutputDescriptor {
 
 fn output_objects_descriptor(command: &OneOutputObjectCommand) -> OutputDescriptor {
     match command {
-        OneOutputObjectCommand::List { .. } | OneOutputObjectCommand::Inputs { .. } => {
-            list("one.output-objects.list")
-        }
+        OneOutputObjectCommand::List { .. } => list("one.output-objects.list"),
+        OneOutputObjectCommand::Inputs { .. } => list("one.output-objects.inputs"),
         OneOutputObjectCommand::Count { .. } => detail("one.output-objects.count"),
         OneOutputObjectCommand::Detail { .. } => detail("one.output-objects.detail"),
         OneOutputObjectCommand::Create { .. } => result("one.output-objects.create"),
@@ -694,6 +696,111 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
 mod tests {
     use super::*;
     use crate::{OneFlowsCommand, OnePlansCommand, OneWorkflowsCommand};
+
+    /// `command` is part of the machine-readable envelope contract: it is how a
+    /// caller correlates a result back to the invocation that produced it.
+    /// Sharing one name across several leaves breaks that correlation. It was
+    /// found live -- `ayx one job-groups profile <id>` reported
+    /// `one.job-groups.detail`, and `inputs` reported `one.job-groups.list`,
+    /// so a failure could not be traced to the command that caused it.
+    ///
+    /// The view *kind* is legitimately shared; the name is not.
+    #[test]
+    fn every_job_group_leaf_reports_its_own_command_name() {
+        let leaves = vec![
+            (
+                "list",
+                OneJobGroupCommand::List {
+                    profile: None,
+                    limit: None,
+                    page_token: None,
+                    all: false,
+                    max_pages: None,
+                },
+            ),
+            ("count", OneJobGroupCommand::Count { profile: None }),
+            (
+                "detail",
+                OneJobGroupCommand::Detail {
+                    profile: None,
+                    id: Some("1".to_string()),
+                },
+            ),
+            (
+                "status",
+                OneJobGroupCommand::Status {
+                    profile: None,
+                    id: "1".to_string(),
+                },
+            ),
+            (
+                "inputs",
+                OneJobGroupCommand::Inputs {
+                    profile: None,
+                    id: "1".to_string(),
+                },
+            ),
+            (
+                "outputs",
+                OneJobGroupCommand::Outputs {
+                    profile: None,
+                    id: "1".to_string(),
+                },
+            ),
+            (
+                "jobs",
+                OneJobGroupCommand::Jobs {
+                    profile: None,
+                    id: "1".to_string(),
+                },
+            ),
+            (
+                "publications",
+                OneJobGroupCommand::Publications {
+                    profile: None,
+                    id: "1".to_string(),
+                },
+            ),
+            (
+                "profile",
+                OneJobGroupCommand::Profile {
+                    profile: None,
+                    id: "1".to_string(),
+                },
+            ),
+            (
+                "profile-results",
+                OneJobGroupCommand::ProfileResults {
+                    profile: None,
+                    id: "1".to_string(),
+                },
+            ),
+            (
+                "pdf-results",
+                OneJobGroupCommand::PdfResults {
+                    profile: None,
+                    id: "1".to_string(),
+                },
+            ),
+        ];
+
+        let mut seen: std::collections::BTreeMap<&'static str, String> =
+            std::collections::BTreeMap::new();
+        for (leaf, command) in leaves {
+            let descriptor = job_groups_descriptor(&command);
+            assert_eq!(
+                descriptor.command,
+                format!("one.job-groups.{leaf}"),
+                "`ayx one job-groups {leaf}` must name itself in the envelope"
+            );
+            if let Some(previous) = seen.insert(descriptor.command, leaf.to_string()) {
+                panic!(
+                    "'{}' is reported by both '{previous}' and '{leaf}'; a caller cannot tell them apart",
+                    descriptor.command
+                );
+            }
+        }
+    }
 
     #[test]
     fn descriptors_name_one_leaf_commands_and_views() {
