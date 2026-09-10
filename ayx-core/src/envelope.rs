@@ -42,27 +42,28 @@ pub enum ErrorCode {
 
 /// Does this upstream error body describe a resource that is not there?
 ///
-/// Deliberately narrow: the exception name ends in `NotFoundException`, or a
-/// human-readable field says "not found". Anything looser would start
-/// reclassifying real validation failures, which would be the same
-/// misdirection in the opposite direction.
+/// The only signal read is the upstream exception *type*: a name ending in
+/// `NotFoundException`. Nothing else qualifies.
+///
+/// An earlier version of this also scanned `message`/`details`/`error` for the
+/// substring "not found". That was speculation, and it was wrong: a genuine
+/// input error reads "Required parameter 'flowId' not found in request body"
+/// or "Column 'foo' not found in dataset schema". Both are caller-input
+/// failures whose correct advice is to check the request -- and both were
+/// being reclassified as absent resources. Reading prose to infer a type
+/// reintroduces, in the opposite direction, exactly the misdirection this
+/// refinement exists to remove.
+///
+/// The cost of this narrowness is that an upstream which reports absence
+/// without a typed name stays `Validation`. That is the safe direction to err:
+/// it leaves a pre-existing imprecision in place rather than actively
+/// misrouting a caller who did make a mistake.
 fn body_reports_absent_resource(body: &Value) -> bool {
-    let exception = body.get("exception").unwrap_or(body);
-
-    if exception
+    body.get("exception")
+        .unwrap_or(body)
         .get("name")
         .and_then(Value::as_str)
         .is_some_and(|name| name.ends_with("NotFoundException"))
-    {
-        return true;
-    }
-
-    ["message", "details", "error"].iter().any(|field| {
-        exception
-            .get(*field)
-            .and_then(Value::as_str)
-            .is_some_and(|text| text.to_ascii_lowercase().contains("not found"))
-    })
 }
 
 impl ErrorCode {
@@ -149,12 +150,13 @@ impl ErrorCode {
     /// Classify an HTTP failure, consulting the upstream response body where
     /// the status alone is ambiguous.
     ///
-    /// Only 400 is refined, and only towards `NotFound`. A 400 is the one
-    /// status this API uses for two unrelated meanings: "your input was
-    /// malformed" and "the thing you asked about has no data". Those need
-    /// different remediation -- one says check your flags, the other says the
-    /// resource is absent and no flag will change that -- so where the body
-    /// names an absent resource, believe the body over the status line.
+    /// Only 400 is refined, and only towards `NotFound`, and only on the
+    /// upstream exception *type*. A 400 is the one status this API uses for
+    /// two unrelated meanings: "your input was malformed" and "the thing you
+    /// asked about has no data". Those need different remediation, so where
+    /// the body types itself as a not-found, believe the body over the status
+    /// line -- but never infer the type from prose. See
+    /// [`body_reports_absent_resource`].
     ///
     /// Everything else defers to [`Self::from_http_status`] unchanged. A
     /// status with an unambiguous meaning must not be second-guessed by
@@ -428,6 +430,88 @@ mod tests {
             Some(ErrorCode::Validation),
             "422 is unambiguous and is not refined"
         );
+    }
+
+    /// The exception *type* is the whole signal. These bodies all say "not
+    /// found" in prose while being ordinary input errors: a misspelled body
+    /// field, a bad column name, a bad path. Classifying any of them as
+    /// `NotFound` sends the caller hunting for a resource when the thing they
+    /// need to fix is their own request.
+    ///
+    /// This is a regression test for a real defect: an earlier version of
+    /// `body_reports_absent_resource` scanned these fields for the substring
+    /// and reclassified every one of them.
+    #[test]
+    fn prose_saying_not_found_never_reclassifies_an_input_error() {
+        for body in [
+            serde_json::json!({"exception": {
+                "name": "ValidationException",
+                "message": "Required parameter 'flowId' not found in request body"
+            }}),
+            serde_json::json!({"exception": {
+                "name": "ValidationException",
+                "message": "Column 'foo' not found in dataset schema"
+            }}),
+            serde_json::json!({"exception": {
+                "name": "ValidationException",
+                "details": "Path 'hdfs://x/y' not found; check writeSettings.path"
+            }}),
+            serde_json::json!({"exception": {
+                "name": "DataServiceInvalidRequest",
+                "message": "RESOURCE NOT FOUND"
+            }}),
+            serde_json::json!({"message": "not found"}),
+        ] {
+            assert_eq!(
+                ErrorCode::from_http_status_with_body(400, Some(&body)),
+                Some(ErrorCode::Validation),
+                "prose is not a type; this body must stay Validation: {body}"
+            );
+        }
+    }
+
+    /// The positive case must depend on the name and nothing else, so that
+    /// deleting the name check cannot pass unnoticed.
+    #[test]
+    fn the_exception_name_alone_carries_the_reclassification() {
+        let name_only = serde_json::json!({
+            "exception": { "name": "ProfilingDataNotFoundException" }
+        });
+        assert_eq!(
+            ErrorCode::from_http_status_with_body(400, Some(&name_only)),
+            Some(ErrorCode::NotFound)
+        );
+
+        // Same body, name changed: the reclassification must disappear.
+        let renamed = serde_json::json!({
+            "exception": {
+                "name": "ProfilingDataInvalidException",
+                "details": "Job group 4087561 does not have profiling data",
+                "message": "Profiling data not found"
+            }
+        });
+        assert_eq!(
+            ErrorCode::from_http_status_with_body(400, Some(&renamed)),
+            Some(ErrorCode::Validation),
+            "without the typed name there is no evidence of absence"
+        );
+    }
+
+    /// Non-object bodies must not panic or match by accident.
+    #[test]
+    fn odd_body_shapes_are_handled_without_panic() {
+        for body in [
+            serde_json::json!([1, 2, 3]),
+            serde_json::json!("Profiling data not found"),
+            serde_json::json!(null),
+            serde_json::json!({"exception": "Profiling data not found"}),
+        ] {
+            assert_eq!(
+                ErrorCode::from_http_status_with_body(400, Some(&body)),
+                Some(ErrorCode::Validation),
+                "{body}"
+            );
+        }
     }
 
     /// Refinement applies only where status alone is ambiguous. Every other

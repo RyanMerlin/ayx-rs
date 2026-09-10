@@ -7235,6 +7235,11 @@ fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static s
 /// Structured remediation for dispatcher-classified failures. `command` is the
 /// descriptor's dotted command id (e.g. `one.flows.list`) so product-specific
 /// advice is only given to the product it applies to.
+/// Leaf verbs whose subject *is* the id, so a `NotFound` really does mean the
+/// id was wrong. Every other verb reads a sub-resource of an id that may well
+/// be valid.
+const ID_IS_THE_SUBJECT_VERBS: &[&str] = &["detail", "status", "full"];
+
 fn remediation_for_error_code(
     code: ayx_core::envelope::ErrorCode,
     command: &str,
@@ -7249,9 +7254,25 @@ fn remediation_for_error_code(
         // still exposes one at `one/<family>/list` -- never fabricate a
         // command that doesn't exist.
         let mut parts = command.split('.');
-        if let (Some("one"), Some(family), Some(_verb), None) =
+        if let (Some("one"), Some(family), Some(verb), None) =
             (parts.next(), parts.next(), parts.next(), parts.next())
         {
+            // "List the family to find a valid one" is only true when the id
+            // itself is what was not found. For a sub-resource read, the id is
+            // usually fine and the sub-resource simply has no data -- e.g.
+            // `job-groups profile <id>` on a job group that exists but was
+            // never profiled. Sending that caller to re-list the family tells
+            // them to go looking for an id they already have, which is the
+            // same misdirection this classification exists to remove, only
+            // pointed somewhere else.
+            if !ID_IS_THE_SUBJECT_VERBS.contains(&verb) {
+                return Some((
+                    format!(
+                        "The requested {verb} data does not exist for that id. The id itself may be valid; this read has nothing to return."
+                    ),
+                    Vec::new(),
+                ));
+            }
             let list_path = format!("one/{family}/list");
             if crate::cmd::command_surface::visible_command_paths().contains(&list_path) {
                 return Some((

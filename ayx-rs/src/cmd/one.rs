@@ -412,7 +412,8 @@ fn connection_permissions_descriptor(command: &OneConnectionPermissionCommand) -
 
 fn plans_descriptor(command: &OnePlansCommand) -> OutputDescriptor {
     match command {
-        OnePlansCommand::List { .. } | OnePlansCommand::Schedules { .. } => list("one.plans.list"),
+        OnePlansCommand::List { .. } => list("one.plans.list"),
+        OnePlansCommand::Schedules { .. } => list("one.plans.schedules"),
         OnePlansCommand::Count { .. } => detail("one.plans.count"),
         OnePlansCommand::Detail { .. } => detail("one.plans.detail"),
         OnePlansCommand::Full { .. } => detail("one.plans.full"),
@@ -705,6 +706,41 @@ mod tests {
     /// so a failure could not be traced to the command that caused it.
     ///
     /// The view *kind* is legitimately shared; the name is not.
+    /// The same defect class in the two other families that had it. Kept as a
+    /// separate test so a regression names the family it broke.
+    #[test]
+    fn sibling_families_do_not_share_a_command_name_either() {
+        let plans_list = plans_descriptor(&OnePlansCommand::List {
+            profile: None,
+            limit: None,
+            page_token: None,
+            all: false,
+            max_pages: None,
+        });
+        let plans_schedules = plans_descriptor(&OnePlansCommand::Schedules {
+            profile: None,
+            id: "1".to_string(),
+        });
+        assert_eq!(plans_list.command, "one.plans.list");
+        assert_eq!(plans_schedules.command, "one.plans.schedules");
+        assert_ne!(plans_list.command, plans_schedules.command);
+
+        let oo_list = output_objects_descriptor(&OneOutputObjectCommand::List {
+            profile: None,
+            limit: None,
+            page_token: None,
+            all: false,
+            max_pages: None,
+        });
+        let oo_inputs = output_objects_descriptor(&OneOutputObjectCommand::Inputs {
+            profile: None,
+            id: "1".to_string(),
+        });
+        assert_eq!(oo_list.command, "one.output-objects.list");
+        assert_eq!(oo_inputs.command, "one.output-objects.inputs");
+        assert_ne!(oo_list.command, oo_inputs.command);
+    }
+
     #[test]
     fn every_job_group_leaf_reports_its_own_command_name() {
         let leaves = vec![
