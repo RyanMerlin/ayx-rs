@@ -111,7 +111,7 @@ Credentials can come from environment variables instead of the profile — handy
 |----------|------|
 | `AYX_ONE_API_ACCESS_TOKEN` | Profile-level access-token fallback; for a workspace-bound import prefer `--access-token-env` or `--access-token-stdin` |
 | `AYX_ONE_API_REFRESH_TOKEN` | Profile-level refresh-token fallback or secret-safe one-time import source |
-| `AYX_ONE_OAUTH_CLIENT_ID` | OAuth client ID for OAuth refresh, `--browser`, and `--device` flows (alias: `AYX_ONE_CLIENT_ID`) |
+| `AYX_ONE_OAUTH_CLIENT_ID` | OAuth client ID for the OAuth refresh flows (alias: `AYX_ONE_CLIENT_ID`) |
 | `AYX_ONE_TOKEN_ENDPOINT_URL` | OAuth token endpoint |
 | `AYX_ONE_CLIENT_SECRET` | OAuth client secret (advanced flows) |
 

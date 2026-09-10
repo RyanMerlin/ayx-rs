@@ -53,12 +53,6 @@ printf '%s' "$AYX_ONE_API_REFRESH_TOKEN" |
 $env:AYX_ONE_API_REFRESH_TOKEN |
   ayx one login --auth-method oauth-refresh --refresh-token-stdin
 
-# Device-code grant
-ayx one login --device
-
-# Browser PKCE flow
-ayx one login --browser
-
 # Compatibility path; prefer --refresh-token-env or --refresh-token-stdin
 ayx one login --refresh-token <t>
 ayx one login --access-token <t>
@@ -68,7 +62,7 @@ ayx one login --access-token-env AYX_ONE_API_ACCESS_TOKEN
 ayx one login --workspace-id <id> --workspace-gid <gid>
 ```
 
-`--client-id` overrides the profile's `oauth_client_id` for the `--browser` / `--device` flows. See [Connecting](/connecting/) for the full sign-in walkthrough.
+`--client-id` overrides the profile's `oauth_client_id` for the OAuth refresh flows. See [Connecting](/connecting/) for the full sign-in walkthrough.
 
 ### Choosing the credential method
 
