@@ -1,8 +1,10 @@
 # Issue intake — 2026-09-10
 
 Raw operator intake captured by Ryan Merlin against the `integration/phase-1`
-release binary. **Not yet transcribed into `operator-followups.md`** — that is
-the next session's first task. Kept verbatim so nothing is lost in summary.
+release binary. **Transcribed into `operator-followups.md` on 2026-09-10**:
+functional defects under "Operator intake 2026-09-10: functional defects",
+everything else in its phase section tagged `(intake 2026-09-10)`. This file
+is kept verbatim as the source record; edit the tracker, not this.
 
 One correction when reading: the `job-groups profile` paste below shows
 `error_code: validation`, which is the pre-`680d308` binary. On this branch it

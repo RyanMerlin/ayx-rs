@@ -50,6 +50,27 @@ re-test before widening the change set.
    remove the incomplete environment model. Do the richer connection
    classification/governance work after the stable public surface is settled.
 
+**Status, 2026-09-10:** phases 1 and 2 are complete on `integration/phase-1`
+([#186](https://github.com/RyanMerlin/ayx-rs/pull/186)); both Phase 2 exit
+gates are evidenced below (the live read sweep and Gate V2.4). Phase 3 is next.
+
+**Why globals are deliberately last.** `-o` and the rest of the global-scope
+work touch every example in every document, skill, runbook and generated page.
+Doing them before Phase 4 settles command names means rewriting all of those
+examples twice -- once for the flag, again for the rename. The order is a
+cost decision, not a priority ranking: a global item is not less important for
+sitting in Phase 5.
+
+**Where the 2026-09-10 intake lands.** The operator intake of that date
+(`docs/roadmap/intake/2026-09-10-merlin-issue-intake.md`, preserved verbatim)
+is transcribed into this file. Its *functional defects* -- commands that are
+broken today, not merely unpolished -- are collected in
+[their own section](#operator-intake-2026-09-10-functional-defects) and are
+not held for any phase: each is small, independently testable, and should be
+fixed before Phase 3 widens the change set. Its UX and naming requests are
+filed under the existing phase sections they belong to, each tagged
+`(intake 2026-09-10)`.
+
 ### Prepared, independently tested changes
 
 **Superseded as of 2026-09-10: every change listed below is now committed on
@@ -69,6 +90,82 @@ lives on `fix/human-output-rendering` as Phase 3 material.
 - The bare-GID onboarding fix and human-output/redaction work exist as local,
   uncommitted experiments. Re-review their scope against phases 2 and 3; do
   not merge them wholesale merely because they passed an earlier local test.
+
+## Operator intake 2026-09-10: functional defects
+
+Priority: fix before Phase 3 -- these commands are broken today
+
+Product: Alteryx One throughout. Reported by the author against the
+`integration/phase-1` release binary; **every item below was re-reproduced on
+2026-09-10** on Windows with `ayx 0.20.5` built at `db3b882`, `windows-otp`
+profile (email OTP), workspace `91946`. The root causes are from the captured
+`--output json-full` payloads and the source, not from the human rendering the
+intake quoted.
+
+- [ ] **`ayx one job-groups list` names every row `job-?`.**
+  `synthesize_job_group_names` (`ayx-rs/src/cmd/one_job_groups.rs`) reads the
+  group `id` with `.as_str()`, but the API returns it as a JSON **number**, so
+  the `job-{id}` branch never fires and every unnamed group falls through to
+  the last-resort `job-?`. The unit tests pass because every fixture uses a
+  **string** id (`"grp-1"`, `"job-42"`), a shape the live API does not send;
+  `flowId` is read the same way and needs the same check. Fix: accept a number
+  or a string, and add a test fixture with the live numeric shape. Separately,
+  `job-{id}` merely repeats the ID column --
+  consider a label from what the payload does carry (`ranfrom`, `ranfor`, the
+  flow), which the Jobs redesign below should decide.
+- [ ] **A 401 on any One read is replaced by an unrelated configuration error
+  when the profile has no refresh credential.** Seen as
+  `ayx one agent-assets agents list` failing with
+  `alteryx_one.oauth_client_id is required to refresh access tokens`,
+  `error_code: validation`, exit 2. `--debug` shows one attempt to
+  `GET /ai-agents/backend/agents` and no second: on a non-mutating 401 the
+  client unconditionally attempts a refresh-token exchange
+  (`ayx-one-api/src/lib.rs`, the `StatusCode::UNAUTHORIZED` arm of the request
+  loop), and on an email-OTP profile, which has no refresh token by design, the
+  refresh fails before the request is retried and `refreshed?` returns *that*
+  error instead of the 401. Two consequences, both wrong:
+  - the upstream status never reaches the user, and the classification is
+    `validation` -- "inspect the failed flag" -- for a request with no bad flag;
+  - **by reading the code (not yet reproduced),** an expired OTP login would
+    fail the same way on every One read, instead of saying the login expired
+    and naming `ayx one login`. That would undercut the Phase 2 OTP-expiry
+    messaging exactly when it matters.
+
+  Fix: attempt the refresh only when a refresh credential exists; otherwise
+  return the original 401 as an auth failure with login remediation. Separately
+  investigate **why** the AI-agents backend rejects an OTP token that every
+  other One read accepts (token audience or scope?); re-test on an OAuth
+  API-token profile before concluding the command itself is broken.
+- [ ] **`ayx one job-groups status` prints nothing in text mode.** The
+  endpoint returns a bare JSON string (`"Complete"`); the detail view wraps it
+  as `fields.value`, which JSON output shows and the text renderer drops,
+  leaving only the `jobGroup status ok` line. A scalar response needs a text
+  rendering. Small; fix standalone rather than waiting for the Phase 3
+  renderer.
+- [ ] **`ayx one job-groups outputs` reports an "unrecognized collection
+  shape".** The response is an object holding two named collections,
+  `{"files": [], "tables": []}`, which the single-list detector does not
+  recognize. Both were empty on the fixture, so the command worked and the
+  renderer failed. Render each named collection, and find a fixture that has
+  outputs. The generic renderer gap is also tracked under
+  [Human-facing output](#human-facing-output-and-redaction).
+- [ ] **`ayx one connections permissions list|detail` shows blank names and an
+  apparent duplicate.** Neither is data corruption:
+  - `name` and `email` are **empty strings upstream** for every subject from
+    `GET /v4/connections/{id}/permissions/sharedSubjects`. The CLI is not
+    losing them; the endpoint does not populate them. Resolving the ID to a
+    person (the IDs are workspace person IDs) is the only way to show a name.
+  - person `646` appears twice because it genuinely holds **two entries**:
+    `roleType: owner` and `roleType: collaborator`. The projection keeps only
+    `id` and `name`, dropping `roleType`, `isCreatedBy`, `policyTag`,
+    `subjectType` and `source`, so two distinct grants look like one row
+    printed twice. The `groups` array is dropped as well.
+
+  Fix: show at least subject type, role, and policy, resolve names, and render
+  group grants. The governance fields the author asked for (when granted, last
+  access, workflows attached) are **not** in this payload; they belong to the
+  [connections governance](#alteryx-one-connections-classification-and-governance)
+  work and must be labelled as heuristics where they are derived.
 
 ## CLI flag ergonomics
 
@@ -188,12 +285,53 @@ implementation terms rather than an operator-facing resource.
   - Design the hierarchy so a parent `jobs` command does not create the absurd
     `jobs jobs` child. Preserve backend `jobGroup` only in transport metadata
     and documentation of legacy endpoints.
+  - **Status (intake 2026-09-10):** the author asked where the `jobs` rename
+    stands. It is **not started**; it is Phase 4 work and is gated on the Job
+    Library migration above, so a rename alone would put a new name on the
+    deprecated endpoints.
+  - **Run metadata the author needs, and where it already lives.** Who ran it,
+    how long it took, whether it errored, which workspace, what triggered it,
+    and which outputs it produced. The live payloads already carry most of it;
+    the CLI projection drops it:
+    `GET /v4/jobGroups/{id}` has `creator.id`, `ranfrom` (the trigger, e.g.
+    `ui`), `ranfor`, `workspace.id`, `workloadError` and `status`;
+    `GET /v4/jobGroups/{id}/jobs` has per-job `startedAt`/`finishedAt` (so
+    runtime is computable), `errorMessage`, `hasWarnings` and `jobType`;
+    `outputs` has the `files`/`tables` refs. Only the creator's *name* needs a
+    second lookup. Conversely, each **list** item embeds the creator's entire
+    person record -- email, `maximalCapabilities`, `maximalPrivileges` --
+    about 14 KB for a single row, which the list view should stop requesting
+    or stop carrying.
+  - **Hierarchy and consolidation (intake 2026-09-10).** Asked: is there a
+    better structure for this family? Today it is fourteen flat leaves under
+    one group: lifecycle (`list`, `count`, `detail`, `status`, `run`,
+    `cancel`, `publish`) mixed with per-run child reads (`jobs`, `inputs`,
+    `outputs`, `publications`, `profile`, `profile-results`, `pdf-results`).
+    Candidates
+    to decide with the rename: fold `status` into `detail`, which already
+    carries `status`; group the three profiling reads, which fail together when
+    a run has no profiling data; and make the per-run child reads read as
+    sub-resources of one run rather than peers of `list`.
+  - **Inverted publications (intake 2026-09-10).** Asked: list all
+    publications and show the job each belongs to, instead of drilling into
+    one job group at a time. Needs research first: whether the API offers a
+    workspace-wide publications collection, or only the per-job-group route
+    this command uses. A client-side fan-out across every job group is not an
+    acceptable substitute for a real collection.
 - [ ] Research whether `/v4/outputObjects` is a current One resource or a
   Designer Cloud/Trifacta-derived surface before renaming it. The endpoint
   worked in Windows validation but returned zero items; it is not a credible
   quick-start example. If retained, use an operator-facing plural name such
   as `outputs` only after its lifecycle and relationship to workflows are
   documented.
+- [ ] Decide whether `ayx one agent-assets` should be named after the product,
+  `agent-studio` (intake 2026-09-10). The author asks why the command does not
+  use the product name. Confirm the current product name and what the
+  `/ai-agents/backend` surface actually covers before renaming; settle it in
+  the same Phase 4 naming pass as `jobs`, so the two renames ship with one
+  migration table rather than two. Independent of the auth defect in
+  [the intake defects](#operator-intake-2026-09-10-functional-defects) that
+  currently stops `agent-assets agents list` on an OTP profile.
 - [ ] Rewrite README Quick Examples as a tested first-run path, not a grab-bag
   of easy list/count calls. Each example must be available in the reference
   One workspace, explain a meaningful capability, name its product clearly,
@@ -609,6 +747,14 @@ that; it is fixed and covered by a stub test.
   network call because they require `api/server_api`; this is the separate
   One-versus-Server defect recorded below. Fixed in `d28f295` / `9770be2`;
   both pass in the live sweep above.
+- [ ] **Decide how the single-endpoint permission regression gets caught.**
+  The known limit above means a sweep without `-AdministratorFixture` exits 0
+  on a denial at a boundary command, indefinitely. That is arguably the right
+  default for an unprivileged operator, but then *some* scheduled run must
+  pass `-AdministratorFixture` against an administrator profile, or the
+  single-endpoint case is never detected. Nothing runs the sweep on a schedule
+  today, so this is a decision about the release checklist (an admin-fixture
+  run required before each release) rather than a CI switch.
 - [ ] Keep the sweep as the Windows release gate after every change touching
   onboarding, One dispatch, profiles/credentials, output, or command help.
   Pair it with the interactive OTP scenario in the preceding authentication
@@ -668,23 +814,90 @@ Priority: release follow-up
 
 Windows validation of `v0.20.5` found these onboarding paths:
 
-- [ ] Ship the tested fix for a bare One workspace GID.
+- [x] Ship the tested fix for a bare One workspace GID. **Done** in `33e9a74`,
+  merged into `integration/phase-1`; covered by
+  `bare_workspace_gid_prompts_for_base_url_before_offering_login` and
+  `onboarding_repairs_an_existing_bare_gid_profile_without_overwriting_it`
+  (`ayx-rs/tests/onboard_login_offer.rs`).
   - A GID alone cannot identify its regional endpoint. The wizard must request
     an explicit regional base URL before offering OTP login, with a visible US1
     default rather than silently assuming a region.
   - An existing incomplete profile must be repairable without being replaced by
     a new default profile.
-- [ ] Fix bare relative `ayx onboard --profile <file>` paths on Windows.
+- [x] Fix bare relative `ayx onboard --profile <file>` paths on Windows.
+  **Done** in the same commit (`ayx-core/src/sensitive.rs`); covered by
+  `onboard_accepts_a_bare_profile_filename`.
   - The sensitive-file writer must treat an empty parent path as the current
     directory, not call `create_dir_all(\"\")`.
-- [ ] Keep live Windows coverage for:
-  - Server-only onboarding;
-  - One onboarding with a full workspace URL and with a bare GID;
-  - an email-OTP login into an isolated `AYX_CONFIG_HOME` profile;
-  - OAuth refresh credential rotation via `ayx one auth diagnose`.
+- [ ] Keep live Windows coverage for the following. Ongoing by design; what has
+  live evidence as of 2026-09-10 is marked:
+  - Server-only onboarding -- **not run live**;
+  - One onboarding with a full workspace URL (**run**, Gate V2.4) and with a
+    bare GID (**not run live**; unit-tested only);
+  - an email-OTP login into an isolated `AYX_CONFIG_HOME` profile (**run**,
+    Gate V2.4);
+  - OAuth refresh credential rotation via `ayx one auth diagnose` (OAuth
+    persistence and silent renewal were **run** in Phase 2 -- see the
+    authentication section -- but no record says `auth diagnose` was the
+    command used, so treat that specific check as **not run live**).
 
-The current local implementation and regression coverage are on branch
-`fix/onboard-bare-workspace-base-url`; it needs normal PR/release handling.
+### Onboarding wizard redesign (intake 2026-09-10)
+
+The author's verdict on the current wizard: it *describes* the API-token path
+in a paragraph of prose instead of walking the user through it, which defeats
+the purpose of a wizard. The reference model cited is `openclaw`: a sequence of
+guided routines that ask the user to choose, collect values, and run checks
+(`openclaw doctor`).
+
+- [ ] **Ask for the auth method.** Prompt for the One credential type, with
+  email OTP as the default and the OAuth API token offered as the durable
+  alternative, instead of printing the `ayx one login --oauth-api-token`
+  paragraph and continuing down the OTP path.
+- [ ] **Walk through the API-token path in the wizard.** Prompt for the Client
+  ID and the refresh token, say where in the Alteryx One UI each is found, and
+  store them the same way `ayx one login --oauth-api-token` does. One code path
+  for both entry points, not a second implementation.
+- [ ] **Finish with a check.** End the wizard by running the relevant `doctor`
+  rows and showing them, rather than printing commands the user may run
+  later.
+- [ ] **Readable output throughout**, per the palette item under
+  [Human-facing output](#human-facing-output-and-redaction). The completion
+  block (`onboarding completed` followed by raw fields) is the least readable
+  screen in the flow and should become a short, human summary.
+
+Settle the auth-method prompt before the palette: the first changes what the
+wizard does, the second only how it looks.
+
+## Profile and credential lifecycle
+
+Priority: medium -- asymmetric lifecycle and a misleading isolation claim
+
+Surfaced during Phase 2 validation, 2026-09-10. Each needs a design decision
+rather than a quick fix, which is why none was rushed. Product: shared CLI.
+
+- [ ] **No way to delete a profile.** `ayx onboard` creates profiles and
+  `ayx profile` offers `list | current | show | use | path | migrate`; nothing
+  removes one. Decide what deletion does to the profile's keyring entries (a
+  profile whose secrets outlive it is a leak), to the active-profile pointer
+  when the active profile is the one deleted, and to audit artifacts that name
+  it.
+- [ ] **`ayx secret prune` cannot clean the orphans current versions create.**
+  Its help says it targets keyring accounts written by `ayx < v0.11.0`, keyed
+  by `profile_name`. Current versions key accounts by credential binding, so
+  the orphans a modern user accumulates -- from a deleted or reset config home,
+  say -- are exactly the kind it does not handle. Extend it to binding-scoped
+  accounts, or document the manual cleanup; this interacts with profile
+  deletion above.
+- [ ] **`AYX_CONFIG_HOME` implies an isolation it does not provide.** Keyring
+  account names derive from the credential binding (identity + workspace), not
+  from the config folder, so two separate config homes logged in as the same
+  identity to the same workspace **share one secret**: re-logging in one
+  silently replaces the other's token. Proven on 2026-09-10 -- `ayx-otp-v24`
+  and `ayx-win-otp-test` carry byte-identical `access_token_ref` values.
+  Decide between documenting the scope of the isolation, warning when a login
+  would overwrite a secret another config home references, or folding the
+  config home into the binding (a migration). The first is the minimum and
+  should not wait for the others.
 
 ## Human-facing output and redaction
 
@@ -719,6 +932,30 @@ Priority: high UX correctness
   - Cover UTC and offset timestamps, values with no fraction, and malformed
     strings, which must pass through without a rendering failure. Apply this
     consistently to connections and every other human text/table view.
+  - Intake 2026-09-10 asks for the same thing ("remove the useless
+    microseconds"). The fraction the One API returns is **milliseconds**, and
+    it was `.000` on every row in the intake and in re-reproduction. Human
+    output should also show a date rather than a raw epoch: the login flow
+    prints `Token expires: 1791640201` (`one_platform/auth.rs`).
+- [ ] **Show `remediation` in human output.** `ayx-rs/src/render.rs` never
+  reads the envelope's `remediation` object, so the actionable next step
+  (for example the `not_found` guidance for sub-resource reads) reaches only
+  `--output json` users. A human, whom it most helps, sees the raw failure
+  fields instead. Deliver it with the Phase 3 renderer; `fix/human-output-rendering`
+  touches the same code, so do it there rather than as a competing change.
+- [ ] **Colour and structure for human output (intake 2026-09-10).** The
+  author asks for a consistent palette: commands highlighted in one colour
+  (suggested: cobalt blue), keys in `key: value` blocks in another (suggested:
+  gold), and emphasis on IDs, links and key terms; plus pretty-printed JSON
+  wherever a nested value is shown to a human. The onboarding completion block
+  is the author's worked example of what not to do: `summary:` and `login:`
+  print single-line JSON, and `inline_secret_fields:`, `secret_refs:` and
+  `warnings:` print as empty labels. Colour must respect `NO_COLOR` and a
+  non-terminal stdout, and must never reach `--output json`. The author also
+  asked what is needed to pin down "visually clean and human readable": agree
+  a reference -- a mock-up of three representative screens (a list, a detail,
+  an error), approved before implementation -- rather than iterating on
+  adjectives.
 
 ## Output contract consolidation
 
@@ -808,6 +1045,26 @@ connections without guessing from a connector name.
 
 - [ ] Live-inventory the fields reliably returned by connection list and detail
   endpoints, redacting parameter values and all credentials.
+  **Started 2026-09-10** on one connection (`44865`, BigQuery), `detail` only.
+  Present upstream and dropped by the human view: `type` (`jdbc`), `vendor` /
+  `vendorName` (`bigquery`), `credentialType` (`apiKey`), `creator.id`,
+  `updater.id`, `associatedPeople`, `isGlobal`, `credentialsShared`,
+  `hasCredentials`, `ssl`, `sshTunneling`, `workspace.id`. Absent upstream:
+  any owner *name* (IDs only), a share count (derivable from the permissions
+  endpoint), and any last-accessed or last-used time. Still to do: the `list`
+  payload, and more than one connection type.
+- [ ] **What the author needs on screen (intake 2026-09-10).** `connections
+  list`: owner ID and owner name (populated, not blank), and the connection
+  type -- what it connects to (BigQuery, Snowflake, GCS, ...). `connections
+  detail`: source type, owner, how many subjects it is shared with, and when
+  it was last accessed or run. The first three are available today: the type
+  and vendor fields above, the owner by resolving `creator.id` to a person,
+  and the share count from `permissions`. "Last used" is not reported by the
+  connection API at all; the only route is a join across job runs, whose
+  `location` embeds a `connectionId`. That is a heuristic, must be labelled as
+  one, and belongs in the governance view rather than `detail`. The same
+  applies to "how many workflows use it", which the author asked for on
+  `permissions list`.
 - [ ] Define a stable human-facing connection classification. Start with:
   connection type (for example JDBC, file/storage, SaaS), connector/vendor,
   credential method, owner/scope, shared/global state, health/status, and
@@ -828,7 +1085,9 @@ Priority: product-boundary decision
 ULID-keyed cloud-native Alteryx One `/svc-workflow` surface exposed as
 `ayx one workflows`.
 
-- [ ] Stop promoting `ayx one flows` in README quick-start examples.
+- [ ] Stop promoting `ayx one flows` in README quick-start examples. The
+  global `--output` help text does it too: its placement example is
+  `ayx one flows list --output json`, shown under every command's `--help`.
 - [ ] Decide support policy with product owners: remove the surface, or retain
   it behind a non-default `legacy-flows` Cargo feature.
   - A real feature gate must cover the Clap command and dispatch, catalog and
