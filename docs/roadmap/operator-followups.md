@@ -102,7 +102,20 @@ profile (email OTP), workspace `91946`. The root causes are from the captured
 `--output json-full` payloads and the source, not from the human rendering the
 intake quoted.
 
-- [ ] **`ayx one job-groups list` names every row `job-?`.**
+**Status:** four of the five are fixed on `integration/phase-1` (`cc2e465`,
+`203e38f`, `528dced`), each with a test that failed first, re-verified live
+after a release build, and followed by a clean read sweep (72 passed,
+2 expected-unprivileged, 0 failed). The connection-permissions item is open:
+it needs a name lookup and a projection decision, not a one-line fix.
+
+- [x] **`ayx one job-groups list` names every row `job-?`.** **Fixed** in
+  `cc2e465`: ids are read as a number or a string, with tests on the live
+  numeric shape; rows now read `job-3978583`. Still open, for the Jobs
+  redesign: a more useful label than one that repeats the ID, and the fact
+  that the synthesized name is written into the data itself, so `json-full`
+  shows a CLI-invented `name` where upstream sent `null`. That second point
+  conflicts with the lossless-JSON rule in
+  [Output contract consolidation](#output-contract-consolidation).
   `synthesize_job_group_names` (`ayx-rs/src/cmd/one_job_groups.rs`) reads the
   group `id` with `.as_str()`, but the API returns it as a JSON **number**, so
   the `job-{id}` branch never fires and every unnamed group falls through to
@@ -113,8 +126,13 @@ intake quoted.
   `job-{id}` merely repeats the ID column --
   consider a label from what the payload does carry (`ranfrom`, `ranfor`, the
   flow), which the Jobs redesign below should decide.
-- [ ] **A 401 on any One read is replaced by an unrelated configuration error
-  when the profile has no refresh credential.** Seen as
+- [x] **A 401 on any One read is replaced by an unrelated configuration error
+  when the profile has no refresh credential.** **Fixed** in `203e38f`: a 401
+  is retried through a refresh only when the profile can renew (a refresh
+  token, or a service principal); otherwise the 401 envelope reaches the user
+  as `auth_failed`, exit 4, with the One "log in again" remediation. The
+  applied-mutation preflight, which had the same flaw for a stale token, now
+  fails with a typed `OneLoginExpired`. Original detail follows. Seen as
   `ayx one agent-assets agents list` failing with
   `alteryx_one.oauth_client_id is required to refresh access tokens`,
   `error_code: validation`, exit 2. `--debug` shows one attempt to
@@ -131,19 +149,41 @@ intake quoted.
     and naming `ayx one login`. That would undercut the Phase 2 OTP-expiry
     messaging exactly when it matters.
 
-  Fix: attempt the refresh only when a refresh credential exists; otherwise
-  return the original 401 as an auth failure with login remediation. Separately
-  investigate **why** the AI-agents backend rejects an OTP token that every
-  other One read accepts (token audience or scope?); re-test on an OAuth
-  API-token profile before concluding the command itself is broken.
-- [ ] **`ayx one job-groups status` prints nothing in text mode.** The
+- [ ] **`ayx one agent-assets` does not work with any bearer-token
+  credential.** Unmasking the 401 above revealed the upstream body: `"No
+  Alteryx session cookies found"`. The `/ai-agents/backend` service
+  authenticates with browser session cookies, not bearer tokens. Reproduced
+  2026-09-10 on **both** credential types -- the `windows-otp` email-OTP
+  profile and the `local-dev` OAuth API-token profile -- for `agents list`,
+  `datasets list` and `workflows list`, which between them cover every
+  `/ai-agents/backend` route this surface calls. So this is not OTP-specific,
+  and "log in again", the remediation any 401 now gets, is **wrong advice
+  here**: no `ayx one login` produces a session cookie.
+
+  This is a product-surface decision, the same shape as the hidden
+  `--browser` / `--device` flags: an advertised command that cannot succeed
+  for any user of this CLI. Options: hide `agent-assets` until a bearer-token
+  route is confirmed with the vendor; or keep it and give its 401 an honest
+  remediation. Do not decide it by matching the cookie message in code -- that
+  is prose-matching again. Settle it before the Phase 4 `agent-studio` rename,
+  since renaming a surface nobody can use is wasted work.
+- [x] **`ayx one job-groups status` prints nothing in text mode.** **Fixed**
+  in `528dced`: a bare scalar body is labelled with the command's single
+  declared field, so text prints `status: Complete`. Compact JSON still
+  carries `fields.value`, unchanged. Original detail: The
   endpoint returns a bare JSON string (`"Complete"`); the detail view wraps it
   as `fields.value`, which JSON output shows and the text renderer drops,
   leaving only the `jobGroup status ok` line. A scalar response needs a text
   rendering. Small; fix standalone rather than waiting for the Phase 3
   renderer.
-- [ ] **`ayx one job-groups outputs` reports an "unrecognized collection
-  shape".** The response is an object holding two named collections,
+- [x] **`ayx one job-groups outputs` reports an "unrecognized collection
+  shape".** **Fixed** in `528dced`: descriptors can declare
+  `named_collections`, each rendered as its own counted section (`Files (0)`,
+  `Tables (0)`) and carried under `data.collections` in compact JSON. Opt-in
+  per command, never inferred. **Still unverified with data:** the fixture's
+  two lists are empty, so a non-empty `files` or `tables` row has been seen
+  only in a unit test. Original detail: The response is an object holding two
+  named collections,
   `{"files": [], "tables": []}`, which the single-list detector does not
   recognize. Both were empty on the fixture, so the command worked and the
   renderer failed. Render each named collection, and find a fixture that has
@@ -329,9 +369,10 @@ implementation terms rather than an operator-facing resource.
   use the product name. Confirm the current product name and what the
   `/ai-agents/backend` surface actually covers before renaming; settle it in
   the same Phase 4 naming pass as `jobs`, so the two renames ship with one
-  migration table rather than two. Independent of the auth defect in
+  migration table rather than two. **Blocked on** the finding in
   [the intake defects](#operator-intake-2026-09-10-functional-defects) that
-  currently stops `agent-assets agents list` on an OTP profile.
+  the whole surface needs browser session cookies and fails for every
+  bearer-token credential; decide whether it stays before renaming it.
 - [ ] Rewrite README Quick Examples as a tested first-run path, not a grab-bag
   of easy list/count calls. Each example must be available in the reference
   One workspace, explain a meaningful capability, name its product clearly,
@@ -926,6 +967,8 @@ Priority: high UX correctness
     outputs` returned successful responses that the human renderer labeled an
     "unrecognized collection shape." Add typed renderers or an explicit
     human-readable fallback before these become promoted examples.
+    `job-groups outputs` is fixed (`528dced`, declared named collections);
+    `workflows tools` has not been re-checked in text mode.
 - [ ] Standardize timestamps in human output at second precision.
   - Preserve the original RFC 3339 value, including fractional seconds, in
     JSON and persisted/audit data; trim only display-only fractional seconds.
