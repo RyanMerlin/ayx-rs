@@ -254,7 +254,8 @@ fn token_descriptor(command: Option<&OneTokenCommand>) -> OutputDescriptor {
 
 fn role_descriptor(command: &OneRoleCommand) -> OutputDescriptor {
     match command {
-        OneRoleCommand::List | OneRoleCommand::ListAssignments { .. } => list("one.role.list"),
+        OneRoleCommand::List => list("one.role.list"),
+        OneRoleCommand::ListAssignments { .. } => list("one.role.list-assignments"),
         OneRoleCommand::Detail { .. } => detail("one.role.detail"),
         OneRoleCommand::Assign { .. } => result("one.role.assign"),
         OneRoleCommand::Unassign { .. } => result("one.role.unassign"),
@@ -698,15 +699,7 @@ mod tests {
     use super::*;
     use crate::{OneFlowsCommand, OnePlansCommand, OneWorkflowsCommand};
 
-    /// `command` is part of the machine-readable envelope contract: it is how a
-    /// caller correlates a result back to the invocation that produced it.
-    /// Sharing one name across several leaves breaks that correlation. It was
-    /// found live -- `ayx one job-groups profile <id>` reported
-    /// `one.job-groups.detail`, and `inputs` reported `one.job-groups.list`,
-    /// so a failure could not be traced to the command that caused it.
-    ///
-    /// The view *kind* is legitimately shared; the name is not.
-    /// The same defect class in the two other families that had it. Kept as a
+    /// The same defect class in the other families that had it. Kept as a
     /// separate test so a regression names the family it broke.
     #[test]
     fn sibling_families_do_not_share_a_command_name_either() {
@@ -739,8 +732,27 @@ mod tests {
         assert_eq!(oo_list.command, "one.output-objects.list");
         assert_eq!(oo_inputs.command, "one.output-objects.inputs");
         assert_ne!(oo_list.command, oo_inputs.command);
+
+        // `role list` and `role list-assignments` are separate user commands
+        // hitting different endpoints (/v4/authorization/roles versus
+        // .../roles/{id}/people), so they must not report the same name.
+        let role_list = role_descriptor(&OneRoleCommand::List);
+        let role_assignments = role_descriptor(&OneRoleCommand::ListAssignments {
+            id: "1".to_string(),
+        });
+        assert_eq!(role_list.command, "one.role.list");
+        assert_eq!(role_assignments.command, "one.role.list-assignments");
+        assert_ne!(role_list.command, role_assignments.command);
     }
 
+    /// `command` is part of the machine-readable envelope contract: it is how a
+    /// caller correlates a result back to the invocation that produced it.
+    /// Sharing one name across several leaves breaks that correlation. It was
+    /// found live -- `ayx one job-groups profile <id>` reported
+    /// `one.job-groups.detail`, and `inputs` reported `one.job-groups.list`,
+    /// so a failure could not be traced to the command that caused it.
+    ///
+    /// The view *kind* is legitimately shared; the name is not.
     #[test]
     fn every_job_group_leaf_reports_its_own_command_name() {
         let leaves = vec![

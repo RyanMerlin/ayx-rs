@@ -40,30 +40,46 @@ pub enum ErrorCode {
     Internal,
 }
 
+/// Upstream exception types that mean "this object exists, the data you asked
+/// for does not". Each entry must have been observed against a live tenant.
+///
+/// This is an allowlist rather than a `*NotFoundException` suffix rule, and
+/// that distinction matters. `RouteNotFoundException` also ends in
+/// `NotFoundException`, and it means something entirely different: the CLI
+/// asked for an endpoint that does not exist. Reporting a client-side routing
+/// defect as a missing resource would send the caller looking for their data
+/// while the actual bug is in this binary -- the same misdirection this
+/// refinement exists to remove, one level further out.
+///
+/// Add a type here when a live response proves it means absent data. The cost
+/// of the allowlist is that an unlisted type stays `Validation` until someone
+/// observes it, which is the safe direction to err: it leaves a pre-existing
+/// imprecision in place rather than actively misrouting a caller.
+const ABSENT_DATA_EXCEPTIONS: &[&str] = &[
+    // `GET /v4/jobGroups/{id}/profile`, `/profileresults`, `/pdfresults` on a
+    // job group that exists but was never profiled.
+    "ProfilingDataNotFoundException",
+];
+
 /// Does this upstream error body describe a resource that is not there?
 ///
-/// The only signal read is the upstream exception *type*: a name ending in
-/// `NotFoundException`. Nothing else qualifies.
+/// The only signal read is the upstream exception *type*, matched against
+/// [`ABSENT_DATA_EXCEPTIONS`]. Nothing else qualifies.
 ///
-/// An earlier version of this also scanned `message`/`details`/`error` for the
-/// substring "not found". That was speculation, and it was wrong: a genuine
-/// input error reads "Required parameter 'flowId' not found in request body"
-/// or "Column 'foo' not found in dataset schema". Both are caller-input
-/// failures whose correct advice is to check the request -- and both were
-/// being reclassified as absent resources. Reading prose to infer a type
-/// reintroduces, in the opposite direction, exactly the misdirection this
-/// refinement exists to remove.
-///
-/// The cost of this narrowness is that an upstream which reports absence
-/// without a typed name stays `Validation`. That is the safe direction to err:
-/// it leaves a pre-existing imprecision in place rather than actively
-/// misrouting a caller who did make a mistake.
+/// An earlier version scanned `message`/`details`/`error` for the substring
+/// "not found". That was speculation, and it was wrong: a genuine input error
+/// reads "Required parameter 'flowId' not found in request body" or "Column
+/// 'foo' not found in dataset schema". Both are caller-input failures whose
+/// correct advice is to check the request, and both were being reclassified.
+/// A later version matched any `*NotFoundException` suffix, which swept in
+/// route errors. Reading prose, or a naming convention, to infer a type is the
+/// same mistake twice.
 fn body_reports_absent_resource(body: &Value) -> bool {
     body.get("exception")
         .unwrap_or(body)
         .get("name")
         .and_then(Value::as_str)
-        .is_some_and(|name| name.ends_with("NotFoundException"))
+        .is_some_and(|name| ABSENT_DATA_EXCEPTIONS.contains(&name))
 }
 
 impl ErrorCode {
@@ -495,6 +511,32 @@ mod tests {
             Some(ErrorCode::Validation),
             "without the typed name there is no evidence of absence"
         );
+    }
+
+    /// `RouteNotFoundException` ends in `NotFoundException` but means the CLI
+    /// asked for an endpoint that does not exist -- a defect in this binary,
+    /// not a missing object. Classifying it as `NotFound` would hand the user
+    /// object-list advice for a routing bug.
+    ///
+    /// This test fails if the rule is ever loosened back to a suffix match or
+    /// to `contains("NotFound")`.
+    #[test]
+    fn a_route_not_found_is_not_an_absent_resource() {
+        for name in [
+            "RouteNotFoundException",
+            "EndpointNotFoundException",
+            "PathNotFoundException",
+            "HandlerNotFoundError",
+        ] {
+            let body = serde_json::json!({
+                "exception": { "name": name, "details": "Cannot GET /v4/bad-path" }
+            });
+            assert_eq!(
+                ErrorCode::from_http_status_with_body(400, Some(&body)),
+                Some(ErrorCode::Validation),
+                "{name} is a routing failure, not absent data"
+            );
+        }
     }
 
     /// Non-object bodies must not panic or match by accident.

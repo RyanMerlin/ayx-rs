@@ -70,6 +70,25 @@ $results = [System.Collections.Generic.List[object]]::new()
 # denial signal that survives every --output mode.
 $PERMISSION_DENIED_EXIT_CODE = 5
 
+# `exit_code_for_envelope` in ayx-rs/src/main.rs. Only the codes this sweep
+# expects are listed; the mapping is many-to-one, which is exactly why a row
+# is matched on error_code and this table is used to check the exit code
+# separately rather than accepting a whole exit class.
+$ERROR_CODE_EXIT_CODES = @{
+    'validation'        = 2
+    'config_missing'    = 3
+    'workspace_mismatch' = 3
+    'auth_failed'       = 4
+    'permission_denied' = 5
+    'not_found'         = 6
+    'gone'              = 6
+    'conflict'          = 6
+    'rate_limited'      = 6
+    'network'           = 6
+    'upstream'          = 6
+    'incomplete'        = 7
+}
+
 function Invoke-OneRead {
     param(
         [Parameter(Mandatory = $true)]
@@ -121,16 +140,50 @@ function Invoke-OneRead {
     # The CLI reports its classification as `error_code` in every output mode:
     # `"error_code": "not_found"` under --output json, `error_code: not_found`
     # under --output text. That is the exact signal; read it first.
+    #
+    # Prefer parsing the envelope. A substring search sees decoys: a nested
+    # `provider_error_code` in an echoed upstream body matches on its suffix,
+    # and the first match in the text is not necessarily the envelope's own
+    # field. The regex fallback exists for --output text and is anchored so a
+    # longer field name cannot match.
     $reportedErrorCode = $null
-    if ($outputText -match 'error_code"?\s*:\s*"?([a-z_]+)') {
-        $reportedErrorCode = $Matches[1]
+    try {
+        $envelope = $outputText | ConvertFrom-Json -ErrorAction Stop
+        if ($envelope.PSObject.Properties.Name -contains 'error_code') {
+            $reportedErrorCode = $envelope.error_code
+        }
+    } catch {
+        # Text mode. `render_text` prints `data` as alphabetically sorted
+        # "  key: value" lines, so an upstream body echoed under `body_preview`
+        # sorts BEFORE the envelope's own `error_code` and its contents are
+        # printed unescaped. A substring search finds that decoy first: a 502
+        # whose body happens to contain `"error_code": "permission_denied"` was
+        # read as a denial. Anchor to the start of a line so only the CLI's own
+        # field can match -- the decoy is always mid-line, after `body_preview:`.
+        if ($outputText -match '(?m)^\s*error_code:\s*([a-z_]+)\s*$') {
+            $reportedErrorCode = $Matches[1]
+        }
+    }
+    # A successful compact envelope carries `"error_code": null`. Record the
+    # absence of a code as an absence, not as the string "null".
+    if ($reportedErrorCode -in @($null, '', 'null')) {
+        $reportedErrorCode = $null
     }
 
     $passed = $ExpectedExitCodes -contains $exitCode
     if ((-not $passed) -and $ExpectedErrorCode -and ($reportedErrorCode -eq $ExpectedErrorCode)) {
-        # An expected, specific error. Not a transport failure wearing the same
-        # exit code.
-        $passed = $true
+        # An expected, specific error -- but the exit code must also be the one
+        # that error_code maps to. Accepting the code alone would let the
+        # published exit-code contract regress unnoticed: `not_found` still
+        # reported, exit silently changed from 6 to 2, sweep still green.
+        $requiredExit = $ERROR_CODE_EXIT_CODES[$ExpectedErrorCode]
+        if ($null -eq $requiredExit) {
+            Write-Warning "no exit code is mapped for expected error_code '$ExpectedErrorCode'; add it to `$ERROR_CODE_EXIT_CODES"
+        } elseif ($exitCode -eq $requiredExit) {
+            $passed = $true
+        } else {
+            Write-Warning "error_code '$reportedErrorCode' matched, but exit code was $exitCode and the contract maps it to $requiredExit"
+        }
     }
 
     # Only an actual denial qualifies. Without this the switch would swallow a

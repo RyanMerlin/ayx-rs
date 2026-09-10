@@ -153,7 +153,7 @@ Minimum expectations:
 - `profile_name`
 - `alteryx_one.base_url` for the One API host
 - `alteryx_one.account_email` when using ownership-transfer and related automation
-- `alteryx_one.oauth_client_id` and `alteryx_one.token_endpoint_url` for One OAuth refresh, browser, or device token posture
+- `alteryx_one.oauth_client_id` and `alteryx_one.token_endpoint_url` for the One OAuth refresh token posture
 - `alteryx_one.access_token` when using One API commands
 - `alteryx_one.refresh_token` when you want to keep the token pair together locally
 - `alteryx_one.client_secret` or `alteryx_one.client_secret_ref` when you use service-principal

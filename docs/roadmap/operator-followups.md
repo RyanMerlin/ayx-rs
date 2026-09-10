@@ -52,8 +52,12 @@ re-test before widening the change set.
 
 ### Prepared, independently tested changes
 
-These are not automatically approved for merge; each needs a conflict review
-against the current integration base.
+**Superseded as of 2026-09-10: every change listed below is now committed on
+`integration/phase-1` and needs no further merge review.** The list is kept
+because the notes on what each change was tested against remain useful. The
+closing paragraph about "local, uncommitted experiments" is likewise stale --
+the bare-GID onboarding fix is `33e9a74`, and the human-output/redaction work
+lives on `fix/human-output-rendering` as Phase 3 material.
 
 - `b25b1b7 fix(cli): wrap help descriptions` sets a 120-column clap help
   width, improves `--no-input` wording, and adds a help-wrap smoke test.
@@ -161,10 +165,12 @@ Windows live verification found that several current One example commands are
 either deprecated, empty in the test workspace, or named after backend
 implementation terms rather than an operator-facing resource.
 
-- [ ] Remove `ayx one person count` now, with no compatibility alias. The
+- [x] Remove `ayx one person count` now, with no compatibility alias. The
   vendor endpoint `/v4/people/count` is already retired (HTTP 410 / the
   `IAM_SCREAM_PEOPLE` removal); it must disappear from the CLI, inventory,
   catalog, generated command surface, README, tests, and current docs.
+  **Done** in `1a91ab6` / `ec52829` (the second removed the site page the
+  first missed). `ayx one person --help` no longer exposes `count`.
 - [ ] Consolidate the duplicate people surfaces. `ayx one person list` and
   `ayx one workspace people` both issue workspace-scoped `GET /v4/people` and
   returned the same 18 ids in Windows validation.

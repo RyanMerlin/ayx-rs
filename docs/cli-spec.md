@@ -80,7 +80,25 @@ The full envelope contract is:
 - `message`
 - `timestamp_utc`
 - `data`
-- `error_code` on failures (`snake_case`: `config_missing`, `auth_failed`, `permission_denied`, `not_found`, `validation`, `conflict`, `rate_limited`, `network`, `upstream`, `workspace_mismatch`, `internal`)
+- `error_code` on failures (`snake_case`: `config_missing`, `auth_failed`, `permission_denied`, `not_found`, `gone`, `validation`, `conflict`, `rate_limited`, `network`, `upstream`, `workspace_mismatch`, `incomplete`, `output_classification`, `internal`)
+
+### Process exit codes
+
+`error_code` determines the process exit code. Several codes deliberately
+share one exit code, so **the exit code narrows the failure class but does not
+identify it** -- match `error_code` when you need to know precisely what
+happened.
+
+| Exit | `error_code` |
+|------|--------------|
+| 0 | success |
+| 2 | `validation` |
+| 3 | `config_missing`, `workspace_mismatch` |
+| 4 | `auth_failed` |
+| 5 | `permission_denied` |
+| 6 | `not_found`, `gone`, `conflict`, `rate_limited`, `network`, `upstream` |
+| 7 | `incomplete` |
+| 70 | `output_classification`, `internal` |
 
 Successful envelopes are written to stdout. Error envelopes are written to
 stderr. Examples should place `--output` after the complete command path;
