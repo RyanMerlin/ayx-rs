@@ -56,7 +56,7 @@ fn command(parts: &[&str]) -> Vec<String> {
 
 fn with_json_full(parts: &[&str]) -> Vec<String> {
     let mut args = command(parts);
-    args.extend(["--output".to_string(), "json-full".to_string()]);
+    args.extend(["--output".to_string(), "json".to_string()]);
     args
 }
 
@@ -66,7 +66,7 @@ fn with_apply(parts: &[&str]) -> Vec<String> {
         "--apply".to_string(),
         "--yes".to_string(),
         "--output".to_string(),
-        "json-full".to_string(),
+        "json".to_string(),
     ]);
     args
 }

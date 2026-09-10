@@ -21,7 +21,7 @@ Use a unique prefix such as `ayx-agent-canary-20260827-<run-id>`.
 
 ## Sequence
 
-1. Run `ayx discover one --deep --output json-full` and select commands from the live tree.
+1. Run `ayx discover one --deep --output json` and select commands from the live tree.
 2. Capture baseline lists/counts for workflows, groups, connections, plans, and schedules.
 3. Create JSON payloads with the unique prefix.
 4. Run every mutation once without `--apply`; inspect the dry-run body and target.

@@ -35,11 +35,29 @@ pub fn render_text(envelope: &Envelope) -> String {
         return format_doctor(&envelope.data, color_enabled());
     }
     let mut out = String::new();
-    out.push_str(&envelope.message);
+    let message_style = if envelope.ok {
+        Style::new().fg_color(Some(ALTERYX_BLUE)).bold()
+    } else {
+        Style::new()
+            .fg_color(Some(Color::Ansi(AnsiColor::Red)))
+            .bold()
+    };
+    out.push_str(&paint(&envelope.message, message_style, color_enabled()));
     if !envelope.message.is_empty() && !matches!(envelope.data, Value::Null) {
         out.push('\n');
     }
     out.push_str(&render_data_text(&envelope.data));
+    if let Some(remediation) = &envelope.remediation {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str("Next: ");
+        out.push_str(&remediation.summary);
+        for command in &remediation.commands {
+            out.push_str("\n  ");
+            out.push_str(command);
+        }
+    }
     // Trailing notice if there's a pagination token. Keeps the operator
     // honest about whether they're seeing all results.
     if let Some(token) = envelope
@@ -361,7 +379,9 @@ fn render_human_field(lines: &mut Vec<String>, key: &str, value: &Value, indent:
 /// Render an array of objects as a tab-aligned table. Columns are
 /// auto-detected from the union of keys, preferring identity-style fields
 /// (id, name, title) first, then descriptors, then everything else.
-/// Capped at 6 columns so wide objects still fit on a terminal.
+/// Capped at 7 columns so permission grants retain their seven operator
+/// fields (subject type/id, identity, role, policy, creation, and source)
+/// without making ordinary tables unboundedly wide.
 pub fn render_object_array(items: &[Value]) -> String {
     if items.is_empty() {
         return String::new();
@@ -369,12 +389,19 @@ pub fn render_object_array(items: &[Value]) -> String {
     // Preferred column ordering — most-useful fields first.
     const PREFERRED: &[&str] = &[
         "id",
+        "subject_type",
+        "subject_id",
+        "display_identity",
         "action_id",
         "workflow_id",
         "name",
         "title",
         "safety",
         "status",
+        "role",
+        "policy",
+        "created",
+        "source",
         "score",
         "action_count",
         "step_count",
@@ -394,7 +421,7 @@ pub fn render_object_array(items: &[Value]) -> String {
         {
             columns.push(p.to_string());
         }
-        if columns.len() >= 6 {
+        if columns.len() >= 7 {
             break;
         }
     }
@@ -411,7 +438,7 @@ pub fn render_object_array(items: &[Value]) -> String {
                     }
                 }
             }
-            if columns.len() >= 6 {
+            if columns.len() >= 7 {
                 break;
             }
         }
@@ -560,6 +587,23 @@ mod tests {
         let env = Envelope::ok("done");
         let text = render_text(&env);
         assert_eq!(text, "done");
+    }
+
+    #[test]
+    fn remediation_is_rendered_for_people_without_changing_non_tty_text() {
+        let env = Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::PermissionDenied,
+            "access denied",
+            Value::Null,
+        )
+        .with_remediation(
+            "Request the required role.",
+            vec!["ayx one workspace current".into()],
+        );
+        let text = render_text(&env);
+        assert!(text.contains("Next: Request the required role."));
+        assert!(text.contains("ayx one workspace current"));
+        assert!(!text.contains("\u{1b}["));
     }
 
     #[test]

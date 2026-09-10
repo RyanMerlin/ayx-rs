@@ -132,18 +132,11 @@ fn run_env(home: &TempDir, args: &[&str], env: &[(&str, &str)]) -> Run {
     run_in(home, home.path(), args, None, env)
 }
 
-/// Slot reports from `secret status --output json-full`, keyed by slot name.
+/// Slot reports from `secret status --output json`, keyed by slot name.
 fn slots(home: &TempDir, profile: &str) -> Vec<Value> {
     let out = run(
         home,
-        &[
-            "secret",
-            "status",
-            "--profile",
-            profile,
-            "--output",
-            "json-full",
-        ],
+        &["secret", "status", "--profile", profile, "--output", "json"],
     );
     assert!(out.ok, "secret status should succeed\n{}", out.combined());
     out.json()["data"]["slots"]
@@ -180,7 +173,7 @@ fn keyring_available() -> bool {
             "probe",
             "--from-stdin",
             "--output",
-            "json-full",
+            "json",
         ],
         Some("keyring-probe"),
         &[],
@@ -220,14 +213,7 @@ fn secret_status_reports_posture_without_disclosing_values_or_reference_targets(
 
     let out = run(
         &home,
-        &[
-            "secret",
-            "status",
-            "--profile",
-            "mixed",
-            "--output",
-            "json-full",
-        ],
+        &["secret", "status", "--profile", "mixed", "--output", "json"],
     );
     assert!(out.ok, "status should succeed\n{}", out.combined());
 
@@ -585,14 +571,7 @@ fn secret_status_does_not_overlay_the_active_profile() {
 
     let out = run(
         &home,
-        &[
-            "secret",
-            "status",
-            "--profile",
-            "other",
-            "--output",
-            "json-full",
-        ],
+        &["secret", "status", "--profile", "other", "--output", "json"],
     );
     assert!(out.ok, "status should succeed\n{}", out.combined());
     out.assert_absent(ACTIVE_SECRET, "the active profile's secret");
@@ -621,14 +600,7 @@ fn secret_status_is_independent_of_the_working_directory() {
     )
     .expect("write .env");
 
-    let args = [
-        "secret",
-        "status",
-        "--profile",
-        "t",
-        "--output",
-        "json-full",
-    ];
+    let args = ["secret", "status", "--profile", "t", "--output", "json"];
     let neutral = run_in(&home, home.path(), &args, None, &[]);
     let from_checkout = run_in(&home, checkout.path(), &args, None, &[]);
 
@@ -732,7 +704,7 @@ fn secret_migrate_is_a_noop_when_nothing_is_plaintext() {
             "--profile",
             "clean",
             "--output",
-            "json-full",
+            "json",
         ],
     );
     assert!(out.ok, "migrate should succeed\n{}", out.combined());
@@ -777,14 +749,7 @@ fn secret_migrate_moves_plaintext_out_of_the_profile_and_reports_only_real_conve
 
     let out = run(
         &home,
-        &[
-            "secret",
-            "migrate",
-            "--profile",
-            "mig",
-            "--output",
-            "json-full",
-        ],
+        &["secret", "migrate", "--profile", "mig", "--output", "json"],
     );
     out.assert_absent(TOP, "the top-level plaintext secret");
     out.assert_absent(WORKSPACE, "the workspace plaintext secret");
@@ -943,7 +908,7 @@ fn secret_set_fallback_warning_is_machine_readable() {
             "t",
             "--from-stdin",
             "--output",
-            "json-full",
+            "json",
         ],
         Some(SECRET),
         &[],
@@ -986,14 +951,7 @@ fn secret_migrate_without_keyring_is_a_warned_no_op() {
     let before = profile_text(&home, "m");
     let out = run(
         &home,
-        &[
-            "secret",
-            "migrate",
-            "--profile",
-            "m",
-            "--output",
-            "json-full",
-        ],
+        &["secret", "migrate", "--profile", "m", "--output", "json"],
     );
     assert!(
         out.ok,
@@ -1040,14 +998,7 @@ fn an_unreadable_keyring_reference_is_reported_not_fatal() {
 
     let out = run(
         &home,
-        &[
-            "secret",
-            "status",
-            "--profile",
-            "kr",
-            "--output",
-            "json-full",
-        ],
+        &["secret", "status", "--profile", "kr", "--output", "json"],
     );
     assert!(
         out.ok,
@@ -1128,7 +1079,7 @@ fn doctor_flags_plaintext_held_in_an_inline_reference() {
     let used = run(&home, &["profile", "use", "inl"]);
     assert!(used.ok, "profile use should succeed\n{}", used.combined());
 
-    let out = run(&home, &["doctor", "config", "--output", "json-full"]);
+    let out = run(&home, &["doctor", "config", "--output", "json"]);
     assert!(out.ok, "doctor should run\n{}", out.combined());
     out.assert_absent("plaintext-in-a-ref-8b3c", "the secret value");
 
@@ -1163,7 +1114,7 @@ fn secret_env_template_emits_variable_names_with_empty_values() {
             "--profile",
             "t",
             "--output",
-            "json-full",
+            "json",
         ],
     );
     assert!(out.ok, "env-template should succeed\n{}", out.combined());
@@ -1277,14 +1228,7 @@ fn secret_migrate_sees_plaintext_held_in_an_inline_reference() {
 
     let out = run_env(
         &home,
-        &[
-            "secret",
-            "migrate",
-            "--profile",
-            "inl",
-            "--output",
-            "json-full",
-        ],
+        &["secret", "migrate", "--profile", "inl", "--output", "json"],
         &[("AYX_FORCE_INLINE_SECRETS", "1")],
     );
     assert!(
@@ -1452,7 +1396,7 @@ fn doctor_flags_an_inline_reference_whose_secret_forced_yaml_quoting() {
     let used = run(&home, &["profile", "use", "qtd"]);
     assert!(used.ok, "profile use should succeed\n{}", used.combined());
 
-    let out = run(&home, &["doctor", "config", "--output", "json-full"]);
+    let out = run(&home, &["doctor", "config", "--output", "json"]);
     assert!(out.ok, "doctor should run\n{}", out.combined());
 
     let json = out.json();

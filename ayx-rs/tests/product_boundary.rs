@@ -182,7 +182,7 @@ server:
 fn run_ayx(home: &TempDir, args: &[&str]) -> Value {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args(args)
-        .args(["--output", "json-full"])
+        .args(["--output", "json"])
         .env("AYX_CONFIG_HOME", home.path())
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())

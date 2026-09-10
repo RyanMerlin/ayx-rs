@@ -8,25 +8,24 @@ source of truth for exact commands and flags.
 
 ```text
 ayx --version
-ayx discover --deep --output json-full
+ayx discover --deep --output json
 ayx profile current --output json
 ayx one auth status --output json
 ayx one workspace current --output json
 ```
 
-Always put `--output json` at the end of the command. From 0.20.0 a
-non-terminal stdout already defaults to compact JSON; keep the explicit flag
+Always put `--output json` at the end of the command. A non-terminal stdout
+already defaults to the canonical JSON envelope; keep the explicit flag
 for clarity. Use `--jq <filter>` to project fields in-binary. Error envelopes
 carry `error_code`, `retryable`, and, where the CLI can name the fix,
 `remediation.commands`; run those before retrying. For an unfamiliar One
 family, discover it first:
 
 ```text
-ayx discover one --deep --output json-full
+ayx discover one --deep --output json
 ```
 
-Walk `data.tree` to select a command. Discovery requires `json-full` because
-compact `json` omits the large tree. Do not infer commands from endpoint names
+Walk `data.tree` to select a command. JSON preserves the command tree. Do not infer commands from endpoint names
 or from a previous workspace.
 
 ## Read structured results

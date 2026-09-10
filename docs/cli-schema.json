@@ -1,11 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "AYX-RS Envelope",
-  "description": "Every `ayx` envelope is either the full (`--output json-full`) envelope, or the compact `ayx.output.v1` document (`--output json` -- the default off a terminal or under an agent host). The compact form adds `schema_version` and `command` on top of the full envelope's fields, and always serializes `error_code` (as `null` on success) instead of omitting it.",
-  "oneOf": [
-    { "$ref": "#/$defs/FullEnvelope" },
-    { "$ref": "#/$defs/CompactEnvelope" }
-  ],
+  "description": "Every `ayx` JSON result is one complete, recursively redacted envelope. It is the default when stdout is not a terminal or an agent host is detected.",
+  "$ref": "#/$defs/FullEnvelope",
   "$defs": {
     "FullEnvelope": {
       "type": "object",
@@ -19,28 +16,6 @@
         "remediation": { "$ref": "#/$defs/Remediation" },
         "retryable": { "type": "boolean" },
         "next": { "type": "array", "items": { "type": "string" } }
-      },
-      "additionalProperties": false
-    },
-    "CompactEnvelope": {
-      "type": "object",
-      "required": [
-        "schema_version", "command", "ok", "message", "timestamp_utc",
-        "error_code", "data"
-      ],
-      "properties": {
-        "schema_version": { "const": "ayx.output.v1" },
-        "command": { "type": "string" },
-        "ok": { "type": "boolean" },
-        "message": { "type": "string" },
-        "timestamp_utc": { "type": "string", "format": "date-time" },
-        "error_code": {
-          "anyOf": [{ "$ref": "#/$defs/ErrorCode" }, { "type": "null" }]
-        },
-        "remediation": { "$ref": "#/$defs/Remediation" },
-        "retryable": { "type": "boolean" },
-        "next": { "type": "array", "items": { "type": "string" } },
-        "data": {}
       },
       "additionalProperties": false
     },

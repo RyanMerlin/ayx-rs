@@ -51,8 +51,10 @@ re-test before widening the change set.
    classification/governance work after the stable public surface is settled.
 
 **Status, 2026-09-10:** phases 1 and 2 are complete on `integration/phase-1`
-([#186](https://github.com/RyanMerlin/ayx-rs/pull/186)); both Phase 2 exit
-gates are evidenced below (the live read sweep and Gate V2.4). Phase 3 is next.
+([#186](https://github.com/RyanMerlin/ayx-rs/pull/186)). Phase 3 is implemented
+on the follow-up branch and has passed the local suite plus redacted live reads
+using the keyring-backed `local-dev` profile. Review/merge and a non-empty
+job-output fixture remain external dependencies.
 
 **Why globals are deliberately last.** `-o` and the rest of the global-scope
 work touch every example in every document, skill, runbook and generated page.
@@ -87,9 +89,8 @@ lives on `fix/human-output-rendering` as Phase 3 material.
   count` across CLI, inventory, catalog, docs, and tests. The CLI smoke suite
   (65 tests), One API inventory tests (3 tests), formatting, and generated-doc
   checks passed.
-- The bare-GID onboarding fix and human-output/redaction work exist as local,
-  uncommitted experiments. Re-review their scope against phases 2 and 3; do
-  not merge them wholesale merely because they passed an earlier local test.
+- The bare-GID onboarding fix is `33e9a74`. The human-output/redaction work is
+  Phase 3 material and is tracked by its implementation branch and review.
 
 ## Operator intake 2026-09-10: functional defects
 
@@ -99,33 +100,18 @@ Product: Alteryx One throughout. Reported by the author against the
 `integration/phase-1` release binary; **every item below was re-reproduced on
 2026-09-10** on Windows with `ayx 0.20.5` built at `db3b882`, `windows-otp`
 profile (email OTP), workspace `91946`. The root causes are from the captured
-`--output json-full` payloads and the source, not from the human rendering the
+full redacted JSON payloads and the source, not from the human rendering the
 intake quoted.
 
-**Status:** four of the five are fixed on `integration/phase-1` (`cc2e465`,
-`203e38f`, `528dced`), each with a test that failed first, re-verified live
-after a release build, and followed by a clean read sweep (72 passed,
-2 expected-unprivileged, 0 failed). The connection-permissions item is open:
-it needs a name lookup and a projection decision, not a one-line fix.
+**Status:** the Phase-1 fixes are complete (`cc2e465`, `203e38f`, `528dced`).
+Phase 3 completes connection-permission rendering and the output contract;
+redacted live permission and workflow-tool reads pass. A non-empty job-output
+fixture and PR review remain external dependencies.
 
-- [x] **`ayx one job-groups list` names every row `job-?`.** **Fixed** in
-  `cc2e465`: ids are read as a number or a string, with tests on the live
-  numeric shape; rows now read `job-3978583`. Still open, for the Jobs
-  redesign: a more useful label than one that repeats the ID, and the fact
-  that the synthesized name is written into the data itself, so `json-full`
-  shows a CLI-invented `name` where upstream sent `null`. That second point
-  conflicts with the lossless-JSON rule in
-  [Output contract consolidation](#output-contract-consolidation).
-  `synthesize_job_group_names` (`ayx-rs/src/cmd/one_job_groups.rs`) reads the
-  group `id` with `.as_str()`, but the API returns it as a JSON **number**, so
-  the `job-{id}` branch never fires and every unnamed group falls through to
-  the last-resort `job-?`. The unit tests pass because every fixture uses a
-  **string** id (`"grp-1"`, `"job-42"`), a shape the live API does not send;
-  `flowId` is read the same way and needs the same check. Fix: accept a number
-  or a string, and add a test fixture with the live numeric shape. Separately,
-  `job-{id}` merely repeats the ID column --
-  consider a label from what the payload does carry (`ranfrom`, `ranfor`, the
-  flow), which the Jobs redesign below should decide.
+- [x] **`ayx one job-groups list` names every row `job-?`.** Numeric IDs are
+  handled. Phase 3 keeps upstream `name: null` truthful in canonical JSON and
+  adds a presentation-only label for human output; the future Jobs naming work
+  remains in the Phase-4 section below.
 - [x] **A 401 on any One read is replaced by an unrelated configuration error
   when the profile has no refresh credential.** **Fixed** in `203e38f`: a 401
   is retried through a refresh only when the profile can renew (a refresh
@@ -149,7 +135,7 @@ it needs a name lookup and a projection decision, not a one-line fix.
     and naming `ayx one login`. That would undercut the Phase 2 OTP-expiry
     messaging exactly when it matters.
 
-- [ ] **`ayx one agent-assets` does not work with any bearer-token
+- [x] **`ayx one agent-assets` does not work with any bearer-token
   credential.** Unmasking the 401 above revealed the upstream body: `"No
   Alteryx session cookies found"`. The `/ai-agents/backend` service
   authenticates with browser session cookies, not bearer tokens. Reproduced
@@ -166,30 +152,19 @@ it needs a name lookup and a projection decision, not a one-line fix.
   route is confirmed with the vendor; or keep it and give its 401 an honest
   remediation. Do not decide it by matching the cookie message in code -- that
   is prose-matching again. Settle it before the Phase 4 `agent-studio` rename,
-  since renaming a surface nobody can use is wasted work.
+  since renaming a surface nobody can use is wasted work. **Disposition:**
+  hidden from help, catalog, and normal discovery until the vendor supplies a
+  supported bearer-token contract; it is not an expired-login defect.
 - [x] **`ayx one job-groups status` prints nothing in text mode.** **Fixed**
   in `528dced`: a bare scalar body is labelled with the command's single
-  declared field, so text prints `status: Complete`. Compact JSON still
-  carries `fields.value`, unchanged. Original detail: The
-  endpoint returns a bare JSON string (`"Complete"`); the detail view wraps it
-  as `fields.value`, which JSON output shows and the text renderer drops,
-  leaving only the `jobGroup status ok` line. A scalar response needs a text
-  rendering. Small; fix standalone rather than waiting for the Phase 3
-  renderer.
+  declared field, so text prints `status: Complete`; canonical JSON retains
+  the upstream scalar response.
 - [x] **`ayx one job-groups outputs` reports an "unrecognized collection
-  shape".** **Fixed** in `528dced`: descriptors can declare
-  `named_collections`, each rendered as its own counted section (`Files (0)`,
-  `Tables (0)`) and carried under `data.collections` in compact JSON. Opt-in
-  per command, never inferred. **Still unverified with data:** the fixture's
-  two lists are empty, so a non-empty `files` or `tables` row has been seen
-  only in a unit test. Original detail: The response is an object holding two
-  named collections,
-  `{"files": [], "tables": []}`, which the single-list detector does not
-  recognize. Both were empty on the fixture, so the command worked and the
-  renderer failed. Render each named collection, and find a fixture that has
-  outputs. The generic renderer gap is also tracked under
-  [Human-facing output](#human-facing-output-and-redaction).
-- [ ] **`ayx one connections permissions list|detail` shows blank names and an
+  shape".** Named collections explicitly render as `Files` and `Tables` in
+  human output; canonical JSON preserves the complete response. The available
+  25-job live scan still found only empty collections, so a non-empty provider
+  fixture remains an external dependency.
+- [x] **`ayx one connections permissions list|detail` shows blank names and an
   apparent duplicate.** Neither is data corruption:
   - `name` and `email` are **empty strings upstream** for every subject from
     `GET /v4/connections/{id}/permissions/sharedSubjects`. The CLI is not
@@ -201,8 +176,10 @@ it needs a name lookup and a projection decision, not a one-line fix.
     `subjectType` and `source`, so two distinct grants look like one row
     printed twice. The `groups` array is dropped as well.
 
-  Fix: show at least subject type, role, and policy, resolve names, and render
-  group grants. The governance fields the author asked for (when granted, last
+  Phase 3 flattens both buckets into distinct rows, resolves people from one
+  bounded `/v4/people` listing, reports lookup failures and unresolved names
+  explicitly, and retains all provider rows. The governance fields the author
+  asked for (when granted, last
   access, workflows attached) are **not** in this payload; they belong to the
   [connections governance](#alteryx-one-connections-classification-and-governance)
   work and must be labelled as heuristics where they are derived.
@@ -240,10 +217,9 @@ The global option list currently advertises controls on every command even
 when they belong only to one product or operation class. Windows review also
 found an internally inconsistent error-format option:
 
-- [ ] Remove `--error-format` with the `json-full` consolidation. `--output
-  json` already renders both success and failure as JSON envelopes; the flag
-  only enables the confusing asymmetric case of human success output with a
-  JSON error. Output format must be one coherent invocation-level contract.
+- [x] Remove `--error-format` with the JSON consolidation. `--output json`
+  now renders one complete recursively redacted envelope for success and
+  failure; terminal projection remains human-only.
 - [ ] Keep `--no-input` global, but describe its actual process-wide contract:
   never read interactive input; fail closed when a credential, secret,
   ambiguous selector, or destructive confirmation would otherwise prompt.
@@ -964,12 +940,10 @@ Priority: high UX correctness
     status, endpoint, elapsed time, and count; the inventory belongs behind an
     intentional detail query.
   - Windows evidence: `ayx one workflows tools` and `ayx one job-groups
-    outputs` returned successful responses that the human renderer labeled an
-    "unrecognized collection shape." Add typed renderers or an explicit
-    human-readable fallback before these become promoted examples.
-    `job-groups outputs` is fixed (`528dced`, declared named collections);
-    `workflows tools` has not been re-checked in text mode.
-- [ ] Standardize timestamps in human output at second precision.
+    outputs` returned sibling collections rather than an `items` wrapper.
+    Both now opt in to named collection rendering; a redacted live workflow
+    tools read confirmed the two sections render correctly.
+- [x] Standardize timestamps in human output at second precision.
   - Preserve the original RFC 3339 value, including fractional seconds, in
     JSON and persisted/audit data; trim only display-only fractional seconds.
   - Cover UTC and offset timestamps, values with no fraction, and malformed
@@ -980,13 +954,9 @@ Priority: high UX correctness
     it was `.000` on every row in the intake and in re-reproduction. Human
     output should also show a date rather than a raw epoch: the login flow
     prints `Token expires: 1791640201` (`one_platform/auth.rs`).
-- [ ] **Show `remediation` in human output.** `ayx-rs/src/render.rs` never
-  reads the envelope's `remediation` object, so the actionable next step
-  (for example the `not_found` guidance for sub-resource reads) reaches only
-  `--output json` users. A human, whom it most helps, sees the raw failure
-  fields instead. Deliver it with the Phase 3 renderer; `fix/human-output-rendering`
-  touches the same code, so do it there rather than as a competing change.
-- [ ] **Colour and structure for human output (intake 2026-09-10).** The
+- [x] **Show `remediation` in human output.** Text now prints the actionable
+  summary and suggested commands beneath the result.
+- [x] **Colour and structure for human output (intake 2026-09-10).** The
   author asks for a consistent palette: commands highlighted in one colour
   (suggested: cobalt blue), keys in `key: value` blocks in another (suggested:
   gold), and emphasis on IDs, links and key terms; plus pretty-printed JSON
@@ -998,37 +968,18 @@ Priority: high UX correctness
   asked what is needed to pin down "visually clean and human readable": agree
   a reference -- a mock-up of three representative screens (a list, a detail,
   an error), approved before implementation -- rather than iterating on
-  adjectives.
+  adjectives. The delivered terminal palette is TTY-only and respects
+  `NO_COLOR`; JSON and non-TTY output remain unstyled.
 
 ## Output contract consolidation
 
 Priority: high — one machine contract, one human experience
 
-Current behavior has two JSON dialects: `--output json` emits the versioned
-`ayx.output.v1` compact projection (selected fields, summarized nested values,
-and a default 20-row cap), while `--output json-full` emits the complete
-recursively redacted envelope. The original rationale was bounded agent
-payloads and insulation from upstream transport-wrapper drift, but the split
-makes `json` unexpectedly incomplete for an agent and creates a second
-machine-facing contract to maintain.
-
-- [ ] Make `--output json` the single canonical machine output: the full,
-  recursively redacted envelope with stable outer fields (`ok`, `message`,
-  `timestamp_utc`, `data`, and `error_code` on failure).
-- [ ] Remove `--output json-full` from the public CLI in the next
-  pre-announcement release rather than carrying a deprecation alias. There is
-  no announced external automation compatibility commitment; update internal
-  tests, docs, skills, and the generator in the same change.
-- [ ] Keep default `text`/`table` as the human output path: readable,
-  formatted/colorized where a terminal supports it, with safe concise views
-  for large diagnostics.
-- [ ] Replace format-level truncation/projection with explicit command-level
-  summary/detail controls and normal list pagination. An agent must never need
-  a second output format merely to retrieve fields omitted by the first.
-- [ ] Update CLI spec, README, schema/tests, shell completions, generated help,
-  and migration/release notes together; add compatibility tests for the alias
-  only if an external compatibility commitment appears before the change; add
-  full-data-preservation tests in all cases.
+**Completed in Phase 3.** `--output json` is the single canonical,
+recursively redacted envelope. `json-full` and `--error-format` are retired;
+text/table remain the bounded human projection. Regression coverage pins
+redaction, upstream payload truth, schema validity, remediation, timestamps,
+and named collections.
 
 ## Redaction model simplification
 

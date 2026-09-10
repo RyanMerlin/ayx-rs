@@ -1,30 +1,20 @@
 //! Central output contracts and renderers.
 //!
 //! The command handlers return the lossless core `Envelope`; this module is
-//! the only place that projects it for terminal or compact JSON output.
+//! the only place that projects it for terminal output.
 
 use ayx_core::envelope::Envelope;
 use ayx_core::observability::redact_text;
-use serde::Serialize;
 use serde_json::{Map, Value, json};
 
 use crate::render;
 
-pub const COMPACT_SCHEMA_VERSION: &str = "ayx.output.v1";
 pub const DEFAULT_OUTPUT_LIMIT: usize = 20;
-
-#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ErrorFormat {
-    #[default]
-    Text,
-    Json,
-}
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {
     Text,
     Json,
-    JsonFull,
     Yaml,
     Table,
 }
@@ -34,7 +24,6 @@ impl std::fmt::Display for OutputMode {
         f.write_str(match self {
             Self::Text => "text",
             Self::Json => "json",
-            Self::JsonFull => "json-full",
             Self::Yaml => "yaml",
             Self::Table => "table",
         })
@@ -80,9 +69,8 @@ pub fn resolve_output_mode(
         return Ok((mode, OutputModeSource::Explicit));
     }
     if let Some(raw) = env_value {
-        let mode = <OutputMode as clap::ValueEnum>::from_str(raw, true).map_err(|_| {
-            format!("AYX_OUTPUT={raw:?} is not one of: text, json, json-full, yaml, table")
-        })?;
+        let mode = <OutputMode as clap::ValueEnum>::from_str(raw, true)
+            .map_err(|_| format!("AYX_OUTPUT={raw:?} is not one of: text, json, yaml, table"))?;
         return Ok((mode, OutputModeSource::Env));
     }
     if agent_marker {
@@ -147,58 +135,39 @@ impl OutputDescriptor {
     }
 }
 
-#[derive(Serialize)]
-struct CompactEnvelope {
-    schema_version: &'static str,
-    command: String,
-    ok: bool,
-    message: String,
-    timestamp_utc: chrono::DateTime<chrono::Utc>,
-    error_code: Option<ayx_core::envelope::ErrorCode>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    remediation: Option<ayx_core::envelope::Remediation>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    retryable: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    next: Option<Vec<String>>,
-    data: Value,
-}
-
 pub fn render_envelope(
     envelope: &Envelope,
     mode: OutputMode,
     descriptor: OutputDescriptor,
     output_limit: usize,
 ) -> anyhow::Result<String> {
+    // Every machine-readable format starts from this one recursively-redacted
+    // envelope.  Do not add a second "full" or compact JSON contract: a
+    // caller must never have to choose between payload truth and safety.
     let clean = redacted_envelope(envelope);
     match mode {
-        OutputMode::Json => Ok(serde_json::to_string_pretty(&compact_envelope(
-            &clean,
-            descriptor,
-            output_limit,
-        ))?),
-        OutputMode::JsonFull => Ok(serde_json::to_string_pretty(&clean)?),
+        OutputMode::Json => Ok(serde_json::to_string_pretty(&clean)?),
         OutputMode::Yaml => serde_yaml::to_string(&clean)
             .map_err(|e| anyhow::anyhow!("failed to serialize envelope to yaml: {e}")),
         OutputMode::Text | OutputMode::Table => {
-            // Text/table retain their established renderer, but list views use
-            // the same bounded projection as compact JSON so --output-limit
-            // has one predictable cross-format meaning.
+            // Text/table retain their established renderer; list views are
+            // bounded by --output-limit without changing machine output.
             if clean.ok
                 && matches!(
                     descriptor.kind,
                     ViewKind::List | ViewKind::Detail | ViewKind::Result
                 )
             {
+                let presentation = presentation_data(&clean.data, descriptor);
                 let data = match descriptor.kind {
                     ViewKind::List => compact_named_collections(
-                        &clean.data,
+                        &presentation,
                         descriptor.named_collections,
                         output_limit,
                     )
                     .unwrap_or_else(|| {
                         compact_data(
-                            &clean.data,
+                            &presentation,
                             descriptor.kind,
                             descriptor.fields,
                             descriptor.collection_keys,
@@ -207,7 +176,7 @@ pub fn render_envelope(
                         )
                     }),
                     ViewKind::Detail | ViewKind::Result => {
-                        human_resource_data(&clean.data, descriptor.fields)
+                        human_resource_data(&presentation, descriptor.fields)
                     }
                     _ => unreachable!("the match above restricts presentation view kinds"),
                 };
@@ -229,41 +198,52 @@ pub fn render_envelope(
     }
 }
 
-fn compact_envelope(
-    envelope: &Envelope,
-    descriptor: OutputDescriptor,
-    output_limit: usize,
-) -> CompactEnvelope {
-    let kind = if envelope.ok {
-        descriptor.kind
-    } else {
-        ViewKind::Raw
+/// Add terminal-only labels without rewriting provider fields. In particular,
+/// job-library rows with a null upstream `name` retain that null in JSON while
+/// a human gets a stable `display_name` column.
+fn presentation_data(data: &Value, descriptor: OutputDescriptor) -> Value {
+    if descriptor.command != "one.job-groups.list" {
+        return data.clone();
+    }
+    let mut presentation = data.clone();
+    let Some(items) = presentation.get_mut("items").and_then(Value::as_array_mut) else {
+        return presentation;
     };
-    let named = (kind == ViewKind::List)
-        .then(|| {
-            compact_named_collections(&envelope.data, descriptor.named_collections, output_limit)
-        })
-        .flatten();
-    CompactEnvelope {
-        schema_version: COMPACT_SCHEMA_VERSION,
-        command: descriptor.command.to_string(),
-        ok: envelope.ok,
-        message: envelope.message.clone(),
-        timestamp_utc: envelope.timestamp_utc,
-        error_code: envelope.error_code,
-        remediation: envelope.remediation.clone(),
-        retryable: envelope.retryable,
-        next: envelope.next.clone(),
-        data: named.unwrap_or_else(|| {
-            compact_data(
-                &envelope.data,
-                kind,
-                descriptor.fields,
-                descriptor.collection_keys,
-                output_limit,
-                !envelope.ok,
-            )
-        }),
+    for item in items {
+        let Some(row) = item.as_object_mut() else {
+            continue;
+        };
+        if row.get("name").is_some_and(|name| !name.is_null()) {
+            continue;
+        }
+        row.insert(
+            "display_name".to_string(),
+            Value::String(job_group_display_name(row)),
+        );
+    }
+    presentation
+}
+
+fn job_group_display_name(row: &Map<String, Value>) -> String {
+    let id = row.get("id").and_then(display_id);
+    let flow_id = row
+        .get("flowRun")
+        .and_then(|flow_run| flow_run.get("flowId"))
+        .and_then(display_id)
+        .or_else(|| row.get("flowId").and_then(display_id));
+    match (flow_id, id) {
+        (Some(flow_id), Some(id)) => format!("flow-{flow_id} ({id})"),
+        (Some(flow_id), None) => format!("flow-{flow_id}"),
+        (None, Some(id)) => format!("job-{id}"),
+        (None, None) => "job-?".to_string(),
+    }
+}
+
+fn display_id(value: &Value) -> Option<String> {
+    match value {
+        Value::Number(number) => Some(number.to_string()),
+        Value::String(value) => Some(value.clone()),
+        _ => None,
     }
 }
 
@@ -345,7 +325,7 @@ fn compact_list(
         return json!({
             "kind": "list",
             "unrecognized_collection": true,
-            "hint": "The service returned a collection shape this CLI version does not recognize. Use --output json-full to inspect it.",
+            "hint": "The service returned a collection shape this CLI version does not recognize. Use --output json to inspect it.",
         });
     };
     let shown = if limit == 0 {
@@ -431,8 +411,8 @@ fn compact_object(kind: &str, data: &Value, descriptor_fields: &[&str]) -> Value
 
 /// The transport layer deliberately preserves server bodies under `response`
 /// alongside timing, retry, and request-id diagnostics. Human and compact
-/// output operate on that resource body; `json-full` is the explicit escape
-/// hatch for the complete transport envelope.
+/// output operate on that resource body; canonical JSON preserves the complete
+/// recursively-redacted transport envelope.
 fn presentation_body(data: &Value) -> &Value {
     data.get("response")
         .filter(|response| !response.is_null())
@@ -474,7 +454,7 @@ fn human_resource_data(data: &Value, descriptor_fields: &[&str]) -> Value {
     if projected.is_empty() {
         json!({
             "response_available": true,
-            "hint": "use --output json-full for the complete API response",
+            "hint": "use --output json for the complete API response",
         })
     } else {
         Value::Object(projected)
@@ -493,6 +473,7 @@ fn priority_fields() -> Vec<&'static str> {
     vec![
         "id",
         "name",
+        "display_name",
         "title",
         "status",
         "ok",
@@ -525,7 +506,7 @@ fn list_projection(items: &[Value]) -> Vec<&'static str> {
 
 /// Locate a collection in either a normalized CLI list envelope or the raw
 /// body nested by `one_api_live_request`. The latter is intentional in the
-/// lossless `json-full` contract, but human/compact list views must not claim
+/// lossless JSON contract, but human list views must not claim
 /// it is empty merely because a gateway uses `{ "data": [...] }`.
 ///
 /// Returns the items, the key they were found under, and the object that
@@ -665,11 +646,11 @@ fn scalar_projection(value: &Value) -> Value {
             value.clone()
         }
         Value::Array(items) => Value::String(format!(
-            "{} item(s); use --output json-full for details",
+            "{} item(s); use --output json for details",
             items.len()
         )),
         Value::Object(object) => Value::String(format!(
-            "{} field(s); use --output json-full for details",
+            "{} field(s); use --output json for details",
             object.len()
         )),
         _ => value.clone(),
@@ -745,7 +726,7 @@ fn is_sensitive_key(key: &str) -> bool {
     }
     let key = normalized;
     // Kept in step with the canonical list in `ayx_core::observability`. This
-    // one had drifted behind it, so `--output json-full` emitted values under
+    // one had drifted behind it, so machine output emitted values under
     // names the rest of the codebase treats as secret.
     //
     // `credential` is deliberately NOT here despite being canonical: the match
@@ -951,6 +932,55 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn job_labels_are_presentation_only_and_json_preserves_the_upstream_null() {
+        let envelope = Envelope::ok_with_data(
+            "job groups listed",
+            json!({"items": [{"id": 3978581, "name": null, "flowRun": {"flowId": 77}}]}),
+        );
+        let descriptor = OutputDescriptor::new("one.job-groups.list", ViewKind::List);
+        let json: Value = serde_json::from_str(
+            &render_envelope(
+                &envelope,
+                OutputMode::Json,
+                descriptor,
+                DEFAULT_OUTPUT_LIMIT,
+            )
+            .expect("canonical JSON"),
+        )
+        .expect("JSON envelope");
+        assert!(json["data"]["items"][0]["name"].is_null());
+        assert!(json["data"]["items"][0].get("display_name").is_none());
+
+        let text = render_envelope(
+            &envelope,
+            OutputMode::Text,
+            descriptor,
+            DEFAULT_OUTPUT_LIMIT,
+        )
+        .expect("human output");
+        assert!(text.contains("flow-77 (3978581)"));
+    }
+
+    #[test]
+    fn json_is_the_complete_recursively_redacted_envelope() {
+        let envelope = Envelope::ok_with_data(
+            "safe",
+            json!({"nested": {"access_token": "do-not-leak", "id": 7}}),
+        );
+        let rendered = render_envelope(
+            &envelope,
+            OutputMode::Json,
+            OutputDescriptor::new("test", ViewKind::Detail),
+            DEFAULT_OUTPUT_LIMIT,
+        )
+        .expect("JSON");
+        let value: Value = serde_json::from_str(&rendered).expect("valid JSON");
+        assert_eq!(value["data"]["nested"]["access_token"], "[REDACTED]");
+        assert_eq!(value["data"]["nested"]["id"], 7);
+        assert!(value.get("schema_version").is_none());
+    }
+
+    #[test]
     fn compact_list_caps_items_and_reports_it() {
         let items: Vec<Value> = (0..21)
             .map(|n| json!({"id": n, "name": format!("n{n}"), "body": {"large": true}}))
@@ -1014,14 +1044,12 @@ mod tests {
             &render_envelope(&envelope, OutputMode::Json, descriptor, 20).expect("compact JSON"),
         )
         .expect("compact output is JSON");
-        assert_eq!(compact["data"]["kind"], "list");
-        assert_eq!(compact["data"]["items"][0]["name"], "SEs");
-        assert_eq!(compact["data"]["total_count"], 1);
-        assert_eq!(compact["data"]["next_page_token"], "next-42");
-        assert!(compact["data"].get("unrecognized_collection").is_none());
+        assert_eq!(compact["data"]["response"]["groups"][0]["name"], "SEs");
+        assert_eq!(compact["data"]["response"]["count"], 1);
+        assert_eq!(compact["data"]["response"]["next_page_token"], "next-42");
 
         let full =
-            render_envelope(&envelope, OutputMode::JsonFull, descriptor, 20).expect("full JSON");
+            render_envelope(&envelope, OutputMode::Json, descriptor, 20).expect("canonical JSON");
         assert!(full.contains("\"members\""));
         assert!(full.contains("\"id\": 7"));
         let yaml = render_envelope(&envelope, OutputMode::Yaml, descriptor, 20).expect("YAML");
@@ -1045,8 +1073,7 @@ mod tests {
             &render_envelope(&envelope, OutputMode::Json, descriptor, 20).expect("compact JSON"),
         )
         .expect("compact output is JSON");
-        assert_eq!(compact["data"]["unrecognized_collection"], true);
-        assert!(compact["data"].get("items").is_none());
+        assert_eq!(compact["data"]["response"]["groups"][0]["name"], "SEs");
     }
 
     #[test]
@@ -1065,11 +1092,10 @@ mod tests {
             &render_envelope(&envelope, OutputMode::Json, descriptor, 20).expect("compact JSON"),
         )
         .expect("compact output is JSON");
-        assert_eq!(compact["data"]["kind"], "detail");
-        assert_eq!(compact["data"]["fields"]["summary"]["connection_count"], 11);
+        assert_eq!(compact["data"]["summary"]["connection_count"], 11);
         assert!(
-            render_envelope(&envelope, OutputMode::JsonFull, descriptor, 20)
-                .expect("full JSON")
+            render_envelope(&envelope, OutputMode::Json, descriptor, 20)
+                .expect("canonical JSON")
                 .contains("\"connection_count\": 11")
         );
         assert!(
@@ -1142,7 +1168,7 @@ mod tests {
                 .expect("compact JSON should render"),
         )
         .expect("compact JSON should parse");
-        assert_eq!(compact["data"]["unrecognized_collection"], true);
+        assert_eq!(compact["data"]["response"]["members"][0]["id"], 1);
     }
 
     #[test]
@@ -1192,12 +1218,58 @@ mod tests {
                 .expect("compact JSON should render"),
         )
         .expect("compact JSON should parse");
-        assert!(compact["data"].get("unrecognized_collection").is_none());
+        assert_eq!(compact["data"]["response"]["files"][0]["name"], "out.csv");
         assert_eq!(
-            compact["data"]["collections"]["files"]["items"][0]["name"],
-            "out.csv"
+            compact["data"]["response"]["tables"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
         );
-        assert_eq!(compact["data"]["collections"]["tables"]["shown_count"], 0);
+    }
+
+    #[test]
+    fn permission_rows_keep_every_operator_field_in_human_output() {
+        let env = Envelope::ok_with_data(
+            "connection permissions ok",
+            json!({
+                "permission_rows": [{
+                    "subject_type": "person",
+                    "subject_id": "7",
+                    "display_identity": "Ada Lovelace",
+                    "role": "member",
+                    "policy": "VIEWER",
+                    "created": true,
+                    "source": "direct"
+                }]
+            }),
+        );
+        let descriptor = OutputDescriptor::new("one.connections.permissions.list", ViewKind::List)
+            .with_collection_keys(&["permission_rows"])
+            .with_fields(&[
+                "subject_type",
+                "subject_id",
+                "display_identity",
+                "role",
+                "policy",
+                "created",
+                "source",
+            ]);
+
+        let text = render_envelope(&env, OutputMode::Text, descriptor, DEFAULT_OUTPUT_LIMIT)
+            .expect("permission rows should render");
+        let normalized = text.to_ascii_lowercase();
+        for field in [
+            "subject_type",
+            "subject_id",
+            "display_identity",
+            "role",
+            "policy",
+            "created",
+            "source",
+        ] {
+            assert!(normalized.contains(field), "missing {field} in:\n{text}");
+        }
     }
 
     #[test]
@@ -1233,15 +1305,9 @@ mod tests {
                 .expect("compact JSON should render"),
         )
         .expect("compact JSON should parse");
-        assert_eq!(compact["data"]["fields"]["name"], "alteryx-fde");
-        assert_eq!(compact["data"]["fields"]["workspace_member_count"], 14);
-        assert!(
-            compact["data"]["omitted_fields"]
-                .as_array()
-                .expect("omitted fields list")
-                .iter()
-                .any(|field| field == "workspacetiers")
-        );
+        assert_eq!(compact["data"]["response"]["name"], "alteryx-fde");
+        assert_eq!(compact["data"]["response"]["workspace_member_count"], 14);
+        assert!(compact["data"]["response"].get("workspacetiers").is_some());
     }
 
     /// `dry_run` / `mutating` / `applied` are set by the transport layer, not by
@@ -1270,11 +1336,11 @@ mod tests {
         )
         .expect("compact JSON should parse");
 
-        assert_eq!(compact["data"]["fields"]["name"], "shared-workflow");
-        assert_eq!(compact["data"]["fields"]["applied"], true);
-        assert_eq!(compact["data"]["fields"]["mutating"], true);
+        assert_eq!(compact["data"]["response"]["name"], "shared-workflow");
+        assert_eq!(compact["data"]["applied"], true);
+        assert_eq!(compact["data"]["mutating"], true);
         assert_eq!(
-            compact["data"]["fields"]["dry_run"], false,
+            compact["data"]["dry_run"], false,
             "a false dry_run must be reported as false, never dropped to null"
         );
 
@@ -1303,7 +1369,7 @@ mod tests {
         );
         let full = render_envelope(
             &env,
-            OutputMode::JsonFull,
+            OutputMode::Json,
             OutputDescriptor::new("one.test", ViewKind::Raw),
             DEFAULT_OUTPUT_LIMIT,
         )
@@ -1330,7 +1396,7 @@ mod tests {
         );
         let full = render_envelope(
             &env,
-            OutputMode::JsonFull,
+            OutputMode::Json,
             OutputDescriptor::new("one.test", ViewKind::Raw),
             DEFAULT_OUTPUT_LIMIT,
         )
@@ -1635,7 +1701,7 @@ mod tests {
         // Nested values stay summarized so the compact view remains bounded.
         assert_eq!(
             value["fields"]["resolution"],
-            "1 field(s); use --output json-full for details"
+            "1 field(s); use --output json for details"
         );
     }
 
@@ -1767,8 +1833,8 @@ mod tests {
     fn env_beats_auto_detection_and_rejects_garbage() {
         let (mode, src) = resolve_output_mode(None, Some("text"), false, true).unwrap();
         assert_eq!((mode, src), (OutputMode::Text, OutputModeSource::Env));
-        let (mode, _) = resolve_output_mode(None, Some("JSON-FULL"), true, false).unwrap();
-        assert_eq!(mode, OutputMode::JsonFull, "env value is case-insensitive");
+        let err = resolve_output_mode(None, Some("JSON-FULL"), true, false).unwrap_err();
+        assert!(err.contains("not one of"));
         let err = resolve_output_mode(None, Some("xml"), true, false).unwrap_err();
         assert!(err.contains("AYX_OUTPUT"));
     }
@@ -1884,26 +1950,21 @@ mod tests {
     }
 
     #[test]
-    fn compact_envelopes_validate_against_the_published_schema() {
-        // Sibling to ayx-core's envelope::tests::envelopes_validate_against_the_published_schema
-        // -- CompactEnvelope lives here, not in ayx-core, so the compact half
-        // of docs/cli-schema.json is covered from this crate instead.
+    fn canonical_envelopes_validate_against_the_published_schema() {
         let schema_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/cli-schema.json");
         let schema: Value =
             serde_json::from_str(&std::fs::read_to_string(schema_path).unwrap()).unwrap();
         let validator = jsonschema::validator_for(&schema).expect("schema compiles");
 
         let ok_envelope = Envelope::ok_with_data("fine", json!({"n": 1}));
-        let ok_descriptor = OutputDescriptor::new("catalog", ViewKind::Raw);
-        let ok_compact =
-            serde_json::to_value(compact_envelope(&ok_envelope, ok_descriptor, 20)).unwrap();
+        let ok_compact = serde_json::to_value(redacted_envelope(&ok_envelope)).unwrap();
         let problems: Vec<String> = validator
             .iter_errors(&ok_compact)
             .map(|e| e.to_string())
             .collect();
         assert!(
             problems.is_empty(),
-            "compact success envelope must validate: {problems:?}\n{ok_compact:#}"
+            "canonical success envelope must validate: {problems:?}\n{ok_compact:#}"
         );
 
         let err_envelope = Envelope::err_coded(
@@ -1916,19 +1977,15 @@ mod tests {
             vec!["ayx one workflows list --output json".to_string()],
         )
         .finalize_retryable();
-        let err_descriptor = OutputDescriptor::new("one.workflows.detail", ViewKind::Detail);
-        let err_compact =
-            serde_json::to_value(compact_envelope(&err_envelope, err_descriptor, 20)).unwrap();
-        // Confirms the always-present, possibly-null error_code the compact
-        // shape carries (unlike the full envelope, which omits it on success).
-        assert_eq!(ok_compact["error_code"], Value::Null);
+        let err_compact = serde_json::to_value(redacted_envelope(&err_envelope)).unwrap();
+        assert!(ok_compact.get("error_code").is_none());
         let problems: Vec<String> = validator
             .iter_errors(&err_compact)
             .map(|e| e.to_string())
             .collect();
         assert!(
             problems.is_empty(),
-            "compact error envelope must validate: {problems:?}\n{err_compact:#}"
+            "canonical error envelope must validate: {problems:?}\n{err_compact:#}"
         );
     }
 }
