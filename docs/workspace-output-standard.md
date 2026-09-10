@@ -20,8 +20,7 @@ automation should use `--workspace`; leaf flags will be deprecated after the
 universal selector has covered all workspace-scoped commands. A future major
 release may remove them after a warning-and-migration period.
 
-Compact JSON uses the versioned `ayx.output.v1` envelope. `json-full` is a
-sanitized diagnostic/transport view: credentials, tokens, headers, cookies,
+JSON is the one sanitized canonical envelope: credentials, tokens, headers, cookies,
 passwords, OTPs, and secret references remain redacted.
 
 Redaction targets fields that *carry* credential material. Fields that only
@@ -33,8 +32,5 @@ documented list contract. The exemption covers `next_page_token`,
 `_claims`, `_endpoint`, `_endpoint_url`, `_refs`, or `_env`. Name new metadata
 fields to match that shape so they are not swallowed.
 
-A command whose output descriptor declares no field list projects every
-top-level key in compact JSON, with nested objects and arrays summarized
-(`"N field(s); use --output json-full for details"`). Descriptors that do
-declare a field list still project only those fields and report the rest under
-`omitted_fields`.
+Output descriptors affect human presentation only. JSON preserves every
+redacted top-level and nested field without an omitted-fields projection.

@@ -73,7 +73,7 @@ ayx one api coverage --output json
 ```
 
 **Reading list-command output**: `ok: true` alone does not prove the underlying route returned
-`200`. Those raw transport fields are available with `--output json-full`: check
+`200`. Those raw transport fields are available with `--output json`: check
 `data.page_envelopes[].status_code` (or, for the single-shot `detail`/`status`/`count`
 shapes, `data.status_code`) — see Methodology below for why.
 

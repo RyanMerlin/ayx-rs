@@ -334,7 +334,12 @@ fn workflows_descriptor(command: &OneWorkflowsCommand) -> OutputDescriptor {
                 .with_fields(WORKFLOW_LIST_FIELDS)
         }
         OneWorkflowsCommand::Assets { .. } => list("one.workflows.assets"),
-        OneWorkflowsCommand::Tools { .. } => list("one.workflows.tools"),
+        // The workflow service returns two sibling arrays rather than a
+        // conventional `items` wrapper. Declare both explicitly so terminal
+        // output renders them as separate tables instead of calling the shape
+        // unrecognized.
+        OneWorkflowsCommand::Tools { .. } => list("one.workflows.tools")
+            .with_named_collections(&["tools", "toolsByProductCapabilityId"]),
         OneWorkflowsCommand::Upload { .. } => result("one.workflows.upload"),
         OneWorkflowsCommand::Dependencies { .. } => list("one.workflows.dependencies"),
         OneWorkflowsCommand::Count { .. } => detail("one.workflows.count"),
@@ -398,7 +403,17 @@ fn connector_metadata_descriptor(command: &OneConnectorMetadataCommand) -> Outpu
 
 fn connection_permissions_descriptor(command: &OneConnectionPermissionCommand) -> OutputDescriptor {
     match command {
-        OneConnectionPermissionCommand::List { .. } => list("one.connections.permissions.list"),
+        OneConnectionPermissionCommand::List { .. } => list("one.connections.permissions.list")
+            .with_collection_keys(&["permission_rows"])
+            .with_fields(&[
+                "subject_type",
+                "subject_id",
+                "display_identity",
+                "role",
+                "policy",
+                "created",
+                "source",
+            ]),
         OneConnectionPermissionCommand::Detail { .. } => {
             detail("one.connections.permissions.detail")
         }
@@ -876,6 +891,16 @@ mod tests {
         assert!(workflow.fields.contains(&"owner"));
         assert!(workflow.fields.contains(&"last_updated_at"));
         assert!(workflow.fields.contains(&"workflow_version"));
+
+        let workflow_tools = output_descriptor(&OneCommand::Workflows {
+            command: OneWorkflowsCommand::Tools { profile: None },
+        });
+        assert_eq!(workflow_tools.command, "one.workflows.tools");
+        assert_eq!(
+            workflow_tools.named_collections,
+            &["tools", "toolsByProductCapabilityId"],
+            "workflow tools must explicitly declare its two sibling collections"
+        );
 
         let groups = output_descriptor(&OneCommand::Workspace {
             command: OneWorkspaceCommand::Groups { workspace_id: None },

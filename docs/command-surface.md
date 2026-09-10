@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json-full` _on 2026-09-09 18:19:12 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json` _on 2026-09-10 21:43:23 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 416
+- Commands: 401
 - Capabilities: 6
 
 ## Commands
@@ -154,21 +154,6 @@ cargo run -q -p xtask -- refresh-command-surface
 | Name | Path | Safety | Mutating | Summary |
 | --- | --- | --- | --- | --- |
 | one | `one` | unclassified |  | Alteryx One command surface |
-| one agent-assets | `one/agent-assets` | unclassified |  | Manage Agent Studio MCP asset registration |
-| one agent-assets agents | `one/agent-assets/agents` | unclassified |  | List, create, update, and delete Agent Studio agents |
-| one agent-assets agents create | `one/agent-assets/agents/create` | unclassified |  | Create an Agent Studio agent from a JSON payload |
-| one agent-assets agents delete | `one/agent-assets/agents/delete` | unclassified |  | Delete an Agent Studio agent |
-| one agent-assets agents detail | `one/agent-assets/agents/detail` | unclassified |  | Inspect one Agent Studio agent |
-| one agent-assets agents list | `one/agent-assets/agents/list` | unclassified |  | List Agent Studio agents |
-| one agent-assets agents prompt | `one/agent-assets/agents/prompt` | unclassified |  | Submit a prompt to an Agent Studio agent |
-| one agent-assets agents update | `one/agent-assets/agents/update` | unclassified |  | Update an Agent Studio agent from a JSON payload |
-| one agent-assets datasets | `one/agent-assets/datasets` | unclassified |  | Manage datasets registered for Agent Studio Insights |
-| one agent-assets datasets list | `one/agent-assets/datasets/list` | unclassified |  | List datasets known to Agent Studio, including MCP preparation state |
-| one agent-assets datasets set | `one/agent-assets/datasets/set` | unclassified |  | Enable or disable a dataset for Agent Studio Insights |
-| one agent-assets workflows | `one/agent-assets/workflows` | unclassified |  | Manage workflow shortcuts registered for Agent Studio Apps |
-| one agent-assets workflows disable | `one/agent-assets/workflows/disable` | unclassified |  | Remove a workflow's Agent Studio Apps shortcut |
-| one agent-assets workflows enable | `one/agent-assets/workflows/enable` | unclassified |  | Register a workflow as an Agent Studio Apps shortcut |
-| one agent-assets workflows list | `one/agent-assets/workflows/list` | unclassified |  | List workflows and their Agent Studio shortcut state |
 | one api | `one/api` | unclassified |  | Alteryx One API introspection (spec + coverage) |
 | one api coverage | `one/api/coverage` | read-only | no | Diff the live One OpenAPI spec against wired commands (covered / missing / stale) |
 | one api diagnose | `one/api/diagnose` | read-only | no | Validate Alteryx One API reachability and auth posture |

@@ -57,19 +57,16 @@ Legacy YAML import remains supported through:
 
 - `--output text`
 - `--output json`
-- `--output json-full`
 - `--output yaml`
 - `--output table`
 
-`json` is the versioned compact presentation contract (`schema_version:
-"ayx.output.v1"`) and is capped at 20 projected list rows unless overridden
-with `--output-limit`; use `0` for no compact-list cap. `json-full` and YAML
-serialize the full, recursively redacted envelope. Raw-field scripts must use
-`json-full`.
+`json` and YAML serialize the complete, recursively redacted envelope. Human
+list views are capped at 20 projected rows unless overridden with
+`--output-limit`; use `0` for no cap. Raw-field scripts use `json`.
 
 Two more global flags post-process the rendered result: `--jq <FILTER>` runs a
 jq filter (pure-Rust `jaq`) over the JSON output and prints one value per
-line, forcing `--output json` unless `--output json-full` is given; `--raw-output`
+line, forcing `--output json`; `--raw-output`
 / `-r` (requires `--jq`) prints string results unquoted. A filter that fails to
 parse, compile, or run exits 2 (`validation`), matching every other
 `validation`-class failure.

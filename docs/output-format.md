@@ -1,19 +1,14 @@
 # Output Format
 
-`ayx` has two JSON contracts:
-
-- `--output json` is the compact, versioned `ayx.output.v1` presentation
-  envelope. It is the default structured result for normal inspection and
-  automation.
-- `--output json-full` is the complete, recursively redacted envelope for
-  callers that need raw API fields, export text, or every returned item.
+`ayx` has one JSON contract: `--output json` is the complete, recursively
+redacted envelope for automation, raw API inspection, and export metadata.
 
 For clean docs, scripts, and agent runs, put the global output flag after the
 complete command path:
 
 ```powershell
-ayx discover --output json-full
-ayx catalog list --format full --scope all --output json-full
+ayx discover --output json
+ayx catalog list --format full --scope all --output json
 ayx actions list --output json
 ayx actions workflows list --output json
 ```
@@ -37,12 +32,10 @@ Resolution order for the effective mode:
 Piping `ayx … | less` therefore shows JSON since 0.20.0; set `AYX_OUTPUT=text`
 in your shell profile if you prefer the text renderer in pipes.
 
-Compact list output defaults to 20 projected rows. Use `--output-limit N` to
-change that limit, or `--output-limit 0` for every projected row. Use
-`json-full` when a script needs unprojected/nested fields; its payload is still
-redacted for credentials and secrets. In particular, use `json-full` for
-`discover --deep` because compact JSON omits the command tree needed for
-progressive traversal.
+Human list output defaults to 20 projected rows. Use `--output-limit N` to
+change that limit, or `--output-limit 0` for every projected row. JSON always
+retains the complete redacted response, including nested fields and command
+trees.
 
 Notes:
 
@@ -60,8 +53,7 @@ Notes:
 `--jq <FILTER>` runs a jq filter (pure-Rust `jaq`; jq 1.7 syntax and the
 standard library) over the rendered JSON and prints one value per line.
 `--raw-output` / `-r` prints string results without quotes. `--jq` forces
-`--output json` unless `--output json-full` is given, and it runs after
-redaction and `--output-limit`, so it cannot reveal anything the plain output
+`--output json`, and it runs after redaction, so it cannot reveal anything the plain output
 would not. A filter that fails to parse, compile, or run is a `validation`
 error (exit 2).
 

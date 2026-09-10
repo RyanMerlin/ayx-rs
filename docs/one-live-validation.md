@@ -6,9 +6,8 @@ release-testing procedure.
 This document tracks the live validation strategy for the wired Alteryx One surface.
 
 > **Output-contract note:** the historical command snippets below inspect raw
-> `.data.*` fields with `jq`. Run those snippets as `<full command> --output
-> json-full` (trailing placement), not as `ayx --output json <command>`.
-> `--output json` now returns the compact `ayx.output.v1` presentation envelope.
+> `.data.*` fields with `jq`. Use `--output json`: it is the complete,
+> recursively redacted canonical envelope.
 
 ## Coverage Model
 

@@ -283,11 +283,7 @@ struct Cli {
     /// on individual commands as a deprecated compatibility alias.
     #[arg(long, global = true)]
     page_size: Option<u32>,
-    /// Format command errors independently from successful command output.
-    #[arg(long, value_enum, default_value_t = output::ErrorFormat::Text, global = true)]
-    error_format: output::ErrorFormat,
-    /// Maximum list rows in text and compact JSON output; 0 shows every
-    /// projected row. Does not affect `--output json-full`.
+    /// Maximum list rows in human output; 0 shows every projected row.
     #[arg(long, default_value_t = output::DEFAULT_OUTPUT_LIMIT, global = true)]
     output_limit: usize,
     /// Select a named environment from environments.yaml for this run.
@@ -323,7 +319,7 @@ struct Cli {
     #[arg(long, global = true)]
     yes: bool,
     /// Apply a jq filter to the JSON result and print one value per line.
-    /// Forces `--output json` unless `--output json-full` is given.
+    /// Forces `--output json`.
     #[arg(long, global = true, value_name = "FILTER")]
     jq: Option<String>,
     /// With --jq, print string results without quotes (like `jq -r`).
@@ -1235,10 +1231,20 @@ mongo:
 
     #[test]
     fn accepts_known_output_formats() {
-        for fmt in ["text", "json", "json-full", "yaml", "table"] {
+        for fmt in ["text", "json", "yaml", "table"] {
             let parsed = Cli::try_parse_from(["ayx", "--output", fmt, "profile", "current"]);
             assert!(parsed.is_ok(), "clap should accept --output {fmt}");
         }
+    }
+
+    #[test]
+    fn rejects_retired_output_variants_and_error_format_override() {
+        assert!(
+            Cli::try_parse_from(["ayx", "--output", "json-full", "profile", "current"]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["ayx", "--error-format", "json", "profile", "current"]).is_err()
+        );
     }
 
     #[test]
@@ -2312,7 +2318,12 @@ pub(crate) enum OneCommand {
     #[command(
         about = "Manage Agent Studio MCP asset registration",
         long_about = "Manage Agent Studio agents and MCP registration state for One datasets and cloud-native workflows.\n\nThese operations use the Agent Studio service surface, not the public One OpenAPI surface. Dataset registration enables Insights; workflow registration creates an Apps shortcut.",
-        arg_required_else_help = true
+        arg_required_else_help = true,
+        // The vendor surface rejects both supported bearer credential kinds.
+        // Retain the implementation only as a preview seam until a supported
+        // bearer-token contract exists; hidden commands are omitted by help,
+        // discover, command-surface generation, and catalog validation.
+        hide = true
     )]
     AgentAssets {
         #[command(subcommand)]
@@ -6896,15 +6907,14 @@ fn main() -> Result<()> {
     // to `Command::Completions`, deliberately overriding the exemption above.
     let jq_filter = cli.jq.clone();
     let raw_output = cli.raw_output;
-    let output = match (&jq_filter, output) {
-        (Some(_), output::OutputMode::JsonFull) => output::OutputMode::JsonFull,
-        (Some(_), _) => output::OutputMode::Json,
-        (None, mode) => mode,
+    let output = if jq_filter.is_some() {
+        output::OutputMode::Json
+    } else {
+        output
     };
     if cli.debug {
         eprintln!("[ayx-debug] output mode {output} ({output_source:?})");
     }
-    let error_format = cli.error_format;
     let output_limit = cli.output_limit;
     let descriptor = output_descriptor(&cli.command);
 
@@ -7005,17 +7015,8 @@ fn main() -> Result<()> {
             // non-zero via process::exit (like the ok=false branch) rather than
             // returning Err, which would make the runtime print a second,
             // non-JSON `Error: ...` line and corrupt the stderr envelope.
-            let rendered = format_envelope(
-                &err_env,
-                if error_format == output::ErrorFormat::Json {
-                    output::OutputMode::Json
-                } else {
-                    output
-                },
-                descriptor,
-                output_limit,
-            )
-            .unwrap_or_else(|_| err_env.message.clone());
+            let rendered = format_envelope(&err_env, output, descriptor, output_limit)
+                .unwrap_or_else(|_| err_env.message.clone());
             // `--jq` applies to dispatcher-level failures too, not just the
             // Ok(envelope) path -- a jq failure here still prints a
             // validation envelope and exits with its code, exactly like the
@@ -7235,7 +7236,7 @@ fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static s
             "The response is partial. Resume with the returned next_page_token or raise --max-pages.",
         ),
         OutputClassification => {
-            Some("Use --output json-full to inspect the sanitized upstream envelope.")
+            Some("Use --output json to inspect the sanitized upstream envelope.")
         }
         Internal => None,
     }

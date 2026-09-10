@@ -1,6 +1,8 @@
 use anyhow::{Result, bail};
 use ayx_core::envelope::{Envelope, ErrorCode};
-use ayx_one_api::{one_api_live_request, one_api_live_request_with_body};
+use ayx_one_api::{
+    OneListParams, one_api_list_request, one_api_live_request, one_api_live_request_with_body,
+};
 use serde_json::{Value, json};
 
 use crate::{
@@ -131,6 +133,97 @@ pub(crate) fn find_shared_subject(
         }
     }
     None
+}
+
+/// Flatten the provider's split `people`/`groups` permission response into
+/// operator rows. A grant remains a row (rather than a map keyed by subject),
+/// because the same subject can legitimately have distinct policy/role grants.
+/// `people` is the one bounded workspace listing collected by the caller;
+/// group names are taken from the grant itself because this API exposes no
+/// equivalent group-directory lookup here.
+pub(crate) fn flatten_connection_permission_grants(
+    shared_subjects: &Value,
+    people: &[Value],
+    people_lookup_succeeded: bool,
+) -> Vec<Value> {
+    let people_by_id: std::collections::BTreeMap<String, String> = people
+        .iter()
+        .filter_map(|person| {
+            let id = json_id(person.get("id")?)?;
+            let identity = ["displayName", "name", "email"]
+                .iter()
+                .find_map(|key| non_empty_string(person.get(*key)))
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("unresolved person {id}"));
+            Some((id, identity))
+        })
+        .collect();
+
+    let mut rows = Vec::new();
+    for (bucket, subject_type) in [("people", "person"), ("groups", "group")] {
+        for grant in shared_subjects
+            .get(bucket)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(subject_id) = ["subjectId", "id"]
+                .iter()
+                .find_map(|key| grant.get(*key).and_then(json_id))
+            else {
+                continue;
+            };
+            let display_identity = if subject_type == "person" {
+                people_by_id.get(&subject_id).cloned().unwrap_or_else(|| {
+                    if people_lookup_succeeded {
+                        format!("unresolved person {subject_id}")
+                    } else {
+                        format!("unresolved person {subject_id} (lookup unavailable)")
+                    }
+                })
+            } else {
+                ["displayName", "name", "email"]
+                    .iter()
+                    .find_map(|key| non_empty_string(grant.get(*key)))
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("unresolved group {subject_id}"))
+            };
+            rows.push(json!({
+                "subject_type": subject_type,
+                "subject_id": subject_id,
+                "display_identity": display_identity,
+                "role": first_grant_value(grant, &["role", "roleTag"]),
+                "policy": first_grant_value(grant, &["policy", "policyTag"]),
+                "created": first_grant_value(grant, &["created", "isCreated", "createdAt"]),
+                "source": first_grant_value(grant, &["source", "sourceType", "createdBy"]),
+                "grant_source": format!("connection.sharedSubjects.{bucket}"),
+            }));
+        }
+    }
+    rows
+}
+
+fn json_id(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.clone()),
+        Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+/// Provider payloads commonly encode an unknown display field as `""`.
+/// Treat that as absent so terminal rows always make unresolved identities
+/// explicit instead of presenting a misleading blank cell.
+fn non_empty_string(value: Option<&Value>) -> Option<&str> {
+    value
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn first_grant_value(grant: &Value, keys: &[&str]) -> Value {
+    keys.iter()
+        .find_map(|key| grant.get(*key).cloned())
+        .unwrap_or(Value::Null)
 }
 
 /// Build a connection create-body template from connector metadata returned by
@@ -511,7 +604,7 @@ pub(crate) fn execute(
         OneConnectionsCommand::Permissions { command } => match command {
             OneConnectionPermissionCommand::List { profile, id } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
-                one_api_live_request(
+                let mut envelope = one_api_live_request(
                     &config,
                     "connection",
                     "permissions",
@@ -519,7 +612,67 @@ pub(crate) fn execute(
                     "/v4/connections/{id}/permissions/sharedSubjects",
                     false,
                     &[("id", id.as_str())],
-                )?
+                )?;
+                if !envelope.ok {
+                    return Ok(envelope);
+                }
+                // A single, bounded people listing resolves every people grant.
+                // Failure is intentionally partial: the provider's permission
+                // response is still useful, and unresolved rows say why.
+                let people_lookup = one_api_list_request(
+                    &config,
+                    "connection",
+                    "permissions-people-lookup",
+                    "/v4/people",
+                    &[],
+                    &OneListParams::new().with_limit(Some(200)),
+                );
+                let (people_lookup_succeeded, people, lookup_error_code) = match people_lookup {
+                    Ok(people_envelope) if people_envelope.ok => (
+                        true,
+                        people_envelope
+                            .data
+                            .get("items")
+                            .and_then(Value::as_array)
+                            .cloned()
+                            .unwrap_or_default(),
+                        Value::Null,
+                    ),
+                    Ok(people_envelope) => (
+                        false,
+                        Vec::new(),
+                        people_envelope
+                            .error_code
+                            .map(|code| Value::String(code.as_str().to_string()))
+                            .unwrap_or_else(|| Value::String("lookup_failed".to_string())),
+                    ),
+                    // The grants have already been fetched successfully. Keep
+                    // them useful even if the bounded identity enrichment has
+                    // a transport failure; do not leak the transport prose.
+                    Err(_) => (
+                        false,
+                        Vec::new(),
+                        Value::String("lookup_failed".to_string()),
+                    ),
+                };
+                let rows = flatten_connection_permission_grants(
+                    envelope.data.get("response").unwrap_or(&Value::Null),
+                    &people,
+                    people_lookup_succeeded,
+                );
+                if let Some(data) = envelope.data.as_object_mut() {
+                    data.insert("permission_rows".to_string(), Value::Array(rows));
+                    data.insert(
+                        "people_lookup".to_string(),
+                        json!({
+                            "status": if people_lookup_succeeded { "ok" } else { "failed" },
+                            "bounded": true,
+                            "returned_count": people.len(),
+                            "error_code": lookup_error_code,
+                        }),
+                    );
+                }
+                envelope
             }
             OneConnectionPermissionCommand::Create {
                 profile,
@@ -658,7 +811,7 @@ pub(crate) fn execute(
 mod share_tests {
     use super::{
         build_connection_share_body, build_connection_unshare_query, find_shared_subject,
-        validate_connection_share_body,
+        flatten_connection_permission_grants, validate_connection_share_body,
     };
     use crate::{ConnectionSharePolicy, ShareSubjectType};
     use serde_json::json;
@@ -775,6 +928,60 @@ mod share_tests {
         assert!(find_shared_subject(&json!({}), "1").is_none());
         assert!(find_shared_subject(&serde_json::Value::Null, "1").is_none());
         assert!(find_shared_subject(&json!({ "people": "not-an-array" }), "1").is_none());
+    }
+
+    #[test]
+    fn permission_rows_flatten_buckets_resolve_people_and_keep_distinct_grants() {
+        let rows = flatten_connection_permission_grants(
+            &json!({
+                "people": [
+                    {"subjectId": 7, "policyTag": "VIEWER", "source": "direct"},
+                    {"subjectId": 7, "policyTag": "EDITOR", "source": "inherited"}
+                ],
+                "groups": [{"id": 9, "name": "Analysts", "role": "member", "created": true}]
+            }),
+            &[json!({"id": 7, "displayName": "Ada Lovelace"})],
+            true,
+        );
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0]["subject_type"], "person");
+        assert_eq!(rows[0]["display_identity"], "Ada Lovelace");
+        assert_eq!(rows[0]["policy"], "VIEWER");
+        assert_eq!(rows[1]["policy"], "EDITOR");
+        assert_eq!(rows[2]["subject_type"], "group");
+        assert_eq!(rows[2]["display_identity"], "Analysts");
+        assert_eq!(rows[2]["created"], true);
+    }
+
+    #[test]
+    fn permission_rows_make_missing_names_and_partial_lookup_explicit() {
+        let rows = flatten_connection_permission_grants(
+            &json!({
+                "people": [{"id": 11}],
+                "groups": [{"subjectId": "ops"}]
+            }),
+            &[],
+            false,
+        );
+        assert_eq!(
+            rows[0]["display_identity"],
+            "unresolved person 11 (lookup unavailable)"
+        );
+        assert_eq!(rows[1]["display_identity"], "unresolved group ops");
+    }
+
+    #[test]
+    fn permission_rows_treat_blank_upstream_names_as_unresolved() {
+        let rows = flatten_connection_permission_grants(
+            &json!({
+                "people": [{"id": 11}],
+                "groups": [{"subjectId": "ops", "displayName": "", "name": "  "}]
+            }),
+            &[json!({"id": 11, "displayName": "", "name": "\t", "email": ""})],
+            true,
+        );
+        assert_eq!(rows[0]["display_identity"], "unresolved person 11");
+        assert_eq!(rows[1]["display_identity"], "unresolved group ops");
     }
 }
 

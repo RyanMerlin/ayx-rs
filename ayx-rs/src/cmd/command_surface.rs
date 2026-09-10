@@ -276,6 +276,14 @@ mod tests {
 
         for (method, path, commands) in ayx_one_api::inventory_endpoints_full() {
             for name in commands {
+                // Agent Assets remains in the endpoint inventory as evidence
+                // of the observed vendor routes, but is deliberately hidden
+                // while those routes reject every supported bearer credential.
+                // Hidden preview commands are not copy-pasteable public CLI
+                // surface and therefore do not participate in this check.
+                if name.starts_with("one agent-assets ") {
+                    continue;
+                }
                 let as_path = name.replace(' ', "/");
                 if !live.contains(&as_path) {
                     unknown.push(format!("  {name:?} (from {method} {path})"));

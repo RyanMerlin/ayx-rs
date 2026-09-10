@@ -39,7 +39,7 @@ fn command_names(tree: &Value, prefix: &str, names: &mut Vec<String>) {
 
 #[test]
 fn discovery_exposes_agent_crud_paths_from_live_tree() {
-    let value = json(&["discover", "one", "--deep", "--output", "json-full"]);
+    let value = json(&["discover", "one", "--deep", "--output", "json"]);
     assert_eq!(value["data"]["schema_version"], 1);
 
     let mut names = Vec::new();
@@ -70,7 +70,7 @@ fn discovery_exposes_agent_crud_paths_from_live_tree() {
 
 #[test]
 fn trailing_json_output_is_supported_for_discovery_and_help() {
-    let discovery = run(&["discover", "--deep", "--output", "json-full"]);
+    let discovery = run(&["discover", "--deep", "--output", "json"]);
     assert!(discovery.status.success());
     let value: Value = serde_json::from_slice(&discovery.stdout).expect("valid discovery JSON");
     assert_eq!(value["data"]["binary"], "ayx");

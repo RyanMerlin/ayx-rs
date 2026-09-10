@@ -318,7 +318,7 @@ fn first_list_item_field(stdout: &str, field_keys: &[&str]) -> Option<String> {
 fn require_live_flow_id(live: &LiveSmokeContext) -> Option<String> {
     require_live_list_item_id(
         live,
-        &["--output", "json-full", "one", "flows", "list"],
+        &["--output", "json", "one", "flows", "list"],
         &["id", "flowId", "flow_id"],
         "flow",
     )
@@ -327,7 +327,7 @@ fn require_live_flow_id(live: &LiveSmokeContext) -> Option<String> {
 fn require_live_folder_id(live: &LiveSmokeContext) -> Option<String> {
     require_live_list_item_id(
         live,
-        &["--output", "json-full", "one", "flows", "folders", "list"],
+        &["--output", "json", "one", "flows", "folders", "list"],
         &["id", "folderId", "folder_id"],
         "folder",
     )
@@ -336,7 +336,7 @@ fn require_live_folder_id(live: &LiveSmokeContext) -> Option<String> {
 fn require_live_job_group_id(live: &LiveSmokeContext) -> Option<String> {
     require_live_list_item_id(
         live,
-        &["--output", "json-full", "one", "job-groups", "list"],
+        &["--output", "json", "one", "job-groups", "list"],
         &["id", "jobGroupId", "job_group_id"],
         "job group",
     )
@@ -345,7 +345,7 @@ fn require_live_job_group_id(live: &LiveSmokeContext) -> Option<String> {
 fn require_live_output_object_id(live: &LiveSmokeContext) -> Option<String> {
     require_live_list_item_id(
         live,
-        &["--output", "json-full", "one", "output-objects", "list"],
+        &["--output", "json", "one", "output-objects", "list"],
         &["id", "outputObjectId", "output_object_id"],
         "output object",
     )
@@ -354,7 +354,7 @@ fn require_live_output_object_id(live: &LiveSmokeContext) -> Option<String> {
 fn require_live_workflow_id(live: &LiveSmokeContext) -> Option<String> {
     require_live_list_item_id(
         live,
-        &["--output", "json-full", "one", "workflows", "list"],
+        &["--output", "json", "one", "workflows", "list"],
         &["id", "workflowId", "workflow_id"],
         "workflow",
     )
@@ -363,7 +363,7 @@ fn require_live_workflow_id(live: &LiveSmokeContext) -> Option<String> {
 fn require_live_write_setting_id(live: &LiveSmokeContext) -> Option<String> {
     require_live_list_item_id(
         live,
-        &["--output", "json-full", "one", "write-settings", "list"],
+        &["--output", "json", "one", "write-settings", "list"],
         &["id", "writeSettingId", "write_setting_id"],
         "write setting",
     )
@@ -382,7 +382,7 @@ fn require_live_write_setting_id(live: &LiveSmokeContext) -> Option<String> {
 /// unconditionally.
 fn require_live_person_email(live: &LiveSmokeContext) -> Option<String> {
     let (success, stdout, stderr) =
-        run_ayx_result(&["--output", "json-full", "one", "person", "list"], live);
+        run_ayx_result(&["--output", "json", "one", "person", "list"], live);
     if !success {
         if live_auth_unavailable(&stderr) {
             return None;
@@ -568,8 +568,7 @@ fn live_smoke_requires_a_live_token() {
     }
 
     let live = LiveSmokeContext::new();
-    let (success, stdout, stderr) =
-        run_ayx_result(&["--output", "json-full", "one", "token"], &live);
+    let (success, stdout, stderr) = run_ayx_result(&["--output", "json", "one", "token"], &live);
 
     if success {
         assert_live_ok(&stdout);
@@ -603,7 +602,7 @@ fn live_smoke_requires_a_live_token() {
 
 live_case!(
     one_workspace_current_live,
-    args = ["--output", "json-full", "one", "workspace", "current"],
+    args = ["--output", "json", "one", "workspace", "current"],
     ok = [
         "\"surface\": \"workspace\"",
         "\"operation\": \"workspace-current\""
@@ -616,14 +615,14 @@ live_case!(
 
 live_case!(
     one_plans_count_live,
-    args = ["--output", "json-full", "one", "plans", "count"],
+    args = ["--output", "json", "one", "plans", "count"],
     ok = ["\"surface\": \"plans\"", "\"operation\": \"count\""],
     fail = ["\"error_code\": \"permission_denied\""]
 );
 
 live_case!(
     one_doctor_discover_live,
-    args = ["--output", "json-full", "one", "doctor", "discover"],
+    args = ["--output", "json", "one", "doctor", "discover"],
     ok = ["\"checks\""],
     fail = [
         "\"error_code\": \"permission_denied\"",
@@ -633,7 +632,7 @@ live_case!(
 
 live_unexpected_case!(
     one_doctor_auth_live,
-    args = ["--output", "json-full", "one", "doctor", "auth"],
+    args = ["--output", "json", "one", "doctor", "auth"],
     ok = [
         "\"surface\": \"auth\"",
         "\"diagnosis\":",
@@ -644,7 +643,7 @@ live_unexpected_case!(
 
 live_unexpected_case!(
     one_api_status_live,
-    args = ["--output", "json-full", "one", "api", "status"],
+    args = ["--output", "json", "one", "api", "status"],
     ok = [
         "\"product\": \"Alteryx One\"",
         "\"base_url\":",
@@ -654,7 +653,7 @@ live_unexpected_case!(
 
 live_unexpected_case!(
     one_workspace_list_live,
-    args = ["--output", "json-full", "one", "workspace", "list"],
+    args = ["--output", "json", "one", "workspace", "list"],
     ok = [
         "\"surface\": \"workspace\"",
         "\"operation\": \"workspace-list\"",
@@ -667,7 +666,7 @@ live_page_boundary_case!(
     one_workspace_list_page_boundary_live,
     args = [
         "--output",
-        "json-full",
+        "json",
         "one",
         "workspace",
         "list",
@@ -685,7 +684,7 @@ live_page_boundary_case!(
 
 live_case!(
     one_person_current_live,
-    args = ["--output", "json-full", "one", "person", "current"],
+    args = ["--output", "json", "one", "person", "current"],
     ok = [
         "\"surface\": \"person\"",
         "\"operation\": \"person-current\""
@@ -700,7 +699,7 @@ live_page_boundary_case!(
     one_person_list_page_boundary_live,
     args = [
         "--output",
-        "json-full",
+        "json",
         "one",
         "person",
         "list",
@@ -715,7 +714,7 @@ live_page_boundary_case!(
 
 live_case!(
     one_token_list_live,
-    args = ["--output", "json-full", "one", "token"],
+    args = ["--output", "json", "one", "token"],
     ok = [
         "\"surface\": \"token\"",
         "\"operation\": \"api-access-tokens-list\""
@@ -728,7 +727,7 @@ live_case!(
 
 live_case!(
     one_plans_list_live,
-    args = ["--output", "json-full", "one", "plans", "list"],
+    args = ["--output", "json", "one", "plans", "list"],
     ok = [
         "\"surface\": \"plans\"",
         "\"operation\": \"list\"",
@@ -750,7 +749,7 @@ fn one_token_detail_not_found_live() {
     let live = LiveSmokeContext::new();
     let Some(token_id) = require_live_list_item_id(
         &live,
-        &["--output", "json-full", "one", "token"],
+        &["--output", "json", "one", "token"],
         &["id", "tokenId", "token_id"],
         "token",
     ) else {
@@ -761,7 +760,7 @@ fn one_token_detail_not_found_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "token",
             "detail",
@@ -785,7 +784,7 @@ live_page_boundary_case!(
     one_plans_list_page_boundary_live,
     args = [
         "--output",
-        "json-full",
+        "json",
         "one",
         "plans",
         "list",
@@ -800,7 +799,7 @@ live_page_boundary_case!(
 
 live_case!(
     one_flows_list_live,
-    args = ["--output", "json-full", "one", "flows", "list"],
+    args = ["--output", "json", "one", "flows", "list"],
     ok = [
         "\"surface\": \"flow\"",
         "\"operation\": \"list\"",
@@ -817,7 +816,7 @@ live_page_boundary_case!(
     one_flows_list_page_boundary_live,
     args = [
         "--output",
-        "json-full",
+        "json",
         "one",
         "flows",
         "list",
@@ -832,7 +831,7 @@ live_page_boundary_case!(
 
 live_case!(
     one_flows_library_list_live,
-    args = ["--output", "json-full", "one", "flows", "library", "list"],
+    args = ["--output", "json", "one", "flows", "library", "list"],
     ok = ["\"surface\": \"flow\"", "\"operation\": \"library-list\""],
     fail = [
         "\"error_code\": \"permission_denied\"",
@@ -842,7 +841,7 @@ live_case!(
 
 live_case!(
     one_flows_library_count_live,
-    args = ["--output", "json-full", "one", "flows", "library", "count"],
+    args = ["--output", "json", "one", "flows", "library", "count"],
     ok = ["\"surface\": \"flow\"", "\"operation\": \"library-count\""],
     fail = [
         "\"error_code\": \"permission_denied\"",
@@ -852,7 +851,7 @@ live_case!(
 
 live_case!(
     one_flows_folders_list_live,
-    args = ["--output", "json-full", "one", "flows", "folders", "list"],
+    args = ["--output", "json", "one", "flows", "folders", "list"],
     ok = ["\"surface\": \"flow\"", "\"operation\": \"folders-list\""],
     fail = [
         "\"error_code\": \"permission_denied\"",
@@ -862,7 +861,7 @@ live_case!(
 
 live_case!(
     one_flows_folders_count_live,
-    args = ["--output", "json-full", "one", "flows", "folders", "count"],
+    args = ["--output", "json", "one", "flows", "folders", "count"],
     ok = ["\"surface\": \"flow\"", "\"operation\": \"folders-count\""],
     fail = [
         "\"error_code\": \"permission_denied\"",
@@ -878,14 +877,7 @@ fn one_flows_folders_limit_request_live() {
     let live = LiveSmokeContext::new();
     let (success, stdout, stderr) = run_ayx_result(
         &[
-            "--output",
-            "json-full",
-            "one",
-            "flows",
-            "folders",
-            "list",
-            "--limit",
-            "1",
+            "--output", "json", "one", "flows", "folders", "list", "--limit", "1",
         ],
         &live,
     );
@@ -923,13 +915,7 @@ fn one_flows_folders_detail_live_real_object() {
 
     let (success, stdout, stderr) = run_ayx_result(
         &[
-            "--output",
-            "json-full",
-            "one",
-            "flows",
-            "folders",
-            "detail",
-            &folder_id,
+            "--output", "json", "one", "flows", "folders", "detail", &folder_id,
         ],
         &live,
     );
@@ -962,7 +948,7 @@ fn one_flows_folders_detail_not_found_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "flows",
             "folders",
@@ -996,14 +982,7 @@ fn one_flows_folder_flows_list_live_real_object() {
 
     let (success, stdout, stderr) = run_ayx_result(
         &[
-            "--output",
-            "json-full",
-            "one",
-            "flows",
-            "folders",
-            "flows",
-            "list",
-            &folder_id,
+            "--output", "json", "one", "flows", "folders", "flows", "list", &folder_id,
         ],
         &live,
     );
@@ -1033,14 +1012,7 @@ fn one_flows_folder_flows_count_live_real_object() {
 
     let (success, stdout, stderr) = run_ayx_result(
         &[
-            "--output",
-            "json-full",
-            "one",
-            "flows",
-            "folders",
-            "flows",
-            "count",
-            &folder_id,
+            "--output", "json", "one", "flows", "folders", "flows", "count", &folder_id,
         ],
         &live,
     );
@@ -1075,7 +1047,7 @@ fn one_flows_permissions_dry_run_shape_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "flows",
             "permissions",
@@ -1115,7 +1087,7 @@ fn one_flows_move_dry_run_shape_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "flows",
             "move",
@@ -1155,7 +1127,7 @@ fn one_flows_replace_dataset_dry_run_shape_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "flows",
             "replace-dataset",
@@ -1192,7 +1164,7 @@ fn one_flows_folder_create_dry_run_shape_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "flows",
             "folders",
@@ -1232,7 +1204,7 @@ fn one_flows_folder_update_dry_run_shape_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "flows",
             "folders",
@@ -1270,13 +1242,7 @@ fn one_flows_folder_delete_dry_run_shape_live() {
 
     let (success, stdout, stderr) = run_ayx_result(
         &[
-            "--output",
-            "json-full",
-            "one",
-            "flows",
-            "folders",
-            "delete",
-            &folder_id,
+            "--output", "json", "one", "flows", "folders", "delete", &folder_id,
         ],
         &live,
     );
@@ -1306,7 +1272,7 @@ fn one_flows_detail_live_real_object() {
     };
 
     let (success, stdout, stderr) = run_ayx_result(
-        &["--output", "json-full", "one", "flows", "detail", &flow_id],
+        &["--output", "json", "one", "flows", "detail", &flow_id],
         &live,
     );
     if !success {
@@ -1338,7 +1304,7 @@ fn one_flows_detail_not_found_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "flows",
             "detail",
@@ -1370,14 +1336,7 @@ fn one_flows_validate_live_real_object() {
     };
 
     let (success, stdout, stderr) = run_ayx_result(
-        &[
-            "--output",
-            "json-full",
-            "one",
-            "flows",
-            "validate",
-            &flow_id,
-        ],
+        &["--output", "json", "one", "flows", "validate", &flow_id],
         &live,
     );
     if !success {
@@ -1406,14 +1365,7 @@ fn one_flows_parameters_live_real_object() {
     };
 
     let (success, stdout, stderr) = run_ayx_result(
-        &[
-            "--output",
-            "json-full",
-            "one",
-            "flows",
-            "parameters",
-            &flow_id,
-        ],
+        &["--output", "json", "one", "flows", "parameters", &flow_id],
         &live,
     );
     if !success {
@@ -1442,7 +1394,7 @@ fn one_flows_inputs_live_real_object() {
     };
 
     let (success, stdout, stderr) = run_ayx_result(
-        &["--output", "json-full", "one", "flows", "inputs", &flow_id],
+        &["--output", "json", "one", "flows", "inputs", &flow_id],
         &live,
     );
     if !success {
@@ -1471,7 +1423,7 @@ fn one_flows_outputs_live_real_object() {
     };
 
     let (success, stdout, stderr) = run_ayx_result(
-        &["--output", "json-full", "one", "flows", "outputs", &flow_id],
+        &["--output", "json", "one", "flows", "outputs", &flow_id],
         &live,
     );
     if !success {
@@ -1502,7 +1454,7 @@ fn one_flows_export_dry_run_live_real_object() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "flows",
             "export-dry-run",
@@ -1534,7 +1486,7 @@ fn one_connections_detail_not_found_live() {
     let live = LiveSmokeContext::new();
     let Some(connection_id) = require_live_list_item_id(
         &live,
-        &["--output", "json-full", "one", "connections", "list"],
+        &["--output", "json", "one", "connections", "list"],
         &["id", "connectionId", "connection_id"],
         "connection",
     ) else {
@@ -1545,7 +1497,7 @@ fn one_connections_detail_not_found_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "connections",
             "detail",
@@ -1574,7 +1526,7 @@ fn one_connections_detail_live_real_object() {
     let live = LiveSmokeContext::new();
     let Some(connection_id) = require_live_list_item_id(
         &live,
-        &["--output", "json-full", "one", "connections", "list"],
+        &["--output", "json", "one", "connections", "list"],
         &["id", "connectionId", "connection_id"],
         "connection",
     ) else {
@@ -1584,7 +1536,7 @@ fn one_connections_detail_live_real_object() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "connections",
             "detail",
@@ -1615,7 +1567,7 @@ fn one_connections_permissions_list_live_real_object() {
     let live = LiveSmokeContext::new();
     let Some(connection_id) = require_live_list_item_id(
         &live,
-        &["--output", "json-full", "one", "connections", "list"],
+        &["--output", "json", "one", "connections", "list"],
         &["id", "connectionId", "connection_id"],
         "connection",
     ) else {
@@ -1625,7 +1577,7 @@ fn one_connections_permissions_list_live_real_object() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "connections",
             "permissions",
@@ -1657,7 +1609,7 @@ fn one_connections_permissions_detail_not_found_live() {
     let live = LiveSmokeContext::new();
     let Some(connection_id) = require_live_list_item_id(
         &live,
-        &["--output", "json-full", "one", "connections", "list"],
+        &["--output", "json", "one", "connections", "list"],
         &["id", "connectionId", "connection_id"],
         "connection",
     ) else {
@@ -1668,7 +1620,7 @@ fn one_connections_permissions_detail_not_found_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "connections",
             "permissions",
@@ -1699,10 +1651,8 @@ fn one_connections_connector_metadata_defaults_live_real_object() {
     }
 
     let live = LiveSmokeContext::new();
-    let (success, list_stdout, list_stderr) = run_ayx_result(
-        &["--output", "json-full", "one", "connections", "list"],
-        &live,
-    );
+    let (success, list_stdout, list_stderr) =
+        run_ayx_result(&["--output", "json", "one", "connections", "list"], &live);
     if !success {
         if live_auth_unavailable(&list_stderr) {
             return;
@@ -1720,7 +1670,7 @@ fn one_connections_connector_metadata_defaults_live_real_object() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "connections",
             "connector-metadata",
@@ -1750,10 +1700,8 @@ fn one_connections_connector_metadata_publish_info_live_real_object() {
     }
 
     let live = LiveSmokeContext::new();
-    let (success, list_stdout, list_stderr) = run_ayx_result(
-        &["--output", "json-full", "one", "connections", "list"],
-        &live,
-    );
+    let (success, list_stdout, list_stderr) =
+        run_ayx_result(&["--output", "json", "one", "connections", "list"], &live);
     if !success {
         if live_auth_unavailable(&list_stderr) {
             return;
@@ -1771,7 +1719,7 @@ fn one_connections_connector_metadata_publish_info_live_real_object() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "connections",
             "connector-metadata",
@@ -1799,7 +1747,7 @@ fn one_connections_connector_metadata_publish_info_live_real_object() {
 
 live_case!(
     one_connections_list_live,
-    args = ["--output", "json-full", "one", "connections", "list"],
+    args = ["--output", "json", "one", "connections", "list"],
     ok = [
         "\"surface\": \"connection\"",
         "\"operation\": \"list\"",
@@ -1816,7 +1764,7 @@ live_page_boundary_case!(
     one_connections_list_page_boundary_live,
     args = [
         "--output",
-        "json-full",
+        "json",
         "one",
         "connections",
         "list",
@@ -1831,7 +1779,7 @@ live_page_boundary_case!(
 
 live_case!(
     one_job_groups_list_live,
-    args = ["--output", "json-full", "one", "job-groups", "list"],
+    args = ["--output", "json", "one", "job-groups", "list"],
     ok = [
         "\"surface\": \"jobGroup\"",
         "\"operation\": \"list\"",
@@ -1848,7 +1796,7 @@ live_page_boundary_case!(
     one_job_groups_list_page_boundary_live,
     args = [
         "--output",
-        "json-full",
+        "json",
         "one",
         "job-groups",
         "list",
@@ -1876,7 +1824,7 @@ fn one_job_groups_detail_not_found_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "job-groups",
             "detail",
@@ -1910,7 +1858,7 @@ fn one_job_groups_detail_live_real_object() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "job-groups",
             "detail",
@@ -1946,7 +1894,7 @@ fn one_job_groups_status_live_real_object() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "job-groups",
             "status",
@@ -1984,7 +1932,7 @@ fn one_job_groups_inspection_live_real_object() {
             "inputs",
             vec![
                 "--output",
-                "json-full",
+                "json",
                 "one",
                 "job-groups",
                 "inputs",
@@ -1995,7 +1943,7 @@ fn one_job_groups_inspection_live_real_object() {
             "outputs",
             vec![
                 "--output",
-                "json-full",
+                "json",
                 "one",
                 "job-groups",
                 "outputs",
@@ -2006,7 +1954,7 @@ fn one_job_groups_inspection_live_real_object() {
             "jobs",
             vec![
                 "--output",
-                "json-full",
+                "json",
                 "one",
                 "job-groups",
                 "jobs",
@@ -2017,7 +1965,7 @@ fn one_job_groups_inspection_live_real_object() {
             "publications",
             vec![
                 "--output",
-                "json-full",
+                "json",
                 "one",
                 "job-groups",
                 "publications",
@@ -2028,7 +1976,7 @@ fn one_job_groups_inspection_live_real_object() {
             "profile",
             vec![
                 "--output",
-                "json-full",
+                "json",
                 "one",
                 "job-groups",
                 "profile",
@@ -2039,7 +1987,7 @@ fn one_job_groups_inspection_live_real_object() {
             "profile-results",
             vec![
                 "--output",
-                "json-full",
+                "json",
                 "one",
                 "job-groups",
                 "profile-results",
@@ -2050,7 +1998,7 @@ fn one_job_groups_inspection_live_real_object() {
             "pdf-results",
             vec![
                 "--output",
-                "json-full",
+                "json",
                 "one",
                 "job-groups",
                 "pdf-results",
@@ -2077,7 +2025,6 @@ fn one_job_groups_inspection_live_real_object() {
             // Profiling endpoints are similarly data-dependent: the route is
             // live, but a non-profiled job group has no artifact to return.
             if matches!(operation, "profile" | "profile-results" | "pdf-results")
-                && stderr.contains("\"error_code\": \"validation\"")
                 && stderr.contains("ProfilingDataNotFoundException")
             {
                 continue;
@@ -2095,7 +2042,7 @@ fn one_job_groups_inspection_live_real_object() {
 
 live_case!(
     one_output_objects_list_live,
-    args = ["--output", "json-full", "one", "output-objects", "list"],
+    args = ["--output", "json", "one", "output-objects", "list"],
     ok = [
         "\"surface\": \"outputObject\"",
         "\"operation\": \"list\"",
@@ -2112,7 +2059,7 @@ live_page_boundary_case!(
     one_output_objects_list_page_boundary_live,
     args = [
         "--output",
-        "json-full",
+        "json",
         "one",
         "output-objects",
         "list",
@@ -2140,7 +2087,7 @@ fn one_output_objects_detail_not_found_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "output-objects",
             "detail",
@@ -2179,7 +2126,7 @@ fn one_output_objects_wrangle_to_python_dry_run_shape_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "output-objects",
             "wrangle-to-python",
@@ -2209,7 +2156,7 @@ fn one_output_objects_wrangle_to_python_dry_run_shape_live() {
 
 live_case!(
     one_workflows_list_live,
-    args = ["--output", "json-full", "one", "workflows", "list"],
+    args = ["--output", "json", "one", "workflows", "list"],
     ok = [
         "\"surface\": \"workflow\"",
         "\"operation\": \"list\"",
@@ -2226,7 +2173,7 @@ live_page_boundary_case!(
     one_workflows_list_page_boundary_live,
     args = [
         "--output",
-        "json-full",
+        "json",
         "one",
         "workflows",
         "list",
@@ -2241,7 +2188,7 @@ live_page_boundary_case!(
 
 live_case!(
     one_workflows_tools_live,
-    args = ["--output", "json-full", "one", "workflows", "tools"],
+    args = ["--output", "json", "one", "workflows", "tools"],
     ok = ["\"surface\": \"workflow\"", "\"operation\": \"tools\""],
     fail = [
         "\"error_code\": \"permission_denied\"",
@@ -2258,10 +2205,8 @@ fn one_workflows_count_reports_collection_total_live() {
     }
 
     let live = LiveSmokeContext::new();
-    let (success, stdout, stderr) = run_ayx_result(
-        &["--output", "json-full", "one", "workflows", "count"],
-        &live,
-    );
+    let (success, stdout, stderr) =
+        run_ayx_result(&["--output", "json", "one", "workflows", "count"], &live);
     if !success {
         if live_auth_unavailable(&stderr) {
             return;
@@ -2291,7 +2236,7 @@ fn one_workflows_detail_live_real_object() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "workflows",
             "detail",
@@ -2328,7 +2273,7 @@ fn one_workflows_dependencies_live_real_object() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "workflows",
             "dependencies",
@@ -2362,7 +2307,7 @@ fn one_workflows_detail_not_found_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "workflows",
             "detail",
@@ -2397,14 +2342,7 @@ fn one_workflows_run_dry_run_shape_live() {
     };
 
     let (success, stdout, stderr) = run_ayx_result(
-        &[
-            "--output",
-            "json-full",
-            "one",
-            "workflows",
-            "run",
-            &workflow_id,
-        ],
+        &["--output", "json", "one", "workflows", "run", &workflow_id],
         &live,
     );
     if !success {
@@ -2438,7 +2376,7 @@ fn one_workflows_cancel_dry_run_shape_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "workflows",
             "cancel",
@@ -2480,7 +2418,7 @@ fn one_workflows_copy_dry_run_shape_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "workflows",
             "copy",
@@ -2534,7 +2472,7 @@ fn one_workflows_share_dry_run_shape_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "workflows",
             "share",
@@ -2622,7 +2560,7 @@ fn one_workflows_share_email_resolution_failure_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "workflows",
             "share",
@@ -2646,7 +2584,7 @@ fn one_workflows_share_email_resolution_failure_live() {
 
 live_case!(
     one_write_settings_list_live,
-    args = ["--output", "json-full", "one", "write-settings", "list"],
+    args = ["--output", "json", "one", "write-settings", "list"],
     ok = [
         "\"surface\": \"writeSetting\"",
         "\"operation\": \"list\"",
@@ -2663,7 +2601,7 @@ live_page_boundary_case!(
     one_write_settings_list_page_boundary_live,
     args = [
         "--output",
-        "json-full",
+        "json",
         "one",
         "write-settings",
         "list",
@@ -2691,7 +2629,7 @@ fn one_write_settings_detail_not_found_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "write-settings",
             "detail",
@@ -2713,7 +2651,7 @@ fn one_write_settings_detail_not_found_live() {
 
 live_case!(
     one_scheduling_list_live,
-    args = ["--output", "json-full", "one", "scheduling", "list"],
+    args = ["--output", "json", "one", "scheduling", "list"],
     ok = [
         "\"surface\": \"scheduling\"",
         "\"operation\": \"list\"",
@@ -2730,7 +2668,7 @@ live_page_boundary_case!(
     one_scheduling_list_page_boundary_live,
     args = [
         "--output",
-        "json-full",
+        "json",
         "one",
         "scheduling",
         "list",
@@ -2752,7 +2690,7 @@ fn one_plans_detail_not_found_live() {
     let live = LiveSmokeContext::new();
     let Some(plan_id) = require_live_list_item_id(
         &live,
-        &["--output", "json-full", "one", "plans", "list"],
+        &["--output", "json", "one", "plans", "list"],
         &["id", "planId", "plan_id"],
         "plan",
     ) else {
@@ -2763,7 +2701,7 @@ fn one_plans_detail_not_found_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "plans",
             "detail",
@@ -2792,7 +2730,7 @@ fn one_person_detail_not_found_live() {
     let live = LiveSmokeContext::new();
     let Some(person_id) = require_live_list_item_id(
         &live,
-        &["--output", "json-full", "one", "person", "list"],
+        &["--output", "json", "one", "person", "list"],
         &["id", "personId", "person_id"],
         "person",
     ) else {
@@ -2803,7 +2741,7 @@ fn one_person_detail_not_found_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "person",
             "detail",
@@ -2834,7 +2772,7 @@ fn one_connections_dry_run_shape_live() {
     let (success, stdout, stderr) = run_ayx_result(
         &[
             "--output",
-            "json-full",
+            "json",
             "one",
             "connections",
             "dry-run",
@@ -2887,72 +2825,72 @@ fn one_endpoint_matrix_spot_check_live() {
     let cases: &[(&str, &[&str], &str)] = &[
         (
             "platform.iam",
-            &["--output", "json-full", "one", "workspace", "current"],
+            &["--output", "json", "one", "workspace", "current"],
             "\"surface\": \"workspace\"",
         ),
         (
             "misc",
-            &["--output", "json-full", "one", "api", "coverage"],
+            &["--output", "json", "one", "api", "coverage"],
             "\"coverage_pct\"",
         ),
         (
             "plans",
-            &["--output", "json-full", "one", "plans", "list"],
+            &["--output", "json", "one", "plans", "list"],
             "\"surface\": \"plans\"",
         ),
         (
             "workflow",
-            &["--output", "json-full", "one", "workflows", "tools"],
+            &["--output", "json", "one", "workflows", "tools"],
             "\"surface\": \"workflow\"",
         ),
         (
             "flow",
-            &["--output", "json-full", "one", "flows", "count"],
+            &["--output", "json", "one", "flows", "count"],
             "\"surface\": \"flow\"",
         ),
         (
             "dataset",
-            &["--output", "json-full", "one", "datasets", "count"],
+            &["--output", "json", "one", "datasets", "count"],
             "\"surface\": \"datasets\"",
         ),
         (
             "connection",
-            &["--output", "json-full", "one", "connections", "count"],
+            &["--output", "json", "one", "connections", "count"],
             "\"surface\": \"connection\"",
         ),
         (
             "jobGroup",
-            &["--output", "json-full", "one", "job-groups", "count"],
+            &["--output", "json", "one", "job-groups", "count"],
             "\"surface\": \"jobGroup\"",
         ),
         (
             "outputObject",
-            &["--output", "json-full", "one", "output-objects", "count"],
+            &["--output", "json", "one", "output-objects", "count"],
             "\"surface\": \"outputObject\"",
         ),
         (
             "writeSetting",
-            &["--output", "json-full", "one", "write-settings", "count"],
+            &["--output", "json", "one", "write-settings", "count"],
             "\"surface\": \"writeSetting\"",
         ),
         (
             "scheduling",
-            &["--output", "json-full", "one", "scheduling", "count"],
+            &["--output", "json", "one", "scheduling", "count"],
             "\"surface\": \"scheduling\"",
         ),
         (
             "apiAccessTokens",
-            &["--output", "json-full", "one", "token"],
+            &["--output", "json", "one", "token"],
             "\"surface\": \"token\"",
         ),
         (
             "person",
-            &["--output", "json-full", "one", "person", "current"],
+            &["--output", "json", "one", "person", "current"],
             "\"surface\": \"person\"",
         ),
         (
             "workspace",
-            &["--output", "json-full", "one", "workspace", "list"],
+            &["--output", "json", "one", "workspace", "list"],
             "\"surface\": \"workspace\"",
         ),
     ];

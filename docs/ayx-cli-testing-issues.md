@@ -1,8 +1,8 @@
 # AYX CLI Testing Issues
 
 This log tracks issues found while exercising the AYX CLI through its live
-discovery surface. Commands in this document put `--output json` last for
-readability.
+discovery surface. `--output json` is the complete recursively redacted
+canonical envelope.
 
 ## Test context
 
@@ -126,7 +126,7 @@ excludes the current (`isAdmin: false`) user.
   `data.response`; paginated CLI-normalized results may place records under
   `data.items`.
 - Compact `json` intentionally omits the large discovery tree; use
-  `json-full` only for discovery/tree traversal or raw payload inspection.
+  `json` only for discovery/tree traversal or raw payload inspection.
 
 ## Issue 2 — managed-IAM role assignments are permission denied
 
@@ -180,36 +180,31 @@ ayx discover one --deep --output json
 
 ### Observed
 
-The command succeeds but returns the compact `ayx.output.v1` envelope with
-`data.omitted_fields` containing `tree`, `path`, `deep`, and `version`. The
-command tree is available with:
+The historical compact-output issue is resolved. The command returns the
+complete canonical envelope, including the command tree:
 
 ```text
-ayx discover one --deep --output json-full
+ayx discover one --deep --output json
 ```
 
 ### Resolution
 
-Agent guidance now uses compact `json` for ordinary results and escalates to
-`json-full` only when progressive discovery needs the omitted tree. This keeps
-normal responses small while preserving discovery as the source of truth.
+Agent guidance uses canonical `json` for ordinary results and discovery.
 
-## Issue 4 — raw-field tests must opt into `json-full`
+## Issue 4 — raw-field tests must opt into `json`
 
 Status: Fixed in test harness
 
 ### Reproduction
 
-The compact presentation intentionally omits raw fields such as `surface`,
-`operation`, and nested response data. A test that asserted those fields after
-running a command with `--output json` failed even though the API call returned
-HTTP 200.
+The historical compact presentation omitted raw fields such as `surface`,
+`operation`, and nested response data.
 
 ### Resolution
 
-Agent and test guidance now uses compact `json` for routing/status checks and
-`json-full` when asserting raw response fields, mutation previews, or discovery
-trees. The exit-regression test was updated accordingly.
+Canonical `json` now retains those fields, after recursive redaction. The
+exit-regression test and agent guidance use it for routing/status checks,
+mutation previews, and discovery trees.
 
 ## Live canary run — 2026-08-27
 
