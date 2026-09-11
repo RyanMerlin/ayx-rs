@@ -218,6 +218,13 @@ pub struct Remediation {
 #[derive(Debug, Serialize)]
 pub struct Envelope {
     pub ok: bool,
+    /// Dotted id of the command that produced this envelope (for example
+    /// `one.jobs.runs`), filled from the CLI's output descriptor when the
+    /// envelope is rendered. It is the key a caller correlates a result with
+    /// its invocation by, so it is emitted on failures as well as successes.
+    /// Absent when no command was resolved, rather than invented.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
     pub message: String,
     pub timestamp_utc: DateTime<Utc>,
     pub data: Value,
@@ -240,6 +247,7 @@ impl Envelope {
     pub fn ok(message: impl Into<String>) -> Self {
         Self {
             ok: true,
+            command: None,
             message: message.into(),
             timestamp_utc: Utc::now(),
             data: Value::Null,
@@ -253,6 +261,7 @@ impl Envelope {
     pub fn ok_with_data(message: impl Into<String>, data: Value) -> Self {
         Self {
             ok: true,
+            command: None,
             message: message.into(),
             timestamp_utc: Utc::now(),
             data,
@@ -266,6 +275,7 @@ impl Envelope {
     pub fn err_with_data(message: impl Into<String>, data: Value) -> Self {
         Self {
             ok: false,
+            command: None,
             message: message.into(),
             timestamp_utc: Utc::now(),
             data,
@@ -282,6 +292,7 @@ impl Envelope {
     pub fn err_coded(code: ErrorCode, message: impl Into<String>, data: Value) -> Self {
         Self {
             ok: false,
+            command: None,
             message: message.into(),
             timestamp_utc: Utc::now(),
             data,
@@ -296,6 +307,12 @@ impl Envelope {
     /// outer dispatch layer when classifying anyhow errors.
     pub fn with_error_code(mut self, code: ErrorCode) -> Self {
         self.error_code = Some(code);
+        self
+    }
+
+    /// Name the command that produced this envelope. See [`Envelope::command`].
+    pub fn with_command(mut self, command: impl Into<String>) -> Self {
+        self.command = Some(command.into());
         self
     }
 

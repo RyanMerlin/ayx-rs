@@ -20,13 +20,14 @@ Every JSON response uses the same envelope:
 ```json
 {
   "ok": true,
+  "command": "one.flows.list",
   "message": "…",
   "timestamp_utc": "…",
   "data": {}
 }
 ```
 
-Branch on `ok`, read `data` for the result. Failures use the same shape with `ok: false`, add an `error_code`, and are written to stderr instead of stdout.
+Branch on `ok`, read `data` for the result. Failures use the same shape with `ok: false`, add an `error_code`, and are written to stderr instead of stdout. `command` names the leaf that ran on both, so a log line can be traced back to the invocation that produced it.
 
 ## Dry-run by default
 

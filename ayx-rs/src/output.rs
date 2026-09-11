@@ -154,7 +154,10 @@ pub fn render_envelope(
     // Every machine-readable format starts from this one recursively-redacted
     // envelope.  Do not add a second "full" or compact JSON contract: a
     // caller must never have to choose between payload truth and safety.
-    let clean = redacted_envelope(envelope);
+    let mut clean = redacted_envelope(envelope);
+    // The descriptor is the one authority on which leaf ran; a compatibility
+    // alias reports its canonical id here, not the spelling that was typed.
+    clean.command = Some(descriptor.command.to_string());
     match mode {
         OutputMode::Json => Ok(serde_json::to_string_pretty(&clean)?),
         OutputMode::Yaml => serde_yaml::to_string(&clean)
@@ -197,6 +200,7 @@ pub fn render_envelope(
                 };
                 let projected = Envelope {
                     ok: clean.ok,
+                    command: clean.command.clone(),
                     message: clean.message.clone(),
                     timestamp_utc: clean.timestamp_utc,
                     data,
@@ -705,6 +709,7 @@ fn summary_projection(value: &Value) -> Value {
 pub fn redacted_envelope(envelope: &Envelope) -> Envelope {
     Envelope {
         ok: envelope.ok,
+        command: envelope.command.clone(),
         message: envelope.message.clone(),
         timestamp_utc: envelope.timestamp_utc,
         data: redact_value(&envelope.data, None),
@@ -1008,6 +1013,35 @@ mod tests {
         assert_eq!(value["data"]["nested"]["access_token"], "[REDACTED]");
         assert_eq!(value["data"]["nested"]["id"], 7);
         assert!(value.get("schema_version").is_none());
+    }
+
+    /// `command` is the correlation key a caller uses to tie a result back to
+    /// the invocation that produced it. It must be on the envelope itself --
+    /// success and failure alike -- in every machine format, and it must be the
+    /// descriptor's dotted id rather than anything reconstructed from argv.
+    #[test]
+    fn machine_envelopes_name_the_command_that_produced_them() {
+        use ayx_core::envelope::ErrorCode;
+
+        let descriptor = OutputDescriptor::new("one.jobs.runs", ViewKind::List);
+        let ok = Envelope::ok_with_data("job runs listed", json!({"items": []}));
+        let err = Envelope::err_coded(ErrorCode::NotFound, "missing", Value::Null);
+        for envelope in [&ok, &err] {
+            let rendered =
+                render_envelope(envelope, OutputMode::Json, descriptor, DEFAULT_OUTPUT_LIMIT)
+                    .expect("JSON");
+            let value: Value = serde_json::from_str(&rendered).expect("valid JSON");
+            assert_eq!(value["command"], "one.jobs.runs", "{rendered}");
+
+            let yaml =
+                render_envelope(envelope, OutputMode::Yaml, descriptor, DEFAULT_OUTPUT_LIMIT)
+                    .expect("YAML");
+            assert!(yaml.contains("command: one.jobs.runs"), "{yaml}");
+        }
+        assert!(
+            serde_json::to_value(&ok).unwrap().get("command").is_none(),
+            "an envelope nobody attached a descriptor to must not invent a name"
+        );
     }
 
     #[test]
@@ -2061,7 +2095,17 @@ mod tests {
         let validator = jsonschema::validator_for(&schema).expect("schema compiles");
 
         let ok_envelope = Envelope::ok_with_data("fine", json!({"n": 1}));
-        let ok_compact = serde_json::to_value(redacted_envelope(&ok_envelope)).unwrap();
+        let ok_compact: Value = serde_json::from_str(
+            &render_envelope(
+                &ok_envelope,
+                OutputMode::Json,
+                OutputDescriptor::new("one.jobs.list", ViewKind::List),
+                DEFAULT_OUTPUT_LIMIT,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(ok_compact["command"], "one.jobs.list");
         let problems: Vec<String> = validator
             .iter_errors(&ok_compact)
             .map(|e| e.to_string())
@@ -2081,7 +2125,17 @@ mod tests {
             vec!["ayx one workflows list --output json".to_string()],
         )
         .finalize_retryable();
-        let err_compact = serde_json::to_value(redacted_envelope(&err_envelope)).unwrap();
+        let err_compact: Value = serde_json::from_str(
+            &render_envelope(
+                &err_envelope,
+                OutputMode::Json,
+                OutputDescriptor::new("one.workflows.detail", ViewKind::Detail),
+                DEFAULT_OUTPUT_LIMIT,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(err_compact["command"], "one.workflows.detail");
         assert!(ok_compact.get("error_code").is_none());
         let problems: Vec<String> = validator
             .iter_errors(&err_compact)

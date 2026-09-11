@@ -3,6 +3,31 @@
 `ayx` has one JSON contract: `--output json` is the complete, recursively
 redacted envelope for automation, raw API inspection, and export metadata.
 
+```json
+{
+  "ok": true,
+  "command": "one.jobs.runs",
+  "message": "jobGroup jobs ok",
+  "timestamp_utc": "2026-09-11T12:00:00Z",
+  "data": { "...": "..." }
+}
+```
+
+| Field | Present | Meaning |
+|---|---|---|
+| `ok` | always | `true` on stdout success, `false` on the stderr failure envelope. |
+| `command` | every parsed command | Dotted id of the leaf that ran, such as `one.jobs.runs`. Compatibility aliases report the canonical id. Use it to correlate a result with its invocation. Omitted, never guessed, when no command was resolved (for example an invalid `AYX_OUTPUT`). |
+| `message` | always | One human sentence. Do not parse it. |
+| `timestamp_utc` | always | RFC 3339 time the envelope was built. |
+| `data` | always | The complete redacted payload; may be `null`. |
+| `error_code` | failures | Stable classification; see [`cli-schema.json`](cli-schema.json). |
+| `remediation` | some failures | `{ summary, commands }`: the next step. |
+| `retryable` | failures | Whether an identical retry may succeed. |
+| `next` | some successes | Follow-up commands, such as the `--page-token` continuation. |
+
+The machine-readable definition is [`cli-schema.json`](cli-schema.json). YAML
+carries the same fields.
+
 For clean docs, scripts, and agent runs, put the global output flag after the
 complete command path:
 

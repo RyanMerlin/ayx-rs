@@ -7245,8 +7245,12 @@ fn main() -> Result<()> {
                 envelope = envelope.with_next(vec![output::pagination_next_command(&argv, &token)]);
             }
             let rendered = format_envelope(&envelope, output, descriptor, output_limit)?;
-            let rendered = match apply_jq_or_passthrough(rendered, jq_filter.as_deref(), raw_output)
-            {
+            let rendered = match apply_jq_or_passthrough(
+                rendered,
+                jq_filter.as_deref(),
+                raw_output,
+                descriptor.command,
+            ) {
                 Ok(text) => text,
                 Err(err_env) => {
                     eprintln!(
@@ -7318,14 +7322,18 @@ fn main() -> Result<()> {
             // Ok(envelope) path -- a jq failure here still prints a
             // validation envelope and exits with its code, exactly like the
             // Ok(envelope) branch above.
-            let (rendered, exit_envelope) =
-                match apply_jq_or_passthrough(rendered, jq_filter.as_deref(), raw_output) {
-                    Ok(text) => (text, err_env),
-                    Err(jq_err_env) => (
-                        serde_json::to_string_pretty(&jq_err_env).unwrap_or_default(),
-                        *jq_err_env,
-                    ),
-                };
+            let (rendered, exit_envelope) = match apply_jq_or_passthrough(
+                rendered,
+                jq_filter.as_deref(),
+                raw_output,
+                descriptor.command,
+            ) {
+                Ok(text) => (text, err_env),
+                Err(jq_err_env) => (
+                    serde_json::to_string_pretty(&jq_err_env).unwrap_or_default(),
+                    *jq_err_env,
+                ),
+            };
             eprint!("{rendered}");
             eprintln!();
             let _ = io::stdout().lock().flush();
@@ -7341,6 +7349,7 @@ fn apply_jq_or_passthrough(
     rendered: String,
     jq_filter: Option<&str>,
     raw_output: bool,
+    command: &str,
 ) -> Result<String, Box<Envelope>> {
     let Some(filter) = jq_filter else {
         return Ok(rendered);
@@ -7353,6 +7362,7 @@ fn apply_jq_or_passthrough(
                 err.to_string(),
                 json!({ "jq": filter }),
             )
+            .with_command(command)
             .finalize_retryable(),
         )),
     }

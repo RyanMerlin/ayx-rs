@@ -998,6 +998,31 @@ mod tests {
                 format!("one.jobs.{leaf}"),
                 "the compatibility alias must report the canonical `one jobs {leaf}` envelope name"
             );
+            // The descriptor name is only useful if it reaches the caller: pin
+            // it on the emitted envelope, success and failure alike.
+            for envelope in [
+                ayx_core::envelope::Envelope::ok_with_data("ok", serde_json::json!({})),
+                ayx_core::envelope::Envelope::err_coded(
+                    ayx_core::envelope::ErrorCode::NotFound,
+                    "missing",
+                    serde_json::Value::Null,
+                ),
+            ] {
+                let rendered = crate::output::render_envelope(
+                    &envelope,
+                    crate::output::OutputMode::Json,
+                    descriptor,
+                    crate::output::DEFAULT_OUTPUT_LIMIT,
+                )
+                .expect("JSON envelope");
+                let emitted: serde_json::Value =
+                    serde_json::from_str(&rendered).expect("valid JSON");
+                assert_eq!(
+                    emitted["command"],
+                    format!("one.jobs.{leaf}"),
+                    "`one job-groups {leaf}` must emit its canonical command id"
+                );
+            }
             if let Some(previous) = seen.insert(descriptor.command, leaf.to_string()) {
                 panic!(
                     "'{}' is reported by both '{previous}' and '{leaf}'; a caller cannot tell them apart",
