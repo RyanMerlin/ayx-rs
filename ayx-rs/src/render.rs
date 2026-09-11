@@ -34,7 +34,7 @@ const ALTERYX_BLUE: Color = Color::Rgb(RgbColor(0, 103, 185));
 /// - **Fallback** to `envelope.message` for anything else.
 pub fn render_text(envelope: &Envelope) -> String {
     if is_doctor_shape(&envelope.data) {
-        return format_doctor(&envelope.data, color_enabled());
+        return format_doctor(&envelope.data, color_enabled(envelope.ok));
     }
     let mut out = String::new();
     let message_style = if envelope.ok {
@@ -47,7 +47,7 @@ pub fn render_text(envelope: &Envelope) -> String {
     out.push_str(&paint(
         &escape_control(&envelope.message),
         message_style,
-        color_enabled(),
+        color_enabled(envelope.ok),
     ));
     if !envelope.message.is_empty() && !matches!(envelope.data, Value::Null) {
         out.push('\n');
@@ -77,8 +77,30 @@ pub fn render_text(envelope: &Envelope) -> String {
     out
 }
 
-fn color_enabled() -> bool {
-    std::io::stdout().is_terminal() && env::var_os("NO_COLOR").is_none()
+/// The stream an envelope is written to: `main` prints successes to stdout
+/// and failure envelopes to stderr.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stream {
+    Stdout,
+    Stderr,
+}
+
+/// Color only when the stream this envelope goes to is a terminal. Checking
+/// stdout for a failure wrote ANSI escapes into a redirected stderr log.
+fn color_enabled(ok: bool) -> bool {
+    color_for(
+        ok,
+        |stream| match stream {
+            Stream::Stdout => std::io::stdout().is_terminal(),
+            Stream::Stderr => std::io::stderr().is_terminal(),
+        },
+        env::var_os("NO_COLOR").is_some(),
+    )
+}
+
+fn color_for(ok: bool, is_terminal: impl Fn(Stream) -> bool, no_color: bool) -> bool {
+    let stream = if ok { Stream::Stdout } else { Stream::Stderr };
+    !no_color && is_terminal(stream)
 }
 
 fn is_doctor_shape(data: &Value) -> bool {
@@ -650,6 +672,37 @@ mod tests {
 
     fn env_with(message: &str, data: Value) -> Envelope {
         Envelope::ok_with_data(message, data)
+    }
+
+    /// Failure envelopes are written to stderr. Color was decided by whether
+    /// *stdout* is a terminal, so `ayx ... 2> errors.log` at an interactive
+    /// prompt wrote ANSI escapes into the log, and a terminal stderr behind a
+    /// redirected stdout lost its color. Decide on the stream actually written.
+    #[test]
+    fn color_follows_the_stream_the_envelope_is_written_to() {
+        let stdout_only = |stream: Stream| stream == Stream::Stdout;
+        let stderr_only = |stream: Stream| stream == Stream::Stderr;
+
+        assert!(
+            color_for(true, stdout_only, false),
+            "success on a TTY stdout"
+        );
+        assert!(
+            !color_for(false, stdout_only, false),
+            "a failure goes to the redirected stderr, so no escapes"
+        );
+        assert!(
+            color_for(false, stderr_only, false),
+            "failure on a TTY stderr"
+        );
+        assert!(
+            !color_for(true, stderr_only, false),
+            "a success goes to the redirected stdout, so no escapes"
+        );
+        assert!(
+            !color_for(true, stdout_only, true) && !color_for(false, stderr_only, true),
+            "NO_COLOR always wins"
+        );
     }
 
     #[test]
