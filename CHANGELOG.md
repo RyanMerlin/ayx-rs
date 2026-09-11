@@ -4,7 +4,12 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
-## 0.21.0 — 2026-09-11
+## 0.21.0
+
+The `v0.21.0-rc.1` release candidate is cut from this section; it is not yet
+the final `0.21.0` release. See `docs/releases/v0.21.0-rc.1.md` for the
+candidate notes. This section becomes the final `0.21.0 — <date>` entry when
+that release is promoted.
 
 ### Changed
 
@@ -15,15 +20,37 @@
   cycle but are absent from help, catalog, and normal discovery.
 - `ayx one jobs runs` now renders every selected child-run lifecycle field in
   text, while JSON retains the complete recursively redacted provider response.
+- `ayx one jobs runs` text output now also shows nested values, such as the
+  parent job id, instead of collapsing them out of the human view.
+- `ayx one jobs <JOB-ID>` text output now shows the entry's key fields rather
+  than an id-only stub.
+- Colour is now emitted only when the stream being written is actually a
+  terminal, so piped or redirected `ayx` output stays plain even when the
+  process itself is attached to a tty.
+- Human text output now escapes control characters (newlines, carriage
+  returns, ESC) found in provider-supplied strings, so a malformed or
+  adversarial upstream response body cannot forge additional envelope-looking
+  lines in terminal output.
+- `ayx one jobs <JOB-ID> list`-style mixing of a job id with a subcommand, and
+  `--profile` given before a `jobs` subcommand, are now usage errors (exit 2)
+  instead of `internal` (exit 70).
+- The docs site now documents `ayx one jobs`; the `job-groups` pages have been
+  replaced.
 - Release candidates use conventional `vX.Y.Z-rc.N` tags and are published as
-  GitHub prereleases; the local candidate checks accept an explicit RC label.
+  GitHub prereleases. The workspace package version itself now carries the RC
+  suffix (e.g. `0.21.0-rc.1`), so `ayx --version` on a candidate build is
+  honest and `ayx self update` can later move an RC install forward to the
+  final release. The local release-check scripts derive release-notes and
+  artifact names from that version directly; there is no separate candidate
+  label to pass.
 
 ### Changed — machine-readable contract
 
 These affect callers that match on envelope fields or process exit codes.
 
-- **BREAKING:** eleven `ayx one` commands now report their own `command` value in
-  the envelope instead of sharing a family name. `job-groups inputs`,
+- **BREAKING:** eleven `ayx one` commands now report their own `command` value
+  as a top-level field of the JSON envelope, instead of sharing a family name.
+  `job-groups inputs`,
   `outputs`, `jobs` and `publications` previously reported
   `one.job-groups.list`; `job-groups status`, `profile`, `profile-results` and
   `pdf-results` previously reported `one.job-groups.detail`;
@@ -48,6 +75,13 @@ These affect callers that match on envelope fields or process exit codes.
 
 ### Removed
 
+- **BREAKING:** `--output json-full` and `--error-format` have been removed.
+  The compact `ayx.output.v1` envelope (with its `schema_version`/`kind`
+  fields) is gone entirely; `--output json` now always emits the full,
+  recursively redacted envelope that `json-full` used to produce. Scripts
+  told by the 0.18.0 and 0.20.0 notes to use `json-full` for the lossless
+  envelope must switch to plain `json` instead — running with
+  `--output json-full` (or `--error-format`) now exits 2 with a usage error.
 - **BREAKING:** `ayx one person count`. The vendor endpoint `/v4/people/count`
   is retired upstream and answers HTTP 410, so the command could not succeed.
   Removed with no compatibility alias, across the CLI, inventory, catalog,
