@@ -1263,6 +1263,46 @@ fn one_open_uses_ayx_one_base_url_from_the_environment() {
     assert_eq!(envelope["data"]["launched"], false);
 }
 
+/// `command` is the envelope's correlation key. Both the stdout success
+/// document and the stderr failure document must carry it, and `--jq` must be
+/// able to read it like any other top-level field.
+#[test]
+fn success_and_failure_envelopes_carry_the_command_id() {
+    let home = write_no_base_url_profile_home();
+    let run = |extra_env: Option<(&str, &str)>, extra_args: &[&str]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ayx"));
+        command
+            .args(["one", "open", "workflow", "01TEST", "--print", "--no-input"])
+            .args(extra_args)
+            .env("AYX_CONFIG_HOME", home.path())
+            .env("HOME", home.path())
+            .env("XDG_CONFIG_HOME", home.path());
+        if let Some((key, value)) = extra_env {
+            command.env(key, value);
+        }
+        command.output().expect("ayx binary should run")
+    };
+
+    let failure = run(None, &["--output", "json"]);
+    assert!(!failure.status.success());
+    let stderr = String::from_utf8_lossy(&failure.stderr);
+    let envelope: serde_json::Value = serde_json::from_str(stderr.trim())
+        .unwrap_or_else(|e| panic!("stderr not JSON: {e}\n{stderr}"));
+    assert_eq!(envelope["command"], "one.open", "{stderr}");
+
+    let base_url = Some(("AYX_ONE_BASE_URL", "https://eu1.example.test"));
+    let success = run(base_url, &["--output", "json"]);
+    assert!(success.status.success());
+    let stdout = String::from_utf8_lossy(&success.stdout);
+    let envelope: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout not JSON: {e}\n{stdout}"));
+    assert_eq!(envelope["command"], "one.open", "{stdout}");
+
+    let jq = run(base_url, &["--jq", ".command", "-r"]);
+    assert!(jq.status.success());
+    assert_eq!(String::from_utf8_lossy(&jq.stdout).trim(), "one.open");
+}
+
 #[test]
 fn omitted_workflow_id_off_tty_names_the_list_command() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))

@@ -9,6 +9,10 @@
       "required": ["ok", "message", "timestamp_utc", "data"],
       "properties": {
         "ok": { "type": "boolean" },
+        "command": {
+          "type": "string",
+          "description": "Dotted id of the command that produced the envelope, such as `one.jobs.runs`. Present on the success and failure envelopes of every parsed command, and omitted rather than guessed when no command was resolved. It is the key that correlates a result with its invocation."
+        },
         "message": { "type": "string" },
         "timestamp_utc": { "type": "string", "format": "date-time" },
         "data": {},

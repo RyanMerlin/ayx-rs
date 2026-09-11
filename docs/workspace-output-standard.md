@@ -32,5 +32,10 @@ documented list contract. The exemption covers `next_page_token`,
 `_claims`, `_endpoint`, `_endpoint_url`, `_refs`, or `_env`. Name new metadata
 fields to match that shape so they are not swallowed.
 
-Output descriptors affect human presentation only. JSON preserves every
-redacted top-level and nested field without an omitted-fields projection.
+Output descriptors affect human presentation, with one exception: the
+descriptor's dotted id is emitted as the envelope's top-level `command`
+(`one.jobs.runs`, `one.workspace.current`). Compatibility aliases report the
+canonical id, so `ayx one job-groups jobs` reports `one.jobs.runs`. Give every
+new leaf its own id; two leaves sharing one cannot be told apart by a caller.
+Otherwise JSON preserves every redacted top-level and nested field without an
+omitted-fields projection.

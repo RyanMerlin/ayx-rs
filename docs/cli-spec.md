@@ -74,9 +74,13 @@ parse, compile, or run exits 2 (`validation`), matching every other
 The full envelope contract is:
 
 - `ok`
+- `command` -- the dotted id of the leaf that ran (`one.jobs.runs`), on
+  success and failure alike; compatibility aliases report the canonical id.
+  Omitted, never guessed, when no command was resolved.
 - `message`
 - `timestamp_utc`
 - `data`
+- `remediation`, `retryable`, and `next` where they apply
 - `error_code` on failures (`snake_case`: `config_missing`, `auth_failed`, `permission_denied`, `not_found`, `gone`, `validation`, `conflict`, `rate_limited`, `network`, `upstream`, `workspace_mismatch`, `incomplete`, `output_classification`, `internal`)
 
 ### Process exit codes
