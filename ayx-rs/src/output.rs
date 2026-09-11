@@ -865,41 +865,45 @@ fn is_metadata_key(key: &str) -> bool {
     // fails the `has_` prefix test and stays redacted.
     let key = key.to_ascii_lowercase().replace('-', "_");
     const EXACT: &[&str] = &["next_page_token", "secret_values_returned"];
-    const SUFFIXES: &[&str] = &[
-        "_present",
-        "_source",
-        "_fields",
-        "_risks",
-        "_posture",
-        "_length",
-        "_expires_at",
-        "_type",
-        "_claims",
-        "_endpoint",
-        "_endpoint_url",
-        "_url",
-        "_ref",
-        "_refs",
-        "_count",
-        "_mode",
-        "_enabled",
-        "_env",
-        // Expiry timestamps (`access_token_expires_at`) are operational
-        // metadata, not a credential value: knowing *when* a token expires
-        // does not disclose the token itself, and doctor/status diagnostics
-        // exist specifically to surface it.
-        "_expires_at",
-        // The same justification in boolean form (`access_token_expired`):
-        // *whether* a credential has expired discloses nothing about the
-        // credential, and the diagnostics exist to surface exactly that.
-        // Redacted it became the truthy string "[REDACTED]", which told every
-        // reader that every credential had expired.
-        "_expired",
-    ];
     EXACT.contains(&key.as_str())
         || key.starts_with("has_")
-        || SUFFIXES.iter().any(|suffix| key.ends_with(suffix))
+        || METADATA_KEY_SUFFIXES
+            .iter()
+            .any(|suffix| key.ends_with(suffix))
 }
+
+/// Field-name endings that mark credential *metadata*. See [`is_metadata_key`]
+/// for the justification each entry needs.
+const METADATA_KEY_SUFFIXES: &[&str] = &[
+    "_present",
+    "_source",
+    "_fields",
+    "_risks",
+    "_posture",
+    "_length",
+    "_type",
+    "_claims",
+    "_endpoint",
+    "_endpoint_url",
+    "_url",
+    "_ref",
+    "_refs",
+    "_count",
+    "_mode",
+    "_enabled",
+    "_env",
+    // Expiry timestamps (`access_token_expires_at`) are operational
+    // metadata, not a credential value: knowing *when* a token expires
+    // does not disclose the token itself, and doctor/status diagnostics
+    // exist specifically to surface it.
+    "_expires_at",
+    // The same justification in boolean form (`access_token_expired`):
+    // *whether* a credential has expired discloses nothing about the
+    // credential, and the diagnostics exist to surface exactly that.
+    // Redacted it became the truthy string "[REDACTED]", which told every
+    // reader that every credential had expired.
+    "_expired",
+];
 
 fn is_sensitive_value(value: &str) -> bool {
     const NEEDLES: &[&str] = &[
@@ -1961,6 +1965,17 @@ mod tests {
         }
         for value in ["hello world", "workspace-1", "token_count=5"] {
             assert!(!is_sensitive_value(value), "unexpected sensitive: {value}");
+        }
+    }
+
+    /// Each metadata suffix disables secret-key matching for every field that
+    /// ends with it, so the list is reviewed entry by entry. A duplicate hides
+    /// in that review and invites two justifications to drift apart.
+    #[test]
+    fn metadata_key_suffixes_are_listed_once() {
+        let mut seen = std::collections::BTreeSet::new();
+        for suffix in METADATA_KEY_SUFFIXES {
+            assert!(seen.insert(*suffix), "`{suffix}` is listed twice");
         }
     }
 
