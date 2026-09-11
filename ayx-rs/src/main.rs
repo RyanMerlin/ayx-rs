@@ -1389,6 +1389,18 @@ mongo:
 
         assert!(remediation_for_error_code(ErrorCode::NotFound, "server").is_none());
     }
+
+    #[test]
+    fn not_found_on_job_runs_is_a_sub_resource_miss() {
+        use ayx_core::envelope::ErrorCode;
+        // `one jobs runs <JOB-ID>` (and the hidden `one job-groups jobs`) on a
+        // job that exists but has no run records must not send the caller to
+        // re-list jobs for an id they already have.
+        let (summary, commands) =
+            remediation_for_error_code(ErrorCode::NotFound, "one.jobs.runs").unwrap();
+        assert!(summary.contains("The id itself may be valid"), "{summary}");
+        assert!(commands.is_empty(), "{commands:?}");
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -7470,7 +7482,7 @@ fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static s
 const SUB_RESOURCE_VERBS: &[&str] = &[
     "inputs",
     "outputs",
-    "jobs",
+    "runs",
     "publications",
     "profile",
     "profile-results",

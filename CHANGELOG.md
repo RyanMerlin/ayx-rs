@@ -32,9 +32,11 @@ These affect callers that match on envelope fields or process exit codes.
   `one.role.list`. Each now reports
   `one.<family>.<verb>`. `command` is how a caller correlates a result with the
   invocation that produced it, so the shared names made a failure untraceable.
-- **BREAKING:** an HTTP 400 whose upstream body types itself as a not-found
-  (an exception name ending `NotFoundException`) is now classified
-  `not_found` (exit 6) instead of `validation` (exit 2). Observed on
+- **BREAKING:** an HTTP 400 whose upstream body carries an allowlisted
+  absent-data exception type (currently only `ProfilingDataNotFoundException`)
+  is now classified `not_found` (exit 6) instead of `validation` (exit 2). This
+  is not a `*NotFoundException` suffix rule: `RouteNotFoundException` and
+  similar stay `validation`. Observed on
   `ayx one job-groups profile|profile-results|pdf-results` against a job group
   with no profiling data. A 400 that is a genuine input error is unchanged.
 - `NotFound` remediation no longer advises listing the family for sub-resource
