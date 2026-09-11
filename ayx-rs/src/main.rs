@@ -760,55 +760,101 @@ mod tests {
         );
     }
 
-    /// A bare JOB-ID lookup and a verb subcommand are mutually exclusive
-    /// invocation shapes on `one jobs`. Before `args_conflicts_with_subcommands`
-    /// was added to the `Jobs` variant, clap happily parsed the mix (e.g.
-    /// `jobs 42 list`) and the ambiguity only surfaced later as an `internal`
-    /// (exit 70) error out of the match in `cmd/one.rs`, or — for `jobs 42
-    /// runs` — as a confusing clap error claiming `<JOB-ID>` was missing even
-    /// though the user typed it. This asserts every such positional/subcommand
-    /// mix is now rejected by clap itself, at parse time, as a usage error
-    /// (exit code 2), while every valid shape keeps parsing.
-    ///
-    /// `--profile x list` (a `--profile` given ahead of the verb) is a
-    /// related but distinct case: clap's `args_conflicts_with_subcommands`
-    /// does not extend to named options, so that mix still parses here and is
-    /// rejected at runtime instead, in `cmd/one.rs` — see
+    /// A bare `[JOB-ID]` positional and an optional `command` subcommand are
+    /// both plain `Option`s on the `Jobs` variant, and clap does not conflict
+    /// an optional positional with an optional subcommand on its own — so
+    /// `ayx one jobs 42 list` now PARSES, with both `id: Some("42")` and
+    /// `command: Some(List { .. })` populated. Mixing the two is still
+    /// rejected, but at dispatch time in `cmd/one.rs` as a `validation`
+    /// (exit 2) `UsageError`, not by clap at parse time — see
     /// `cli_smoke::jobs_id_and_subcommand_mix_is_a_usage_error_not_internal`.
+    /// This used to be caught here by `args_conflicts_with_subcommands` on
+    /// the `Jobs` variant, but that flag also locked clap out of subcommand
+    /// parsing whenever ANY other arg preceded the verb — including global
+    /// flags like `--output` and `--no-input` that appear before `one jobs`
+    /// itself, silently turning `ayx one jobs --output json list` into a
+    /// detail lookup of JOB-ID `"list"`. Removing it restores correct global
+    /// flag handling; this test locks in the resulting parse behavior.
     #[test]
-    fn jobs_positional_id_and_subcommand_conflict_at_parse_time() {
-        for bad in [
+    fn jobs_positional_id_and_subcommand_now_parse_but_are_rejected_at_dispatch() {
+        for both in [
             ["ayx", "one", "jobs", "42", "list"].as_slice(),
             ["ayx", "one", "jobs", "42", "count"].as_slice(),
             ["ayx", "one", "jobs", "42", "status", "43"].as_slice(),
-            ["ayx", "one", "jobs", "42", "runs"].as_slice(),
         ] {
+            let parsed = Cli::try_parse_from(both)
+                .unwrap_or_else(|e| panic!("expected {both:?} to parse: {e}"));
             assert!(
-                Cli::try_parse_from(bad).is_err(),
-                "expected a JOB-ID/subcommand mix to be rejected at parse time: {bad:?}"
+                matches!(
+                    parsed.command,
+                    Command::One {
+                        command: OneCommand::Jobs {
+                            id: Some(_),
+                            command: Some(_),
+                            ..
+                        }
+                    }
+                ),
+                "expected {both:?} to parse with both an id and a subcommand set"
             );
         }
 
+        // `jobs 42 runs` still fails to parse — not from a subcommand
+        // conflict, but because `runs` itself requires its own `<JOB-ID>`
+        // positional and none is left once `42` is consumed by the outer
+        // `[JOB-ID]`. A clap usage error (exit 2) is fine here.
+        assert!(
+            Cli::try_parse_from(["ayx", "one", "jobs", "42", "runs"]).is_err(),
+            "`jobs 42 runs` should still fail to parse: `runs` needs its own JOB-ID"
+        );
+
         // Every valid shape must still parse: a bare id, a subcommand alone,
         // `--profile` in its documented position (after the verb), and
-        // `--profile` ahead of the verb (parses fine; rejected at dispatch).
+        // `--profile` ahead of the verb (parses as the subcommand now;
+        // rejected at dispatch in cmd/one.rs).
         for ok in [
             ["ayx", "one", "jobs", "42"].as_slice(),
             ["ayx", "one", "jobs", "list"].as_slice(),
             ["ayx", "one", "jobs", "runs", "42"].as_slice(),
             ["ayx", "one", "jobs", "runs", "42", "--profile", "x"].as_slice(),
-            // `--profile` alone, with neither an id nor a subcommand, is
-            // syntactically valid (clap has nothing to conflict it with) but
-            // is rejected at runtime by cmd/one.rs as a validation error —
-            // see the dispatcher match, not this parser-level test.
             ["ayx", "one", "jobs", "--profile", "x"].as_slice(),
-            // Likewise `--profile` ahead of the verb: clap parses it, and
-            // cmd/one.rs rejects it as a validation error at dispatch time.
             ["ayx", "one", "jobs", "--profile", "x", "list"].as_slice(),
         ] {
             assert!(
                 Cli::try_parse_from(ok).is_ok(),
                 "expected a valid `jobs` invocation to keep parsing: {ok:?}"
+            );
+        }
+    }
+
+    /// The release-blocking regression: `args_conflicts_with_subcommands` on
+    /// the `Jobs` variant locked clap out of subcommand parsing as soon as
+    /// ANY other arg was seen ahead of the verb — including global flags
+    /// (`--output`, `--no-input`, etc., all `global = true`) that a caller
+    /// naturally places before `one jobs`. `ayx one jobs --output json list`
+    /// silently became a detail lookup of JOB-ID `"list"` instead of
+    /// dispatching to the `list` subcommand.
+    #[test]
+    fn jobs_global_flags_before_the_verb_still_dispatch_the_subcommand() {
+        for args in [
+            ["ayx", "one", "jobs", "--output", "json", "list"].as_slice(),
+            ["ayx", "one", "jobs", "--no-input", "runs", "42"].as_slice(),
+            ["ayx", "--output", "json", "one", "jobs", "list"].as_slice(),
+        ] {
+            let parsed = Cli::try_parse_from(args)
+                .unwrap_or_else(|e| panic!("expected {args:?} to parse: {e}"));
+            assert!(
+                matches!(
+                    parsed.command,
+                    Command::One {
+                        command: OneCommand::Jobs {
+                            id: None,
+                            command: Some(_),
+                            ..
+                        }
+                    }
+                ),
+                "expected {args:?} to dispatch to a jobs subcommand, not a JOB-ID lookup"
             );
         }
     }
@@ -2496,13 +2542,7 @@ pub(crate) enum OneCommand {
                       <JOB-ID>` to inspect that aggregate job and `ayx one jobs runs <JOB-ID>` \
                       to see every child run record. The provider exposes no full child-run detail \
                       endpoint; the complete child records are returned by `runs`.",
-        arg_required_else_help = true,
-        // A bare JOB-ID lookup and a verb subcommand are mutually exclusive
-        // invocation shapes; without this, clap happily parses `jobs 42 list`
-        // or `jobs --profile x list` and the mixup only surfaced later as an
-        // internal error out of the match in cmd/one.rs. Rejecting the mix
-        // at parse time gives a clap usage error (exit 2) instead.
-        args_conflicts_with_subcommands = true
+        arg_required_else_help = true
     )]
     Jobs {
         /// Job Library entry identifier. Omitting a verb makes this an aggregate-job lookup.
