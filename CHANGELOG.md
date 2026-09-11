@@ -4,6 +4,20 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.21.0 — 2026-09-11
+
+### Changed
+
+- **BREAKING:** `ayx one job-groups` is now the hidden compatibility namespace.
+  Use `ayx one jobs`: `jobs <JOB-ID>` inspects the aggregate Job Library entry,
+  `jobs runs <JOB-ID>` lists all of its child run records, and `jobs execute`
+  submits a Job Group. The legacy commands remain callable for this release
+  cycle but are absent from help, catalog, and normal discovery.
+- `ayx one jobs runs` now renders every selected child-run lifecycle field in
+  text, while JSON retains the complete recursively redacted provider response.
+- Release candidates use conventional `vX.Y.Z-rc.N` tags and are published as
+  GitHub prereleases; the local candidate checks accept an explicit RC label.
+
 ### Changed — machine-readable contract
 
 These affect callers that match on envelope fields or process exit codes.

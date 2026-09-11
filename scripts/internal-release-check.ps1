@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
-    [switch]$SkipAudit
+    [switch]$SkipAudit,
+    [ValidatePattern('^rc\.[1-9][0-9]*$')]
+    [string]$Candidate = "rc.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,7 +25,7 @@ function Invoke-Checked {
 }
 
 if (-not (Get-Command cargo-nextest -ErrorAction SilentlyContinue)) {
-    throw "cargo-nextest is required; install it before running the internal release check"
+    throw "cargo-nextest is required; install it before running the release-candidate check"
 }
 
 Invoke-Checked cargo @("fmt", "--all", "--check")
@@ -40,15 +42,15 @@ if (-not $cargoTomlMatch) {
     throw "unable to find workspace version in Cargo.toml"
 }
 $workspaceVersion = $cargoTomlMatch.Matches[0].Groups[1].Value
-$releaseNotesName = "v$workspaceVersion-internal.1.md"
+$releaseNotesName = "v$workspaceVersion-$Candidate.md"
 $releaseNotes = Join-Path $repo "docs\releases\$releaseNotesName"
 if (-not (Test-Path -LiteralPath $releaseNotes)) {
-    throw "release notes not found: docs/releases/$releaseNotesName -- create it before cutting an internal release"
+    throw "release notes not found: docs/releases/$releaseNotesName -- create it before cutting release candidate $Candidate"
 }
 
-$dist = Join-Path $repo "dist\internal"
+$dist = Join-Path $repo "dist\$Candidate"
 $stage = Join-Path $dist "ayx-x86_64-pc-windows-msvc"
-$archive = Join-Path $dist "ayx-x86_64-pc-windows-msvc-internal.zip"
+$archive = Join-Path $dist "ayx-x86_64-pc-windows-msvc-$Candidate.zip"
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 if (Test-Path -LiteralPath $stage) {
     Remove-Item -LiteralPath $stage -Recurse -Force
@@ -69,4 +71,4 @@ Invoke-Checked (Join-Path $verify "ayx.exe") @("--version")
 Invoke-Checked (Join-Path $verify "ayx.exe") @("--help")
 Remove-Item -LiteralPath $verify -Recurse -Force
 
-Write-Host "Internal Windows artifact: $archive"
+Write-Host "Release-candidate Windows artifact: $archive"
