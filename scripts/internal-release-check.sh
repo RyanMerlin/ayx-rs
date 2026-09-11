@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+candidate="rc.1"
+while (($#)); do
+  case "$1" in
+    --candidate)
+      candidate="${2:?--candidate requires a value}"
+      shift 2
+      ;;
+    *)
+      echo "usage: $0 [--candidate rc.N]" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ ! "$candidate" =~ ^rc\.[1-9][0-9]*$ ]]; then
+  echo "--candidate must be an RC label such as rc.1" >&2
+  exit 2
+fi
+
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
@@ -11,7 +30,7 @@ if [[ "${AYX_INTERNAL_RELEASE_ALLOW_NON_WSL2:-}" != "1" \
 fi
 
 if ! command -v cargo-nextest >/dev/null 2>&1; then
-  echo "cargo-nextest is required; install it before running the internal release check." >&2
+  echo "cargo-nextest is required; install it before running the release-candidate check." >&2
   exit 1
 fi
 
@@ -34,16 +53,16 @@ if [[ -z "$workspace_version" ]]; then
   echo "unable to find workspace version in Cargo.toml" >&2
   exit 1
 fi
-release_notes_name="v${workspace_version}-internal.1.md"
+release_notes_name="v${workspace_version}-${candidate}.md"
 release_notes="docs/releases/${release_notes_name}"
 if [[ ! -f "$release_notes" ]]; then
-  echo "release notes not found: $release_notes -- create it before cutting an internal release" >&2
+  echo "release notes not found: $release_notes -- create it before cutting release candidate $candidate" >&2
   exit 1
 fi
 
-dist="$repo_dir/dist/internal"
+dist="$repo_dir/dist/$candidate"
 stage="$dist/ayx-x86_64-unknown-linux-gnu"
-archive="$dist/ayx-x86_64-unknown-linux-gnu-internal.tar.gz"
+archive="$dist/ayx-x86_64-unknown-linux-gnu-$candidate.tar.gz"
 mkdir -p "$dist"
 rm -rf "$stage"
 mkdir -p "$stage"
@@ -58,4 +77,4 @@ test -x "$verify/ayx"
 "$verify/ayx" --help >/dev/null
 rm -rf "$verify"
 
-echo "Internal WSL2/Linux artifact: $archive"
+echo "Release-candidate WSL2/Linux artifact: $archive"

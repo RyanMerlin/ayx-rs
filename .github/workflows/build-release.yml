@@ -353,6 +353,7 @@ jobs:
         with:
           body_path: docs/releases/${{ github.ref_name }}.md
           generate_release_notes: false
+          prerelease: ${{ contains(github.ref_name, '-rc.') }}
           files: |
             release/ayx-x86_64-unknown-linux-gnu.tar.gz
             release/ayx-x86_64-unknown-linux-gnu.tar.gz.sigstore
