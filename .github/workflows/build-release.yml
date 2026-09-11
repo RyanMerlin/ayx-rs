@@ -348,6 +348,16 @@ jobs:
             release/ayx-aarch64-apple-darwin.tar.gz
             release/ayx-x86_64-pc-windows-msvc.zip
             release/*.cdx.json
+      - name: Require release notes for the tagged version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          if [ ! -f "$notes" ]; then
+            echo "::error title=Missing release notes::$notes not found for tag ${GITHUB_REF_NAME}. Add release notes before tagging, or the release body will be silently empty." >&2
+            exit 1
+          fi
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3
         with:
