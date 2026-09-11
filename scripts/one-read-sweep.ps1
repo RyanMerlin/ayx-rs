@@ -306,19 +306,23 @@ Invoke-OneRead "connector defaults" (OneArgs @("connections", "connector-metadat
 Invoke-OneRead "connector publish info (may be scope denied)" (OneArgs @("connections", "connector-metadata", "publish-info", $ConnectorSlug)) -PermissionBoundary
 Invoke-OneRead "connector metadata" (OneArgs @("connections", "connector-metadata", "detail", $ConnectorSlug))
 
-# The current command label is intentionally retained for this run so its live
-# semantics can be tested before the planned rename from job-groups to jobs.
-Invoke-OneRead "job-library list" (OneArgs @("job-groups", "list", "--all", "--output-limit", "5"))
-Invoke-OneRead "job-library count" (OneArgs @("job-groups", "count"))
-Invoke-OneRead "job-library detail" (OneArgs @("job-groups", "detail", $JobGroupId))
-Invoke-OneRead "job-library status" (OneArgs @("job-groups", "status", $JobGroupId))
-Invoke-OneRead "job-library inputs (fixture may not be JDBC)" (OneArgs @("job-groups", "inputs", $JobGroupId)) -ExpectedErrorCode "validation"
-Invoke-OneRead "job-library outputs" (OneArgs @("job-groups", "outputs", $JobGroupId))
-Invoke-OneRead "job-library jobs" (OneArgs @("job-groups", "jobs", $JobGroupId))
-Invoke-OneRead "job-library publications" (OneArgs @("job-groups", "publications", $JobGroupId))
-Invoke-OneRead "job-library profile (fixture may have no profiling data)" (OneArgs @("job-groups", "profile", $JobGroupId)) -ExpectedErrorCode "not_found"
-Invoke-OneRead "job-library profile results (fixture may have no profiling data)" (OneArgs @("job-groups", "profile-results", $JobGroupId)) -ExpectedErrorCode "not_found"
-Invoke-OneRead "job-library PDF results (fixture may have no profiling data)" (OneArgs @("job-groups", "pdf-results", $JobGroupId)) -ExpectedErrorCode "not_found"
+# The Job Library command family completed its promotion from `job-groups` to
+# `jobs` (02c7d1a); `job-groups` now survives only as a hidden compatibility
+# alias for this release cycle. This sweep exercises the canonical `jobs`
+# commands, and keeps one row on the `job-groups` alias below to prove the
+# compatibility path still routes correctly.
+Invoke-OneRead "job-library list" (OneArgs @("jobs", "list", "--all", "--output-limit", "5"))
+Invoke-OneRead "job-library count" (OneArgs @("jobs", "count"))
+Invoke-OneRead "job-library detail" (OneArgs @("jobs", $JobGroupId))
+Invoke-OneRead "job-library status" (OneArgs @("jobs", "status", $JobGroupId))
+Invoke-OneRead "job-library inputs (fixture may not be JDBC)" (OneArgs @("jobs", "inputs", $JobGroupId)) -ExpectedErrorCode "validation"
+Invoke-OneRead "job-library outputs" (OneArgs @("jobs", "outputs", $JobGroupId))
+Invoke-OneRead "job-library runs" (OneArgs @("jobs", "runs", $JobGroupId))
+Invoke-OneRead "job-library publications" (OneArgs @("jobs", "publications", $JobGroupId))
+Invoke-OneRead "job-library profile (fixture may have no profiling data)" (OneArgs @("jobs", "profile", $JobGroupId)) -ExpectedErrorCode "not_found"
+Invoke-OneRead "job-library profile results (fixture may have no profiling data)" (OneArgs @("jobs", "profile-results", $JobGroupId)) -ExpectedErrorCode "not_found"
+Invoke-OneRead "job-library PDF results (fixture may have no profiling data)" (OneArgs @("jobs", "pdf-results", $JobGroupId)) -ExpectedErrorCode "not_found"
+Invoke-OneRead "job-library list (job-groups compat alias)" (OneArgs @("job-groups", "list", "--all", "--output-limit", "5"))
 
 # Plans and schedules are tier-dependent. A nonzero result is a capability or
 # permissions finding to record, not a reason to retry with --apply.
