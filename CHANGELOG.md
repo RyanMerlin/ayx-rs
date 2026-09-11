@@ -32,15 +32,20 @@ that release is promoted.
   checks stderr, so error output redirected to a file no longer contains ANSI
   colour codes. `NO_COLOR` still wins.
 - Human text output escapes control characters (`\n`, `\r`, `\t`, ESC and other
-  C0/C1 controls, U+2028/2029) as visible sequences such as `\n` or `\u{1b}`,
-  so an upstream error page can no longer forge output lines such as
-  `error_code: …` or inject terminal escape sequences. JSON is unchanged.
-- Text output shortens sub-second precision only in timestamp fields; names and
-  ids that merely look like timestamps print exactly as sent.
+  C0/C1 controls, U+2028/2029, bidi overrides and zero-width characters) as
+  visible sequences such as `\n` or `\u{1b}`, so an upstream error page can no
+  longer forge output lines such as `error_code: …`, inject terminal escape
+  sequences, or visually reorder a line. JSON is unchanged.
+- Text output shortens sub-second precision only in timestamp fields (keys
+  ending `At`/`_at`, `Time`/`_time`, `Date`/`_date`, `Utc`/`_utc`, and names
+  such as `created`, `lastModified`, `expires`); names and ids that merely look
+  like timestamps print exactly as sent.
 - Text tables consistently fill up to seven columns.
-- `ayx one jobs <JOB-ID> list`-style mixing of a job id with a subcommand, and
-  `--profile` given before a `jobs` subcommand, are now usage errors (exit 2)
-  instead of `internal` (exit 70).
+- Mixing a job id with a subcommand (`ayx one jobs 42 list`), `--profile` given
+  before a `jobs` subcommand (`ayx one jobs --profile x list`), and a bare
+  `ayx one jobs --profile x` are now `validation` errors (exit 2) with a hint
+  at the right form, instead of `internal` (exit 70). Global flags such as
+  `--output json` may still precede the verb.
 - The docs site now documents `ayx one jobs`; the `job-groups` pages have been
   replaced.
 - Release candidates use conventional `vX.Y.Z-rc.N` tags and are published as
