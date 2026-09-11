@@ -4,6 +4,12 @@ import starlight from '@astrojs/starlight';
 export default defineConfig({
   site: 'https://ayx-rs.pages.dev',
   base: '/',
+  redirects: {
+    // `ayx one job-groups` was renamed to the canonical `ayx one jobs`
+    // (02c7d1a); `job-groups` survives only as a hidden compatibility alias.
+    '/one/job-groups/': '/one/jobs/',
+    '/one/job-groups/results/': '/one/jobs/results/',
+  },
   integrations: [
     starlight({
       title: 'ayx-rs',
@@ -60,8 +66,8 @@ export default defineConfig({
               label: 'Jobs & runs',
               collapsed: true,
               items: [
-                'one/job-groups',
-                'one/job-groups/results',
+                'one/jobs',
+                'one/jobs/results',
                 'one/output-objects',
               ],
             },
