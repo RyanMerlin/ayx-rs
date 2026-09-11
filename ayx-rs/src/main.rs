@@ -702,6 +702,65 @@ mod tests {
     use crate::output::ViewKind;
 
     #[test]
+    fn jobs_surface_distinguishes_job_lookup_runs_and_legacy_submit() {
+        let lookup = Cli::try_parse_from(["ayx", "one", "jobs", "42"])
+            .expect("bare job id should select aggregate-job lookup");
+        assert!(matches!(
+            lookup.command,
+            Command::One {
+                command: OneCommand::Jobs {
+                    id: Some(ref id),
+                    profile: None,
+                    command: None,
+                }
+            } if id == "42"
+        ));
+
+        let runs = Cli::try_parse_from(["ayx", "one", "jobs", "runs", "42"])
+            .expect("runs should select the child-run collection");
+        assert!(matches!(
+            runs.command,
+            Command::One {
+                command: OneCommand::Jobs {
+                    id: None,
+                    command: Some(OneJobsCommand::Runs { ref id, .. }),
+                    ..
+                }
+            } if id == "42"
+        ));
+
+        let legacy = Cli::try_parse_from(["ayx", "one", "job-groups", "run", "--body", "x.json"])
+            .expect("hidden compatibility command must retain its submit verb");
+        assert!(matches!(
+            legacy.command,
+            Command::One {
+                command: OneCommand::JobGroups {
+                    command: OneJobGroupCommand::Run { .. }
+                }
+            }
+        ));
+
+        let scoped_lookup =
+            Cli::try_parse_from(["ayx", "one", "jobs", "--profile", "operator", "42"])
+                .expect("aggregate lookup should retain its profile selector");
+        assert!(matches!(
+            scoped_lookup.command,
+            Command::One {
+                command: OneCommand::Jobs {
+                    id: Some(ref id),
+                    profile: Some(ref profile),
+                    command: None,
+                }
+            } if id == "42" && profile == "operator"
+        ));
+
+        assert!(
+            Cli::try_parse_from(["ayx", "one", "jobs", "run", "42"]).is_err(),
+            "singular `run` must not become an ambiguous read or a submit alias; use `runs <JOB-ID>`"
+        );
+    }
+
+    #[test]
     fn shared_profile_loader_rejects_mismatched_bound_one_refs_but_reads_legacy_refs() {
         let mut config: Config = serde_yaml::from_str(
             r#"
@@ -2352,7 +2411,27 @@ pub(crate) enum OneCommand {
         command: OneWorkflowsCommand,
     },
     #[command(
-        about = "Alteryx One job groups — run, publish, and inspect",
+        about = "Alteryx One Job Library — inspect jobs, their runs, and results",
+        long_about = "Alteryx One Job Library — inspect jobs, their runs, and results.\n\n\
+                      A Job Library entry is a Job Group identified by JOB-ID. Use `ayx one jobs \
+                      <JOB-ID>` to inspect that aggregate job and `ayx one jobs runs <JOB-ID>` \
+                      to see every child run record. The provider exposes no full child-run detail \
+                      endpoint; the complete child records are returned by `runs`.",
+        arg_required_else_help = true
+    )]
+    Jobs {
+        /// Job Library entry identifier. Omitting a verb makes this an aggregate-job lookup.
+        #[arg(value_name = "JOB-ID")]
+        id: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
+        #[command(subcommand)]
+        command: Option<OneJobsCommand>,
+    },
+    #[command(
+        name = "job-groups",
+        about = "Deprecated alias for `one jobs`",
+        hide = true,
         arg_required_else_help = true
     )]
     JobGroups {
@@ -3961,6 +4040,107 @@ impl DatasetFilter {
 }
 
 #[derive(Subcommand, Debug)]
+pub(crate) enum OneJobsCommand {
+    /// List Job Library entries.
+    List {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        page_token: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        max_pages: Option<u32>,
+    },
+    /// Count Job Library entries.
+    Count {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Submit a Job Group from a JSON request body.
+    Execute {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
+    /// Publish job results to a target.
+    Publish {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "JOB-ID")]
+        id: String,
+        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        body: PathBuf,
+    },
+    /// Cancel a Job Library entry.
+    Cancel {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "JOB-ID")]
+        id: String,
+    },
+    /// Inspect aggregate job status.
+    Status {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "JOB-ID")]
+        id: String,
+    },
+    /// List every child run record for an aggregate job.
+    Runs {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "JOB-ID")]
+        id: String,
+    },
+    /// List aggregate job inputs.
+    Inputs {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "JOB-ID")]
+        id: String,
+    },
+    /// List aggregate job outputs.
+    Outputs {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "JOB-ID")]
+        id: String,
+    },
+    /// List publications for an aggregate job.
+    Publications {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "JOB-ID")]
+        id: String,
+    },
+    /// Inspect aggregate job profiling metadata.
+    Profile {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "JOB-ID")]
+        id: String,
+    },
+    /// Inspect aggregate job profiling results.
+    ProfileResults {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "JOB-ID")]
+        id: String,
+    },
+    /// Inspect aggregate job PDF results.
+    PdfResults {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "JOB-ID")]
+        id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub(crate) enum OneJobGroupCommand {
     /// List One job groups.
     List {
@@ -4067,6 +4247,38 @@ pub(crate) enum OneJobGroupCommand {
         #[arg(value_name = "ID")]
         id: String,
     },
+}
+
+impl From<OneJobsCommand> for OneJobGroupCommand {
+    fn from(command: OneJobsCommand) -> Self {
+        match command {
+            OneJobsCommand::List {
+                profile,
+                limit,
+                page_token,
+                all,
+                max_pages,
+            } => Self::List {
+                profile,
+                limit,
+                page_token,
+                all,
+                max_pages,
+            },
+            OneJobsCommand::Count { profile } => Self::Count { profile },
+            OneJobsCommand::Execute { profile, body } => Self::Run { profile, body },
+            OneJobsCommand::Publish { profile, id, body } => Self::Publish { profile, id, body },
+            OneJobsCommand::Cancel { profile, id } => Self::Cancel { profile, id },
+            OneJobsCommand::Status { profile, id } => Self::Status { profile, id },
+            OneJobsCommand::Runs { profile, id } => Self::Jobs { profile, id },
+            OneJobsCommand::Inputs { profile, id } => Self::Inputs { profile, id },
+            OneJobsCommand::Outputs { profile, id } => Self::Outputs { profile, id },
+            OneJobsCommand::Publications { profile, id } => Self::Publications { profile, id },
+            OneJobsCommand::Profile { profile, id } => Self::Profile { profile, id },
+            OneJobsCommand::ProfileResults { profile, id } => Self::ProfileResults { profile, id },
+            OneJobsCommand::PdfResults { profile, id } => Self::PdfResults { profile, id },
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]

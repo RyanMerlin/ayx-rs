@@ -233,7 +233,7 @@ set -a && source .env && set +a
 
 # resolve ids the sweep needs
 ayx one connections list --output json | jq -r '.data.items[0].id'
-ayx one job-groups list --output json  | jq -r '.data.items[0].id'
+ayx one jobs list --output json  | jq -r '.data.items[0].id'
 ayx one workflows list --output json   | jq -r '.data.items[0].id'   # reused in Phase 4/5b
 ```
 
@@ -259,8 +259,9 @@ ayx one connections detail <connection_id> --output json
 ayx one workflows list --output json
 ayx one workflows count --output json
 ayx one workflows tools --output json
-ayx one job-groups list --output json
-ayx one job-groups detail <job_group_id> --output json
+ayx one jobs list --output json
+ayx one jobs <job_id> --output json
+ayx one jobs runs <job_id> --output json
 ayx one output-objects list --output json
 ayx one write-settings list --output json
 ayx one scheduling list --output json

@@ -49,8 +49,8 @@ These require new subcommands or corrected endpoint targets.
   `admins` → `GET /v4/people?role=admin`. Both `/v4/workspaces/{id}/people` and `/v4/workspaces/{id}/admins` are confirmed non-existent routes.  
   **Superseded 2026-08-31:** the `/v4/workspaces/{workspaceId}/admins` "404" was a probe error — the spec declares `workspaceId` as an integer and the probe sent the workspace GID. `admins` now uses `GET /v4/workspaces/{workspaceId}/admins` with the numeric id. See `docs/ayx-cli-testing-issues.md` Issue 1.
 
-- [x] **`job-groups` — `name=None` on all entries** — DONE v0.9.13  
-  `ayx one job-groups list` now post-processes the response: when `name` is null, synthesizes a display name from `flowRun.flowId` (`flow-{flowId}`) or falls back to `job-{id}`. The API returns no job-groups in the `example-workspace` workspace currently so this was implemented based on the known item shape from the prior audit session.
+- [x] **Job Library entries — upstream `name=None`** — DONE v0.9.13; presentation contract updated in v0.21.0.
+  `ayx one jobs list` keeps an upstream null `name` intact in canonical JSON and uses a presentation-only display label in human output. The API returns no job groups in the `example-workspace` workspace currently, so the original handling was implemented from the known item shape captured in the prior audit session.
 
 ---
 
@@ -110,7 +110,7 @@ panicked at runtime on every call. All four renamed their file arg to `--output-
 - [x] **`output-objects list` / `write-settings list`** — VERIFIED working (200, 0 items).
 - [~] **`flows import`** — endpoint wired; needs a valid `.yxzp` package and credentials. Export now produces a package, so an export→import round-trip is the natural next test (deferred — import of an empty-flow package returned a backend validation error, not a CLI bug).
 - [x] **`flows validate`** — `GET /v4/flows/{id}/validate` returns 404. No validate route exists in this API version. Documented as unsupported.
-- [~] **`job-groups run` / `outputs` / `inputs` / `jobs`** — need a flow with real content + a completed run. The workspace has 0 job-groups; can't exercise without authoring a non-empty flow (requires Designer/UI, not the API).
+- [x] **`jobs` detail / `runs` / `outputs` / `inputs`** — live-validated in v0.21.0 against Job Library entries. `runs` is the canonical child-run collection; submission remains `jobs execute` and requires a separately approved mutating fixture.
 - [~] **`connections update/delete/status`** — need a test connection, which needs valid credentials (see Phase 3 partial).
 - [x] **`connections dry-run`** — `POST /v4/connections/dryRun` returns `AccessControlException` (403) via PAT. Endpoint exists but PAT lacks scope.
 - [~] **`output-objects create` / `write-settings create`** — need a valid flow with output and a writable destination.

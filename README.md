@@ -128,7 +128,7 @@ The shortest path from zero to useful output is usually one of:
 - `ayx one connections list`
 - `ayx server api status --output json`
 - `ayx mongo inventory --output json`
-- `ayx one job-groups list`
+- `ayx one jobs list`
 - `ayx one output-objects list`
 
 The tool returns a consistent envelope model so humans and agents can parse success, failure, and artifact paths in the same way.
@@ -269,7 +269,7 @@ ayx one workspace current
 ayx one flows list
 ayx one workflows list
 ayx one connections list
-ayx one job-groups list
+ayx one jobs list
 ayx one output-objects list
 ayx one auth status
 ayx one auth diagnose

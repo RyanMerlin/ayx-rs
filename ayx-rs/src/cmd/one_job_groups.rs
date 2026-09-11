@@ -21,7 +21,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
                 .with_all(all, max_pages);
             ayx_one_api::one_api_list_request(
                 &config,
-                "jobGroup",
+                "jobs",
                 "list",
                 "/v4/jobLibrary",
                 &[],
@@ -32,7 +32,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "jobGroup",
+                "jobs",
                 "count",
                 "GET",
                 "/v4/jobLibrary/count",
@@ -45,8 +45,8 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
-                "jobGroup",
-                "run",
+                "jobs",
+                "execute",
                 "POST",
                 "/v4/jobGroups",
                 true,
@@ -59,7 +59,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             let payload = load_payload(&body)?;
             one_api_live_request_with_body(
                 &config,
-                "jobGroup",
+                "jobs",
                 "publish",
                 "PUT",
                 "/v4/jobGroups/{id}/publish",
@@ -72,7 +72,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "jobGroup",
+                "jobs",
                 "pdf-results",
                 "GET",
                 "/v4/jobGroups/{id}/pdfResults",
@@ -82,8 +82,8 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
         }
         OneJobGroupCommand::Detail { profile, id } => {
             let id = crate::cmd::select::resolve_selector(
-                "job group id",
-                "ayx one job-groups list --output json",
+                "job id",
+                "ayx one jobs list --output json",
                 id,
                 crate::cmd::select::SelectPolicy::from_runtime(runtime.no_input),
                 || {
@@ -93,7 +93,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
                         .with_all(true, Some(10));
                     let listed = ayx_one_api::one_api_list_request(
                         &config,
-                        "jobGroup",
+                        "jobs",
                         "picker-list",
                         "/v4/jobLibrary",
                         &[],
@@ -108,7 +108,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "jobGroup",
+                "jobs",
                 "detail",
                 "GET",
                 "/v4/jobGroups/{id}",
@@ -120,7 +120,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "jobGroup",
+                "jobs",
                 "cancel",
                 "POST",
                 "/v4/jobGroups/{id}/cancel",
@@ -132,7 +132,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "jobGroup",
+                "jobs",
                 "status",
                 "GET",
                 "/v4/jobGroups/{id}/status",
@@ -144,7 +144,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "jobGroup",
+                "jobs",
                 "inputs",
                 "GET",
                 "/v4/jobGroups/{id}/inputs",
@@ -156,7 +156,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "jobGroup",
+                "jobs",
                 "outputs",
                 "GET",
                 "/v4/jobGroups/{id}/outputs",
@@ -168,8 +168,8 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "jobGroup",
                 "jobs",
+                "runs",
                 "GET",
                 "/v4/jobGroups/{id}/jobs",
                 false,
@@ -180,7 +180,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "jobGroup",
+                "jobs",
                 "publications",
                 "GET",
                 "/v4/jobGroups/{id}/publications",
@@ -192,7 +192,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "jobGroup",
+                "jobs",
                 "profile",
                 "GET",
                 "/v4/jobGroups/{id}/profile",
@@ -204,7 +204,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             one_api_live_request(
                 &config,
-                "jobGroup",
+                "jobs",
                 "profile-results",
                 "GET",
                 "/v4/jobGroups/{id}/profileResults",

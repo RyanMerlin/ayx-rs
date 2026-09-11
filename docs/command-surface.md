@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json` _on 2026-09-10 21:43:23 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json` _on 2026-09-11 12:12:42 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 401
+- Commands: 400
 - Capabilities: 6
 
 ## Commands
@@ -237,21 +237,20 @@ cargo run -q -p xtask -- refresh-command-surface
 | one flows update | `one/flows/update` | mutating | yes | Update a One flow from JSON payload |
 | one flows validate | `one/flows/validate` | read-only | no | Validate a One flow |
 | one inventory | `one/inventory` | read-only | no | Summarize the current One API surface registry |
-| one job-groups | `one/job-groups` | unclassified |  | Alteryx One job groups — run, publish, and inspect |
-| one job-groups cancel | `one/job-groups/cancel` | mutating | yes | Cancel a One job group |
-| one job-groups count | `one/job-groups/count` | read-only | no | Count One job groups |
-| one job-groups detail | `one/job-groups/detail` | read-only | no | Inspect a One job group |
-| one job-groups inputs | `one/job-groups/inputs` | read-only | no | List One job group inputs |
-| one job-groups jobs | `one/job-groups/jobs` | read-only | no | List jobs for a One job group |
-| one job-groups list | `one/job-groups/list` | read-only | no | List One job groups |
-| one job-groups outputs | `one/job-groups/outputs` | read-only | no | List One job group outputs |
-| one job-groups pdf-results | `one/job-groups/pdf-results` | read-only | no | Inspect PDF results for a One job group |
-| one job-groups profile | `one/job-groups/profile` | read-only | no | Inspect profile data for a One job group |
-| one job-groups profile-results | `one/job-groups/profile-results` | read-only | no | Inspect profile results for a One job group |
-| one job-groups publications | `one/job-groups/publications` | read-only | no | List publications for a One job group |
-| one job-groups publish | `one/job-groups/publish` | mutating | yes | Publish job-group results to a target |
-| one job-groups run | `one/job-groups/run` | mutating | yes | Run a One job group |
-| one job-groups status | `one/job-groups/status` | read-only | no | Inspect a One job group status |
+| one jobs | `one/jobs` | read-only | no | Alteryx One Job Library — inspect jobs, their runs, and results |
+| one jobs cancel | `one/jobs/cancel` | mutating | yes | Cancel a Job Library entry |
+| one jobs count | `one/jobs/count` | read-only | no | Count Job Library entries |
+| one jobs execute | `one/jobs/execute` | mutating | yes | Submit a Job Group from a JSON request body |
+| one jobs inputs | `one/jobs/inputs` | read-only | no | List aggregate job inputs |
+| one jobs list | `one/jobs/list` | read-only | no | List Job Library entries |
+| one jobs outputs | `one/jobs/outputs` | read-only | no | List aggregate job outputs |
+| one jobs pdf-results | `one/jobs/pdf-results` | read-only | no | Inspect aggregate job PDF results |
+| one jobs profile | `one/jobs/profile` | read-only | no | Inspect aggregate job profiling metadata |
+| one jobs profile-results | `one/jobs/profile-results` | read-only | no | Inspect aggregate job profiling results |
+| one jobs publications | `one/jobs/publications` | read-only | no | List publications for an aggregate job |
+| one jobs publish | `one/jobs/publish` | mutating | yes | Publish job results to a target |
+| one jobs runs | `one/jobs/runs` | read-only | no | List every child run record for an aggregate job |
+| one jobs status | `one/jobs/status` | read-only | no | Inspect aggregate job status |
 | one login | `one/login` | mutating | yes | Authenticate with Alteryx One and store credentials |
 | one logout | `one/logout` | mutating | yes | Clear stored Alteryx One credentials from the active profile |
 | one open | `one/open` | read-only | no | Open a One resource in the web console. Launches a browser only on a terminal, without --no-input or --print, and when no agent host is detected; otherwise prints the URL |

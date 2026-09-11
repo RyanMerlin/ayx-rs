@@ -21,9 +21,9 @@ use crate::{
     OneConnectionsCommand, OneConnectorMetadataCommand, OneConnectorMetadataOverridesCommand,
     OneDatasetsCommand, OneDatasetsImportedCommand, OneDatasetsWrangledCommand,
     OneFlowFolderFlowsCommand, OneFlowFoldersCommand, OneFlowLibraryCommand, OneFlowsCommand,
-    OneJobGroupCommand, OneOutputObjectCommand, OnePersonCommand, OnePlansCommand, OneRoleCommand,
-    OneSchedulingCommand, OneTokenCommand, OneWebhookFlowTaskCommand, OneWorkflowsCommand,
-    OneWorkspaceCommand, OneWriteSettingCommand,
+    OneJobGroupCommand, OneJobsCommand, OneOutputObjectCommand, OnePersonCommand, OnePlansCommand,
+    OneRoleCommand, OneSchedulingCommand, OneTokenCommand, OneWebhookFlowTaskCommand,
+    OneWorkflowsCommand, OneWorkspaceCommand, OneWriteSettingCommand,
 };
 
 use crate::output::{OutputDescriptor, ViewKind};
@@ -118,7 +118,8 @@ pub(crate) fn output_descriptor(command: &OneCommand) -> OutputDescriptor {
         OneCommand::Plans { command } => plans_descriptor(command),
         OneCommand::Datasets { command } => datasets_descriptor(command),
         OneCommand::AgentAssets { command } => agent_assets_descriptor(command),
-        OneCommand::JobGroups { command } => job_groups_descriptor(command),
+        OneCommand::Jobs { id, command, .. } => jobs_descriptor(id.as_deref(), command.as_ref()),
+        OneCommand::JobGroups { command } => legacy_job_groups_descriptor(command),
         OneCommand::OutputObjects { command } => output_objects_descriptor(command),
         OneCommand::WriteSettings { command } => write_settings_descriptor(command),
         OneCommand::Scheduling { command } => scheduling_descriptor(command),
@@ -489,29 +490,77 @@ fn agent_assets_descriptor(command: &OneAgentAssetsCommand) -> OutputDescriptor 
     }
 }
 
-fn job_groups_descriptor(command: &OneJobGroupCommand) -> OutputDescriptor {
+const JOB_RUN_FIELDS: &[&str] = &[
+    "id",
+    "jobGroup",
+    "jobType",
+    "status",
+    "percentComplete",
+    "createdAt",
+    "startedAt",
+    "finishedAt",
+    "lastHeartbeatAt",
+    "hasWarnings",
+    "errorMessage",
+    "executionLanguage",
+    "sampleSize",
+    "cpJobId",
+    "emrcluster",
+    "wrangleScript",
+];
+
+fn jobs_descriptor(id: Option<&str>, command: Option<&OneJobsCommand>) -> OutputDescriptor {
+    match (id, command) {
+        (Some(_), None) => detail("one.jobs.detail"),
+        (None, Some(OneJobsCommand::List { .. })) => list("one.jobs.list"),
+        (None, Some(OneJobsCommand::Count { .. })) => detail("one.jobs.count"),
+        (None, Some(OneJobsCommand::Execute { .. })) => result("one.jobs.execute"),
+        (None, Some(OneJobsCommand::Publish { .. })) => result("one.jobs.publish"),
+        (None, Some(OneJobsCommand::Cancel { .. })) => result("one.jobs.cancel"),
+        (None, Some(OneJobsCommand::Status { .. })) => detail_with("one.jobs.status", &["status"]),
+        (None, Some(OneJobsCommand::Runs { .. })) => list("one.jobs.runs")
+            .with_fields(JOB_RUN_FIELDS)
+            .with_detailed_rows(),
+        (None, Some(OneJobsCommand::Inputs { .. })) => list("one.jobs.inputs"),
+        (None, Some(OneJobsCommand::Outputs { .. })) => {
+            list("one.jobs.outputs").with_named_collections(&["files", "tables"])
+        }
+        (None, Some(OneJobsCommand::Publications { .. })) => list("one.jobs.publications"),
+        (None, Some(OneJobsCommand::Profile { .. })) => detail("one.jobs.profile"),
+        (None, Some(OneJobsCommand::ProfileResults { .. })) => detail("one.jobs.profile-results"),
+        (None, Some(OneJobsCommand::PdfResults { .. })) => detail("one.jobs.pdf-results"),
+        // Clap accepts either a positional JOB-ID or one subcommand, and the
+        // parent requires one of them. Keep this arm total for future parser
+        // changes rather than allowing presentation metadata to panic.
+        _ => OutputDescriptor::new("one.jobs", ViewKind::Raw),
+    }
+}
+
+fn legacy_job_groups_descriptor(command: &OneJobGroupCommand) -> OutputDescriptor {
     // The view *kind* is shared -- these really do render as lists or details.
     // The `command` name is not: it is how a caller correlates a result back
     // to the invocation that produced it, so each leaf names itself.
     match command {
-        OneJobGroupCommand::List { .. } => list("one.job-groups.list"),
-        OneJobGroupCommand::Inputs { .. } => list("one.job-groups.inputs"),
+        OneJobGroupCommand::List { .. } => list("one.jobs.list"),
+        OneJobGroupCommand::Inputs { .. } => list("one.jobs.inputs"),
         // `{files: [...], tables: [...]}` -- two lists, both shown.
         OneJobGroupCommand::Outputs { .. } => {
-            list("one.job-groups.outputs").with_named_collections(&["files", "tables"])
+            list("one.jobs.outputs").with_named_collections(&["files", "tables"])
         }
-        OneJobGroupCommand::Jobs { .. } => list("one.job-groups.jobs"),
-        OneJobGroupCommand::Publications { .. } => list("one.job-groups.publications"),
-        OneJobGroupCommand::Count { .. } => detail("one.job-groups.count"),
-        OneJobGroupCommand::Detail { .. } => detail("one.job-groups.detail"),
+        OneJobGroupCommand::Jobs { .. } => list("one.jobs.runs")
+            .with_fields(JOB_RUN_FIELDS)
+            .with_detailed_rows(),
+        OneJobGroupCommand::Publications { .. } => list("one.jobs.publications"),
+        OneJobGroupCommand::Count { .. } => detail("one.jobs.count"),
+        OneJobGroupCommand::Detail { .. } => detail("one.jobs.detail"),
         // The body is a bare string ("Complete"); the one field labels it.
-        OneJobGroupCommand::Status { .. } => detail_with("one.job-groups.status", &["status"]),
-        OneJobGroupCommand::Profile { .. } => detail("one.job-groups.profile"),
-        OneJobGroupCommand::ProfileResults { .. } => detail("one.job-groups.profile-results"),
-        OneJobGroupCommand::PdfResults { .. } => detail("one.job-groups.pdf-results"),
-        OneJobGroupCommand::Run { .. } => result("one.job-groups.run"),
-        OneJobGroupCommand::Publish { .. } => result("one.job-groups.publish"),
-        OneJobGroupCommand::Cancel { .. } => result("one.job-groups.cancel"),
+        OneJobGroupCommand::Status { .. } => detail_with("one.jobs.status", &["status"]),
+        OneJobGroupCommand::Profile { .. } => detail("one.jobs.profile"),
+        OneJobGroupCommand::ProfileResults { .. } => detail("one.jobs.profile-results"),
+        OneJobGroupCommand::PdfResults { .. } => detail("one.jobs.pdf-results"),
+        OneJobGroupCommand::Run { .. } => result("one.jobs.execute"),
+        OneJobGroupCommand::Publish { .. } => result("one.jobs.publish"),
+        OneJobGroupCommand::Cancel { .. } => result("one.jobs.cancel"),
     }
 }
 
@@ -679,6 +728,32 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
         }
         OneCommand::Doctor { command } => super::one_doctor::execute(&runtime, command)?,
         OneCommand::Api { command } => super::one_api::execute(&runtime, command)?,
+        OneCommand::Jobs {
+            id,
+            profile,
+            command,
+        } => match (id, command) {
+            (Some(id), None) => super::one_job_groups::execute(
+                &runtime,
+                OneJobGroupCommand::Detail {
+                    profile,
+                    id: Some(id),
+                },
+            )?,
+            (None, Some(command)) if profile.is_none() => {
+                super::one_job_groups::execute(&runtime, command.into())?
+            }
+            (None, Some(_)) => {
+                return Err(anyhow::anyhow!(
+                    "place --profile after the jobs verb, for example `ayx one jobs runs <JOB-ID> --profile <PROFILE>`"
+                ));
+            }
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "use `ayx one jobs <JOB-ID>` or a `ayx one jobs` subcommand"
+                ));
+            }
+        },
         OneCommand::JobGroups { command } => super::one_job_groups::execute(&runtime, command)?,
         OneCommand::OutputObjects { command } => {
             super::one_output_objects::execute(&runtime, command)?
@@ -773,7 +848,7 @@ mod tests {
     ///
     /// The view *kind* is legitimately shared; the name is not.
     #[test]
-    fn every_job_group_leaf_reports_its_own_command_name() {
+    fn every_job_group_compatibility_leaf_reports_its_own_canonical_command_name() {
         let leaves = vec![
             (
                 "list",
@@ -815,7 +890,7 @@ mod tests {
                 },
             ),
             (
-                "jobs",
+                "runs",
                 OneJobGroupCommand::Jobs {
                     profile: None,
                     id: "1".to_string(),
@@ -854,11 +929,11 @@ mod tests {
         let mut seen: std::collections::BTreeMap<&'static str, String> =
             std::collections::BTreeMap::new();
         for (leaf, command) in leaves {
-            let descriptor = job_groups_descriptor(&command);
+            let descriptor = legacy_job_groups_descriptor(&command);
             assert_eq!(
                 descriptor.command,
-                format!("one.job-groups.{leaf}"),
-                "`ayx one job-groups {leaf}` must name itself in the envelope"
+                format!("one.jobs.{leaf}"),
+                "the compatibility alias must report the canonical `one jobs {leaf}` envelope name"
             );
             if let Some(previous) = seen.insert(descriptor.command, leaf.to_string()) {
                 panic!(
