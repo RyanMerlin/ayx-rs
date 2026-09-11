@@ -1307,7 +1307,7 @@ mongo:
         // is free to read naturally instead of being contorted to contain a
         // keyword this classifier's fallback substring scan would catch.
         let err = anyhow::Error::new(cmd::UsageError(
-            "put --profile after the jobs verb: `ayx one jobs list <JOB-ID> --profile <PROFILE>`"
+            "put --profile after the jobs verb: `ayx one jobs list --profile <PROFILE>`"
                 .to_string(),
         ))
         .context("jobs dispatch failed");

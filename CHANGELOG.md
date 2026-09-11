@@ -20,17 +20,24 @@ that release is promoted.
   cycle but are absent from help, catalog, and normal discovery.
 - `ayx one jobs runs` now renders every selected child-run lifecycle field in
   text, while JSON retains the complete recursively redacted provider response.
-- `ayx one jobs runs` text output now also shows nested values, such as the
-  parent job id, instead of collapsing them out of the human view.
-- `ayx one jobs <JOB-ID>` text output now shows the entry's key fields rather
-  than an id-only stub.
-- Colour is now emitted only when the stream being written is actually a
-  terminal, so piped or redirected `ayx` output stays plain even when the
-  process itself is attached to a tty.
-- Human text output now escapes control characters (newlines, carriage
-  returns, ESC) found in provider-supplied strings, so a malformed or
-  adversarial upstream response body cannot forge additional envelope-looking
-  lines in terminal output.
+- `ayx one jobs runs` text output now expands nested values, so each run shows
+  its parent `jobGroup` id instead of "1 field(s)".
+- `ayx one jobs <JOB-ID>` text output shows who ran the job, what triggered it,
+  the workspace, the failure reason, and the flow-run, dataset and snapshot
+  references.
+- `ayx one jobs list` text output has a single NAME column that is always
+  filled; unnamed jobs get a stable label such as `flow-77 (3978581)`, while
+  JSON still reports the upstream `null`.
+- Colour is decided per stream: success output checks stdout and error output
+  checks stderr, so error output redirected to a file no longer contains ANSI
+  colour codes. `NO_COLOR` still wins.
+- Human text output escapes control characters (`\n`, `\r`, `\t`, ESC and other
+  C0/C1 controls, U+2028/2029) as visible sequences such as `\n` or `\u{1b}`,
+  so an upstream error page can no longer forge output lines such as
+  `error_code: …` or inject terminal escape sequences. JSON is unchanged.
+- Text output shortens sub-second precision only in timestamp fields; names and
+  ids that merely look like timestamps print exactly as sent.
+- Text tables consistently fill up to seven columns.
 - `ayx one jobs <JOB-ID> list`-style mixing of a job id with a subcommand, and
   `--profile` given before a `jobs` subcommand, are now usage errors (exit 2)
   instead of `internal` (exit 70).
@@ -56,8 +63,12 @@ These affect callers that match on envelope fields or process exit codes.
   `pdf-results` previously reported `one.job-groups.detail`;
   `output-objects inputs` previously reported `one.output-objects.list`; `plans schedules` previously reported
   `one.plans.list`; and `role list-assignments` previously reported
-  `one.role.list`. Each now reports
-  `one.<family>.<verb>`. `command` is how a caller correlates a result with the
+  `one.role.list`. Each now reports its own
+  `one.<family>.<verb>`; the job-group leaves report the canonical Job Library
+  names (`one.jobs.inputs`, `one.jobs.runs`, `one.jobs.status`, …) whether
+  invoked as `ayx one jobs …` or through the hidden `job-groups` alias.
+  `command` is emitted on both success and error envelopes (omitted only when
+  no command was resolved). It is how a caller correlates a result with the
   invocation that produced it, so the shared names made a failure untraceable.
 - **BREAKING:** an HTTP 400 whose upstream body carries an allowlisted
   absent-data exception type (currently only `ProfilingDataNotFoundException`)

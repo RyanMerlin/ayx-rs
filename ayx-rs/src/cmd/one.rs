@@ -800,7 +800,7 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             // keyword the classifier scans for.
             (Some(id), None) if profile.is_some() && is_jobs_verb_name(&id) => {
                 return Err(anyhow::Error::new(super::UsageError(format!(
-                    "put --profile after the jobs verb: `ayx one jobs {id} <JOB-ID> --profile <PROFILE>` \
+                    "put --profile after the jobs verb and its arguments: `ayx one jobs {id} [ARGS] --profile <PROFILE>` \
                      (for example `ayx one jobs runs <JOB-ID> --profile <PROFILE>`); if `{id}` is meant \
                      as a literal JOB-ID, move --profile after it instead: `ayx one jobs {id} --profile <PROFILE>`"
                 ))));
