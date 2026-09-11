@@ -316,9 +316,10 @@ CLI needs it (`inventory.rs` `PARTIAL_SURFACES`).
 | GET | `/v4/wrangledDatasets/{id}` | unverified | not probed this session | `one datasets wrangled detail` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | No wrangled dataset id available (list is empty). |
 | GET | `/v4/importedDatasets/{id}` | unverified | not probed this session | `one datasets imported detail` | object: raw API resource body, JSON-passthrough | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | No imported dataset id available. |
 
-### jobGroup (partial)
+### jobs (partial)
 
-> Job-group execution, publish, and inspection commands are wired.
+> Job execution, publish, and inspection commands are wired (canonical `ayx one jobs`;
+> `ayx one job-groups` is a hidden compatibility alias).
 
 > PDF/log artifact downloads and other deeper job-library paths remain documented-only.
 

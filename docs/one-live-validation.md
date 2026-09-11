@@ -30,13 +30,13 @@ Test the currently wired One families in the CLI and API layers:
   - permissions list
   - connector-metadata defaults
   - connector-metadata publish-info
-- job-group
+- jobs (canonical `ayx one jobs`; `ayx one job-groups` is a hidden compatibility alias)
   - list
-  - detail
+  - `<JOB-ID>` (bare aggregate-job lookup)
   - status
   - inputs
   - outputs
-  - jobs
+  - runs
   - publications
   - profile
   - profile-results
