@@ -38,7 +38,7 @@ All mutating commands are dry-run by default. Nothing changes on the server unti
 | Workflows | `ayx one workflows` | List, inspect, run, cancel, copy, share, and delete cloud-native canvas workflows |
 | Connections | `ayx one connections` | Manage data connections and connector metadata |
 | Datasets | `ayx one datasets` | Browse the One dataset library and inspect dataset details |
-| Job groups | `ayx one job-groups` | Run, cancel, inspect, and retrieve results for job groups |
+| Jobs | `ayx one jobs` | Execute, cancel, inspect, and retrieve results for Job Library entries (`ayx one job-groups` remains a hidden compatibility alias) |
 | Output objects | `ayx one output-objects` | CRUD for output objects; inspect inputs; convert to Python |
 | Scheduling | `ayx one scheduling` | List schedules, enable and disable them |
 | Plans | `ayx one plans` | Orchestrate multi-flow plans, manage schedules, share, import/export |

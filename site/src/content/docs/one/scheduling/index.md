@@ -156,7 +156,7 @@ ayx --output json one scheduling list --all | jq '
 
 ## Related
 
-- [Job groups](/one/job-groups/) — run and inspect the job groups schedules trigger
+- [Jobs](/one/jobs/) — execute and inspect the jobs schedules trigger
 - [Plan schedules](/one/plans/schedules/) — view schedules attached to a specific plan via `ayx one plans schedules`
 - [Safety model](/safety-model/) — how dry-run and `--apply` work
 - [Output & automation](/output-automation/) — JSON envelope and scripting patterns
