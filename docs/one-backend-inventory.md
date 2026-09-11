@@ -160,7 +160,7 @@ The public One API surface exposed here does not provide a general-purpose workf
   - Notes:
     - Dataset library list/count plus wrangled and imported dataset detail reads are wired.
     - Mutating dataset lifecycle operations remain documented-only in this first cut.
-- `jobGroup`
+- `jobs` (canonical `ayx one jobs`; `ayx one job-groups` is a hidden compatibility alias)
   - `GET /v4/jobLibrary`
   - `GET /v4/jobLibrary/count`
   - `POST /v4/jobGroups`
@@ -177,7 +177,7 @@ The public One API surface exposed here does not provide a general-purpose workf
   - `GET /v4/jobGroups/{id}/profileResults`
   - Notes:
     - Execution, publish, status, and inspection commands are wired.
-    - Live smoke coverage now exercises detail, status, inputs, outputs, jobs, publications, profile, profile-results, and pdf-results on real job groups.
+    - Live smoke coverage now exercises detail, status, inputs, outputs, runs, publications, profile, profile-results, and pdf-results on real jobs.
 - `outputObject`
   - `GET /v4/outputObjects`
   - `GET /v4/outputObjects/count`
@@ -275,16 +275,16 @@ The live smoke suite currently proves a representative path for:
 - `connections.permissions.list`
 - `connections.connector-metadata.defaults`
 - `connections.connector-metadata.publish-info`
-- `job-groups.list`
-- `job-groups.detail`
-- `job-groups.status`
-- `job-groups.inputs`
-- `job-groups.outputs`
-- `job-groups.jobs`
-- `job-groups.publications`
-- `job-groups.profile`
-- `job-groups.profile-results`
-- `job-groups.pdf-results`
+- `jobs.list` (canonical `ayx one jobs list`; `ayx one job-groups list` is a hidden compatibility alias)
+- `jobs.detail` (`ayx one jobs <JOB-ID>`; `ayx one job-groups detail <ID>` alias)
+- `jobs.status`
+- `jobs.inputs`
+- `jobs.outputs`
+- `jobs.runs` (`ayx one jobs runs <JOB-ID>`; `ayx one job-groups jobs <ID>` alias)
+- `jobs.publications`
+- `jobs.profile`
+- `jobs.profile-results`
+- `jobs.pdf-results`
 - `output-objects.list`
 - `write-settings.list`
 - `scheduling.list`
@@ -301,7 +301,7 @@ The live smoke suite currently proves a representative path for:
 
 It also exercises edge coverage for representative families:
 
-- invalid-id detail failures across `flow` (flows and folders), `connection` (connections and permissions), `plans`, `platform.person`, `platform.token`, `jobGroup`, `outputObject`, `writeSetting`, and `workflow`
+- invalid-id detail failures across `flow` (flows and folders), `connection` (connections and permissions), `plans`, `platform.person`, `platform.token`, `jobs`, `outputObject`, `writeSetting`, and `workflow`
 - pagination-boundary list checks on the major list families using `--limit 1 --all --max-pages 1`
 
 ## Live Coverage Baseline
