@@ -611,14 +611,35 @@ fn compact_cell(v: &Value, timestamp: bool) -> String {
 /// applied to every RFC 3339-looking string, the rewrite altered names and ids
 /// that merely resemble one. The rule follows the names this CLI and its
 /// services actually emit -- `createdAt`/`lastHeartbeatAt`, `created_at`/
-/// `generated_at`, `timestamp_utc`, and bare `created`/`updated`.
+/// `generated_at`, `timestamp_utc`, `created_utc` (e.g.
+/// `ayx-server/src/upgrade/manifest.rs`'s sub-second-precision plan manifest
+/// timestamp), and bare `created`/`updated`.
+///
+/// The `Time`/`Date`/`Utc` suffix checks run against the *original-case* key
+/// as well as the lowercased one: `key.ends_with("Time")` matches the
+/// camelCase word boundary in `updateTime` but not the all-lowercase
+/// `runtime` (which ends in `time`, never `Time`), and `key.ends_with("Date")`
+/// matches `expiresDate` but not `update` (which ends in `date` but never
+/// `Date`). The `_time`/`_date`/`_utc` lowercase checks require the
+/// underscore, so `runtime` and `update` don't match those either. The value
+/// must still parse as RFC 3339 for shortening to actually happen -- see
+/// `compact_cell`'s fallback to the original string.
 fn is_timestamp_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
     key.ends_with("At")
+        || key.ends_with("Time")
+        || key.ends_with("Date")
+        || key.ends_with("Utc")
         || lower.ends_with("_at")
+        || lower.ends_with("_time")
+        || lower.ends_with("_date")
+        || lower.ends_with("_utc")
         || lower.starts_with("timestamp")
         || lower.ends_with("_timestamp")
-        || matches!(lower.as_str(), "created" | "updated" | "modified")
+        || matches!(
+            lower.as_str(),
+            "created" | "updated" | "modified" | "lastrun" | "lastmodified" | "expires"
+        )
 }
 
 /// Keep exact timestamp values in JSON, but omit visual noise below a second
@@ -641,13 +662,30 @@ fn human_timestamp_or_original(value: &str) -> String {
 /// C0, DEL and C1 -- and the two Unicode line separators print as a visible
 /// escape: `\n`, `\r`, `\t`, and otherwise `\u{1b}` style.
 ///
+/// The same threat applies to Unicode bidi/format controls and zero-width
+/// characters, none of which `char::is_control` covers: U+202A-U+202E
+/// (LRE/RLE/PDF/LRO/RLO) and U+2066-U+2069 (LRI/RLI/FSI/PDI) can reorder how
+/// surrounding text *displays* without changing its byte content -- e.g.
+/// making `evil.exe` render as `exe.evil` -- and U+200B-U+200F (zero-width
+/// space/non-joiner/joiner/LRM/RLM) plus U+FEFF (zero-width no-break
+/// space/BOM) are invisible but can still split or hide characters in a
+/// spoofed name. All of these print as a visible `\u{...}` escape.
+///
 /// Backslashes are deliberately left alone. Escaping them would make every
 /// Windows path unreadable, and the only cost of not doing so is that a
 /// literal `\n` in the source looks the same as an escaped newline -- an
 /// ambiguity, not a way to start a line. JSON output never passes through
 /// here; serde escapes it.
 fn escape_control(text: &str) -> Cow<'_, str> {
-    let needs_escape = |c: char| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}');
+    let needs_escape = |c: char| {
+        c.is_control()
+            || matches!(c,
+                '\u{2028}' | '\u{2029}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{FEFF}')
+    };
     if !text.chars().any(needs_escape) {
         return Cow::Borrowed(text);
     }
@@ -1093,5 +1131,109 @@ mod tests {
         assert!(config_pos < auth_pos);
         assert!(auth_pos < network_pos);
         assert!(!text.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn is_timestamp_key_recognizes_common_timestamp_field_names() {
+        for key in [
+            "createdAt",
+            "lastHeartbeatAt",
+            "created_at",
+            "generated_at",
+            "timestamp_utc",
+            // The regression this test guards: ayx-server's plan manifest
+            // (`ayx-server/src/upgrade/manifest.rs`) emits this field with
+            // sub-second precision via `Utc::now().to_rfc3339()`.
+            "created_utc",
+            "createdUtc",
+            "updateTime",
+            "update_time",
+            "expiresDate",
+            "expires_date",
+            "created",
+            "updated",
+            "modified",
+            "lastRun",
+            "lastModified",
+            "expires",
+        ] {
+            assert!(
+                is_timestamp_key(key),
+                "expected {key:?} to be a timestamp key"
+            );
+        }
+    }
+
+    #[test]
+    fn is_timestamp_key_does_not_match_lookalike_non_timestamp_keys() {
+        for key in [
+            "runtime",
+            "update",
+            "date",
+            "time",
+            "utc",
+            "id",
+            "name",
+            "status",
+            "createdBy",
+        ] {
+            assert!(
+                !is_timestamp_key(key),
+                "expected {key:?} to NOT be treated as a timestamp key"
+            );
+        }
+    }
+
+    #[test]
+    fn timestamp_key_shortening_still_requires_an_rfc3339_value() {
+        // `is_timestamp_key` alone doesn't shorten anything -- the value
+        // must parse as RFC 3339, or `compact_cell` falls back to printing
+        // it unchanged.
+        assert_eq!(
+            compact_cell(&json!("not-a-timestamp"), true),
+            "not-a-timestamp"
+        );
+        assert_eq!(
+            compact_cell(&json!("2024-01-02T03:04:05.123456789Z"), true),
+            "2024-01-02T03:04:05Z"
+        );
+    }
+
+    #[test]
+    fn escape_control_escapes_bidi_and_zero_width_unicode_controls() {
+        // Bidi/format overrides (U+202A-U+202E, U+2066-U+2069) can make
+        // spoofed text *display* in a different order than its bytes read,
+        // e.g. faking a `.exe` extension onto a name that isn't one.
+        for c in [
+            '\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}', '\u{202E}', '\u{2066}', '\u{2067}',
+            '\u{2068}', '\u{2069}',
+        ] {
+            let input = format!("evil{c}exe");
+            let escaped = escape_control(&input);
+            assert!(
+                escaped.contains(&format!("\\u{{{:x}}}", u32::from(c))),
+                "expected {c:?} (U+{:04X}) to be escaped, got: {escaped}",
+                u32::from(c)
+            );
+        }
+
+        // Zero-width space/joiners/marks (U+200B-U+200F) and the zero-width
+        // no-break space / BOM (U+FEFF) are invisible in a terminal but can
+        // still split or hide characters in a spoofed name.
+        for c in [
+            '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}', '\u{FEFF}',
+        ] {
+            let input = format!("a{c}b");
+            let escaped = escape_control(&input);
+            assert!(
+                escaped.contains(&format!("\\u{{{:x}}}", u32::from(c))),
+                "expected {c:?} (U+{:04X}) to be escaped, got: {escaped}",
+                u32::from(c)
+            );
+        }
+
+        // Ordinary text with none of these characters is left untouched
+        // (and borrowed, not reallocated).
+        assert!(matches!(escape_control("plain text"), Cow::Borrowed(_)));
     }
 }
