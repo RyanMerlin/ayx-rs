@@ -770,10 +770,16 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             // Catch the silent case here: an id that is exactly a known
             // `jobs` verb name, combined with an explicit `--profile`, is
             // essentially always this mix-up rather than a literal JOB-ID.
+            // A typed `UsageError` (not message-text sniffing) is what tells
+            // `classify_anyhow_error` this is a validation error, so the
+            // message can stay plain instead of being contorted to contain a
+            // keyword the classifier scans for.
             (Some(id), None) if profile.is_some() && is_jobs_verb_name(&id) => {
-                return Err(anyhow::anyhow!(
-                    "invalid value: --profile is required to come after the jobs verb, not before it: use `ayx one jobs {id} <JOB-ID> --profile <PROFILE>` (for example `ayx one jobs runs <JOB-ID> --profile <PROFILE>`); if `{id}` is a literal JOB-ID, move --profile after it instead: `ayx one jobs {id} --profile <PROFILE>`"
-                ));
+                return Err(anyhow::Error::new(super::UsageError(format!(
+                    "put --profile after the jobs verb: `ayx one jobs {id} <JOB-ID> --profile <PROFILE>` \
+                     (for example `ayx one jobs runs <JOB-ID> --profile <PROFILE>`); if `{id}` is meant \
+                     as a literal JOB-ID, move --profile after it instead: `ayx one jobs {id} --profile <PROFILE>`"
+                ))));
             }
             (Some(id), None) => super::one_job_groups::execute(
                 &runtime,
@@ -793,13 +799,16 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             // Reachable only as `ayx one jobs --profile <PROFILE>` with no
             // JOB-ID and no subcommand — clap accepts it syntactically since
             // `--profile` alone doesn't trigger the subcommand conflict, but
-            // there is nothing for the profile to scope. The "is required"
-            // wording keeps `classify_anyhow_error` mapping this to a
-            // validation error (exit 2), not internal.
+            // there is nothing for the profile to scope. A typed
+            // `UsageError` (see above) keeps this a validation error (exit
+            // 2) without the message having to spell out a classifier
+            // keyword.
             (None, None) => {
-                return Err(anyhow::anyhow!(
-                    "a JOB-ID or subcommand is required: use `ayx one jobs <JOB-ID>` or `ayx one jobs <VERB> ...` (for example `ayx one jobs runs <JOB-ID>`); see `ayx one jobs --help`"
-                ));
+                return Err(anyhow::Error::new(super::UsageError(
+                    "`ayx one jobs` needs a JOB-ID or a subcommand, e.g. `ayx one jobs <JOB-ID>` \
+                     or `ayx one jobs runs <JOB-ID>`; see `ayx one jobs --help`"
+                        .to_string(),
+                )));
             }
             // clap's `args_conflicts_with_subcommands` on the `Jobs` variant
             // rejects a JOB-ID together with a subcommand before dispatch
