@@ -40,13 +40,19 @@ function compareReleaseVersionsDescending(a: string, b: string): number {
   return bpre.localeCompare(apre, undefined, { numeric: true });
 }
 
+// The site badge must never advertise a prerelease: only a stable (non "-rc.",
+// non-prerelease) notes file is eligible for the badge label, even though
+// prerelease notes pages are still generated and listed on the site.
 const releaseDir = resolve(dirname(cargoTomlPath), 'docs', 'releases');
-const latestRelease = existsSync(releaseDir)
+const latestStableRelease = existsSync(releaseDir)
   ? readdirSync(releaseDir)
-      .filter((filename) => releasePattern.test(filename))
+      .filter((filename) => {
+        const match = releasePattern.exec(filename);
+        return match !== null && !match[4];
+      })
       .sort(compareReleaseVersionsDescending)[0]
   : undefined;
-const publicVersion = latestRelease?.slice(0, -3);
+const publicVersion = latestStableRelease?.slice(0, -3);
 
 export const ayxVersion = workspaceVersion;
 export const ayxVersionLabel = publicVersion ?? `v${workspaceVersion}`;
