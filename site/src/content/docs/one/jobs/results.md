@@ -77,24 +77,24 @@ Check profile results for data quality after every run:
 
 ```bash
 PROFILE=$(ayx --output json one jobs profile-results <JOB-ID>)
-echo "$PROFILE" | jq '.data'
+echo "$PROFILE" | jq '.data.response'
 ```
 
 Audit all publication targets for a job:
 
 ```bash
 ayx --output json one jobs publications <JOB-ID> \
-  | jq -r '.data[] | [.target, .publishedAt, .status] | @tsv'
+  | jq -r '.data.response[] | [.target, .publishedAt, .status] | @tsv'
 ```
 
 List Job Library entries that have produced PDF results:
 
 ```bash
 ayx --output json one jobs list --all \
-  | jq -r '.data[].id' \
-  | while read id; do
+  | jq -r '.data.items[].id' \
+  | while read -r id; do
       COUNT=$(ayx --output json one jobs pdf-results "$id" \
-               | jq '.data | length')
+               | jq '.data.response | length')
       [[ "$COUNT" -gt 0 ]] && echo "$id: $COUNT PDF result(s)"
     done
 ```
