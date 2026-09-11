@@ -389,6 +389,7 @@ fn render_object_fields(object: &serde_json::Map<String, Value>, indent: usize) 
 
 fn render_human_field(lines: &mut Vec<String>, key: &str, value: &Value, indent: usize) {
     let prefix = " ".repeat(indent);
+    let cell = |value: &Value| field_cell(key, value);
     let key = escape_control(key);
     match value {
         Value::Object(object) if object.is_empty() => {
@@ -406,7 +407,7 @@ fn render_human_field(lines: &mut Vec<String>, key: &str, value: &Value, indent:
                 .iter()
                 .all(|item| !item.is_object() && !item.is_array()) =>
         {
-            lines.push(format!("{prefix}{key}: {}", scalar_or_compact(value)));
+            lines.push(format!("{prefix}{key}: {}", cell(value)));
         }
         Value::Array(items) => {
             lines.push(format!("{prefix}{key}:"));
@@ -419,22 +420,11 @@ fn render_human_field(lines: &mut Vec<String>, key: &str, value: &Value, indent:
                         lines.push(format!("{}-", " ".repeat(indent + 2)));
                         lines.extend(render_object_fields(object, indent + 4));
                     }
-                    Value::Array(_) => {
-                        lines.push(format!(
-                            "{}- {}",
-                            " ".repeat(indent + 2),
-                            scalar_or_compact(item)
-                        ));
-                    }
-                    _ => lines.push(format!(
-                        "{}- {}",
-                        " ".repeat(indent + 2),
-                        scalar_or_compact(item)
-                    )),
+                    _ => lines.push(format!("{}- {}", " ".repeat(indent + 2), cell(item))),
                 }
             }
         }
-        _ => lines.push(format!("{prefix}{key}: {}", scalar_or_compact(value))),
+        _ => lines.push(format!("{prefix}{key}: {}", cell(value))),
     }
 }
 
@@ -515,7 +505,7 @@ pub fn render_object_array(items: &[Value]) -> String {
             .iter()
             .map(|col| {
                 obj.get(col)
-                    .map(scalar_or_compact)
+                    .map(|value| field_cell(col, value))
                     .unwrap_or_else(|| "-".to_string())
             })
             .collect();
@@ -584,16 +574,29 @@ fn render_scalar_array(items: &[Value]) -> String {
 /// summarized here because tables need one line per cell; vertical detail
 /// output expands those structures through `render_human_field` instead.
 fn scalar_or_compact(v: &Value) -> String {
+    compact_cell(v, false)
+}
+
+/// [`scalar_or_compact`] for a value printed under `key`: timestamp fields
+/// are shortened, every other string is printed as sent.
+fn field_cell(key: &str, value: &Value) -> String {
+    compact_cell(value, is_timestamp_key(key))
+}
+
+fn compact_cell(v: &Value, timestamp: bool) -> String {
     match v {
         Value::Null => "-".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
-        Value::String(s) => escape_control(&human_timestamp_or_original(s)).into_owned(),
+        Value::String(s) if timestamp => {
+            escape_control(&human_timestamp_or_original(s)).into_owned()
+        }
+        Value::String(s) => escape_control(s).into_owned(),
         Value::Array(arr) => {
             // For short arrays of scalars, render comma-separated.
             if arr.iter().all(|v| !v.is_object() && !v.is_array()) {
                 arr.iter()
-                    .map(scalar_or_compact)
+                    .map(|item| compact_cell(item, timestamp))
                     .collect::<Vec<_>>()
                     .join(",")
             } else {
@@ -602,6 +605,20 @@ fn scalar_or_compact(v: &Value) -> String {
         }
         Value::Object(object) => format!("{{{} fields}}", object.len()),
     }
+}
+
+/// Does this field name a point in time? Only such fields are shortened:
+/// applied to every RFC 3339-looking string, the rewrite altered names and ids
+/// that merely resemble one. The rule follows the names this CLI and its
+/// services actually emit -- `createdAt`/`lastHeartbeatAt`, `created_at`/
+/// `generated_at`, `timestamp_utc`, and bare `created`/`updated`.
+fn is_timestamp_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    key.ends_with("At")
+        || lower.ends_with("_at")
+        || lower.starts_with("timestamp")
+        || lower.ends_with("_timestamp")
+        || matches!(lower.as_str(), "created" | "updated" | "modified")
 }
 
 /// Keep exact timestamp values in JSON, but omit visual noise below a second
@@ -819,6 +836,57 @@ mod tests {
         let text = render_text(&env);
         assert!(text.contains("{1 fields}"));
         assert!(!text.contains("{\"nested\":true}"));
+    }
+
+    /// Shortening timestamps is for fields that *are* timestamps. Applied to
+    /// every RFC 3339-looking string it rewrote names and ids that merely
+    /// look like one, so the terminal showed a value the service never sent
+    /// and a copied id no longer matched.
+    #[test]
+    fn only_timestamp_fields_are_shortened() {
+        let stamp = "2026-09-09T13:14:15.987654Z";
+        let env = env_with(
+            "status",
+            json!({
+                "name": stamp,
+                "id": stamp,
+                "tags": [stamp],
+                "createdAt": stamp,
+                "finished_at": stamp,
+                "timestamp_utc": stamp,
+                "updated": stamp,
+            }),
+        );
+        let text = render_text(&env);
+        assert!(text.contains(&format!("name: {stamp}")), "{text}");
+        assert!(text.contains(&format!("id: {stamp}")), "{text}");
+        assert!(text.contains(&format!("tags: {stamp}")), "{text}");
+        for key in ["createdAt", "finished_at", "timestamp_utc", "updated"] {
+            assert!(
+                text.contains(&format!("{key}: 2026-09-09T13:14:15Z")),
+                "{key} should be shortened in:\n{text}"
+            );
+        }
+
+        let table = render_object_array(&[json!({"id": "a", "name": stamp, "createdAt": stamp})]);
+        assert!(
+            table.contains(stamp),
+            "a name cell keeps its value:\n{table}"
+        );
+        assert!(
+            table
+                .lines()
+                .last()
+                .unwrap()
+                .ends_with("  2026-09-09T13:14:15Z"),
+            "a timestamp cell is shortened:\n{table}"
+        );
+
+        let bare = render_text(&env_with("ids", json!([stamp])));
+        assert!(
+            bare.contains(stamp),
+            "a keyless value is not a timestamp field:\n{bare}"
+        );
     }
 
     #[test]
