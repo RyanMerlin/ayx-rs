@@ -1301,6 +1301,20 @@ mongo:
     }
 
     #[test]
+    fn a_usage_error_classifies_as_validation_by_type_not_message_text() {
+        // Typed, like `OneLoginExpired` above, so `cmd::one`'s jobs-mix-up
+        // errors classify as Validation regardless of wording -- the message
+        // is free to read naturally instead of being contorted to contain a
+        // keyword this classifier's fallback substring scan would catch.
+        let err = anyhow::Error::new(cmd::UsageError(
+            "put --profile after the jobs verb: `ayx one jobs list <JOB-ID> --profile <PROFILE>`"
+                .to_string(),
+        ))
+        .context("jobs dispatch failed");
+        assert_eq!(classify_anyhow_error(&err), ErrorCode::Validation);
+    }
+
+    #[test]
     fn missing_argument_errors_classify_as_validation() {
         // A required-argument error must classify as Validation (not Internal)
         // so the user gets the input/`--help` hint instead of a fabricated
@@ -7639,6 +7653,9 @@ fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
         .any(|cause| cause.is::<ayx_one_api::OneLoginExpired>())
     {
         return ErrorCode::AuthFailed;
+    }
+    if err.chain().any(|cause| cause.is::<cmd::UsageError>()) {
+        return ErrorCode::Validation;
     }
     let chain = err
         .chain()

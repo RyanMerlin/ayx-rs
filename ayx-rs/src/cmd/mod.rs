@@ -120,3 +120,21 @@ impl<'a> RuntimeCtx<'a> {
         )?)
     }
 }
+
+/// The caller typed a command invocation that is syntactically acceptable to
+/// clap but not actually meaningful (e.g. mixing two mutually exclusive
+/// shapes clap can't itself reject). Typed, like `ayx_one_api::OneLoginExpired`,
+/// so `classify_anyhow_error` in main.rs can recognize it by downcasting
+/// instead of pattern-matching on the message text -- the message stays
+/// natural and readable rather than being contorted to contain a keyword the
+/// classifier scans for.
+#[derive(Debug)]
+pub(crate) struct UsageError(pub(crate) String);
+
+impl std::fmt::Display for UsageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for UsageError {}
