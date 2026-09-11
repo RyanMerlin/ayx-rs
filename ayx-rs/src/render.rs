@@ -24,11 +24,17 @@ use serde_json::Value;
 
 const ALTERYX_BLUE: Color = Color::Rgb(RgbColor(0, 103, 185));
 
+/// Widest table the text renderer draws. Seven so permission grants keep
+/// their seven operator fields (subject type/id, identity, role, policy,
+/// creation, and source) without making ordinary tables unboundedly wide.
+const MAX_TABLE_COLUMNS: usize = 7;
+
 /// Pretty-print an envelope for human reading at a terminal.
 ///
 /// Inspects `envelope.data` and selects:
 /// - **Table** when `data.items` is an array of homogeneous objects
-///   (auto-detected columns, preferential field ordering, capped at 6).
+///   (auto-detected columns, preferential field ordering, capped at
+///   [`MAX_TABLE_COLUMNS`]).
 /// - **Vertical key:value** when data is a single object.
 /// - **Newline-joined** when data is a scalar array.
 /// - **Fallback** to `envelope.message` for anything else.
@@ -435,9 +441,7 @@ fn render_human_field(lines: &mut Vec<String>, key: &str, value: &Value, indent:
 /// Render an array of objects as a tab-aligned table. Columns are
 /// auto-detected from the union of keys, preferring identity-style fields
 /// (id, name, title) first, then descriptors, then everything else.
-/// Capped at 7 columns so permission grants retain their seven operator
-/// fields (subject type/id, identity, role, policy, creation, and source)
-/// without making ordinary tables unboundedly wide.
+/// Capped at [`MAX_TABLE_COLUMNS`].
 pub fn render_object_array(items: &[Value]) -> String {
     if items.is_empty() {
         return String::new();
@@ -477,25 +481,21 @@ pub fn render_object_array(items: &[Value]) -> String {
         {
             columns.push(p.to_string());
         }
-        if columns.len() >= 7 {
+        if columns.len() >= MAX_TABLE_COLUMNS {
             break;
         }
     }
-    // Fill the rest with anything else still seen.
-    if columns.len() < 6 {
-        for item in items {
-            if let Some(obj) = item.as_object() {
-                for k in obj.keys() {
-                    if !columns.iter().any(|c| c == k) {
-                        columns.push(k.clone());
-                        if columns.len() >= 6 {
-                            break;
-                        }
-                    }
-                }
+    // Fill the rest with anything else still seen, up to the same cap.
+    'fill: for item in items {
+        let Some(obj) = item.as_object() else {
+            continue;
+        };
+        for k in obj.keys() {
+            if columns.len() >= MAX_TABLE_COLUMNS {
+                break 'fill;
             }
-            if columns.len() >= 7 {
-                break;
+            if !columns.iter().any(|c| c == k) {
+                columns.push(k.clone());
             }
         }
     }
@@ -858,6 +858,28 @@ mod tests {
         assert!(text.contains("read_only"));
         // header separator
         assert!(text.contains("---"));
+    }
+
+    /// The documented cap is seven columns. The preferred-field pass honoured
+    /// it, but the fill pass for other keys stopped at six, so a table whose
+    /// rows carried few preferred names lost a column the cap allows.
+    #[test]
+    fn tables_fill_to_the_documented_column_cap() {
+        let row = json!({
+            "id": 1, "alpha": 2, "bravo": 3, "charlie": 4, "delta": 5,
+            "echo": 6, "foxtrot": 7, "golf": 8, "hotel": 9,
+        });
+        let header_columns = |text: &str| text.lines().next().unwrap().split_whitespace().count();
+
+        let sparse = render_object_array(std::slice::from_ref(&row));
+        assert_eq!(header_columns(&sparse), MAX_TABLE_COLUMNS, "{sparse}");
+        assert_eq!(MAX_TABLE_COLUMNS, 7);
+
+        let preferred = render_object_array(&[json!({
+            "id": 1, "subject_type": "p", "subject_id": 2, "display_identity": "a",
+            "role": "r", "policy": "v", "created": true, "source": "s", "status": "x",
+        })]);
+        assert_eq!(header_columns(&preferred), MAX_TABLE_COLUMNS, "{preferred}");
     }
 
     #[test]
