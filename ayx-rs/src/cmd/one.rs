@@ -1121,6 +1121,83 @@ mod tests {
         assert!(!text.contains("use --output json"), "{text}");
     }
 
+    /// Job Library rows often carry `name: null`. The table must show one name
+    /// column that is populated on every row -- the upstream name where there
+    /// is one, a stable label where there is not -- rather than a NAME column
+    /// blank on unnamed rows beside a label column blank on named ones. The
+    /// label is presentation only; JSON keeps the upstream null.
+    #[test]
+    fn job_list_text_has_one_always_populated_name_column() {
+        let envelope = ayx_core::envelope::Envelope::ok_with_data(
+            "job groups listed",
+            serde_json::json!({"items": [
+                {"id": 1, "name": "Nightly load", "status": "Complete"},
+                {"id": 3978581, "name": null, "flowRun": {"flowId": 77}, "status": "Failed"},
+            ]}),
+        );
+        let canonical = jobs_descriptor(
+            None,
+            Some(&OneJobsCommand::List {
+                profile: None,
+                limit: None,
+                page_token: None,
+                all: false,
+                max_pages: None,
+            }),
+        );
+        let compatibility = legacy_job_groups_descriptor(&OneJobGroupCommand::List {
+            profile: None,
+            limit: None,
+            page_token: None,
+            all: false,
+            max_pages: None,
+        });
+        for descriptor in [canonical, compatibility] {
+            let text = crate::output::render_envelope(
+                &envelope,
+                crate::output::OutputMode::Text,
+                descriptor,
+                crate::output::DEFAULT_OUTPUT_LIMIT,
+            )
+            .expect("job list text");
+            let header = text
+                .lines()
+                .find(|line| line.starts_with("ID"))
+                .unwrap_or_else(|| panic!("no table header in:\n{text}"));
+            let columns: Vec<&str> = header.split_whitespace().collect();
+            assert_eq!(
+                columns
+                    .iter()
+                    .filter(|column| column.contains("NAME"))
+                    .count(),
+                1,
+                "exactly one name column, got {columns:?} in:\n{text}"
+            );
+            let name_at = columns.iter().position(|c| *c == "NAME").unwrap();
+            for row in text.lines().filter(|line| line.starts_with(['1', '3'])) {
+                let cells: Vec<&str> = row.split("  ").filter(|c| !c.is_empty()).collect();
+                assert_ne!(cells[name_at].trim(), "-", "blank name cell in:\n{text}");
+            }
+            assert!(text.contains("Nightly load"), "{text}");
+            assert!(text.contains("flow-77 (3978581)"), "{text}");
+
+            let json: serde_json::Value = serde_json::from_str(
+                &crate::output::render_envelope(
+                    &envelope,
+                    crate::output::OutputMode::Json,
+                    descriptor,
+                    crate::output::DEFAULT_OUTPUT_LIMIT,
+                )
+                .expect("job list JSON"),
+            )
+            .expect("valid JSON");
+            assert!(json["data"]["items"][1]["name"].is_null());
+            for item in json["data"]["items"].as_array().unwrap() {
+                assert!(item.get("display_name").is_none(), "{item}");
+            }
+        }
+    }
+
     #[test]
     fn descriptors_name_one_leaf_commands_and_views() {
         let flow = output_descriptor(&OneCommand::Flows {

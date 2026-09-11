@@ -111,7 +111,10 @@ fixture and PR review remain external dependencies.
 - [x] **Job Library entries with upstream `name: null` are intelligible in
   human output.** Numeric IDs are handled. Phase 3 keeps upstream `name: null`
   truthful in canonical JSON and adds a presentation-only label for
-  `ayx one jobs list` human output.
+  `ayx one jobs list` human output. As first shipped the label went into a
+  separate `display_name` field that the command's declared list columns never
+  projected, so it never appeared; since the RC output-contract review it
+  fills the unnamed row's NAME cell in the terminal copy instead.
 - [x] **A 401 on any One read is replaced by an unrelated configuration error
   when the profile has no refresh credential.** **Fixed** in `203e38f`: a 401
   is retried through a refresh only when the profile can renew (a refresh

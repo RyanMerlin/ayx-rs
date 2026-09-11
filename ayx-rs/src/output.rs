@@ -245,9 +245,12 @@ fn detailed_list_data(data: Value) -> Value {
     })
 }
 
-/// Add terminal-only labels without rewriting provider fields. In particular,
-/// job-library rows with a null upstream `name` retain that null in JSON while
-/// a human gets a stable `display_name` column.
+/// Add terminal-only labels to a copy of the data; provider fields in the
+/// envelope itself are never rewritten. Job Library rows often carry a null
+/// upstream `name`, which JSON keeps as null. In the terminal copy an unnamed
+/// row's `name` is filled with a stable label instead, so the table has one
+/// NAME column populated on every row. A separate label column beside `name`
+/// left each of the two blank on half the rows.
 fn presentation_data(data: &Value, descriptor: OutputDescriptor) -> Value {
     if descriptor.command != "one.jobs.list" {
         return data.clone();
@@ -260,13 +263,15 @@ fn presentation_data(data: &Value, descriptor: OutputDescriptor) -> Value {
         let Some(row) = item.as_object_mut() else {
             continue;
         };
-        if row.get("name").is_some_and(|name| !name.is_null()) {
-            continue;
+        let named = match row.get("name") {
+            None | Some(Value::Null) => false,
+            Some(Value::String(name)) => !name.trim().is_empty(),
+            Some(_) => true,
+        };
+        if !named {
+            let label = job_group_display_name(row);
+            row.insert("name".to_string(), Value::String(label));
         }
-        row.insert(
-            "display_name".to_string(),
-            Value::String(job_group_display_name(row)),
-        );
     }
     presentation
 }
