@@ -1,8 +1,6 @@
 [CmdletBinding()]
 param(
-    [switch]$SkipAudit,
-    [ValidatePattern('^rc\.[1-9][0-9]*$')]
-    [string]$Candidate = "rc.1"
+    [switch]$SkipAudit
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,15 +40,15 @@ if (-not $cargoTomlMatch) {
     throw "unable to find workspace version in Cargo.toml"
 }
 $workspaceVersion = $cargoTomlMatch.Matches[0].Groups[1].Value
-$releaseNotesName = "v$workspaceVersion-$Candidate.md"
+$releaseNotesName = "v$workspaceVersion.md"
 $releaseNotes = Join-Path $repo "docs\releases\$releaseNotesName"
 if (-not (Test-Path -LiteralPath $releaseNotes)) {
-    throw "release notes not found: docs/releases/$releaseNotesName -- create it before cutting release candidate $Candidate"
+    throw "release notes not found: docs/releases/$releaseNotesName -- create it before cutting release $workspaceVersion"
 }
 
-$dist = Join-Path $repo "dist\$Candidate"
+$dist = Join-Path $repo "dist\v$workspaceVersion"
 $stage = Join-Path $dist "ayx-x86_64-pc-windows-msvc"
-$archive = Join-Path $dist "ayx-x86_64-pc-windows-msvc-$Candidate.zip"
+$archive = Join-Path $dist "ayx-x86_64-pc-windows-msvc-v$workspaceVersion.zip"
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 if (Test-Path -LiteralPath $stage) {
     Remove-Item -LiteralPath $stage -Recurse -Force

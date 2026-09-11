@@ -1,22 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-candidate="rc.1"
-while (($#)); do
-  case "$1" in
-    --candidate)
-      candidate="${2:?--candidate requires a value}"
-      shift 2
-      ;;
-    *)
-      echo "usage: $0 [--candidate rc.N]" >&2
-      exit 2
-      ;;
-  esac
-done
-
-if [[ ! "$candidate" =~ ^rc\.[1-9][0-9]*$ ]]; then
-  echo "--candidate must be an RC label such as rc.1" >&2
+if (($#)); then
+  echo "usage: $0" >&2
   exit 2
 fi
 
@@ -53,16 +39,16 @@ if [[ -z "$workspace_version" ]]; then
   echo "unable to find workspace version in Cargo.toml" >&2
   exit 1
 fi
-release_notes_name="v${workspace_version}-${candidate}.md"
+release_notes_name="v${workspace_version}.md"
 release_notes="docs/releases/${release_notes_name}"
 if [[ ! -f "$release_notes" ]]; then
-  echo "release notes not found: $release_notes -- create it before cutting release candidate $candidate" >&2
+  echo "release notes not found: $release_notes -- create it before cutting release $workspace_version" >&2
   exit 1
 fi
 
-dist="$repo_dir/dist/$candidate"
+dist="$repo_dir/dist/v$workspace_version"
 stage="$dist/ayx-x86_64-unknown-linux-gnu"
-archive="$dist/ayx-x86_64-unknown-linux-gnu-$candidate.tar.gz"
+archive="$dist/ayx-x86_64-unknown-linux-gnu-v$workspace_version.tar.gz"
 mkdir -p "$dist"
 rm -rf "$stage"
 mkdir -p "$stage"
