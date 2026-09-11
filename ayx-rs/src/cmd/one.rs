@@ -534,9 +534,33 @@ fn is_jobs_verb_name(candidate: &str) -> bool {
     JOBS_VERB_NAMES.contains(&candidate)
 }
 
+/// `GET /v4/jobGroups/{id}`, as an operator reads it: who ran the job, what
+/// triggered it, where, and how it ended. Live payloads carry `creator.id`,
+/// `ranfrom`, `ranfor`, `workspace.id`, `workloadError` and `status` (see
+/// `docs/roadmap/operator-followups.md`); the flow-run, dataset and snapshot
+/// references follow the documented `/v4` job-group shape and are simply
+/// omitted when a tenant does not return them. Parent references are named by
+/// id rather than expanded.
+const JOB_DETAIL_FIELDS: &[&str] = &[
+    "id",
+    "name",
+    "status",
+    "ranfrom",
+    "ranfor",
+    "workloadError",
+    "profilingEnabled",
+    "creator.id",
+    "workspace.id",
+    "flowRun.id",
+    "wrangledDataset.id",
+    "snapshot.id",
+    "createdAt",
+    "updatedAt",
+];
+
 fn jobs_descriptor(id: Option<&str>, command: Option<&OneJobsCommand>) -> OutputDescriptor {
     match (id, command) {
-        (Some(_), None) => detail("one.jobs.detail"),
+        (Some(_), None) => detail_with("one.jobs.detail", JOB_DETAIL_FIELDS),
         (None, Some(OneJobsCommand::List { .. })) => list("one.jobs.list"),
         (None, Some(OneJobsCommand::Count { .. })) => detail("one.jobs.count"),
         (None, Some(OneJobsCommand::Execute { .. })) => result("one.jobs.execute"),
@@ -577,7 +601,7 @@ fn legacy_job_groups_descriptor(command: &OneJobGroupCommand) -> OutputDescripto
             .with_detailed_rows(),
         OneJobGroupCommand::Publications { .. } => list("one.jobs.publications"),
         OneJobGroupCommand::Count { .. } => detail("one.jobs.count"),
-        OneJobGroupCommand::Detail { .. } => detail("one.jobs.detail"),
+        OneJobGroupCommand::Detail { .. } => detail_with("one.jobs.detail", JOB_DETAIL_FIELDS),
         // The body is a bare string ("Complete"); the one field labels it.
         OneJobGroupCommand::Status { .. } => detail_with("one.jobs.status", &["status"]),
         OneJobGroupCommand::Profile { .. } => detail("one.jobs.profile"),
@@ -1030,6 +1054,71 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// `ayx one jobs <JOB-ID>` is the operator's "what happened to this job"
+    /// view. The generic detail projection (`title`, `displayName`,
+    /// `description`) matches nothing a job group carries except `id` and
+    /// `status`, so who ran it, what triggered it, and in which workspace were
+    /// all hidden behind `--output json`. The parent references are nested
+    /// objects -- and a list row's `creator` is a whole person record -- so the
+    /// view names the reference ids rather than expanding the objects.
+    #[test]
+    fn job_detail_text_shows_the_job_group_disposition() {
+        let envelope = ayx_core::envelope::Envelope::ok_with_data(
+            "jobGroup detail ok",
+            serde_json::json!({
+                "attempts": 1,
+                "response": {
+                    "id": 3978581,
+                    "name": null,
+                    "description": null,
+                    "status": "Failed",
+                    "ranfrom": "ui",
+                    "ranfor": "recipe",
+                    "workloadError": "Out of memory",
+                    "profilingEnabled": true,
+                    "creator": {"id": 646, "email": "person@example.invalid", "maximalPrivileges": ["x"]},
+                    "workspace": {"id": 91946},
+                    "flowRun": {"id": 12},
+                    "wrangledDataset": {"id": 88},
+                    "snapshot": {"id": 99},
+                    "createdAt": "2026-09-11T12:00:00.123Z",
+                    "updatedAt": "2026-09-11T12:05:00.456Z"
+                }
+            }),
+        );
+        let descriptor = jobs_descriptor(Some("3978581"), None);
+        assert_eq!(descriptor.command, "one.jobs.detail");
+        let text = crate::output::render_envelope(
+            &envelope,
+            crate::output::OutputMode::Text,
+            descriptor,
+            crate::output::DEFAULT_OUTPUT_LIMIT,
+        )
+        .expect("job detail text");
+        for line in [
+            "id: 3978581",
+            "status: Failed",
+            "ranfrom: ui",
+            "ranfor: recipe",
+            "workloadError: Out of memory",
+            "profilingEnabled: true",
+            "creator.id: 646",
+            "workspace.id: 91946",
+            "flowRun.id: 12",
+            "wrangledDataset.id: 88",
+            "snapshot.id: 99",
+            "createdAt: 2026-09-11T12:00:00Z",
+            "updatedAt: 2026-09-11T12:05:00Z",
+        ] {
+            assert!(text.contains(line), "missing `{line}` in:\n{text}");
+        }
+        assert!(
+            !text.contains("person@example.invalid") && !text.contains("maximalPrivileges"),
+            "a parent reference shows its id, not the embedded record:\n{text}"
+        );
+        assert!(!text.contains("use --output json"), "{text}");
     }
 
     #[test]
