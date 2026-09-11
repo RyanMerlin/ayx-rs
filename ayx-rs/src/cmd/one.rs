@@ -509,31 +509,6 @@ const JOB_RUN_FIELDS: &[&str] = &[
     "wrangleScript",
 ];
 
-/// Every `ayx one jobs <VERB>` subcommand name, as clap spells it (kebab-case
-/// where relevant). Used only to detect the `--profile`-before-verb mix-up in
-/// `execute` above — see the comment there for why clap can silently swallow
-/// one of these words as the `[JOB-ID]` positional instead of dispatching to
-/// the subcommand.
-const JOBS_VERB_NAMES: &[&str] = &[
-    "list",
-    "count",
-    "execute",
-    "publish",
-    "cancel",
-    "status",
-    "runs",
-    "inputs",
-    "outputs",
-    "publications",
-    "profile",
-    "profile-results",
-    "pdf-results",
-];
-
-fn is_jobs_verb_name(candidate: &str) -> bool {
-    JOBS_VERB_NAMES.contains(&candidate)
-}
-
 /// `GET /v4/jobGroups/{id}`, as an operator reads it: who ran the job, what
 /// triggered it, where, and how it ended. Live payloads carry `creator.id`,
 /// `ranfrom`, `ranfor`, `workspace.id`, `workloadError` and `status` (see
@@ -782,28 +757,20 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             profile,
             command,
         } => match (id, command) {
-            // `args_conflicts_with_subcommands` on the `Jobs` variant locks
-            // clap into "no subcommand" parsing as soon as any other arg
-            // (`--profile` included) is seen ahead of the verb, so a verb
-            // name typed after a leading `--profile` is swallowed as the
-            // optional `[JOB-ID]` positional instead of matching a
-            // subcommand — for a zero-further-args verb like `list`/`count`
-            // this parses silently; for one that itself takes more tokens
-            // (`runs <ID>`, `status <ID>`, `execute --body …`) clap already
-            // rejects the leftover token as "unexpected argument" (exit 2).
-            // Catch the silent case here: an id that is exactly a known
-            // `jobs` verb name, combined with an explicit `--profile`, is
-            // essentially always this mix-up rather than a literal JOB-ID.
-            // A typed `UsageError` (not message-text sniffing) is what tells
-            // `classify_anyhow_error` this is a validation error, so the
-            // message can stay plain instead of being contorted to contain a
-            // keyword the classifier scans for.
-            (Some(id), None) if profile.is_some() && is_jobs_verb_name(&id) => {
-                return Err(anyhow::Error::new(super::UsageError(format!(
-                    "put --profile after the jobs verb and its arguments: `ayx one jobs {id} [ARGS] --profile <PROFILE>` \
-                     (for example `ayx one jobs runs <JOB-ID> --profile <PROFILE>`); if `{id}` is meant \
-                     as a literal JOB-ID, move --profile after it instead: `ayx one jobs {id} --profile <PROFILE>`"
-                ))));
+            // Both the `[JOB-ID]` positional and the subcommand are plain
+            // `Option`s, and clap does not conflict an optional positional
+            // with an optional subcommand: `ayx one jobs 42 list` parses
+            // clap-side with both `id: Some("42")` and `command:
+            // Some(List { .. })` populated. Reject the mix here instead, as
+            // a `validation` (exit 2) `UsageError` — a typed error (not
+            // message-text sniffing) is what tells `classify_anyhow_error`
+            // this is a caller mistake, not `internal`.
+            (Some(_), Some(_)) => {
+                return Err(anyhow::Error::new(super::UsageError(
+                    "give either a JOB-ID or a subcommand, not both: `ayx one jobs <JOB-ID>` \
+                     or `ayx one jobs <VERB> ...` (for example `ayx one jobs runs <JOB-ID>`)"
+                        .to_string(),
+                )));
             }
             (Some(id), None) => super::one_job_groups::execute(
                 &runtime,
@@ -812,17 +779,22 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
                     id: Some(id),
                 },
             )?,
-            // Whenever a subcommand matched, the `Jobs`-level `--profile`
-            // could not also have been consumed (see the comment above):
-            // consuming any arg at the `Jobs` level locks clap out of
-            // subcommand parsing for the rest of the invocation. Each
-            // `OneJobsCommand` variant carries its own `profile` field for
-            // the documented `ayx one jobs <VERB> <JOB-ID> --profile
-            // <PROFILE>` form, converted along with the rest of `command`.
+            // A `--profile` given ahead of the verb is bound to the `Jobs`
+            // variant itself, not to the subcommand's own `--profile` field
+            // (the documented position). Each `OneJobsCommand` variant
+            // carries its own `profile` field for the documented `ayx one
+            // jobs <VERB> <JOB-ID> --profile <PROFILE>` form; catch the
+            // wrong-position case here rather than silently discarding it.
+            (None, Some(_)) if profile.is_some() => {
+                return Err(anyhow::Error::new(super::UsageError(
+                    "put --profile after the jobs verb and its arguments, e.g. \
+                     `ayx one jobs runs <JOB-ID> --profile <PROFILE>`"
+                        .to_string(),
+                )));
+            }
             (None, Some(command)) => super::one_job_groups::execute(&runtime, command.into())?,
             // Reachable only as `ayx one jobs --profile <PROFILE>` with no
-            // JOB-ID and no subcommand — clap accepts it syntactically since
-            // `--profile` alone doesn't trigger the subcommand conflict, but
+            // JOB-ID and no subcommand — clap accepts it syntactically, but
             // there is nothing for the profile to scope. A typed
             // `UsageError` (see above) keeps this a validation error (exit
             // 2) without the message having to spell out a classifier
@@ -834,12 +806,6 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
                         .to_string(),
                 )));
             }
-            // clap's `args_conflicts_with_subcommands` on the `Jobs` variant
-            // rejects a JOB-ID together with a subcommand before dispatch
-            // ever reaches here.
-            (Some(_), Some(_)) => unreachable!(
-                "clap rejects a JOB-ID and a `jobs` subcommand together via args_conflicts_with_subcommands"
-            ),
         },
         OneCommand::JobGroups { command } => super::one_job_groups::execute(&runtime, command)?,
         OneCommand::OutputObjects { command } => {
