@@ -155,11 +155,13 @@ function Invoke-OneRead {
     } catch {
         # Text mode. `render_text` prints `data` as alphabetically sorted
         # "  key: value" lines, so an upstream body echoed under `body_preview`
-        # sorts BEFORE the envelope's own `error_code` and its contents are
-        # printed unescaped. A substring search finds that decoy first: a 502
-        # whose body happens to contain `"error_code": "permission_denied"` was
-        # read as a denial. Anchor to the start of a line so only the CLI's own
-        # field can match -- the decoy is always mid-line, after `body_preview:`.
+        # sorts BEFORE the envelope's own `error_code`. A substring search finds
+        # that decoy first: a 502 whose body happens to contain
+        # `"error_code": "permission_denied"` was read as a denial. Anchor to the
+        # start of a line so only the CLI's own field can match -- the decoy is
+        # always mid-line, after `body_preview:`. That holds because text mode
+        # escapes control characters in provider strings (a newline prints as
+        # `\n`), so a body cannot start a line of its own.
         if ($outputText -match '(?m)^\s*error_code:\s*([a-z_]+)\s*$') {
             $reportedErrorCode = $Matches[1]
         }

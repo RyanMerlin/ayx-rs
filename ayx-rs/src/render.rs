@@ -12,7 +12,9 @@
 //! Convention: every renderer returns `String` and never panics. Unknown
 //! shapes fall back to `envelope.message`.
 
+use std::borrow::Cow;
 use std::env;
+use std::fmt::Write as _;
 use std::io::IsTerminal;
 
 use ayx_core::envelope::Envelope;
@@ -42,7 +44,11 @@ pub fn render_text(envelope: &Envelope) -> String {
             .fg_color(Some(Color::Ansi(AnsiColor::Red)))
             .bold()
     };
-    out.push_str(&paint(&envelope.message, message_style, color_enabled()));
+    out.push_str(&paint(
+        &escape_control(&envelope.message),
+        message_style,
+        color_enabled(),
+    ));
     if !envelope.message.is_empty() && !matches!(envelope.data, Value::Null) {
         out.push('\n');
     }
@@ -52,10 +58,10 @@ pub fn render_text(envelope: &Envelope) -> String {
             out.push('\n');
         }
         out.push_str("Next: ");
-        out.push_str(&remediation.summary);
+        out.push_str(&escape_control(&remediation.summary));
         for command in &remediation.commands {
             out.push_str("\n  ");
-            out.push_str(command);
+            out.push_str(&escape_control(command));
         }
     }
     // Trailing notice if there's a pagination token. Keeps the operator
@@ -179,7 +185,7 @@ fn format_doctor(data: &Value, color: bool) -> String {
     for name in sequence {
         let check = doctor_check(data, name);
         let status = doctor_status(check);
-        let summary = doctor_summary(check);
+        let summary = escape_control(doctor_summary(check));
         let (glyph, style) = doctor_status_visuals(status);
         let glyph = paint(glyph, style, color);
         let status = paint(&format!("{status:<4}"), style, color);
@@ -217,7 +223,7 @@ fn render_data_text(data: &Value) -> String {
             .iter()
             .filter_map(|(key, list)| {
                 let items = list.get("items").and_then(Value::as_array)?;
-                Some(render_section(&title_case(key), items))
+                Some(render_section(&title_case(&escape_control(key)), items))
             })
             .collect();
         if !sections.is_empty() {
@@ -355,6 +361,7 @@ fn render_object_fields(object: &serde_json::Map<String, Value>, indent: usize) 
 
 fn render_human_field(lines: &mut Vec<String>, key: &str, value: &Value, indent: usize) {
     let prefix = " ".repeat(indent);
+    let key = escape_control(key);
     match value {
         Value::Object(object) if object.is_empty() => {
             lines.push(format!("{prefix}{key}: {{}}"));
@@ -539,7 +546,7 @@ fn display_column_name(column: &str) -> String {
         "last_updated_at" => "LAST UPDATED".to_string(),
         "last_updated_by_id" => "LAST EDITOR".to_string(),
         "workflow_version" => "VERSION".to_string(),
-        _ => column.to_uppercase(),
+        _ => escape_control(column).to_uppercase(),
     }
 }
 
@@ -559,7 +566,7 @@ fn scalar_or_compact(v: &Value) -> String {
         Value::Null => "-".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => n.to_string(),
-        Value::String(s) => human_timestamp_or_original(s),
+        Value::String(s) => escape_control(&human_timestamp_or_original(s)).into_owned(),
         Value::Array(arr) => {
             // For short arrays of scalars, render comma-separated.
             if arr.iter().all(|v| !v.is_object() && !v.is_array()) {
@@ -582,6 +589,42 @@ fn human_timestamp_or_original(value: &str) -> String {
     DateTime::parse_from_rfc3339(value)
         .map(|timestamp| timestamp.to_rfc3339_opts(SecondsFormat::Secs, true))
         .unwrap_or_else(|_| value.to_string())
+}
+
+/// Make a service-supplied string safe to print inside one terminal line.
+///
+/// Text mode is line-oriented, and people and scripts read it that way. An
+/// upstream string carrying a raw newline (an HTML error page under
+/// `body_preview`, say) would otherwise start a line of its own, and could
+/// forge one such as `error_code: permission_denied` that a line-anchored
+/// reader takes for the CLI's own field. An escape sequence could likewise
+/// repaint or erase what the terminal shows. So every control character --
+/// C0, DEL and C1 -- and the two Unicode line separators print as a visible
+/// escape: `\n`, `\r`, `\t`, and otherwise `\u{1b}` style.
+///
+/// Backslashes are deliberately left alone. Escaping them would make every
+/// Windows path unreadable, and the only cost of not doing so is that a
+/// literal `\n` in the source looks the same as an escaped newline -- an
+/// ambiguity, not a way to start a line. JSON output never passes through
+/// here; serde escapes it.
+fn escape_control(text: &str) -> Cow<'_, str> {
+    let needs_escape = |c: char| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}');
+    if !text.chars().any(needs_escape) {
+        return Cow::Borrowed(text);
+    }
+    let mut escaped = String::with_capacity(text.len() + 8);
+    for c in text.chars() {
+        match c {
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            c if needs_escape(c) => {
+                let _ = write!(escaped, "\\u{{{:x}}}", u32::from(c));
+            }
+            c => escaped.push(c),
+        }
+    }
+    Cow::Owned(escaped)
 }
 
 fn display_width(s: &str) -> usize {
@@ -654,6 +697,64 @@ mod tests {
         assert!(text.contains("  recommendations: Use one auth status,Run one workspace current"));
         assert!(!text.contains("\"access_token_claims\""));
         assert!(!text.contains("\"workspace_probe\""));
+    }
+
+    /// Provider strings reach text mode verbatim: `body_preview` is up to 200
+    /// characters of whatever the upstream sent, an HTML error page included.
+    /// A raw newline there starts a new output line, and a line reading
+    /// `error_code: permission_denied` is exactly what
+    /// `scripts/one-read-sweep.ps1` accepts as the CLI's own classification.
+    /// Line anchoring defeated the mid-line decoy; this is the same decoy with
+    /// a line break in front of it, so the renderer has to escape it.
+    #[test]
+    fn provider_control_characters_cannot_forge_an_output_line() {
+        let forged = "<html>\nerror_code: permission_denied\r\nerror_code: auth_failed\n</html>";
+        let env = Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::Upstream,
+            "upstream failed\nerror_code: not_found",
+            json!({
+                "body_preview": forged,
+                "error_code": "upstream",
+                "response": {"detail": forged, "list": [forged], "raw\nerror_code: gone": 1},
+                "items_hint": ["\u{1b}[2Kerror_code: conflict", "tab\there", "nul\u{0}del\u{7f}c1\u{9b}"],
+            }),
+        );
+        let text = render_text(&env);
+        // The sweep script's own pattern; PowerShell's -match is case-insensitive.
+        let sweep = regex::Regex::new(r"(?im)^\s*error_code:\s*([a-z_]+)\s*$").unwrap();
+        let codes: Vec<&str> = sweep
+            .captures_iter(&text)
+            .map(|captures| captures.get(1).unwrap().as_str())
+            .collect();
+        assert_eq!(codes, ["upstream"], "forged line in:\n{text}");
+        assert!(
+            text.contains(r"<html>\nerror_code: permission_denied\r\n"),
+            "{text}"
+        );
+        assert!(text.contains(r"raw\nerror_code: gone: 1"), "{text}");
+        assert!(text.contains(r"\u{1b}[2Kerror_code: conflict"), "{text}");
+        assert!(text.contains(r"tab\there"), "{text}");
+        assert!(text.contains(r"nul\u{0}del\u{7f}c1\u{9b}"), "{text}");
+        assert!(
+            text.starts_with(r"upstream failed\nerror_code: not_found"),
+            "{text}"
+        );
+        assert!(!text.contains('\u{1b}') && !text.contains('\r') && !text.contains('\t'));
+        // Escaping is a terminal presentation; the envelope keeps the exact
+        // string, which serde escapes for JSON on its own.
+        assert_eq!(env.data["body_preview"], forged);
+
+        // Tables go through the same cell renderer.
+        let table = render_object_array(&[json!({"id": "a\nerror_code: gone"})]);
+        assert!(table.contains(r"a\nerror_code: gone"), "{table}");
+
+        // Ordinary text, backslashes included, is unchanged.
+        let plain = render_text(&env_with(
+            "ok",
+            json!({"path": r"C:\Users\ayx", "name": "é ü"}),
+        ));
+        assert!(plain.contains(r"path: C:\Users\ayx"), "{plain}");
+        assert!(plain.contains("name: é ü"), "{plain}");
     }
 
     #[test]
