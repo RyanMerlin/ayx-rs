@@ -398,7 +398,9 @@ fn compact_list(
             Some(object) if preserve_nested => Value::Object(
                 projection
                     .iter()
-                    .filter_map(|field| Some(((*field).to_string(), object.get(*field)?.clone())))
+                    .filter_map(|field| {
+                        Some(((*field).to_string(), field_value(object, field)?.clone()))
+                    })
                     .collect(),
             ),
             Some(object) => Value::Object(project_object(Some(object), &projection)),
@@ -668,11 +670,23 @@ fn project_object_with_wrapper(
     projected
 }
 
+/// Look up a declared field. A dotted name (`creator.id`) that is not itself a
+/// key walks into nested objects, so a descriptor can name one member of a
+/// parent reference -- its id -- without the terminal expanding the whole
+/// object, which for some references is an entire embedded person record.
+fn field_value<'a>(object: &'a Map<String, Value>, field: &str) -> Option<&'a Value> {
+    if let Some(value) = object.get(field) {
+        return Some(value);
+    }
+    let (parent, rest) = field.split_once('.')?;
+    field_value(object.get(parent)?.as_object()?, rest)
+}
+
 fn project_object(object: Option<&Map<String, Value>>, fields: &[&str]) -> Map<String, Value> {
     let mut projected = Map::new();
     if let Some(object) = object {
         for field in fields {
-            if let Some(value) = object.get(*field) {
+            if let Some(value) = field_value(object, field) {
                 let projected_value = if *field == "summary" {
                     summary_projection(value)
                 } else {
