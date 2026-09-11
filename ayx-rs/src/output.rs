@@ -179,14 +179,27 @@ pub fn render_envelope(
                         output_limit,
                     )
                     .unwrap_or_else(|| {
-                        compact_data(
-                            &presentation,
-                            descriptor.kind,
-                            descriptor.fields,
-                            descriptor.collection_keys,
-                            output_limit,
-                            false,
-                        )
+                        if descriptor.detailed_rows {
+                            // Detailed rows are rendered as vertical records,
+                            // so they keep nested values for the recursive
+                            // field renderer instead of flattening them.
+                            compact_list(
+                                &presentation,
+                                descriptor.fields,
+                                descriptor.collection_keys,
+                                output_limit,
+                                true,
+                            )
+                        } else {
+                            compact_data(
+                                &presentation,
+                                descriptor.kind,
+                                descriptor.fields,
+                                descriptor.collection_keys,
+                                output_limit,
+                                false,
+                            )
+                        }
                     }),
                     ViewKind::Detail | ViewKind::Result => {
                         human_resource_data(&presentation, descriptor.fields)
@@ -310,7 +323,7 @@ fn compact_data(
         });
     }
     match kind {
-        ViewKind::List => compact_list(data, descriptor_fields, collection_keys, limit),
+        ViewKind::List => compact_list(data, descriptor_fields, collection_keys, limit, false),
         ViewKind::Detail => compact_object("detail", data, descriptor_fields),
         ViewKind::Result => compact_object("result", data, descriptor_fields),
         ViewKind::Diagnostic => compact_object("diagnostic", data, descriptor_fields),
@@ -329,7 +342,10 @@ fn compact_named_collections(data: &Value, keys: &[&str], limit: usize) -> Optio
     let mut collections = Map::new();
     for key in keys {
         if let Some(items) = object.get(*key).filter(|value| value.is_array()) {
-            collections.insert((*key).to_string(), compact_list(items, &[], &[], limit));
+            collections.insert(
+                (*key).to_string(),
+                compact_list(items, &[], &[], limit, false),
+            );
         }
     }
     if collections.is_empty() {
@@ -346,11 +362,15 @@ fn compact_named_collections(data: &Value, keys: &[&str], limit: usize) -> Optio
     }))
 }
 
+/// Project a list for the terminal. `preserve_nested` keeps each selected
+/// field's nested value intact for views that render rows as vertical records;
+/// a table cell cannot hold one, so every other view summarizes it.
 fn compact_list(
     data: &Value,
     descriptor_fields: &[&str],
     collection_keys: &[&'static str],
     limit: usize,
+    preserve_nested: bool,
 ) -> Value {
     let Some((items, source_key, collection_data)) = list_items(data, collection_keys) else {
         // An unknown gateway wrapper is a CLI compatibility problem, not proof
@@ -375,7 +395,14 @@ fn compact_list(
     let projected: Vec<Value> = items[..shown]
         .iter()
         .map(|item| match item.as_object() {
+            Some(object) if preserve_nested => Value::Object(
+                projection
+                    .iter()
+                    .filter_map(|field| Some(((*field).to_string(), object.get(*field)?.clone())))
+                    .collect(),
+            ),
             Some(object) => Value::Object(project_object(Some(object), &projection)),
+            None if preserve_nested => item.clone(),
             None => scalar_projection(item),
         })
         .collect();
@@ -1364,6 +1391,17 @@ mod tests {
             assert!(text.contains(field), "missing {field} from:\n{text}");
         }
         assert!(text.contains("Run 12"), "got:\n{text}");
+        // The label alone is not the field: the parent job group id is the
+        // disposition an operator reads this view for, so it must be shown
+        // expanded rather than summarized as a field count.
+        assert!(
+            text.contains("  jobGroup:\n    id: 7"),
+            "the nested job group id must be rendered, got:\n{text}"
+        );
+        assert!(
+            !text.contains("use --output json for details"),
+            "detailed rows must not summarize nested values, got:\n{text}"
+        );
     }
 
     #[test]
