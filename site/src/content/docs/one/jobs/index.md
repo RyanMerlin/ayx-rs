@@ -88,32 +88,41 @@ dedicated endpoint for that.
 
 ## Submitting a job
 
+`--body <FILE>` is a path to a JSON body file, not inline JSON:
+
 ```bash
+# Write the request body to a file
+cat > body.json <<'EOF'
+{"jobGroupId":"<id>"}
+EOF
+
 # Dry-run — shows the request, submits nothing
-ayx one jobs execute --body '{"jobGroupId":"<id>"}'
+ayx one jobs execute --body body.json
 
 # Commit
-ayx one jobs execute --body '{"jobGroupId":"<id>"}' --apply
+ayx one jobs execute --body body.json --apply
 
 # With input overrides
-ayx one jobs execute \
-  --body '{"jobGroupId":"<id>","inputs":{"param":"value"}}' \
-  --apply
+cat > body-with-inputs.json <<'EOF'
+{"jobGroupId":"<id>","inputs":{"param":"value"}}
+EOF
+ayx one jobs execute --body body-with-inputs.json --apply
 ```
 
 ## Publishing results
 
+`--body <FILE>` is likewise a path to a JSON body file:
+
 ```bash
+cat > publish-body.json <<'EOF'
+{"target":"<target>","...":{}}
+EOF
+
 # Dry-run
-ayx one jobs publish \
-  <JOB-ID> \
-  --body '{"target":"<target>","...":{}}'
+ayx one jobs publish <JOB-ID> --body publish-body.json
 
 # Commit
-ayx one jobs publish \
-  <JOB-ID> \
-  --body '{"target":"<target>","...":"{}"}' \
-  --apply
+ayx one jobs publish <JOB-ID> --body publish-body.json --apply
 ```
 
 For profile and publication queries see [Results & publications](/one/jobs/results/).
@@ -136,19 +145,21 @@ Find all Job Library entries and show their status in one pass:
 
 ```bash
 ayx --output json one jobs list --all \
-  | jq -r '.data[].id' \
-  | xargs -I{} ayx --output json one jobs status {} \
-  | jq -r '[.data.id, .data.status] | @tsv'
+  | jq -r '.data.items[].id' \
+  | while read -r id; do
+      STATUS=$(ayx --output json one jobs status "$id" | jq -r '.data.response')
+      printf '%s\t%s\n' "$id" "$STATUS"
+    done
 ```
 
 Submit a job and poll until complete:
 
 ```bash
-ayx one jobs execute --body '{"jobGroupId":"<id>"}' --apply
+ayx one jobs execute --body body.json --apply
 
 # Poll status
 while true; do
-  STATUS=$(ayx --output json one jobs status <JOB-ID> | jq -r '.data.status')
+  STATUS=$(ayx --output json one jobs status <JOB-ID> | jq -r '.data.response')
   echo "$STATUS"
   [[ "$STATUS" == "Completed" || "$STATUS" == "Failed" ]] && break
   sleep 10
