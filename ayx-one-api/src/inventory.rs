@@ -524,72 +524,72 @@ const JOB_GROUP_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/v4/jobLibrary",
-        commands: &["one job-groups list"],
+        commands: &["one jobs list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobLibrary/count",
-        commands: &["one job-groups count"],
+        commands: &["one jobs count"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/jobGroups",
-        commands: &["one job-groups run"],
+        commands: &["one jobs execute"],
     },
     EndpointSpec {
         method: "PUT",
         path: "/v4/jobGroups/{id}/publish",
-        commands: &["one job-groups publish"],
+        commands: &["one jobs publish"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}",
-        commands: &["one job-groups detail"],
+        commands: &["one jobs"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/jobGroups/{id}/cancel",
-        commands: &["one job-groups cancel"],
+        commands: &["one jobs cancel"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/status",
-        commands: &["one job-groups status"],
+        commands: &["one jobs status"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/inputs",
-        commands: &["one job-groups inputs"],
+        commands: &["one jobs inputs"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/pdfResults",
-        commands: &["one job-groups pdf-results"],
+        commands: &["one jobs pdf-results"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/outputs",
-        commands: &["one job-groups outputs"],
+        commands: &["one jobs outputs"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/jobs",
-        commands: &["one job-groups jobs"],
+        commands: &["one jobs runs"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/publications",
-        commands: &["one job-groups publications"],
+        commands: &["one jobs publications"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/profile",
-        commands: &["one job-groups profile"],
+        commands: &["one jobs profile"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/jobGroups/{id}/profileResults",
-        commands: &["one job-groups profile-results"],
+        commands: &["one jobs profile-results"],
     },
 ];
 

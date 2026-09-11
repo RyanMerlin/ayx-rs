@@ -336,7 +336,7 @@ fn require_live_folder_id(live: &LiveSmokeContext) -> Option<String> {
 fn require_live_job_group_id(live: &LiveSmokeContext) -> Option<String> {
     require_live_list_item_id(
         live,
-        &["--output", "json", "one", "job-groups", "list"],
+        &["--output", "json", "one", "jobs", "list"],
         &["id", "jobGroupId", "job_group_id"],
         "job group",
     )
@@ -1878,6 +1878,47 @@ fn one_job_groups_detail_live_real_object() {
     assert_contains(&stdout, "\"surface\": \"jobGroup\"");
     assert_contains(&stdout, "\"operation\": \"detail\"");
     assert_contains(&stdout, &job_group_id);
+}
+
+#[test]
+fn one_jobs_detail_and_runs_live_real_object() {
+    if !live_smoke_enabled() {
+        return;
+    }
+
+    let live = LiveSmokeContext::new();
+    let Some(job_id) = require_live_job_group_id(&live) else {
+        return;
+    };
+
+    let (success, stdout, stderr) =
+        run_ayx_result(&["--output", "json", "one", "jobs", &job_id], &live);
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one jobs {job_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"operation\": \"detail\"");
+    assert_contains(&stdout, &job_id);
+
+    let (success, stdout, stderr) =
+        run_ayx_result(&["--output", "json", "one", "jobs", "runs", &job_id], &live);
+    if !success {
+        if live_auth_unavailable(&stderr) {
+            return;
+        }
+        panic!(
+            "command failed: --output json one jobs runs {job_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+    assert_live_ok(&stdout);
+    assert_contains(&stdout, "\"surface\": \"jobs\"");
+    assert_contains(&stdout, "\"operation\": \"runs\"");
+    assert_contains(&stdout, "\"response\"");
 }
 
 #[test]

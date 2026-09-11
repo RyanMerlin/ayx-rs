@@ -108,10 +108,10 @@ Phase 3 completes connection-permission rendering and the output contract;
 redacted live permission and workflow-tool reads pass. A non-empty job-output
 fixture and PR review remain external dependencies.
 
-- [x] **`ayx one job-groups list` names every row `job-?`.** Numeric IDs are
-  handled. Phase 3 keeps upstream `name: null` truthful in canonical JSON and
-  adds a presentation-only label for human output; the future Jobs naming work
-  remains in the Phase-4 section below.
+- [x] **Job Library entries with upstream `name: null` are intelligible in
+  human output.** Numeric IDs are handled. Phase 3 keeps upstream `name: null`
+  truthful in canonical JSON and adds a presentation-only label for
+  `ayx one jobs list` human output.
 - [x] **A 401 on any One read is replaced by an unrelated configuration error
   when the profile has no refresh credential.** **Fixed** in `203e38f`: a 401
   is retried through a refresh only when the profile can renew (a refresh
@@ -155,11 +155,11 @@ fixture and PR review remain external dependencies.
   since renaming a surface nobody can use is wasted work. **Disposition:**
   hidden from help, catalog, and normal discovery until the vendor supplies a
   supported bearer-token contract; it is not an expired-login defect.
-- [x] **`ayx one job-groups status` prints nothing in text mode.** **Fixed**
+- [x] **`ayx one jobs status` prints nothing in text mode.** **Fixed**
   in `528dced`: a bare scalar body is labelled with the command's single
   declared field, so text prints `status: Complete`; canonical JSON retains
   the upstream scalar response.
-- [x] **`ayx one job-groups outputs` reports an "unrecognized collection
+- [x] **`ayx one jobs outputs` reports an "unrecognized collection
   shape".** Named collections explicitly render as `Files` and `Tables` in
   human output; canonical JSON preserves the complete response. The available
   25-job live scan still found only empty collections, so a non-empty provider
@@ -293,18 +293,23 @@ implementation terms rather than an operator-facing resource.
     than a second membership list.
   - Do not rename to `users` merely as an alias while two overlapping command
     trees and inconsistent payload terms remain.
-- [ ] Replace the `job-groups` user-facing namespace with a clear Jobs
-  surface only after migrating to the supported Job Library contract.
+- [x] Replace the `job-groups` user-facing namespace with the Jobs surface
+  backed by the supported Job Library list/count contract. **Done 2026-09-11.**
+  - `ayx one jobs <JOB-ID>` retrieves the aggregate Job Library entry;
+    `ayx one jobs runs <JOB-ID>` returns the complete child-run collection;
+    `ayx one jobs execute --body <FILE>` submits a Job Group. The old
+    `job-groups` namespace is hidden but retained as a compatibility command,
+    including its former mutating `run` verb.
   - The live OpenAPI marks `GET /v4/jobGroups` deprecated and directs callers
     to `/v4/jobLibrary`; the current list/count already use Job Library, but
     detail/run/status operations retain job-group endpoints.
-  - Design the hierarchy so a parent `jobs` command does not create the absurd
-    `jobs jobs` child. Preserve backend `jobGroup` only in transport metadata
-    and documentation of legacy endpoints.
-  - **Status (intake 2026-09-10):** the author asked where the `jobs` rename
-    stands. It is **not started**; it is Phase 4 work and is gated on the Job
-    Library migration above, so a rename alone would put a new name on the
-    deprecated endpoints.
+  - The live OpenAPI defines a Job Group as a job executed from a flow node and
+    `GET /v4/jobGroups/{JOB-ID}/jobs` as its batch-job collection. Its child
+    records have their own numeric `RUN-ID` and a `jobGroup` parent reference.
+    The only direct child route is status-only
+    `GET /v4/jobs/{RUN-ID}/status`; no full child detail route exists. The
+    `runs` command therefore deliberately presents every returned child record
+    instead of inventing a false singular detail command.
   - **Run metadata the author needs, and where it already lives.** Who ran it,
     how long it took, whether it errored, which workspace, what triggered it,
     and which outputs it produced. The live payloads already carry most of it;
@@ -318,16 +323,10 @@ implementation terms rather than an operator-facing resource.
     person record -- email, `maximalCapabilities`, `maximalPrivileges` --
     about 14 KB for a single row, which the list view should stop requesting
     or stop carrying.
-  - **Hierarchy and consolidation (intake 2026-09-10).** Asked: is there a
-    better structure for this family? Today it is fourteen flat leaves under
-    one group: lifecycle (`list`, `count`, `detail`, `status`, `run`,
-    `cancel`, `publish`) mixed with per-run child reads (`jobs`, `inputs`,
-    `outputs`, `publications`, `profile`, `profile-results`, `pdf-results`).
-    Candidates
-    to decide with the rename: fold `status` into `detail`, which already
-    carries `status`; group the three profiling reads, which fail together when
-    a run has no profiling data; and make the per-run child reads read as
-    sub-resources of one run rather than peers of `list`.
+  - Human `runs` output is a vertical record per child run, including identity,
+    parent, type, status/progress, timestamps, heartbeat, warning/error,
+    execution context, sample size, and script references. Canonical JSON
+    retains the full recursively redacted provider response.
   - **Inverted publications (intake 2026-09-10).** Asked: list all
     publications and show the job each belongs to, instead of drilling into
     one job group at a time. Needs research first: whether the API offers a

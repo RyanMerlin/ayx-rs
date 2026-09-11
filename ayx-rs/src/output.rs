@@ -106,6 +106,10 @@ pub struct OutputDescriptor {
     /// `{files, tables}`. Every one is shown. Opt-in per command, so a shape is
     /// never guessed from "an object whose values happen to be arrays".
     pub named_collections: &'static [&'static str],
+    /// Render each list row as an explicit vertical record. This is reserved
+    /// for operator primitives whose complete lifecycle metadata matters more
+    /// than a compact comparison table.
+    pub detailed_rows: bool,
 }
 
 impl OutputDescriptor {
@@ -116,6 +120,7 @@ impl OutputDescriptor {
             fields: &[],
             collection_keys: &[],
             named_collections: &[],
+            detailed_rows: false,
         }
     }
 
@@ -131,6 +136,11 @@ impl OutputDescriptor {
 
     pub const fn with_collection_keys(mut self, collection_keys: &'static [&'static str]) -> Self {
         self.collection_keys = collection_keys;
+        self
+    }
+
+    pub const fn with_detailed_rows(mut self) -> Self {
+        self.detailed_rows = true;
         self
     }
 }
@@ -180,6 +190,11 @@ pub fn render_envelope(
                     }
                     _ => unreachable!("the match above restricts presentation view kinds"),
                 };
+                let data = if descriptor.detailed_rows {
+                    detailed_list_data(data)
+                } else {
+                    data
+                };
                 let projected = Envelope {
                     ok: clean.ok,
                     message: clean.message.clone(),
@@ -198,11 +213,26 @@ pub fn render_envelope(
     }
 }
 
+/// Preserve a declared list projection but tell the terminal renderer that the
+/// records must be shown in full rather than squeezed into its normal table
+/// column budget. Machine formats never use this path.
+fn detailed_list_data(data: Value) -> Value {
+    let Some(items) = data.get("items").cloned() else {
+        return data;
+    };
+    json!({
+        "detailed_items": items,
+        "total_count": data.get("total_count").cloned().unwrap_or(Value::Null),
+        "shown_count": data.get("shown_count").cloned().unwrap_or(Value::Null),
+        "truncated": data.get("truncated").cloned().unwrap_or(Value::Bool(false)),
+    })
+}
+
 /// Add terminal-only labels without rewriting provider fields. In particular,
 /// job-library rows with a null upstream `name` retain that null in JSON while
 /// a human gets a stable `display_name` column.
 fn presentation_data(data: &Value, descriptor: OutputDescriptor) -> Value {
-    if descriptor.command != "one.job-groups.list" {
+    if descriptor.command != "one.jobs.list" {
         return data.clone();
     }
     let mut presentation = data.clone();
@@ -937,7 +967,7 @@ mod tests {
             "job groups listed",
             json!({"items": [{"id": 3978581, "name": null, "flowRun": {"flowId": 77}}]}),
         );
-        let descriptor = OutputDescriptor::new("one.job-groups.list", ViewKind::List);
+        let descriptor = OutputDescriptor::new("one.jobs.list", ViewKind::List);
         let json: Value = serde_json::from_str(
             &render_envelope(
                 &envelope,
@@ -1226,6 +1256,80 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn job_runs_render_every_declared_lifecycle_field_in_text() {
+        let env = Envelope::ok_with_data(
+            "job runs listed",
+            json!({
+                "response": {
+                    "count": 1,
+                    "data": [{
+                        "id": 12,
+                        "jobGroup": {"id": 7},
+                        "jobType": "wrangle",
+                        "status": "Complete",
+                        "percentComplete": 100,
+                        "createdAt": "2026-09-11T12:00:00.123Z",
+                        "startedAt": "2026-09-11T12:00:01.123Z",
+                        "finishedAt": "2026-09-11T12:00:02.123Z",
+                        "lastHeartbeatAt": "2026-09-11T12:00:01.999Z",
+                        "hasWarnings": false,
+                        "errorMessage": null,
+                        "executionLanguage": "trifacta",
+                        "sampleSize": 1000,
+                        "cpJobId": "cp-12",
+                        "emrcluster": "cluster-1",
+                        "wrangleScript": "derive value: x"
+                    }]
+                }
+            }),
+        );
+        let descriptor = OutputDescriptor::new("one.jobs.runs", ViewKind::List)
+            .with_fields(&[
+                "id",
+                "jobGroup",
+                "jobType",
+                "status",
+                "percentComplete",
+                "createdAt",
+                "startedAt",
+                "finishedAt",
+                "lastHeartbeatAt",
+                "hasWarnings",
+                "errorMessage",
+                "executionLanguage",
+                "sampleSize",
+                "cpJobId",
+                "emrcluster",
+                "wrangleScript",
+            ])
+            .with_detailed_rows();
+
+        let text = render_envelope(&env, OutputMode::Text, descriptor, DEFAULT_OUTPUT_LIMIT)
+            .expect("job runs should render");
+        for field in [
+            "id",
+            "jobGroup",
+            "jobType",
+            "status",
+            "percentComplete",
+            "createdAt",
+            "startedAt",
+            "finishedAt",
+            "lastHeartbeatAt",
+            "hasWarnings",
+            "errorMessage",
+            "executionLanguage",
+            "sampleSize",
+            "cpJobId",
+            "emrcluster",
+            "wrangleScript",
+        ] {
+            assert!(text.contains(field), "missing {field} from:\n{text}");
+        }
+        assert!(text.contains("Run 12"), "got:\n{text}");
     }
 
     #[test]

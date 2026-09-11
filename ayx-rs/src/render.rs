@@ -225,6 +225,33 @@ fn render_data_text(data: &Value) -> String {
         }
     }
 
+    // Certain operator primitives (notably One child job runs) carry enough
+    // lifecycle and disposition metadata that the normal compact table would
+    // hide most of the record. The descriptor has already selected safe,
+    // useful fields; show every selected field for every displayed record.
+    if let Some(items) = data.get("detailed_items").and_then(Value::as_array) {
+        if items.is_empty() {
+            return "(no items)".to_string();
+        }
+        let records: Vec<String> = items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                let object = item.as_object()?;
+                let label = object
+                    .get("id")
+                    .map(scalar_or_compact)
+                    .filter(|id| !id.is_empty())
+                    .map_or_else(|| format!("Record {}", index + 1), |id| format!("Run {id}"));
+                let fields = render_object_fields(object, 2).join("\n");
+                Some(format!("{label}\n{fields}"))
+            })
+            .collect();
+        if !records.is_empty() {
+            return records.join("\n\n");
+        }
+    }
+
     // Catalog uses named collections rather than the usual `items` wrapper.
     // Keep its operator view useful without changing the lossless JSON
     // contract consumed by agents and scripts.
