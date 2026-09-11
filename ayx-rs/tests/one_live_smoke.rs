@@ -1778,10 +1778,10 @@ live_page_boundary_case!(
 );
 
 live_case!(
-    one_job_groups_list_live,
-    args = ["--output", "json", "one", "job-groups", "list"],
+    one_jobs_list_live,
+    args = ["--output", "json", "one", "jobs", "list"],
     ok = [
-        "\"surface\": \"jobGroup\"",
+        "\"surface\": \"jobs\"",
         "\"operation\": \"list\"",
         "\"pages_fetched\":",
         "\"items\":"
@@ -1793,12 +1793,12 @@ live_case!(
 );
 
 live_page_boundary_case!(
-    one_job_groups_list_page_boundary_live,
+    one_jobs_list_page_boundary_live,
     args = [
         "--output",
         "json",
         "one",
-        "job-groups",
+        "jobs",
         "list",
         "--limit",
         "1",
@@ -1806,11 +1806,11 @@ live_page_boundary_case!(
         "--max-pages",
         "1"
     ],
-    ok = ["\"surface\": \"jobGroup\"", "\"operation\": \"list\""]
+    ok = ["\"surface\": \"jobs\"", "\"operation\": \"list\""]
 );
 
 #[test]
-fn one_job_groups_detail_not_found_live() {
+fn one_jobs_detail_not_found_live() {
     if !live_smoke_enabled() {
         return;
     }
@@ -1822,30 +1822,27 @@ fn one_job_groups_detail_not_found_live() {
     let invalid_job_group_id = format!("{job_group_id}-missing");
 
     let (success, stdout, stderr) = run_ayx_result(
-        &[
-            "--output",
-            "json",
-            "one",
-            "job-groups",
-            "detail",
-            &invalid_job_group_id,
-        ],
+        &["--output", "json", "one", "jobs", &invalid_job_group_id],
         &live,
     );
     if !success {
         if live_auth_unavailable(&stderr) {
             return;
         }
-        assert_contains(&stderr, "\"surface\": \"jobGroup\"");
+        assert_contains(&stderr, "\"surface\": \"jobs\"");
         assert_contains(&stderr, "\"operation\": \"detail\"");
         assert_live_error_code(&stderr, &["not_found", "validation"]);
         return;
     }
-    panic!("expected invalid job group id to fail\nstdout:\n{stdout}\nstderr:\n{stderr}");
+    panic!("expected invalid job id to fail\nstdout:\n{stdout}\nstderr:\n{stderr}");
 }
 
+// The lone test on the hidden `job-groups` compatibility alias: proves
+// `ayx one job-groups detail <ID>` still routes correctly now that `ayx one
+// jobs <JOB-ID>` is the canonical, documented form (see
+// `one_jobs_detail_and_runs_live_real_object` below for that coverage).
 #[test]
-fn one_job_groups_detail_live_real_object() {
+fn one_job_groups_detail_compat_alias_live_real_object() {
     if !live_smoke_enabled() {
         return;
     }
@@ -1875,7 +1872,7 @@ fn one_job_groups_detail_live_real_object() {
         );
     }
     assert_live_ok(&stdout);
-    assert_contains(&stdout, "\"surface\": \"jobGroup\"");
+    assert_contains(&stdout, "\"surface\": \"jobs\"");
     assert_contains(&stdout, "\"operation\": \"detail\"");
     assert_contains(&stdout, &job_group_id);
 }
@@ -1922,7 +1919,7 @@ fn one_jobs_detail_and_runs_live_real_object() {
 }
 
 #[test]
-fn one_job_groups_status_live_real_object() {
+fn one_jobs_status_live_real_object() {
     if !live_smoke_enabled() {
         return;
     }
@@ -1933,14 +1930,7 @@ fn one_job_groups_status_live_real_object() {
     };
 
     let (success, stdout, stderr) = run_ayx_result(
-        &[
-            "--output",
-            "json",
-            "one",
-            "job-groups",
-            "status",
-            &job_group_id,
-        ],
+        &["--output", "json", "one", "jobs", "status", &job_group_id],
         &live,
     );
     if !success {
@@ -1948,17 +1938,17 @@ fn one_job_groups_status_live_real_object() {
             return;
         }
         panic!(
-            "command failed: --output json one job-groups status {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            "command failed: --output json one jobs status {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
         );
     }
     assert_live_ok(&stdout);
-    assert_contains(&stdout, "\"surface\": \"jobGroup\"");
+    assert_contains(&stdout, "\"surface\": \"jobs\"");
     assert_contains(&stdout, "\"operation\": \"status\"");
     assert_contains(&stdout, &job_group_id);
 }
 
 #[test]
-fn one_job_groups_inspection_live_real_object() {
+fn one_jobs_inspection_live_real_object() {
     if !live_smoke_enabled() {
         return;
     }
@@ -1975,7 +1965,7 @@ fn one_job_groups_inspection_live_real_object() {
                 "--output",
                 "json",
                 "one",
-                "job-groups",
+                "jobs",
                 "inputs",
                 job_group_id.as_str(),
             ],
@@ -1986,19 +1976,22 @@ fn one_job_groups_inspection_live_real_object() {
                 "--output",
                 "json",
                 "one",
-                "job-groups",
+                "jobs",
                 "outputs",
                 job_group_id.as_str(),
             ],
         ),
         (
-            "jobs",
+            // The child-run collection: the CLI verb is `runs`, and the
+            // envelope's `operation` field matches — this used to read
+            // "jobs" here, but the dispatched operation was always "runs".
+            "runs",
             vec![
                 "--output",
                 "json",
                 "one",
-                "job-groups",
                 "jobs",
+                "runs",
                 job_group_id.as_str(),
             ],
         ),
@@ -2008,7 +2001,7 @@ fn one_job_groups_inspection_live_real_object() {
                 "--output",
                 "json",
                 "one",
-                "job-groups",
+                "jobs",
                 "publications",
                 job_group_id.as_str(),
             ],
@@ -2019,7 +2012,7 @@ fn one_job_groups_inspection_live_real_object() {
                 "--output",
                 "json",
                 "one",
-                "job-groups",
+                "jobs",
                 "profile",
                 job_group_id.as_str(),
             ],
@@ -2030,7 +2023,7 @@ fn one_job_groups_inspection_live_real_object() {
                 "--output",
                 "json",
                 "one",
-                "job-groups",
+                "jobs",
                 "profile-results",
                 job_group_id.as_str(),
             ],
@@ -2041,7 +2034,7 @@ fn one_job_groups_inspection_live_real_object() {
                 "--output",
                 "json",
                 "one",
-                "job-groups",
+                "jobs",
                 "pdf-results",
                 job_group_id.as_str(),
             ],
@@ -2071,11 +2064,11 @@ fn one_job_groups_inspection_live_real_object() {
                 continue;
             }
             panic!(
-                "command failed: --output json one job-groups {operation} {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+                "command failed: --output json one jobs {operation} {job_group_id}\nstdout:\n{stdout}\nstderr:\n{stderr}"
             );
         }
         assert_live_ok(&stdout);
-        assert_contains(&stdout, "\"surface\": \"jobGroup\"");
+        assert_contains(&stdout, "\"surface\": \"jobs\"");
         assert_contains(&stdout, &format!("\"operation\": \"{operation}\""));
         assert_contains(&stdout, &job_group_id);
     }
@@ -2900,9 +2893,9 @@ fn one_endpoint_matrix_spot_check_live() {
             "\"surface\": \"connection\"",
         ),
         (
-            "jobGroup",
-            &["--output", "json", "one", "job-groups", "count"],
-            "\"surface\": \"jobGroup\"",
+            "jobs",
+            &["--output", "json", "one", "jobs", "count"],
+            "\"surface\": \"jobs\"",
         ),
         (
             "outputObject",
