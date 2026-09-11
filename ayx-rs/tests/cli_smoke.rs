@@ -1307,3 +1307,177 @@ fn omitted_flow_id_off_tty_names_the_list_command() {
         "ayx one flows list --output json"
     );
 }
+
+/// `one jobs` mixes a bare `JOB-ID` lookup and a verb-subcommand dispatch in a
+/// single clap variant. Before `args_conflicts_with_subcommands` was added,
+/// combining the two parsed successfully and the ambiguity was only rejected
+/// deep in `cmd/one.rs`'s dispatcher, classified as `internal` (exit 70) --
+/// wrong for what is caller error, not a server/internal fault. These cases
+/// must now fail at parse time as a clap usage error (exit code 2), with a
+/// plain-text clap usage message on stderr rather than a JSON envelope.
+#[test]
+fn jobs_id_and_subcommand_mix_is_a_usage_error_not_internal() {
+    let home = tempfile::tempdir().expect("tempdir");
+    for args in [
+        vec!["one", "jobs", "42", "list"],
+        vec!["one", "jobs", "42", "count"],
+        vec!["one", "jobs", "42", "status", "43"],
+        vec!["one", "jobs", "42", "runs"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+            .args(&args)
+            .args(["--output", "json", "--no-input"])
+            .env("AYX_CONFIG_HOME", home.path())
+            .env("HOME", home.path())
+            .env("XDG_CONFIG_HOME", home.path())
+            .output()
+            .unwrap_or_else(|_| panic!("ayx binary should run for {args:?}"));
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "expected a usage error (exit 2) for {args:?}\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Usage:"),
+            "expected a clap usage message for {args:?}, got: {stderr}"
+        );
+    }
+}
+
+/// `ayx one jobs --profile x list` (and `... --profile x count`) is a
+/// different flavor of the same mix-up. `args_conflicts_with_subcommands`
+/// locks clap out of subcommand parsing as soon as `--profile` is consumed
+/// ahead of the verb, so a zero-further-args verb like `list`/`count` gets
+/// silently swallowed as the optional `[JOB-ID]` positional instead of
+/// erroring at parse time (verbs that take more tokens, like `runs <ID>`,
+/// still produce a clap usage error the same way the id+subcommand mixes
+/// above do). `cmd/one.rs` must catch this specific shape -- an id that
+/// exactly matches a known jobs verb name, combined with an explicit
+/// `--profile` -- and reject it as `validation` (exit 2), not silently treat
+/// the verb word as a literal job id and not classify it `internal`.
+#[test]
+fn jobs_profile_before_zero_arg_verb_is_a_validation_error_not_a_silent_id_lookup() {
+    let home = tempfile::tempdir().expect("tempdir");
+    for verb in ["list", "count"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+            .args(["one", "jobs", "--profile", "x", verb])
+            .args(["--output", "json", "--no-input"])
+            .env("AYX_CONFIG_HOME", home.path())
+            .env("HOME", home.path())
+            .env("XDG_CONFIG_HOME", home.path())
+            .output()
+            .unwrap_or_else(|_| panic!("ayx binary should run for verb {verb:?}"));
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "expected a validation error (exit 2) for --profile before {verb:?}\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let envelope: serde_json::Value = serde_json::from_str(stderr.trim())
+            .unwrap_or_else(|e| panic!("stderr not JSON for verb {verb:?}: {e}\n{stderr}"));
+        assert_eq!(envelope["error_code"], "validation");
+        let message = envelope["data"]["error"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("--profile") && message.contains(verb),
+            "message should name --profile and the verb {verb:?}: {stderr}"
+        );
+    }
+}
+
+/// `ayx one jobs --profile x` -- a `--profile` with neither a `JOB-ID` nor a
+/// subcommand -- is syntactically valid (clap has nothing to conflict
+/// `--profile` with), so it must be caught by the dispatcher in `cmd/one.rs`
+/// instead. That runtime rejection must be classified as `validation` (exit
+/// code 2), matching the clap-usage-error cases above, not `internal`.
+#[test]
+fn jobs_bare_profile_without_id_or_subcommand_is_a_validation_error() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args([
+            "one",
+            "jobs",
+            "--profile",
+            "x",
+            "--output",
+            "json",
+            "--no-input",
+        ])
+        .env("AYX_CONFIG_HOME", home.path())
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .output()
+        .expect("ayx binary should run");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let envelope: serde_json::Value = serde_json::from_str(stderr.trim())
+        .unwrap_or_else(|e| panic!("stderr not JSON: {e}\n{stderr}"));
+    assert_eq!(envelope["error_code"], "validation");
+    let message = envelope["data"]["error"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("ayx one jobs"),
+        "message should name the correct invocation form: {stderr}"
+    );
+}
+
+/// A bare `JOB-ID` lookup and each verb subcommand alone must keep working:
+/// clap parses them and dispatch reaches the job-groups backend (surfacing
+/// only as a config-loading failure here, since no live profile exists in
+/// this sandboxed environment) -- never a clap usage error and never the
+/// `--profile`-position hint that used to fire for every subcommand
+/// invocation regardless of where `--profile` was placed.
+#[test]
+fn jobs_bare_id_and_each_subcommand_still_parse_and_dispatch() {
+    let home = tempfile::tempdir().expect("tempdir");
+    for args in [
+        vec!["one", "jobs", "42"],
+        vec!["one", "jobs", "list"],
+        vec!["one", "jobs", "count"],
+        vec!["one", "jobs", "runs", "42"],
+        vec!["one", "jobs", "status", "42"],
+        vec!["one", "jobs", "runs", "42", "--profile", "x"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
+            .args(&args)
+            .args(["--output", "json", "--no-input"])
+            .env("AYX_CONFIG_HOME", home.path())
+            .env("HOME", home.path())
+            .env("XDG_CONFIG_HOME", home.path())
+            .output()
+            .unwrap_or_else(|_| panic!("ayx binary should run for {args:?}"));
+
+        // Never a clap usage error.
+        assert_ne!(
+            output.status.code(),
+            Some(2),
+            "expected {args:?} to pass parsing and dispatch, not fail as a usage error\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Must reach the dispatcher (a config-file error), not the
+        // `--profile`-placement hint or the old "use `ayx one jobs
+        // <JOB-ID>`..." catch-all that used to fire for every subcommand.
+        assert!(
+            !stderr.contains("place --profile after"),
+            "should not hit the retired --profile hint for {args:?}: {stderr}"
+        );
+        assert!(
+            stderr.contains("config") || stderr.contains("profile"),
+            "expected {args:?} to fail on config/profile loading, got: {stderr}"
+        );
+    }
+}

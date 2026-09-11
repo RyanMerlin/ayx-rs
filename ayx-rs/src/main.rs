@@ -760,6 +760,59 @@ mod tests {
         );
     }
 
+    /// A bare JOB-ID lookup and a verb subcommand are mutually exclusive
+    /// invocation shapes on `one jobs`. Before `args_conflicts_with_subcommands`
+    /// was added to the `Jobs` variant, clap happily parsed the mix (e.g.
+    /// `jobs 42 list`) and the ambiguity only surfaced later as an `internal`
+    /// (exit 70) error out of the match in `cmd/one.rs`, or — for `jobs 42
+    /// runs` — as a confusing clap error claiming `<JOB-ID>` was missing even
+    /// though the user typed it. This asserts every such positional/subcommand
+    /// mix is now rejected by clap itself, at parse time, as a usage error
+    /// (exit code 2), while every valid shape keeps parsing.
+    ///
+    /// `--profile x list` (a `--profile` given ahead of the verb) is a
+    /// related but distinct case: clap's `args_conflicts_with_subcommands`
+    /// does not extend to named options, so that mix still parses here and is
+    /// rejected at runtime instead, in `cmd/one.rs` — see
+    /// `cli_smoke::jobs_id_and_subcommand_mix_is_a_usage_error_not_internal`.
+    #[test]
+    fn jobs_positional_id_and_subcommand_conflict_at_parse_time() {
+        for bad in [
+            ["ayx", "one", "jobs", "42", "list"].as_slice(),
+            ["ayx", "one", "jobs", "42", "count"].as_slice(),
+            ["ayx", "one", "jobs", "42", "status", "43"].as_slice(),
+            ["ayx", "one", "jobs", "42", "runs"].as_slice(),
+        ] {
+            assert!(
+                Cli::try_parse_from(bad).is_err(),
+                "expected a JOB-ID/subcommand mix to be rejected at parse time: {bad:?}"
+            );
+        }
+
+        // Every valid shape must still parse: a bare id, a subcommand alone,
+        // `--profile` in its documented position (after the verb), and
+        // `--profile` ahead of the verb (parses fine; rejected at dispatch).
+        for ok in [
+            ["ayx", "one", "jobs", "42"].as_slice(),
+            ["ayx", "one", "jobs", "list"].as_slice(),
+            ["ayx", "one", "jobs", "runs", "42"].as_slice(),
+            ["ayx", "one", "jobs", "runs", "42", "--profile", "x"].as_slice(),
+            // `--profile` alone, with neither an id nor a subcommand, is
+            // syntactically valid (clap has nothing to conflict it with) but
+            // is rejected at runtime by cmd/one.rs as a validation error —
+            // see the dispatcher match, not this parser-level test.
+            ["ayx", "one", "jobs", "--profile", "x"].as_slice(),
+            // Likewise `--profile` ahead of the verb: clap parses it, and
+            // cmd/one.rs rejects it as a validation error at dispatch time.
+            ["ayx", "one", "jobs", "--profile", "x", "list"].as_slice(),
+        ] {
+            assert!(
+                Cli::try_parse_from(ok).is_ok(),
+                "expected a valid `jobs` invocation to keep parsing: {ok:?}"
+            );
+        }
+    }
+
     #[test]
     fn shared_profile_loader_rejects_mismatched_bound_one_refs_but_reads_legacy_refs() {
         let mut config: Config = serde_yaml::from_str(
@@ -2429,7 +2482,13 @@ pub(crate) enum OneCommand {
                       <JOB-ID>` to inspect that aggregate job and `ayx one jobs runs <JOB-ID>` \
                       to see every child run record. The provider exposes no full child-run detail \
                       endpoint; the complete child records are returned by `runs`.",
-        arg_required_else_help = true
+        arg_required_else_help = true,
+        // A bare JOB-ID lookup and a verb subcommand are mutually exclusive
+        // invocation shapes; without this, clap happily parses `jobs 42 list`
+        // or `jobs --profile x list` and the mixup only surfaced later as an
+        // internal error out of the match in cmd/one.rs. Rejecting the mix
+        // at parse time gives a clap usage error (exit 2) instead.
+        args_conflicts_with_subcommands = true
     )]
     Jobs {
         /// Job Library entry identifier. Omitting a verb makes this an aggregate-job lookup.

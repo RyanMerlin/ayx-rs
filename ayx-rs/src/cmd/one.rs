@@ -509,6 +509,31 @@ const JOB_RUN_FIELDS: &[&str] = &[
     "wrangleScript",
 ];
 
+/// Every `ayx one jobs <VERB>` subcommand name, as clap spells it (kebab-case
+/// where relevant). Used only to detect the `--profile`-before-verb mix-up in
+/// `execute` above — see the comment there for why clap can silently swallow
+/// one of these words as the `[JOB-ID]` positional instead of dispatching to
+/// the subcommand.
+const JOBS_VERB_NAMES: &[&str] = &[
+    "list",
+    "count",
+    "execute",
+    "publish",
+    "cancel",
+    "status",
+    "runs",
+    "inputs",
+    "outputs",
+    "publications",
+    "profile",
+    "profile-results",
+    "pdf-results",
+];
+
+fn is_jobs_verb_name(candidate: &str) -> bool {
+    JOBS_VERB_NAMES.contains(&candidate)
+}
+
 fn jobs_descriptor(id: Option<&str>, command: Option<&OneJobsCommand>) -> OutputDescriptor {
     match (id, command) {
         (Some(_), None) => detail("one.jobs.detail"),
@@ -733,6 +758,23 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             profile,
             command,
         } => match (id, command) {
+            // `args_conflicts_with_subcommands` on the `Jobs` variant locks
+            // clap into "no subcommand" parsing as soon as any other arg
+            // (`--profile` included) is seen ahead of the verb, so a verb
+            // name typed after a leading `--profile` is swallowed as the
+            // optional `[JOB-ID]` positional instead of matching a
+            // subcommand — for a zero-further-args verb like `list`/`count`
+            // this parses silently; for one that itself takes more tokens
+            // (`runs <ID>`, `status <ID>`, `execute --body …`) clap already
+            // rejects the leftover token as "unexpected argument" (exit 2).
+            // Catch the silent case here: an id that is exactly a known
+            // `jobs` verb name, combined with an explicit `--profile`, is
+            // essentially always this mix-up rather than a literal JOB-ID.
+            (Some(id), None) if profile.is_some() && is_jobs_verb_name(&id) => {
+                return Err(anyhow::anyhow!(
+                    "invalid value: --profile is required to come after the jobs verb, not before it: use `ayx one jobs {id} <JOB-ID> --profile <PROFILE>` (for example `ayx one jobs runs <JOB-ID> --profile <PROFILE>`); if `{id}` is a literal JOB-ID, move --profile after it instead: `ayx one jobs {id} --profile <PROFILE>`"
+                ));
+            }
             (Some(id), None) => super::one_job_groups::execute(
                 &runtime,
                 OneJobGroupCommand::Detail {
@@ -740,19 +782,31 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
                     id: Some(id),
                 },
             )?,
-            (None, Some(command)) if profile.is_none() => {
-                super::one_job_groups::execute(&runtime, command.into())?
-            }
-            (None, Some(_)) => {
+            // Whenever a subcommand matched, the `Jobs`-level `--profile`
+            // could not also have been consumed (see the comment above):
+            // consuming any arg at the `Jobs` level locks clap out of
+            // subcommand parsing for the rest of the invocation. Each
+            // `OneJobsCommand` variant carries its own `profile` field for
+            // the documented `ayx one jobs <VERB> <JOB-ID> --profile
+            // <PROFILE>` form, converted along with the rest of `command`.
+            (None, Some(command)) => super::one_job_groups::execute(&runtime, command.into())?,
+            // Reachable only as `ayx one jobs --profile <PROFILE>` with no
+            // JOB-ID and no subcommand — clap accepts it syntactically since
+            // `--profile` alone doesn't trigger the subcommand conflict, but
+            // there is nothing for the profile to scope. The "is required"
+            // wording keeps `classify_anyhow_error` mapping this to a
+            // validation error (exit 2), not internal.
+            (None, None) => {
                 return Err(anyhow::anyhow!(
-                    "place --profile after the jobs verb, for example `ayx one jobs runs <JOB-ID> --profile <PROFILE>`"
+                    "a JOB-ID or subcommand is required: use `ayx one jobs <JOB-ID>` or `ayx one jobs <VERB> ...` (for example `ayx one jobs runs <JOB-ID>`); see `ayx one jobs --help`"
                 ));
             }
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "use `ayx one jobs <JOB-ID>` or a `ayx one jobs` subcommand"
-                ));
-            }
+            // clap's `args_conflicts_with_subcommands` on the `Jobs` variant
+            // rejects a JOB-ID together with a subcommand before dispatch
+            // ever reaches here.
+            (Some(_), Some(_)) => unreachable!(
+                "clap rejects a JOB-ID and a `jobs` subcommand together via args_conflicts_with_subcommands"
+            ),
         },
         OneCommand::JobGroups { command } => super::one_job_groups::execute(&runtime, command)?,
         OneCommand::OutputObjects { command } => {
