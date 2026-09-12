@@ -55,7 +55,7 @@ Manually review:
 
 ## Functional Validation
 
-A live validation pass per [docs/one-live-validation.md](one-live-validation.md) must be green, or have every deviation explicitly recorded, before tagging a release; the v0.17.0-rc.3 candidate pass is recorded on 2026-08-20 against a disposable validation workspace.
+A live validation pass per [docs/one-live-validation.md](one-live-validation.md) must be green, or have every deviation explicitly recorded, before tagging a release. The latest recorded pass is the `v0.21.0-rc.1` candidate sweep on 2026-09-12 (see that document's Current Harness section); the earlier v0.17.0-rc.3 candidate pass is recorded on 2026-08-20 against a disposable validation workspace.
 
 ## GitHub Protections
 
@@ -74,7 +74,7 @@ If release tags are part of the trust model, also protect `v*` tags or cover the
 
 ### Current state
 
-Verified against the live rulesets on `RyanMerlin/ayx-rs` via the GitHub API, 2026-07-28.
+Verified against the live rulesets on `RyanMerlin/ayx-rs` via the GitHub API, 2026-09-12.
 
 `protect-main` (branch ruleset, active, `refs/heads/main`) enforces:
 
@@ -91,7 +91,8 @@ the release trust model, sigstore keyless signing plus GitHub provenance attesta
 to the `v*` tag.
 
 Both rulesets grant bypass to the repository-admin role and to the `merlinlabs-automation` GitHub
-App, so solo maintenance and automated merges still work. That is deliberate: the rules gate outside
+App, so solo maintenance and automated merges still work; `protect-main` additionally grants bypass
+to deploy keys. That is deliberate: the rules gate outside
 contributions and accidents, not the maintainer.
 
 Current CI (`.github/workflows/ci.yml`) defines these jobs:

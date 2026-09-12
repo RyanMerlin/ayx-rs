@@ -103,6 +103,13 @@ These affect callers that match on envelope fields or process exit codes.
   below, which said the command "still functions and is not removed", no
   longer describes the current release.
 
+### Deferred
+
+- The hidden `ayx tui` stub is **not** removed in this release, despite the
+  0.20.0 entry below saying it would be. It still returns the "removed in
+  0.20.0" remediation envelope; its deletion moves to 0.22.0 so that 0.21.0
+  stays the exact code that passed the `v0.21.0-rc.1` live sweep.
+
 
 ## 0.20.5 — 2026-09-08
 
