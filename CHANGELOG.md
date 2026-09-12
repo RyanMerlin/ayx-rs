@@ -4,12 +4,10 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
-## 0.21.0
+## 0.21.0 — 2026-09-12
 
-The `v0.21.0-rc.1` release candidate is cut from this section; it is not yet
-the final `0.21.0` release. See `docs/releases/v0.21.0-rc.1.md` for the
-candidate notes. This section becomes the final `0.21.0 — <date>` entry when
-that release is promoted.
+Promoted unchanged from `v0.21.0-rc.1` after its live Alteryx One read sweep.
+Release notes: `docs/releases/v0.21.0.md`.
 
 ### Changed
 
