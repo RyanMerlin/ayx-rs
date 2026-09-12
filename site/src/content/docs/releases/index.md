@@ -18,19 +18,69 @@ the default for interactive onboarding and normal human sign-in. See
 [Connecting](/connecting/) and [Identity & auth](/one/identity/) for the full
 setup and recovery rules.
 
+## v0.21.0
+
+**`ayx one jobs` is the canonical Job Library command family.** `jobs <JOB-ID>`
+inspects an entry, `jobs runs <JOB-ID>` lists every child run, and `jobs
+execute` submits one; `ayx one job-groups` remains a hidden compatibility alias
+for this release cycle.
+
+**BREAKING for automation:** `--output json-full` and `--error-format` are
+removed, and `--output json` always emits the full redacted envelope, which
+again carries a top-level `command`. Human text escapes control and bidi
+characters so provider strings cannot forge output lines. See the [release
+notes](/releases/v0210/) for the upgrade notes.
+
+## v0.21.0-rc.1
+
+Historical release candidate for `0.21.0`, promoted unchanged after its live
+Alteryx One read sweep. See the [candidate release notes](/releases/v0210-rc1/).
+
+## v0.20.0 – v0.20.5
+
+**`ayx` is an agent-first CLI.** The bundled terminal UI is removed (ADR 0004),
+the output format follows the caller, Alteryx One authentication is
+strengthened, and Agent Studio asset commands were added. See the [release
+notes](/releases/v0200/). v0.20.1 through v0.20.5 were onboarding and
+documentation fixes without separate notes pages; see `CHANGELOG.md`.
+
+## v0.19.1
+
+A bounded MCP client slice for the product's local MCP server and authenticated
+MCP Gateway discovery. See the [release notes](/releases/v0191/).
+
+## v0.19.0
+
+**OAuth2.0 API access/refresh credentials are a first-class authentication
+method** for automation, agents and CI; email OTP remains the interactive
+default. See the [release notes](/releases/v0190/).
+
+## v0.18.1
+
+The first published 0.18 release: the output-contract upgrade, human-readable
+workflow governance, authentication and release-integrity work. See the
+[release notes](/releases/v0181/).
+
+## v0.18.0
+
+**Output contract upgrade.** Output was standardized across the command
+surface, with human-readable text as the default and a compact versioned JSON
+envelope for automation (retired again in v0.21.0). See the [release
+notes](/releases/v0180/).
+
 ## v0.17.0
 
 First stable release of the `0.17.0` authentication rollout. The Wizard
 email-OTP flow is the default, secure persistence is the normal path, and
 Legacy remains available only as an explicit rollback lane. See the [release
-notes](/releases/v0.17.0/).
+notes](/releases/v0170/).
 
 ## v0.17.0-rc.3
 
 Historical release candidate for the `0.17.0` authentication rollout.
 The Wizard email-OTP flow is the default, secure persistence is the normal
 path, and Legacy remains available only as an explicit rollback lane. See the
-[candidate release notes](/releases/v0.17.0-rc.3/).
+[candidate release notes](/releases/v0170-rc3/).
 
 ## v0.16.1
 

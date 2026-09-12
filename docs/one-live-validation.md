@@ -82,6 +82,14 @@ The current smoke harness lives in `ayx-rs/tests/one_live_smoke.rs` and already:
 - contains 75 generated live tests as of this repo state. The v0.17.0-rc.3
   validation used a fresh Wizard login and a release-binary read sweep; tests
   requiring a live token remain explicitly gated by `AYX_ONE_LIVE_SMOKE`.
+- The latest recorded pass is `v0.21.0-rc.1` (2026-09-12):
+  `scripts/one-read-sweep.ps1` against the packaged Windows release artifact
+  reported 73 passed, 0 failed, and 2 expected-unprivileged (`workspace detail`
+  and `connector publish info`, refused for a non-admin profile; run without
+  `-AdministratorFixture`). Four passes were expected fixture errors: job
+  `inputs` on a non-JDBC job (`validation`) and job `profile`,
+  `profile-results`, `pdf-results` on a job with no profiling data
+  (`not_found`).
 
 ## Methodology traps
 
