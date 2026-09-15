@@ -54,4 +54,4 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [dev-dependencies]
-jsonschema = "0.53"
+jsonschema = "0.56"
