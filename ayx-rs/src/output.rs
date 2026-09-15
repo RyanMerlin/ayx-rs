@@ -163,6 +163,16 @@ pub fn render_envelope(
         OutputMode::Yaml => serde_yaml::to_string(&clean)
             .map_err(|e| anyhow::anyhow!("failed to serialize envelope to yaml: {e}")),
         OutputMode::Text | OutputMode::Table => {
+            // A failed transport envelope can contain an arbitrary provider
+            // body under `response`. It is useful in the canonical redacted
+            // machine envelope, but it must not be recursively printed in
+            // text: nested fields can look like envelope `error_code`, and
+            // provider URLs/request ids/headers are not operator output.
+            // Preserve only deliberately projected partial records.
+            if !clean.ok {
+                let partial = partial_failure_data(&clean.data, descriptor, output_limit);
+                return Ok(render::render_failure_text(&clean, partial.as_ref()));
+            }
             // Text/table retain their established renderer; list views are
             // bounded by --output-limit without changing machine output.
             if clean.ok
@@ -384,7 +394,8 @@ fn compact_list(
         return json!({
             "kind": "list",
             "unrecognized_collection": true,
-            "hint": "The service returned a collection shape this CLI version does not recognize. Use --output json to inspect it.",
+            "detected_safe_wrapper_keys": safe_wrapper_keys(data),
+            "hint": "The service returned a collection shape this CLI version does not recognize. This CLI version is not compatible with that shape; use -o json to inspect the redacted envelope.",
         });
     };
     let shown = if limit == 0 {
@@ -521,12 +532,51 @@ fn human_resource_data(data: &Value, descriptor_fields: &[&str]) -> Value {
     let projected = project_object_with_wrapper(Some(object), transport_wrapper(data), &fields);
     if projected.is_empty() {
         json!({
-            "response_available": true,
-            "hint": "use --output json for the complete API response",
+            "unsupported_response": true,
+            "detected_safe_wrapper_keys": safe_wrapper_keys(body),
+            "hint": "The service returned a response shape this CLI version does not recognize. This CLI version is not compatible with that shape; use -o json to inspect the redacted envelope.",
         })
     } else {
         Value::Object(projected)
     }
+}
+
+/// Partial pages are the sole failure payload permitted into default text.
+/// The records still pass through the command's declared field projection, so
+/// a later-page transport failure cannot expose arbitrary provider data.
+fn partial_failure_data(
+    data: &Value,
+    descriptor: OutputDescriptor,
+    output_limit: usize,
+) -> Option<Value> {
+    if data.get("partial").and_then(Value::as_bool) != Some(true)
+        || !data.get("items").is_some_and(Value::is_array)
+    {
+        return None;
+    }
+    Some(compact_list(
+        data,
+        descriptor.fields,
+        descriptor.collection_keys,
+        output_limit,
+        descriptor.detailed_rows,
+    ))
+}
+
+/// Field names are useful compatibility evidence, but a key which itself
+/// advertises a credential is not. Keep this intentionally shallow: values
+/// are never included in an unsupported-shape report.
+fn safe_wrapper_keys(data: &Value) -> Vec<String> {
+    presentation_body(data)
+        .as_object()
+        .map(|object| {
+            object
+                .keys()
+                .filter(|key| !is_sensitive_key(key))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn selected_fields<'a>(descriptor_fields: &'a [&'a str]) -> Vec<&'a str> {
@@ -725,12 +775,11 @@ fn scalar_projection(value: &Value) -> Value {
         {
             value.clone()
         }
-        Value::Array(items) => Value::String(format!(
-            "{} item(s); use --output json for details",
-            items.len()
-        )),
+        Value::Array(items) => {
+            Value::String(format!("{} item(s); use -o json for details", items.len()))
+        }
         Value::Object(object) => Value::String(format!(
-            "{} field(s); use --output json for details",
+            "{} field(s); use -o json for details",
             object.len()
         )),
         _ => value.clone(),
@@ -756,11 +805,20 @@ pub fn redacted_envelope(envelope: &Envelope) -> Envelope {
     Envelope {
         ok: envelope.ok,
         command: envelope.command.clone(),
-        message: envelope.message.clone(),
+        message: redact_text_value(&envelope.message),
         timestamp_utc: envelope.timestamp_utc,
         data: redact_value(&envelope.data, None),
         error_code: envelope.error_code,
-        remediation: envelope.remediation.clone(),
+        remediation: envelope.remediation.as_ref().map(|remediation| {
+            ayx_core::envelope::Remediation {
+                summary: redact_text_value(&remediation.summary),
+                commands: remediation
+                    .commands
+                    .iter()
+                    .map(|command| redact_text_value(command))
+                    .collect(),
+            }
+        }),
         retryable: envelope.retryable,
         // `next` hints are full command lines (see pagination_next_command),
         // not bare secret values, so they need the same in-place text
@@ -789,8 +847,19 @@ fn redact_value(value: &Value, key: Option<&str>) -> Value {
                 .collect(),
         ),
         Value::Array(items) => Value::Array(items.iter().map(|v| redact_value(v, key)).collect()),
-        Value::String(text) if is_sensitive_value(text) => Value::String("[REDACTED]".to_string()),
+        Value::String(text) => Value::String(redact_text_value(text)),
         _ => value.clone(),
+    }
+}
+
+fn redact_text_value(value: &str) -> String {
+    // Preserve the existing whole-value marker for strings that are themselves
+    // credential-bearing values. For surrounding prose, redact only the
+    // embedded bearer/JWT/query secret so the useful context survives.
+    if is_sensitive_value(value) {
+        "[REDACTED]".to_string()
+    } else {
+        redact_text(value)
     }
 }
 
@@ -802,7 +871,12 @@ fn is_sensitive_key(key: &str) -> bool {
     if matches!(normalized.as_str(), "tokenid" | "tokeninfo") {
         return false;
     }
-    if is_metadata_key(key) {
+    if is_metadata_key(key)
+        || matches!(
+            normalized.as_str(),
+            "credentialkind" | "credentialhealth" | "workspacecredentials"
+        )
+    {
         return false;
     }
     let key = normalized;
@@ -810,18 +884,15 @@ fn is_sensitive_key(key: &str) -> bool {
     // one had drifted behind it, so machine output emitted values under
     // names the rest of the codebase treats as secret.
     //
-    // `credential` is deliberately NOT here despite being canonical: the match
-    // is a substring test, and adding it would redact the posture fields that
-    // exist to report credential state (`credential_kind`, `credential_health`,
-    // and the `workspace_credentials` container itself), none of which match a
-    // metadata suffix above. Closing that gap needs the metadata rule extended
-    // first; the child fields inside those objects are already covered by the
-    // `token`, `password`, and `secret` needles.
+    // Keep `credential` in step with the canonical core matcher. Credential
+    // posture fields and the workspace credential container are explicitly
+    // exempted above so adding this needle does not hide diagnostics.
     [
         "authorization",
         "token",
         "password",
         "secret",
+        "credential",
         "cookie",
         "connectionstring",
         "clientkey",
@@ -1123,8 +1194,8 @@ mod tests {
         );
         // A List descriptor's `fields` describe the success shape (id, name)
         // and share nothing with the error payload's keys.
-        let descriptor =
-            OutputDescriptor::new("one.flows.list", ViewKind::List).with_fields(&["id", "name"]);
+        let descriptor = OutputDescriptor::new("one.workflows.list", ViewKind::List)
+            .with_fields(&["id", "name"]);
         let value = compact_data(
             &envelope.data,
             descriptor.kind,
@@ -1136,6 +1207,40 @@ mod tests {
         assert_eq!(value["fields"]["error"], "boom");
         assert_eq!(value["fields"]["hint"], "run onboard");
         assert_eq!(value["fields"]["error_code"], "config_missing");
+    }
+
+    #[test]
+    fn failed_text_renders_envelope_block_before_safe_partial_records() {
+        use ayx_core::envelope::ErrorCode;
+
+        let envelope = Envelope::err_coded(
+            ErrorCode::Upstream,
+            "connection list failed",
+            json!({
+                "partial": true,
+                "items": [{"id": "c-1", "name": "Recovered", "password": "nope"}],
+                "error": "HTTP 502 url=https://provider.example/connections body={\"error_code\":\"permission_denied\"}",
+                "response": {"error_code": "permission_denied", "headers": {"x-request-id": "r-1"}}
+            }),
+        )
+        .finalize_retryable();
+        let text = render_envelope(
+            &envelope,
+            OutputMode::Text,
+            OutputDescriptor::new("one.connections.list", ViewKind::List)
+                .with_fields(&["id", "name"]),
+            DEFAULT_OUTPUT_LIMIT,
+        )
+        .expect("failure text");
+
+        let failure = text.find("Error code: upstream").expect("envelope code");
+        let records = text.find("Recovered records").expect("partial label");
+        assert!(failure < records, "{text}");
+        assert!(text.contains("Partial results: incomplete"), "{text}");
+        assert!(text.contains("Recovered"), "{text}");
+        assert!(!text.contains("permission_denied"), "{text}");
+        assert!(!text.contains("provider.example"), "{text}");
+        assert!(!text.contains("nope"), "{text}");
     }
 
     #[test]
@@ -1286,6 +1391,24 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_list_shape_names_only_safe_wrapper_keys() {
+        let env = Envelope::ok_with_data(
+            "workspace people ok",
+            json!({"response": {"members": [{"id": 1}], "access_token": "secret"}}),
+        );
+        let text = render_envelope(
+            &env,
+            OutputMode::Text,
+            OutputDescriptor::new("one.workspace.people", ViewKind::List),
+            DEFAULT_OUTPUT_LIMIT,
+        )
+        .expect("unsupported shape text");
+        assert!(text.contains("not compatible"), "{text}");
+        assert!(text.contains("members"), "{text}");
+        assert!(!text.contains("access_token"), "{text}");
+    }
+
+    #[test]
     fn a_bare_scalar_body_renders_under_the_single_declared_field() {
         // `GET /v4/jobGroups/{id}/status` returns the JSON string "Complete".
         // Text mode used to print only the message line, because a scalar has
@@ -1422,7 +1545,7 @@ mod tests {
             "the nested job group id must be rendered, got:\n{text}"
         );
         assert!(
-            !text.contains("use --output json for details"),
+            !text.contains("use -o json for details"),
             "detailed rows must not summarize nested values, got:\n{text}"
         );
     }
@@ -1585,8 +1708,8 @@ mod tests {
         }
     }
 
-    /// Redacting these would break the diagnostics that report credential
-    /// posture, which is why `credential` is not a sensitive-key needle.
+    /// Credential posture metadata remains readable while credential-bearing
+    /// fields are still redacted.
     #[test]
     fn credential_posture_fields_stay_readable() {
         let env = Envelope::ok_with_data(
@@ -1603,6 +1726,31 @@ mod tests {
 
         assert!(full.contains("oauth_refresh"), "{full}");
         assert!(full.contains("verified"), "{full}");
+    }
+
+    #[test]
+    fn raw_credential_fields_and_embedded_bearer_values_are_redacted() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({
+                "credential": "provider-secret",
+                "nested": {"details": "Bearer abc.def.ghi"},
+                "workspace_credentials": {
+                    "91946": {"access_token": "access-secret"}
+                },
+                "credential_kind": "oauth_refresh",
+                "credential_health": "verified"
+            }),
+        );
+        let clean = redacted_envelope(&env);
+        assert_eq!(clean.data["credential"], "[REDACTED]");
+        assert_eq!(clean.data["nested"]["details"], "[REDACTED]");
+        assert_eq!(
+            clean.data["workspace_credentials"]["91946"]["access_token"],
+            "[REDACTED]"
+        );
+        assert_eq!(clean.data["credential_kind"], "oauth_refresh");
+        assert_eq!(clean.data["credential_health"], "verified");
     }
 
     #[test]
@@ -1900,7 +2048,7 @@ mod tests {
         // Nested values stay summarized so the compact view remains bounded.
         assert_eq!(
             value["fields"]["resolution"],
-            "1 field(s); use --output json for details"
+            "1 field(s); use -o json for details"
         );
     }
 
@@ -2019,6 +2167,44 @@ mod tests {
     }
 
     #[test]
+    fn redacts_embedded_bearer_values_in_all_envelope_text() {
+        let env = Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::Upstream,
+            "provider said Authorization: Bearer response-secret",
+            json!({"detail": "Authorization: Bearer body-secret"}),
+        )
+        .with_remediation(
+            "Retry with Authorization: Bearer remediation-secret",
+            vec!["ayx call --header 'Authorization: Bearer command-secret'".to_string()],
+        );
+        let clean = redacted_envelope(&env);
+        let serialized = serde_json::to_string(&clean).expect("redacted envelope should serialize");
+        for secret in [
+            "response-secret",
+            "body-secret",
+            "remediation-secret",
+            "command-secret",
+        ] {
+            assert!(!serialized.contains(secret), "secret leaked: {secret}");
+        }
+        assert!(clean.message.contains("Bearer ***"));
+        assert!(
+            clean.data["detail"]
+                .as_str()
+                .unwrap()
+                .contains("Bearer ***")
+        );
+        assert!(
+            clean
+                .remediation
+                .as_ref()
+                .unwrap()
+                .summary
+                .contains("Bearer ***")
+        );
+    }
+
+    #[test]
     fn token_metadata_survives_while_token_value_is_redacted() {
         let env = Envelope::ok_with_data(
             "ok",
@@ -2096,35 +2282,45 @@ mod tests {
     #[test]
     fn next_command_appends_the_token() {
         let cmd = pagination_next_command(
-            &argv(&["/usr/bin/ayx", "one", "flows", "list", "--output", "json"]),
+            &argv(&[
+                "/usr/bin/ayx",
+                "one",
+                "workflows",
+                "list",
+                "--output",
+                "json",
+            ]),
             "tok123",
         );
-        assert_eq!(cmd, "ayx one flows list --output json --page-token tok123");
+        assert_eq!(
+            cmd,
+            "ayx one workflows list --output json --page-token tok123"
+        );
     }
 
     #[test]
     fn next_command_replaces_an_existing_token_in_either_form() {
         let cmd = pagination_next_command(
-            &argv(&["ayx", "one", "flows", "list", "--page-token", "old"]),
+            &argv(&["ayx", "one", "workflows", "list", "--page-token", "old"]),
             "new",
         );
-        assert_eq!(cmd, "ayx one flows list --page-token new");
+        assert_eq!(cmd, "ayx one workflows list --page-token new");
         let cmd = pagination_next_command(
-            &argv(&["ayx", "one", "flows", "list", "--page-token=old"]),
+            &argv(&["ayx", "one", "workflows", "list", "--page-token=old"]),
             "new",
         );
-        assert_eq!(cmd, "ayx one flows list --page-token new");
+        assert_eq!(cmd, "ayx one workflows list --page-token new");
     }
 
     #[test]
     fn next_command_quotes_arguments_with_spaces() {
         let cmd = pagination_next_command(
-            &argv(&["ayx", "one", "flows", "list", "--profile", "my profile"]),
+            &argv(&["ayx", "one", "workflows", "list", "--profile", "my profile"]),
             "t",
         );
         assert_eq!(
             cmd,
-            "ayx one flows list --profile 'my profile' --page-token t"
+            "ayx one workflows list --profile 'my profile' --page-token t"
         );
     }
 
@@ -2132,21 +2328,31 @@ mod tests {
     fn next_command_quotes_every_unsafe_argument() {
         let cmd = pagination_next_command(
             &argv(&[
-                "ayx", "one", "flows", "list", "--filter", "#urgent", "--name", "a*b", "--owner",
-                "it's", "--note", "",
+                "ayx",
+                "one",
+                "workflows",
+                "list",
+                "--filter",
+                "#urgent",
+                "--name",
+                "a*b",
+                "--owner",
+                "it's",
+                "--note",
+                "",
             ]),
             "t",
         );
         assert_eq!(
             cmd,
-            "ayx one flows list --filter '#urgent' --name 'a*b' --owner 'it'\\''s' --note '' --page-token t"
+            "ayx one workflows list --filter '#urgent' --name 'a*b' --owner 'it'\\''s' --note '' --page-token t"
         );
         // Safe arguments stay bare.
         let cmd = pagination_next_command(
             &argv(&[
                 "ayx",
                 "one",
-                "flows",
+                "workflows",
                 "list",
                 "--profile",
                 "dev-01@eu.example.com",
@@ -2155,7 +2361,7 @@ mod tests {
         );
         assert_eq!(
             cmd,
-            "ayx one flows list --profile dev-01@eu.example.com --page-token t"
+            "ayx one workflows list --profile dev-01@eu.example.com --page-token t"
         );
     }
 
@@ -2194,7 +2400,7 @@ mod tests {
         )
         .with_remediation(
             "List first",
-            vec!["ayx one workflows list --output json".to_string()],
+            vec!["ayx one workflows list -o json".to_string()],
         )
         .finalize_retryable();
         let err_compact: Value = serde_json::from_str(

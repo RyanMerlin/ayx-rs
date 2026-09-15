@@ -89,42 +89,6 @@ The public One API surface exposed here does not provide a general-purpose workf
     - Distinct from the `flow` family below, which is Designer Cloud `/v4/flows` keyed by integer ids.
     - `GET /v4/workflows` is the one listing route the gateway exposes; it is absent from the published `/v4/open-api-spec`, so `one api coverage` reports it as stale even though it is live-wired.
     - `detail` and `count` are synthesized client-side; the API exposes no per-id or count route.
-- `flow`
-  - `POST /v4/flows`
-  - `GET /v4/flows`
-  - `GET /v4/flows/count`
-  - `GET /v4/flows/{id}`
-  - `PATCH /v4/flows/{id}`
-  - `DELETE /v4/flows/{id}`
-  - `POST /v4/flows/{id}/copy`
-  - `POST /v4/flows/{id}/run`
-  - `GET /v4/flows/{id}/validate`
-  - `GET /v4/flows/{id}/recipeParameters`
-  - `GET /v4/flows/{id}/inputs`
-  - `GET /v4/flows/{id}/outputs`
-  - `POST /v4/flows/package`
-  - `POST /v4/flows/package/dryRun`
-  - `GET /v4/flows/{id}/package`
-  - `GET /v4/flows/{id}/package/dryRun`
-  - `GET /v4/flowsLibrary`
-  - `GET /v4/flowsLibrary/count`
-  - `GET /v4/folders`
-  - `GET /v4/folders/count`
-  - `GET /v4/folders/{id}`
-  - `POST /v4/folders`
-  - `PATCH /v4/folders/{id}`
-  - `DELETE /v4/folders/{id}`
-  - `GET /v4/folders/{id}/flows`
-  - `GET /v4/folders/{id}/flows/count`
-  - `POST /v4/flows/{id}/permissions`
-  - `GET /v4/flows/{id}/permissions` (`flows permissions-get`; read side of the same path)
-  - `POST /v4/flows/{id}/move`
-  - `PATCH /v4/flows/{id}/replaceDataset`
-  - Notes:
-    - Lifecycle, package, parameter, library, folder, and permission commands are wired.
-    - The One surface does not expose arbitrary workflow authoring through this family.
-    - Destructive deletes on flows and folders prompt for TTY confirmation unless `--yes` is supplied.
-
 ## Partial Surfaces
 
 - `connection`
@@ -269,18 +233,18 @@ The live smoke suite currently proves a representative path for:
 - `platform.token`
 - `plans.count`
 - `plans.list`
-- `flows.list`
+- `workflows.list` (cloud-native `/svc-workflow` workflow inventory)
 - `connections.list`
 - `connections.detail`
 - `connections.permissions.list`
 - `connections.connector-metadata.defaults`
 - `connections.connector-metadata.publish-info`
 - `jobs.list` (canonical `ayx one jobs list`; `ayx one job-groups list` is a hidden compatibility alias)
-- `jobs.detail` (`ayx one jobs <JOB-ID>`; `ayx one job-groups detail <ID>` alias)
+- `jobs.detail` (`ayx one jobs <JOB-GROUP-ID>`; `ayx one job-groups detail <ID>` alias)
 - `jobs.status`
 - `jobs.inputs`
 - `jobs.outputs`
-- `jobs.runs` (`ayx one jobs runs <JOB-ID>`; `ayx one job-groups jobs <ID>` alias)
+- `jobs.runs` (`ayx one jobs runs <JOB-GROUP-ID>`; `ayx one job-groups jobs <ID>` alias)
 - `jobs.publications`
 - `jobs.profile`
 - `jobs.profile-results`

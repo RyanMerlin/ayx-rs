@@ -19,19 +19,19 @@ trigger:
     - safety
 steps:
   - kind: command
-    cmd: "ayx doctor config --profile <profile> --output json"
+    cmd: "ayx doctor config --profile <profile> -o json"
     why: "Validate config + secret refs resolve cleanly. Upgrade fails fast if anything is malformed."
   - kind: command
-    cmd: "ayx server auth status --profile <profile> --output json"
+    cmd: "ayx server auth status --profile <profile> -o json"
     why: "Snapshot auth posture so post-upgrade comparison is possible."
   - kind: action
     id: mongo.backup-restore
     why: "Take the snapshot. Mandatory before any upgrade."
   - kind: command
-    cmd: "ayx server api status --profile <profile> --output json"
+    cmd: "ayx server api status --profile <profile> -o json"
     why: "Capture API reachability + auth posture so post-upgrade comparison is possible."
   - kind: command
-    cmd: "ayx server upgrade plan --profile <profile> --output json"
+    cmd: "ayx server upgrade plan --profile <profile> -o json"
     why: "Compute the upgrade plan envelope (rules, version graph, expected migrations). Read-only."
   - kind: note
     text: |

@@ -17,13 +17,13 @@ actions:
 success_criteria: |
   - Backup audit artifact exists for the operation.
   - SAML diagnose envelopes are all ok=true.
-  - Target workspace flow + plan counts match the migration plan.
+  - Target workspace workflow + plan counts are recorded for the migration plan.
   - Mongo doctor reports no orphan / queue-stuck conditions.
 input_schema:
   type: object
-  description: "Parameters for the governance go-live recipe: Mongo profile/timestamp, SAML IdP metadata URL, and the source/target environment + flow id used by the workspace migration step."
+  description: "Parameters for the governance go-live recipe: Mongo profile/timestamp, SAML IdP metadata URL, and the source/target environments used by the workspace migration step."
   additionalProperties: false
-  required: [profile, ts, idp-metadata-url, source, target, flow_id]
+  required: [profile, ts, idp-metadata-url, source, target]
   properties:
     profile:
       type: string
@@ -44,10 +44,6 @@ input_schema:
     target:
       type: string
       description: "Environment name, as configured in ayx's environments file, to promote or migrate assets TO."
-      minLength: 1
-    flow_id:
-      type: string
-      description: "Alteryx One flow id being promoted between environments."
       minLength: 1
 output_schema:
   type: object

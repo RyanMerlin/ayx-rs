@@ -11,9 +11,9 @@ Use a named profile and verify the target before mutation:
 $env:AYX_ONE_LIVE_CRUD = '1'
 $env:AYX_ONE_LIVE_PROFILE = 'local-dev'
 ayx --version
-ayx profile current --output json
-ayx one auth status --output json
-ayx one workspace current --output json
+ayx profile current -o json
+ayx one auth status -o json
+ayx one workspace current -o json
 ```
 
 The active workspace and display name must be recorded before applying writes.
@@ -21,7 +21,7 @@ Use a unique prefix such as `ayx-agent-canary-20260827-<run-id>`.
 
 ## Sequence
 
-1. Run `ayx discover one --deep --output json` and select commands from the live tree.
+1. Run `ayx discover one --deep -o json` and select commands from the live tree.
 2. Capture baseline lists/counts for workflows, groups, connections, plans, and schedules.
 3. Create JSON payloads with the unique prefix.
 4. Run every mutation once without `--apply`; inspect the dry-run body and target.

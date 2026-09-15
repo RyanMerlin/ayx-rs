@@ -37,7 +37,7 @@ Use [Identity & auth](/one/identity/) for OAuth credential setup.
 ayx one token list
 
 # Machine-readable
-ayx --output json one token list
+ayx -o json one token list
 ```
 
 `token list` takes no filter flags. Use `jq` to filter the JSON output.
@@ -64,7 +64,7 @@ Pass `--profile <name>` to create the token against a non-default environment.
 ayx one token detail <id>
 
 # JSON for scripting
-ayx --output json one token detail <id>
+ayx -o json one token detail <id>
 ```
 
 Pass `--profile <name>` to query a specific environment.
@@ -87,11 +87,11 @@ ayx one token delete <id> --apply --yes
 
 ```bash
 # Audit: list all token IDs and names
-ayx --output json one token list \
+ayx -o json one token list \
   | jq -r '.data[] | "\(.id)\t\(.name)"'
 
 # Rotate: create new, then delete old
-NEW_ID=$(ayx --output json one token create \
+NEW_ID=$(ayx -o json one token create \
   --body '{"name":"ci-bot-new"}' --apply \
   | jq -r '.data.id')
 

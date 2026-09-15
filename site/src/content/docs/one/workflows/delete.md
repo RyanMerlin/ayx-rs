@@ -17,7 +17,7 @@ id and the workflow name before you add `--apply`.
 |---|---|---|
 | `ayx one workflows delete <id>` | `--profile`, `--env` | Delete a cloud-native workflow |
 
-Every leaf also accepts the global `--output`, `--apply`, `--verbose`, `--debug`, `--no-verify-tls`, and `--yes` flags. Use `--output json` for automation, `--env <ENVIRONMENT_FLAG>` to select a named environment, and `--profile <name>` on the leaves that expose it.
+Every leaf also accepts the global `--output`, `--apply`, `--verbose`, `--debug`, `--no-verify-tls`, and `--yes` flags. Use `-o json` for automation, `--env <ENVIRONMENT_FLAG>` to select a named environment, and `--profile <name>` on the leaves that expose it.
 
 ## How it works
 

@@ -207,8 +207,8 @@ fn step_looks_mutating(cmd: &str) -> bool {
 
 /// Global flags that may appear *before* the subcommand chain. The
 /// extractor skips these (and their values, where applicable) so an action
-/// like `ayx --environment <env> --apply one flows list` resolves to
-/// `one flows list`, not the empty string.
+/// like `ayx --environment <env> --apply one workflows list` resolves to
+/// `one workflows list`, not the empty string.
 ///
 /// Boolean flags consume no value. Value flags consume the next token.
 const GLOBAL_BOOL_FLAGS: &[&str] = &["--apply", "--verbose", "-v", "--debug", "--no-verify-tls"];
@@ -219,8 +219,8 @@ const GLOBAL_VALUE_FLAGS: &[&str] = &["--output", "--environment", "--profile"];
 /// Stops at the first token that starts with `-` (a flag) or `<` (a
 /// placeholder). Returns `None` if the command does not start with `ayx`.
 /// Skips known global flags (and their values) that may appear before the
-/// subcommand chain so `ayx --environment <env> one flows list` resolves
-/// to `one flows list`.
+/// subcommand chain so `ayx --environment <env> one workflows list` resolves
+/// to `one workflows list`.
 fn command_path_from_cmd(cmd: &str) -> Option<String> {
     let mut iter = cmd.split_whitespace().peekable();
     if iter.next()? != "ayx" {
@@ -285,8 +285,8 @@ mod tests {
             Some("mongo backup".to_string())
         );
         assert_eq!(
-            command_path_from_cmd("ayx one flows list"),
-            Some("one flows list".to_string())
+            command_path_from_cmd("ayx one workflows list"),
+            Some("one workflows list".to_string())
         );
         assert_eq!(command_path_from_cmd("foo bar"), None);
     }

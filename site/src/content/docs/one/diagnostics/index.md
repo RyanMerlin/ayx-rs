@@ -90,17 +90,17 @@ The old top-level `status` command under `one` — and its nested equivalent fro
 
 ## JSON output
 
-All diagnostic commands support `--output json`:
+All diagnostic commands support `-o json`:
 
 ```bash
-ayx --output json one doctor auth
-ayx --output json one inventory
+ayx -o json one doctor auth
+ayx -o json one inventory
 ```
 
 The envelope is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`. Pipe to `jq` for scripting:
 
 ```bash
-ayx --output json one doctor auth | jq '.ok'
+ayx -o json one doctor auth | jq '.ok'
 ```
 
 ## Related

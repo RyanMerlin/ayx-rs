@@ -13,7 +13,7 @@ capabilities AYX-RS itself owns." The client half shipped in `v0.19.1`
 Three things have changed since ADR 0003 was written:
 
 1. **The hosts that matter are known.** Shell-capable coding agents (Claude
-   Code, Codex CLI, Gemini CLI, the Aria fleet) can run `ayx --output json`
+   Code, Codex CLI, Gemini CLI, the Aria fleet) can run `ayx -o json`
    directly, so the CLI plus a shipped skill is their primary interface.
    Alteryx's own agent surface and no-shell chat or IDE
    hosts can only reach `ayx` through an MCP server.

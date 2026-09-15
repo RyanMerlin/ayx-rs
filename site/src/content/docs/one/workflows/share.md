@@ -14,7 +14,7 @@ The `ayx one workflows copy` and `share` commands duplicate a workflow or grant 
 | `ayx one workflows copy <id>` | `--profile`, `--env`, `--name`, `--version` | Duplicate a workflow |
 | `ayx one workflows share <id>` | `--profile`, `--env`, `--to-person`, `--to-group`, `--privilege`, `--include-dependencies`, `--send-email`, `--message`, `--body`, `--no-resolve-emails` | Share a workflow with people or groups |
 
-Every leaf also accepts the global `--output`, `--apply`, `--verbose`, `--debug`, `--no-verify-tls`, and `--yes` flags. Use `--output json` for automation, `--env <ENVIRONMENT_FLAG>` to select a named environment, and `--profile <name>` on the leaves that expose it.
+Every leaf also accepts the global `--output`, `--apply`, `--verbose`, `--debug`, `--no-verify-tls`, and `--yes` flags. Use `-o json` for automation, `--env <ENVIRONMENT_FLAG>` to select a named environment, and `--profile <name>` on the leaves that expose it.
 
 ## Copy
 
@@ -60,13 +60,13 @@ The share body shape was recovered from the service's own schema-validation erro
 
 ```bash
 # Capture the exact request a share would send, without sending it
-ayx --output json one workflows share <workflow-ulid> \
+ayx -o json one workflows share <workflow-ulid> \
   --to-person analyst@example.com \
   --privilege read \
   | jq '.data.would_send'
 
 # Copy in automation, then read the new workflow's identifiers off the envelope
-ayx --output json one workflows copy <workflow-ulid> \
+ayx -o json one workflows copy <workflow-ulid> \
   --name "Revenue - copy" --apply --yes \
   | jq '.data'
 

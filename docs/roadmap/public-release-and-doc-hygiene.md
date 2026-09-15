@@ -34,7 +34,7 @@ Status: active
   branch and was kept deliberately when the others were pruned, because unlike
   them it carries genuinely unmerged content: a `Mutex` serializing environment
   mutations in `onboard.rs` tests (main has no equivalent) and a 39-file doc
-  sweep moving `--output json` to a trailing position in examples. Either land
+  sweep moving `-o json` to a trailing position in examples. Either land
   the test-serialization fix or delete the branch consciously, rather than
   leaving it to rot.
 - Decide whether the workspace template writer should stop emitting editable

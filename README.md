@@ -103,7 +103,6 @@ not extend how long an email-OTP token lasts.
 ```bash
 ayx profile current
 ayx one workspace current
-ayx one flows list
 ayx one workflows list
 ayx server api status
 ```
@@ -114,7 +113,7 @@ ayx server api status
 cargo install --locked --path ayx-rs
 ```
 
-5. Use trailing `--output json` when another tool should consume the complete, redacted envelope. For `designer workflow yxdb`, pair `--csv <path>` with `--output json` if you want both export and structured metadata.
+5. Use trailing `-o json` when another tool should consume the complete, redacted envelope. For `designer workflow yxdb`, pair `--csv <path>` with `-o json` if you want both export and structured metadata.
 
 ## Quick Examples
 
@@ -123,11 +122,10 @@ The shortest path from zero to useful output is usually one of:
 - `ayx profile current`
 - `ayx doctor`
 - `ayx one workspace current`
-- `ayx one flows list`
 - `ayx one workflows list`
 - `ayx one connections list`
-- `ayx server api status --output json`
-- `ayx mongo inventory --output json`
+- `ayx server api status -o json`
+- `ayx mongo inventory -o json`
 - `ayx one jobs list`
 - `ayx one output-objects list`
 
@@ -180,7 +178,7 @@ printing secret values. For local setup, paste a value into
 `ayx secret set <slot>` (or use `--from-stdin` in a script); AYX stores it in the
 OS keyring and saves only a profile-scoped reference.  Use `ayx secret set <slot>
 --from-env AYX_NAME` for CI, where the platform injects `AYX_NAME` and AYX never
-persists its value.  `ayx secret validate --output json` is the offline preflight
+persists its value.  `ayx secret validate -o json` is the offline preflight
 (and exits non-zero for unresolved or invalid references),
 and `ayx secret env-template` prints a non-secret variable manifest.
 
@@ -261,12 +259,12 @@ Start with:
 
 ```powershell
 ayx discover
-ayx catalog list --format full --scope all --output json
+ayx catalog list --format full --scope all -o json
 ayx catalog describe mongo/backup
 ayx catalog describe designer.workflow.context
 ayx one doctor discover
 ayx one workspace current
-ayx one flows list
+ayx one workflows list
 ayx one workflows list
 ayx one connections list
 ayx one jobs list
@@ -294,8 +292,8 @@ ayx mongo doctor
 
 Agent-oriented catalog notes:
 - `ayx discover [path] [--deep]` is the progressive, rich tree/flag discovery API — the source of truth for flags, positional arguments, aliases, and nested command structure.
-- `ayx catalog list --format full --scope all --output json` is the complete, flattened, machine-readable index of every visible command plus every registered capability. `--scope all` is the default; pass it explicitly in scripts and docs so a future compatibility change to the default can't silently shrink what comes back.
-- `ayx catalog list --format full --scope curated --output json` is the compatibility view for clients that need only the previously curated subset — commands with a full `output`/`safety`/`mutating`/`prerequisites`/`notes` classification, no `unclassified` rows.
+- `ayx catalog list --format full --scope all -o json` is the complete, flattened, machine-readable index of every visible command plus every registered capability. `--scope all` is the default; pass it explicitly in scripts and docs so a future compatibility change to the default can't silently shrink what comes back.
+- `ayx catalog list --format full --scope curated -o json` is the compatibility view for clients that need only the previously curated subset — commands with a full `output`/`safety`/`mutating`/`prerequisites`/`notes` classification, no `unclassified` rows.
 - `ayx catalog describe <command-or-capability>` continues to accept either a legacy command name/path or a capability id such as `designer.tool.add`.
 - `catalog` remains the derived registry/compatibility view for commands and capabilities — command identity and summaries come live from clap, not a hand-maintained list; it is not the primary discovery entry point.
 - Capability ids, validation metadata, and executor wiring already exist inside the registry layer so we can progressively expose deeper discovery without changing the ids.

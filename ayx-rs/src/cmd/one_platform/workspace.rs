@@ -7,7 +7,7 @@ use ayx_one_api::{
 use serde_json::json;
 
 use crate::{
-    OneWorkspaceCommand,
+    WorkspaceAction as OneWorkspaceCommand,
     cmd::{self, RuntimeCtx},
     load_payload,
     onboard::{InlineSecretPolicy, inline_secret_warning, write_config_with_policy},
@@ -183,19 +183,6 @@ pub(crate) fn execute(
                 &[("id", &path_id)],
             )?
         }
-        OneWorkspaceCommand::ConfigurationV4 { id } => {
-            let config = runtime.load_profile_lenient(None)?;
-            let path_id = resolve_workspace_path_id(Some(id), &config)?;
-            one_api_live_request(
-                &config,
-                "workspace",
-                "workspace-configuration-v4",
-                "GET",
-                "/v4/workspaces/{id}/configuration",
-                false,
-                &[("id", &path_id)],
-            )?
-        }
         OneWorkspaceCommand::CurrentConfiguration => {
             let config = runtime.load_profile_lenient(None)?;
             one_api_live_request(
@@ -229,28 +216,6 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        OneWorkspaceCommand::SaveConfigurationV4 { profile, id, body } => {
-            let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let path_id = resolve_workspace_path_id(Some(id), &config)?;
-            let payload = load_payload(&body)?;
-            confirm_workspace_mutation(
-                apply,
-                yes,
-                "update",
-                &format!("workspace configuration id='{path_id}'"),
-                &config.profile_name,
-            )?;
-            one_api_live_request_with_body(
-                &config,
-                "workspace",
-                "workspace-save-configuration-v4",
-                "PATCH",
-                "/v4/workspaces/{id}/configuration",
-                true,
-                &[("id", &path_id)],
-                Some(payload),
-            )?
-        }
         OneWorkspaceCommand::Current => {
             if ayx_one_api::debug_trace() {
                 eprintln!("[one-debug] workspace current: loading profile");
@@ -279,19 +244,6 @@ pub(crate) fn execute(
                 WORKSPACE_DETAIL_ENDPOINT,
                 false,
                 &[("workspaceId", &id)],
-            )?
-        }
-        OneWorkspaceCommand::ConfigurationSchema { id } => {
-            let config = runtime.load_profile_lenient(None)?;
-            let path_id = resolve_workspace_path_id(Some(id), &config)?;
-            one_api_live_request(
-                &config,
-                "workspace",
-                "workspace-configuration-schema",
-                "GET",
-                "/v4/workspaces/{id}/configuration-schema",
-                false,
-                &[("id", &path_id)],
             )?
         }
         OneWorkspaceCommand::CurrentConfigurationSchema => {
@@ -323,39 +275,6 @@ pub(crate) fn execute(
                 "/v4/workspaces/current/delete-configuration",
                 true,
                 &[],
-            )?
-        }
-        OneWorkspaceCommand::DeleteConfiguration { id } => {
-            let config = runtime.load_profile_lenient(None)?;
-            let path_id = resolve_workspace_path_id(Some(id), &config)?;
-            confirm_workspace_mutation(
-                apply,
-                yes,
-                "delete",
-                &format!("workspace configuration id='{path_id}'"),
-                &config.profile_name,
-            )?;
-            one_api_live_request(
-                &config,
-                "workspace",
-                "workspace-delete-configuration",
-                "POST",
-                "/v4/workspaces/{id}/delete-configuration",
-                true,
-                &[("id", &path_id)],
-            )?
-        }
-        OneWorkspaceCommand::Configuration { id } => {
-            let config = runtime.load_profile_lenient(None)?;
-            let path_id = resolve_workspace_path_id(Some(id), &config)?;
-            one_api_live_request(
-                &config,
-                "workspace",
-                "workspace-configuration",
-                "GET",
-                "/v4/workspaces/{id}/configuration",
-                false,
-                &[("id", &path_id)],
             )?
         }
         OneWorkspaceCommand::People => {
@@ -410,25 +329,13 @@ pub(crate) fn execute(
                 &[("id", &path_id)],
             )?
         }
-        OneWorkspaceCommand::GroupsGlobal => {
-            let config = runtime.load_profile_lenient(None)?;
-            one_api_live_request(
-                &config,
-                "workspace",
-                "workspace-groups-global",
-                "GET",
-                "/v4/groups",
-                false,
-                &[],
-            )?
-        }
         OneWorkspaceCommand::CreateGroup {
             profile,
             workspace_id,
             body,
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             let payload = load_payload(&body)?;
             confirm_workspace_mutation(
                 apply,
@@ -453,7 +360,7 @@ pub(crate) fn execute(
             group_id,
         } => {
             let config = runtime.load_profile_lenient(None)?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
@@ -481,7 +388,7 @@ pub(crate) fn execute(
             body,
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             let payload = load_payload(&body)?;
             confirm_workspace_mutation(
                 apply,
@@ -508,7 +415,7 @@ pub(crate) fn execute(
             body,
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             let payload = load_payload(&body)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
@@ -537,7 +444,7 @@ pub(crate) fn execute(
             user_ids,
         } => {
             let config = runtime.load_profile_lenient(None)?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
@@ -569,7 +476,7 @@ pub(crate) fn execute(
             user_ids,
         } => {
             let config = runtime.load_profile_lenient(None)?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
@@ -600,7 +507,7 @@ pub(crate) fn execute(
             person_id,
         } => {
             let config = runtime.load_profile_lenient(None)?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             one_api_live_request(
                 &config,
                 "workspace",
@@ -613,7 +520,7 @@ pub(crate) fn execute(
         }
         OneWorkspaceCommand::CloudConfigs { workspace_id } => {
             let config = runtime.load_profile_lenient(None)?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             one_api_live_request(
                 &config,
                 "workspace",
@@ -727,43 +634,36 @@ pub(crate) fn execute(
                 }),
             )
         }
-        OneWorkspaceCommand::InviteUsers { workspace_id } => {
-            let config = runtime.load_profile_lenient(None)?;
-            let ws_id = resolve_workspace_path_id(workspace_id, &config)?;
-            if apply {
-                cmd::confirm::require_tty_confirmation(
-                    yes,
-                    &cmd::confirm::access_change_message(
-                        "invite",
-                        &format!("users to workspace id='{ws_id}'"),
-                        &config.profile_name,
-                    ),
-                )?;
-            }
-            one_api_live_request(
-                &config,
-                "workspace",
-                "workspace-invite-users",
-                "POST",
-                "/v4/workspaces/{id}/people/batch",
-                true,
-                &[("id", &ws_id)],
-            )?
-        }
         OneWorkspaceCommand::Invite {
             profile,
             workspace_id,
+            email,
             body,
         } => {
+            if email.is_none() == body.is_none() {
+                return Err(anyhow!(
+                    "validation: provide exactly one of --email <address> or --body <FILE|JSON|->"
+                ));
+            }
+            let payload = if let Some(email) = email {
+                let email = email.trim();
+                if email.is_empty() || !email.contains('@') {
+                    return Err(anyhow!(
+                        "validation: --email must be a non-empty email address"
+                    ));
+                }
+                serde_json::json!({"email": email})
+            } else {
+                load_payload(&body.expect("validated body source"))?
+            };
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
-            let payload = load_payload(&body)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
                     yes,
                     &cmd::confirm::access_change_message(
                         "invite",
-                        &format!("user(s) to workspace id='{path_id}'"),
+                        &format!("member(s) to workspace id='{path_id}'"),
                         &config.profile_name,
                     ),
                 )?;
@@ -779,42 +679,13 @@ pub(crate) fn execute(
                 Some(payload),
             )?
         }
-        OneWorkspaceCommand::InviteList {
-            profile,
-            workspace_id,
-            body,
-        } => {
-            let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
-            let payload = load_payload(&body)?;
-            if apply {
-                cmd::confirm::require_tty_confirmation(
-                    yes,
-                    &cmd::confirm::access_change_message(
-                        "invite",
-                        &format!("user list to workspace id='{path_id}'"),
-                        &config.profile_name,
-                    ),
-                )?;
-            }
-            one_api_live_request_with_body(
-                &config,
-                "workspace",
-                "workspace-invite-list",
-                "POST",
-                "/v4/workspaces/{id}/people/batch",
-                true,
-                &[("id", &path_id)],
-                Some(payload),
-            )?
-        }
         OneWorkspaceCommand::ReinviteUsers {
             profile,
             workspace_id,
             body,
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             let payload = load_payload(&body)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
@@ -858,29 +729,6 @@ pub(crate) fn execute(
                 "/v4/workspaces/{workspaceId}/people/{id}",
                 true,
                 &[("workspaceId", &ws_id), ("id", &id)],
-            )?
-        }
-        OneWorkspaceCommand::SuspendUsers { workspace_id } => {
-            let config = runtime.load_profile_lenient(None)?;
-            let ws_id = resolve_workspace_path_id(workspace_id, &config)?;
-            if apply {
-                cmd::confirm::require_tty_confirmation(
-                    yes,
-                    &cmd::confirm::access_change_message(
-                        "suspend",
-                        &format!("users in workspace id='{ws_id}'"),
-                        &config.profile_name,
-                    ),
-                )?;
-            }
-            one_api_live_request(
-                &config,
-                "workspace",
-                "workspace-suspend-users",
-                "POST",
-                "/v4/workspaces/{id}/people/suspend",
-                true,
-                &[("id", &ws_id)],
             )?
         }
         OneWorkspaceCommand::UnsuspendUsers { workspace_id } => {
@@ -983,7 +831,7 @@ pub(crate) fn execute(
             body,
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             let payload = load_payload(&body)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
@@ -1016,7 +864,7 @@ pub(crate) fn execute(
             body,
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             let payload = load_payload(&body)?;
             if apply {
                 cmd::confirm::require_tty_confirmation(
@@ -1049,7 +897,7 @@ pub(crate) fn execute(
             body,
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
+            let path_id = resolve_workspace_path_id(workspace_id, &config)?;
             let payload = load_payload(&body)?;
             confirm_workspace_mutation(
                 apply,
@@ -1063,33 +911,6 @@ pub(crate) fn execute(
                 "workspace",
                 "workspace-user-patch",
                 "PATCH",
-                "/v4/workspaces/{workspaceId}/people/{id}",
-                true,
-                &[("workspaceId", &path_id), ("id", &person_id)],
-                Some(payload),
-            )?
-        }
-        OneWorkspaceCommand::UpdateUser {
-            profile,
-            workspace_id,
-            person_id,
-            body,
-        } => {
-            let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let path_id = resolve_workspace_path_id(Some(workspace_id), &config)?;
-            let payload = load_payload(&body)?;
-            confirm_workspace_mutation(
-                apply,
-                yes,
-                "update",
-                &format!("user person id='{person_id}' in workspace id='{path_id}'"),
-                &config.profile_name,
-            )?;
-            one_api_live_request_with_body(
-                &config,
-                "workspace",
-                "workspace-user-update",
-                "PUT",
                 "/v4/workspaces/{workspaceId}/people/{id}",
                 true,
                 &[("workspaceId", &path_id), ("id", &person_id)],

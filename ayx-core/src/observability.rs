@@ -321,8 +321,15 @@ fn redact_bare_jwts(input: &str) -> String {
                 }
             }
         }
-        out.push(bytes[i] as char);
-        i += 1;
+        // `i` is a byte offset because JWT detection is ASCII-byte based, but
+        // the untouched text must remain valid UTF-8. Advancing a byte at a
+        // time would turn every non-ASCII scalar into mojibake.
+        let ch = input[i..]
+            .chars()
+            .next()
+            .expect("i is always a valid boundary before input length");
+        out.push(ch);
+        i += ch.len_utf8();
     }
     out
 }
@@ -370,7 +377,10 @@ fn redact_query_params(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        let ch = bytes[i] as char;
+        let ch = input[i..]
+            .chars()
+            .next()
+            .expect("i is always a valid boundary before input length");
 
         // Detect a `key=` pattern, either at the start of the string or
         // immediately after a delimiter. Critically, when `i == 0` we do
@@ -412,18 +422,21 @@ fn redact_query_params(input: &str) -> String {
                 // Skip the value up to the next terminator or EOS.
                 i = key_end + 1;
                 while i < bytes.len() {
-                    let vc = bytes[i] as char;
+                    let vc = input[i..]
+                        .chars()
+                        .next()
+                        .expect("i is always a valid boundary before input length");
                     if VALUE_TERMINATORS.contains(&vc) {
                         break;
                     }
-                    i += 1;
+                    i += vc.len_utf8();
                 }
                 out.push_str("***");
                 continue;
             }
         }
         out.push(ch);
-        i += 1;
+        i += ch.len_utf8();
     }
     out
 }
@@ -710,6 +723,16 @@ mod tests {
         let r = redact_text(jwt);
         assert!(!r.contains("eyJaaa"), "leaked: {r}");
         assert_eq!(r, "***");
+    }
+
+    #[test]
+    fn redaction_preserves_unicode_that_is_not_secret_material() {
+        let input = "Alteryx One — weekly matrix (7×24), café";
+        assert_eq!(redact_text(input), input);
+        assert_eq!(
+            redact_url("https://example.test/café?access_token=secret"),
+            "https://example.test/café?access_token=***"
+        );
     }
 
     #[test]

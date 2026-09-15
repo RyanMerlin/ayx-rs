@@ -109,10 +109,6 @@ export default defineConfig({
               label: 'Flows (DC Legacy)',
               collapsed: true,
               items: [
-                'one/flows',
-                'one/flows/folders',
-                'one/flows/import-export',
-                'one/flows/permissions',
               ],
             },
           ],

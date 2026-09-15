@@ -83,7 +83,7 @@ pub(crate) fn execute(runtime: &RuntimeCtx<'_>, command: OneJobGroupCommand) -> 
         OneJobGroupCommand::Detail { profile, id } => {
             let id = crate::cmd::select::resolve_selector(
                 "job id",
-                "ayx one jobs list --output json",
+                "ayx one jobs list -o json",
                 id,
                 crate::cmd::select::SelectPolicy::from_runtime(runtime.no_input),
                 || {

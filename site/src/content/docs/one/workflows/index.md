@@ -7,9 +7,8 @@ sidebar:
 
 Cloud-native **workflows** are the execution unit in Alteryx One. They are keyed by ULIDs and served by the `/svc-workflow/api/vN` service.
 
-Two other surfaces in this CLI are also called workflows or flows, and none of the three are interchangeable:
+The on-prem Designer/Server workflow surface is separate and is not interchangeable:
 
-- `ayx one flows` is the older Designer Cloud family at `/v4/flows`, keyed by integer ids. A workspace can hold dozens of cloud-native workflows while `ayx one flows list` returns zero items. See [Flows (DC Legacy)](/one/flows/).
 - `ayx designer workflow` operates on on-prem Designer/Server packages (`.yxmd`, `.yxzp`) — a different technology entirely, reached by migration rather than configuration. See [Workflows & packages](/server/workflow/).
 
 The workflows surface is for inspecting, running, and managing existing canvas workflows. Authoring arbitrary visual workflow logic is out of scope: no public endpoint accepts it.
@@ -23,17 +22,18 @@ Mutating commands are dry-run by default — add `--apply` to commit.
 | `ayx one workflows list` | `--profile`, `--env`, `--limit`, `--page-token`, `--all`, `--max-pages` | List cloud-native workflows |
 | `ayx one workflows count` | `--profile`, `--env` | Return the workspace workflow count |
 | `ayx one workflows detail <id>` | `--profile`, `--env`, `--include-dependencies` | Inspect one ULID-keyed workflow — see [Inspect](/one/workflows/inspect/) |
+| `ayx one workflows graph <id>` | `--profile`, `--env` | Inspect provider-supplied nodes, configurations, ports, and connections — see [Inspect](/one/workflows/inspect/) |
 | `ayx one workflows dependencies <id>` | `--profile`, `--env` | List its connections, datasets, and macros — see [Inspect](/one/workflows/inspect/) |
 | `ayx one workflows engines <id>` | `--profile`, `--env` | Show available execution engines — see [Inspect](/one/workflows/inspect/) |
 | `ayx one workflows tools` | `--env` | List tools available to cloud-native workflows — see [Inspect](/one/workflows/inspect/) |
 | `ayx one workflows assets` | `--profile`, `--env`, `--limit`, `--page-token`, `--all`, `--max-pages` | List the richer workflow-asset projection — see [Inspect](/one/workflows/inspect/) |
-| `ayx one workflows run <id>` | `--profile`, `--env`, `--body` | Queue a workflow run; returns the run/job id |
-| `ayx one workflows cancel <run-id>` | `--profile`, `--env` | Cancel a queued or running run using its returned run/job id |
+| `ayx one workflows run <id>` | `--profile`, `--env`, `--body` | Queue a workflow run; returns `jobId` and `jobgroupId` |
+| `ayx one workflows cancel <job-id>` | `--profile`, `--env` | Cancel a queued or running run using its returned `jobId` |
 | `ayx one workflows copy <id>` | `--profile`, `--env`, `--name`, `--version` | Duplicate a workflow — see [Copy & share](/one/workflows/share/) |
 | `ayx one workflows share <id>` | `--profile`, `--env`, `--to-person`, `--to-group`, `--privilege`, `--include-dependencies`, `--send-email`, `--message`, `--body`, `--no-resolve-emails` | Share a workflow with people or groups — see [Copy & share](/one/workflows/share/) |
 | `ayx one workflows delete <id>` | `--profile`, `--env` | Permanently delete a workflow — see [Delete](/one/workflows/delete/) |
 
-Every leaf also accepts the global `--output`, `--apply`, `--verbose`, `--debug`, `--no-verify-tls`, and `--yes` flags. Use `--output json` for automation, `--env <ENVIRONMENT_FLAG>` to select a named environment, and `--profile <name>` on the leaves that expose it.
+Every leaf also accepts the global `--output`, `--apply`, `--verbose`, `--debug`, `--no-verify-tls`, and `--yes` flags. Use `-o json` for automation, `--env <ENVIRONMENT_FLAG>` to select a named environment, and `--profile <name>` on the leaves that expose it.
 
 ## List and count
 
@@ -48,7 +48,7 @@ ayx one workflows list --limit 100
 ayx one workflows list --page-token <token>
 
 # Request the all-items form and inspect data.complete in the envelope
-ayx --output json one workflows list --all
+ayx -o json one workflows list --all
 ```
 
 The list response uses `data.items`. The current `/v4/workflows` endpoint reports a collection `count` but does not provide reliable cursor pagination; `data.complete` tells you whether the fetched item count reached that total. If it is `false`, increase `--limit` and check again.
@@ -58,23 +58,34 @@ The list response uses `data.items`. The current `/v4/workflows` endpoint report
 ```bash
 ayx one workflows count
 ayx one workflows count --profile <name>
-ayx --output json one workflows count
+ayx -o json one workflows count
 ```
 
 `count` is synthesized client-side from the workflow-list response because the API has no `/v4/workflows/count` route. Its output includes `count_source`, so consumers can distinguish this assembly from a server-side count lookup.
+
+### Inspect a workflow graph
+
+```bash
+ayx -o json one workflows graph <workflow-ulid>
+```
+
+The command preserves the provider response under `data.response` and adds a
+normalized `data.graph` with `nodes`, `configurations`, `ports`, and
+`connections` buckets. A `schema` is included only when the provider supplied
+one; the CLI does not infer field-level schemas.
 
 ## Automation patterns
 
 ```bash
 # Extract every workflow id and name as TSV
-ayx --output json one workflows list --all \
+ayx -o json one workflows list --all \
   | jq -r '.data.items[] | [.id, .name] | @tsv'
 
 # Verify a --all fetch actually reached the reported total
-ayx --output json one workflows list --all | jq '.data.complete'
+ayx -o json one workflows list --all | jq '.data.complete'
 
 # Compare the synthesized count against the number of items returned
-ayx --output json one workflows count | jq '{count: .data.count, source: .data.count_source}'
+ayx -o json one workflows count | jq '{count: .data.count, source: .data.count_source}'
 ```
 
 ## Run and cancel
@@ -83,26 +94,39 @@ Run a saved cloud-native workflow by its workflow ULID. The first command is a
 dry-run; add `--apply` only when you are ready to queue the job:
 
 ```bash
-ayx --output json one workflows run <workflow-ulid>
-ayx --output json one workflows run <workflow-ulid> --apply --yes
+ayx -o json one workflows run <workflow-ulid>
+ayx -o json one workflows run <workflow-ulid> --apply --yes
 ```
 
-The applied response contains the provider's run/job identifier. Save that
-identifier and use it to cancel the run if needed:
+The applied response contains both a provider `jobId` and `jobgroupId`. Use
+the `jobId` to cancel the execution:
 
 ```bash
-ayx --output json one workflows cancel <run-id>
-ayx --output json one workflows cancel <run-id> --apply --yes
+ayx -o json one workflows cancel <job-id>
+ayx -o json one workflows cancel <job-id> --apply --yes
 ```
 
-`cancel` takes a run/job id, not the workflow definition ULID. Both commands
-use `/svc-workflow/api/v1`; they do not route through the legacy
-`/v4/jobGroups` or recipe APIs. If the workflow accepts runtime overrides or
-input parameters, pass the documented JSON body with `--body <file>` on `run`.
+To inspect the child runs for that workflow execution, pass the returned
+`jobgroupId` to the canonical Job Library command:
+
+```bash
+ayx -o json one jobs runs <jobgroup-id>
+```
+
+There is no separate `one workflows runs` command: the provider exposes run
+history through the Job Group child collection. `cancel` takes `jobId`, not
+the workflow definition ULID or `jobgroupId`; pass `jobgroupId` to `one jobs runs`.
+Both workflow controls use
+`/svc-workflow/api/v1`; run history uses `/v4/jobGroups/{id}/jobs`. If the
+workflow accepts runtime overrides or input parameters, pass the documented
+JSON body with `--body <FILE|JSON|->` on `run`; prefer a file or piped stdin for
+sensitive values because inline JSON is visible in shell history and process
+listings.
 
 ## Honesty notes
 
 - `count` is a client-side synthesis, not a real server route. Its envelope includes `count_source`. The same applies to `detail` — see [Inspect](/one/workflows/inspect/).
+- `one workflows runs` is intentionally not exposed. The provider's Job Group child collection is the run-history boundary: use `one jobs runs <jobgroupId>` for the `jobgroupId` returned by `one workflows run`.
 - This command family runs and manages existing cloud-native workflows; it does not author arbitrary canvas logic because no endpoint accepts it.
 
 ## Known limitations
@@ -116,7 +140,6 @@ input parameters, pass the documented JSON body with `--body <file>` on `run`.
 - [Run and cancel](/one/workflows/run/) — queue a workflow and stop its run safely
 - [Copy & share](/one/workflows/share/) — duplicate a workflow or grant access
 - [Delete](/one/workflows/delete/) — permanently remove a workflow; no restore endpoint exists
-- [Flows](/one/flows/) — the separate integer-id-keyed Designer Cloud `/v4/flows` family
 - [Datasets](/one/datasets/) — the One dataset library
 - [Plans](/one/plans/) — orchestrate multi-flow plans
 - [Safety model](/safety-model/) — dry-run and `--apply` in detail

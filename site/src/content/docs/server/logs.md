@@ -32,7 +32,7 @@ ayx server server-logs discover --profile prod
 Then get a full inventory with file sizes and modified timestamps:
 
 ```sh
-ayx --output json server server-logs inventory --profile prod
+ayx -o json server server-logs inventory --profile prod
 ```
 
 ## Tailing and recent files
@@ -86,11 +86,11 @@ ayx server server-logs context \
 Alteryx Server produces some logs in CSV format. Parse them into a clean JSON envelope:
 
 ```sh
-ayx --output json server server-logs parse-csv \
+ayx -o json server server-logs parse-csv \
   --path "C:\ProgramData\Alteryx\Logs\AlteryxGallery.csv"
 ```
 
-Note: `--output` is a global flag, so `--output json` can appear before or after the subcommand.
+Note: `--output` is a global flag, so `-o json` can appear before or after the subcommand.
 
 ## Service and Gallery events
 
@@ -110,10 +110,10 @@ ayx server server-logs gallery-events \
 
 ## Machine-readable output
 
-Every command in this branch accepts `--output json` as a global flag:
+Every command in this branch accepts `-o json` as a global flag:
 
 ```sh
-ayx --output json server server-logs summary \
+ayx -o json server server-logs summary \
   --path "C:\ProgramData\Alteryx\Logs\AlteryxService.log"
 ```
 

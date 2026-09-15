@@ -1,6 +1,6 @@
 # Output Format
 
-`ayx` has one JSON contract: `--output json` is the complete, recursively
+`ayx` has one JSON contract: `-o json` is the complete, recursively
 redacted envelope for automation, raw API inspection, and export metadata.
 
 ```json
@@ -32,10 +32,10 @@ For clean docs, scripts, and agent runs, put the global output flag after the
 complete command path:
 
 ```powershell
-ayx discover --output json
-ayx catalog list --format full --scope all --output json
-ayx actions list --output json
-ayx actions workflows list --output json
+ayx discover -o json
+ayx catalog list --format full --scope all -o json
+ayx actions list -o json
+ayx actions workflows list -o json
 ```
 
 Why this form is preferred:
@@ -70,7 +70,7 @@ Notes:
 - `yaml` serializes the full redacted envelope. `table` remains the text/list
   table presentation.
 - Interactive onboarding/authentication and shell completion scripts are direct-terminal workflows; structured modes return an envelope summary.
-- For `workflow yxdb`, keep `--csv <path>` for export and add `--output json`
+- For `workflow yxdb`, keep `--csv <path>` for export and add `-o json`
   when you want structured metadata alongside it.
 
 ## `--jq`
@@ -78,7 +78,7 @@ Notes:
 `--jq <FILTER>` runs a jq filter (pure-Rust `jaq`; jq 1.7 syntax and the
 standard library) over the rendered JSON and prints one value per line.
 `--raw-output` / `-r` prints string results without quotes. `--jq` forces
-`--output json`, and it runs after redaction, so it cannot reveal anything the plain output
+`-o json`, and it runs after redaction, so it cannot reveal anything the plain output
 would not. A filter that fails to parse, compile, or run is a `validation`
 error (exit 2).
 

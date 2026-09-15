@@ -331,7 +331,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-core"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "apple-native-keyring-store",
  "chrono",
@@ -352,7 +352,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-one"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -362,7 +362,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-one-api"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-registry"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -397,7 +397,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-rs"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -409,6 +409,7 @@ dependencies = [
  "ayx-workflow",
  "base64 0.23.1",
  "chrono",
+ "chrono-tz",
  "clap",
  "clap_complete",
  "crossterm",
@@ -435,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-server"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -457,7 +458,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-server-api"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "ayx-core",
@@ -470,7 +471,7 @@ dependencies = [
 
 [[package]]
 name = "ayx-workflow"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "lzf",
@@ -669,6 +670,28 @@ dependencies = [
  "serde",
  "wasm-bindgen",
  "windows-link",
+]
+
+[[package]]
+name = "chrono-tz"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93698b29de5e97ad0ae26447b344c482a7284c737d9ddc5f9e52b74a336671bb"
+dependencies = [
+ "chrono",
+ "chrono-tz-build",
+ "phf",
+]
+
+[[package]]
+name = "chrono-tz-build"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c088aee841df9c3041febbb73934cfc39708749bf96dc827e3359cd39ef11b1"
+dependencies = [
+ "parse-zoneinfo",
+ "phf",
+ "phf_codegen",
 ]
 
 [[package]]
@@ -2632,6 +2655,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "parse-zoneinfo"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f2a05b18d44e2957b88f96ba460715e295bc1d7510468a2f3d3b44535d26c24"
+dependencies = [
+ "regex",
+]
+
+[[package]]
 name = "path-tree"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2664,6 +2696,44 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "phf"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
+dependencies = [
+ "phf_shared",
+]
+
+[[package]]
+name = "phf_codegen"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aef8048c789fa5e851558d709946d6d79a8ff88c0440c587967f8e94bfb1216a"
+dependencies = [
+ "phf_generator",
+ "phf_shared",
+]
+
+[[package]]
+name = "phf_generator"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
+dependencies = [
+ "phf_shared",
+ "rand 0.8.8",
+]
+
+[[package]]
+name = "phf_shared"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
+dependencies = [
+ "siphasher",
+]
 
 [[package]]
 name = "pin-project-lite"
@@ -2830,7 +2900,7 @@ dependencies = [
  "bytes",
  "getrandom 0.3.4",
  "lru-slab",
- "rand",
+ "rand 0.9.4",
  "ring",
  "rustc-hash",
  "rustls",
@@ -2876,6 +2946,15 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "rand"
+version = "0.8.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e058c7de0b26af77780c769414d6257830bb240f3c38477dbc2c16e5f54d6d4c"
+dependencies = [
+ "rand_core 0.6.4",
+]
 
 [[package]]
 name = "rand"
@@ -3551,6 +3630,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
+name = "siphasher"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3726,7 +3811,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4520,7 +4605,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "chrono",

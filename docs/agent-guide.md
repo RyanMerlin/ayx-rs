@@ -8,13 +8,13 @@ source of truth for exact commands and flags.
 
 ```text
 ayx --version
-ayx discover --deep --output json
-ayx profile current --output json
-ayx one auth status --output json
-ayx one workspace current --output json
+ayx discover --deep -o json
+ayx profile current -o json
+ayx one auth status -o json
+ayx one workspace current -o json
 ```
 
-Always put `--output json` at the end of the command. A non-terminal stdout
+Always put `-o json` at the end of the command. A non-terminal stdout
 already defaults to the canonical JSON envelope; keep the explicit flag
 for clarity. Use `--jq <filter>` to project fields in-binary. Error envelopes
 carry `error_code`, `retryable`, and, where the CLI can name the fix,
@@ -22,7 +22,7 @@ carry `error_code`, `retryable`, and, where the CLI can name the fix,
 family, discover it first:
 
 ```text
-ayx discover one --deep --output json
+ayx discover one --deep -o json
 ```
 
 Walk `data.tree` to select a command. JSON preserves the command tree. Do not infer commands from endpoint names

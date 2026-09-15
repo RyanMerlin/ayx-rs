@@ -132,7 +132,7 @@ fn run_env(home: &TempDir, args: &[&str], env: &[(&str, &str)]) -> Run {
     run_in(home, home.path(), args, None, env)
 }
 
-/// Slot reports from `secret status --output json`, keyed by slot name.
+/// Slot reports from `secret status -o json`, keyed by slot name.
 fn slots(home: &TempDir, profile: &str) -> Vec<Value> {
     let out = run(
         home,

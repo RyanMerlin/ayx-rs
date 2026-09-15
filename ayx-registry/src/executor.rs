@@ -197,8 +197,8 @@ pub struct ExecutionConfig {
     /// `audits` path.
     pub audit_dir: Option<PathBuf>,
     /// Extra args to inject before each step's own args. Typically used to
-    /// pass `--output json` so the executor can parse the envelope back.
-    /// The executor will always set `--output json` itself; this is for
+    /// pass `-o json` so the executor can parse the envelope back.
+    /// The executor will always set `-o json` itself; this is for
     /// future extension (e.g. propagating `--environment`).
     pub global_args: Vec<String>,
 }
@@ -783,8 +783,8 @@ mod tests {
     #[test]
     fn shell_split_handles_quotes() {
         assert_eq!(
-            shell_split("ayx one flows list --tag \"with spaces\"").unwrap(),
-            vec!["ayx", "one", "flows", "list", "--tag", "with spaces"]
+            shell_split("ayx one workflows list --tag \"with spaces\"").unwrap(),
+            vec!["ayx", "one", "workflows", "list", "--tag", "with spaces"]
         );
         assert!(shell_split("missing 'quote").is_none());
     }

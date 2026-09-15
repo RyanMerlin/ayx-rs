@@ -50,7 +50,7 @@ Overrides let you change connector metadata at the environment level without tou
 ```bash
 ayx one connections connector-metadata overrides list <connector>
 
-ayx --output json one connections connector-metadata overrides list <connector>
+ayx -o json one connections connector-metadata overrides list <connector>
 ```
 
 ### Create overrides
@@ -86,10 +86,12 @@ Deleting overrides reverts the connector to its platform defaults.
 
 ```bash
 # Generate the template and write it to a file
-ayx one connections connector-metadata template bigquery --output json > body.json
+ayx one connections connector-metadata template bigquery -o json > body.json
 
 # Edit body.json to fill in your values, then create the connection
-ayx one connections create --body "$(cat body.json)" --apply
+ayx one connections create --body body.json --apply
+# Or pipe it without placing the payload in argv:
+cat body.json | ayx one connections create --body - --apply
 ```
 
 The command derives each field from the connector metadata:
@@ -116,15 +118,15 @@ Pipe the output to a file and pass it to `connections create --body <file>`. Use
 Dump all metadata for a connector to a file for auditing:
 
 ```bash
-ayx --output json one connections connector-metadata detail <connector> \
+ayx -o json one connections connector-metadata detail <connector> \
   | jq '.data' > connector-<connector>-metadata.json
 ```
 
 Compare defaults against active overrides to detect drift:
 
 ```bash
-ayx --output json one connections connector-metadata defaults <connector> | jq '.data' > defaults.json
-ayx --output json one connections connector-metadata overrides list <connector> | jq '.data' > overrides.json
+ayx -o json one connections connector-metadata defaults <connector> | jq '.data' > defaults.json
+ayx -o json one connections connector-metadata overrides list <connector> | jq '.data' > overrides.json
 diff defaults.json overrides.json
 ```
 

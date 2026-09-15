@@ -32,18 +32,10 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
     },
     EndpointSpec {
         method: "GET",
-        path: "/v4/workspaces/{id}/configuration",
-        commands: &[
-            "one workspace configuration",
-            "one workspace configuration-v4",
-        ],
-    },
-    EndpointSpec {
-        method: "GET",
         path: "/v4/people",
         commands: &[
             "one person list",
-            "one workspace people",
+            "one workspace members list",
             // `share` resolves --to-person emails to ids before building its body.
             "one workflows share",
         ],
@@ -55,52 +47,37 @@ const IAM_ENDPOINTS: &[EndpointSpec] = &[
     EndpointSpec {
         method: "GET",
         path: "/v4/workspaces/{workspaceId}/admins",
-        commands: &["one workspace admins"],
+        commands: &["one workspace members admins"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/workspaces/{id}/groups",
-        commands: &["one workspace groups"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/groups",
-        commands: &["one workspace groups-global"],
+        commands: &["one workspace groups list"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/workspaces/{id}/invitationLink",
-        commands: &["one workspace invitation-link"],
+        commands: &["one workspace members invitation-link"],
     },
     EndpointSpec {
         method: "GET",
         path: "/v4/workspaces/{workspaceId}/cloudConfigs",
-        commands: &["one workspace cloud-configs"],
-    },
-    EndpointSpec {
-        method: "POST",
-        path: "/v4/workspaces/{id}/people/batch",
-        commands: &["one workspace invite-users", "one workspace invite-list"],
+        commands: &["one workspace cloud-configs list"],
     },
     EndpointSpec {
         method: "DELETE",
         path: "/v4/workspaces/{workspaceId}/people/{id}",
-        commands: &["one workspace remove-user"],
-    },
-    EndpointSpec {
-        method: "POST",
-        path: "/v4/workspaces/{id}/people/suspend",
-        commands: &["one workspace suspend-users"],
+        commands: &["one workspace members remove"],
     },
     EndpointSpec {
         method: "POST",
         path: "/v4/workspaces/{id}/people/unsuspend",
-        commands: &["one workspace unsuspend-users"],
+        commands: &["one workspace members unsuspend"],
     },
     EndpointSpec {
         method: "PATCH",
         path: "/v4/workspaces/{id}/transfer",
-        commands: &["one workspace transfer"],
+        commands: &["one workspace transfer start"],
     },
     EndpointSpec {
         method: "GET",
@@ -275,6 +252,7 @@ const WORKFLOW_ENDPOINTS: &[EndpointSpec] = &[
         commands: &[
             "one workflows assets",
             "one workflows detail",
+            "one workflows graph",
             // `copy` resolves the current version from the asset list when
             // --version is omitted.
             "one workflows copy",
@@ -324,161 +302,6 @@ const WORKFLOW_ENDPOINTS: &[EndpointSpec] = &[
         method: "DELETE",
         path: "/svc-workflow/api/v2/workflows/{id}",
         commands: &["one workflows delete"],
-    },
-];
-
-const FLOW_ENDPOINTS: &[EndpointSpec] = &[
-    EndpointSpec {
-        method: "POST",
-        path: "/v4/flows",
-        commands: &["one flows create"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/flows",
-        commands: &["one flows list"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/flows/count",
-        commands: &["one flows count"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/flowsLibrary",
-        commands: &["one flows library list"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/flowsLibrary/count",
-        commands: &["one flows library count"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/folders",
-        commands: &["one flows folders list"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/folders/count",
-        commands: &["one flows folders count"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/folders/{id}",
-        commands: &["one flows folders detail"],
-    },
-    EndpointSpec {
-        method: "POST",
-        path: "/v4/folders",
-        commands: &["one flows folders create"],
-    },
-    EndpointSpec {
-        method: "PATCH",
-        path: "/v4/folders/{id}",
-        commands: &["one flows folders update"],
-    },
-    EndpointSpec {
-        method: "DELETE",
-        path: "/v4/folders/{id}",
-        commands: &["one flows folders delete"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/folders/{id}/flows",
-        commands: &["one flows folders flows list"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/folders/{id}/flows/count",
-        commands: &["one flows folders flows count"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/flows/{id}",
-        commands: &["one flows detail"],
-    },
-    EndpointSpec {
-        method: "PATCH",
-        path: "/v4/flows/{id}",
-        commands: &["one flows update"],
-    },
-    EndpointSpec {
-        method: "DELETE",
-        path: "/v4/flows/{id}",
-        commands: &["one flows delete"],
-    },
-    EndpointSpec {
-        method: "POST",
-        path: "/v4/flows/{id}/copy",
-        commands: &["one flows copy"],
-    },
-    EndpointSpec {
-        method: "POST",
-        path: "/v4/flows/{id}/run",
-        commands: &["one flows run"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/flows/{id}/validate",
-        commands: &["one flows validate"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/flows/{id}/recipeParameters",
-        commands: &["one flows parameters"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/flows/{id}/inputs",
-        commands: &["one flows inputs"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/flows/{id}/outputs",
-        commands: &["one flows outputs"],
-    },
-    EndpointSpec {
-        method: "POST",
-        path: "/v4/flows/{id}/permissions",
-        commands: &["one flows permissions"],
-    },
-    // Read side of the same path. `one flows permissions-get` has always dispatched
-    // this; the inventory only ever recorded the POST.
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/flows/{id}/permissions",
-        commands: &["one flows permissions-get"],
-    },
-    EndpointSpec {
-        method: "POST",
-        path: "/v4/flows/{id}/move",
-        commands: &["one flows move"],
-    },
-    EndpointSpec {
-        method: "PATCH",
-        path: "/v4/flows/{id}/replaceDataset",
-        commands: &["one flows replace-dataset"],
-    },
-    EndpointSpec {
-        method: "POST",
-        path: "/v4/flows/package",
-        commands: &["one flows import"],
-    },
-    EndpointSpec {
-        method: "POST",
-        path: "/v4/flows/package/dryRun",
-        commands: &["one flows import-dry-run"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/flows/{id}/package",
-        commands: &["one flows export"],
-    },
-    EndpointSpec {
-        method: "GET",
-        path: "/v4/flows/{id}/package/dryRun",
-        commands: &["one flows export-dry-run"],
     },
 ];
 
@@ -900,7 +723,7 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
                 path: "/v4/people",
                 commands: &[
                     "one person list",
-                    "one workspace people",
+                    "one workspace members list",
                     // `share` resolves --to-person emails to ids before building its body.
                     "one workflows share",
                 ],
@@ -967,115 +790,87 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             EndpointSpec {
                 method: "POST",
                 path: "/v4/workspaces/{id}/groups",
-                commands: &["one workspace create-group"],
+                commands: &["one workspace groups create"],
             },
             EndpointSpec {
                 method: "DELETE",
                 path: "/v4/workspaces/{id}/groups/{groupId}",
-                commands: &["one workspace delete-group"],
+                commands: &["one workspace groups delete"],
             },
             EndpointSpec {
                 method: "PUT",
                 path: "/v4/workspaces/{id}/groups/{groupId}",
-                commands: &["one workspace update-group"],
+                commands: &["one workspace groups update"],
             },
             EndpointSpec {
                 method: "PUT",
                 path: "/v4/workspaces/{id}/groups/{groupId}/roles",
-                commands: &["one workspace set-group-roles"],
+                commands: &["one workspace groups roles set"],
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/workspaces/{id}/groups/{groupId}/users",
-                commands: &["one workspace add-group-users"],
+                commands: &["one workspace groups members add"],
             },
             EndpointSpec {
                 method: "DELETE",
                 path: "/v4/workspaces/{id}/groups/{groupId}/users",
-                commands: &["one workspace remove-group-users"],
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/workspaces/{id}/configuration",
-                commands: &[
-                    "one workspace configuration",
-                    "one workspace configuration-v4",
-                ],
+                commands: &["one workspace groups members remove"],
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/workspaces/current/transfer",
-                commands: &["one workspace transfer-assets"],
+                commands: &["one workspace transfer assets"],
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/workspaces/current/configuration",
-                commands: &["one workspace current-configuration"],
+                commands: &["one workspace config get"],
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/workspaces/current/configuration",
-                commands: &["one workspace save-current-configuration"],
-            },
-            EndpointSpec {
-                method: "PATCH",
-                path: "/v4/workspaces/{id}/configuration",
-                commands: &["one workspace save-configuration-v4"],
-            },
-            EndpointSpec {
-                method: "GET",
-                path: "/v4/workspaces/{id}/configuration-schema",
-                commands: &["one workspace configuration-schema"],
+                commands: &["one workspace config set"],
             },
             EndpointSpec {
                 method: "GET",
                 path: "/v4/workspaces/current/configuration-schema",
-                commands: &["one workspace current-configuration-schema"],
+                commands: &["one workspace config schema"],
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/workspaces/current/delete-configuration",
-                commands: &["one workspace delete-current-configuration"],
-            },
-            EndpointSpec {
-                method: "POST",
-                path: "/v4/workspaces/{id}/delete-configuration",
-                commands: &["one workspace delete-configuration"],
+                commands: &["one workspace config reset"],
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/workspaces/{id}/people",
-                commands: &["one workspace invite"],
+                commands: &["one workspace members invite"],
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/workspaces/{id}/people/batch",
-                commands: &["one workspace reinvite-users"],
+                commands: &["one workspace members reinvite"],
             },
             EndpointSpec {
                 method: "PUT",
                 path: "/v4/workspaces/{id}/people/{personId}/suspended",
-                commands: &["one workspace suspend-user"],
+                commands: &["one workspace members suspend"],
             },
             EndpointSpec {
                 method: "POST",
                 path: "/v4/workspaces/{workspaceId}/cloudConfigs/{cloudProvider}",
-                commands: &["one workspace create-cloud-config"],
+                commands: &["one workspace cloud-configs create"],
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/workspaces/{workspaceId}/cloudConfigs/{cloudProvider}",
-                commands: &["one workspace update-cloud-config"],
+                commands: &["one workspace cloud-configs update"],
             },
             EndpointSpec {
                 method: "PATCH",
                 path: "/v4/workspaces/{workspaceId}/people/{id}",
-                commands: &["one workspace patch-user"],
-            },
-            EndpointSpec {
-                method: "PUT",
-                path: "/v4/workspaces/{workspaceId}/people/{id}",
-                commands: &["one workspace update-user"],
+                commands: &["one workspace members update"],
             },
         ],
         notes: &[
@@ -1220,15 +1015,6 @@ const SURFACES: &[SurfaceSpec] = &[
         notes: &[
             "Agent Studio Set Up Assets service endpoints recovered from an authenticated UI HAR.",
             "Agent CRUD and MCP asset registration are preview operations; these private routes are not described by the public One OpenAPI specification.",
-        ],
-    },
-    SurfaceSpec {
-        name: "flow",
-        status: "implemented",
-        endpoints: FLOW_ENDPOINTS,
-        notes: &[
-            "Flow lifecycle, package, parameters, library, folder, and permission commands are wired.",
-            "The One surface does not expose arbitrary workflow authoring through this family.",
         ],
     },
     SurfaceSpec {
@@ -1424,7 +1210,6 @@ mod tests {
         );
         assert!(surfaces.iter().any(|surface| surface["name"] == "plan"));
         assert!(surfaces.iter().any(|surface| surface["name"] == "plans"));
-        assert!(surfaces.iter().any(|surface| surface["name"] == "flow"));
         assert!(surfaces.iter().any(|surface| surface["name"] == "misc"));
         assert!(
             surfaces

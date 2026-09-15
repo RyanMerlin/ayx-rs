@@ -64,7 +64,7 @@ pub(crate) fn execute(
         OnePlansCommand::Detail { profile, id } => {
             let id = crate::cmd::select::resolve_selector(
                 "plan id",
-                "ayx one plans list --output json",
+                "ayx one plans list -o json",
                 id,
                 crate::cmd::select::SelectPolicy::from_runtime(runtime.no_input),
                 || {
@@ -235,17 +235,21 @@ pub(crate) fn execute(
             )?
         }
         OnePlansCommand::Import { profile } => {
-            let config = runtime.load_profile_lenient(profile.as_deref())?;
-            confirm_plan_mutation(apply, yes, "import", "a plan package", &config.profile_name)?;
-            one_api_live_request(
-                &config,
-                "plans",
-                "import",
-                "POST",
-                "/v4/plans/package",
-                true,
-                &[],
-            )?
+            let _ = (profile, apply, yes);
+            Envelope::err_coded(
+                ayx_core::envelope::ErrorCode::Validation,
+                "one plans import is unavailable until the provider upload contract is verified",
+                serde_json::json!({
+                    "operation": "one plans import",
+                    "endpoint": "/v4/plans/package",
+                    "reason": "the required package input mechanism is undocumented and the route is not live-verified",
+                    "network_called": false
+                }),
+            )
+            .with_remediation(
+                "Use one plans export to capture a package, then verify the target tenant's import contract before retrying",
+                vec!["ayx one plans export <PLAN-ID> -o json".to_string()],
+            )
         }
         OnePlansCommand::Permissions {
             profile,

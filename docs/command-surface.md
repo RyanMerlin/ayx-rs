@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json` _on 2026-09-11 12:12:42 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all -o json` _on 2026-09-15 21:25:06 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -14,7 +14,7 @@ cargo run -q -p xtask -- refresh-command-surface
 
 ## Summary
 
-- Commands: 400
+- Commands: 364
 - Capabilities: 6
 
 ## Commands
@@ -74,7 +74,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | designer workflow scan | `designer/workflow/scan` | read-only | no | Preflight scan workflow artifacts for rule matches without rewriting. |
 | designer workflow unpack | `designer/workflow/unpack` | read-only | no | Unpack a .yxzp workflow package. |
 | designer workflow validate | `designer/workflow/validate` | read-only | no | Validate workflow and macro XML structures. |
-| designer workflow yxdb | `designer/workflow/yxdb` | unclassified |  | Read and export .yxdb data; use --csv for export and top-level --output json for machine-readable envelopes |
+| designer workflow yxdb | `designer/workflow/yxdb` | unclassified |  | Read and export .yxdb data; use --csv for export and top-level -o json for machine-readable envelopes |
 
 ### `discover`
 
@@ -202,40 +202,6 @@ cargo run -q -p xtask -- refresh-command-surface
 | one doctor identity | `one/doctor/identity` | read-only | no | Run the One identity doctor workflow |
 | one doctor plans | `one/doctor/plans` | read-only | no | Run the One plans doctor workflow |
 | one doctor scheduling | `one/doctor/scheduling` | read-only | no | Run the One scheduling doctor workflow |
-| one flows | `one/flows` | unclassified |  | Alteryx One flows — list, run, import, and export |
-| one flows copy | `one/flows/copy` | mutating | yes | Copy a One flow using a JSON payload |
-| one flows count | `one/flows/count` | read-only | no | Count One flows (flat — see `flows library count` for a breakdown that includes folders) |
-| one flows create | `one/flows/create` | mutating | yes | Create a One flow from JSON payload |
-| one flows delete | `one/flows/delete` | mutating | yes | Delete a One flow |
-| one flows detail | `one/flows/detail` | read-only | no | Inspect a One flow by id |
-| one flows export | `one/flows/export` | read-only | no | Export a flow package to disk |
-| one flows export-dry-run | `one/flows/export-dry-run` | read-only | no | Dry-run export of a flow package |
-| one flows folders | `one/flows/folders` | unclassified |  | Manage One flow folders (list, create, update, delete, nested flows) |
-| one flows folders count | `one/flows/folders/count` | read-only | no | Count flow folders |
-| one flows folders create | `one/flows/folders/create` | mutating | yes | Create a flow folder from JSON payload |
-| one flows folders delete | `one/flows/folders/delete` | mutating | yes | Delete a flow folder |
-| one flows folders detail | `one/flows/folders/detail` | read-only | no | Inspect a flow folder by id |
-| one flows folders flows | `one/flows/folders/flows` | unclassified |  | List or count flows within a folder |
-| one flows folders flows count | `one/flows/folders/flows/count` | read-only | no | Count flows in a folder |
-| one flows folders flows list | `one/flows/folders/flows/list` | read-only | no | List flows in a folder |
-| one flows folders list | `one/flows/folders/list` | read-only | no | List flow folders |
-| one flows folders update | `one/flows/folders/update` | mutating | yes | Update a flow folder from JSON payload |
-| one flows import | `one/flows/import` | mutating | yes | Import a flow package |
-| one flows import-dry-run | `one/flows/import-dry-run` | read-only | no | Dry-run import of a flow package |
-| one flows inputs | `one/flows/inputs` | read-only | no | List inputs for a One flow |
-| one flows library | `one/flows/library` | unclassified |  | Browse the One flow library: flows AND their containing folders together, unlike the flat `flows list`/`flows count` (list, count) |
-| one flows library count | `one/flows/library/count` | read-only | no | Count the One flow library — returns separate flow/folder/total counts, unlike the flat `flows count` |
-| one flows library list | `one/flows/library/list` | read-only | no | List the One flow library — a folder-aware view combining flows and folders, unlike the flat `flows list` |
-| one flows list | `one/flows/list` | read-only | no | List One flows (flat — no folder structure; see `flows library` for a folder-aware view) |
-| one flows move | `one/flows/move` | mutating | yes | Move a One flow from JSON payload |
-| one flows outputs | `one/flows/outputs` | read-only | no | List outputs for a One flow |
-| one flows parameters | `one/flows/parameters` | read-only | no | Inspect flow-level parameters and overrides |
-| one flows permissions | `one/flows/permissions` | mutating | yes | Share a flow from JSON payload |
-| one flows permissions-get | `one/flows/permissions-get` | read-only | no | List permissions for a One flow |
-| one flows replace-dataset | `one/flows/replace-dataset` | mutating | yes | Replace a dataset in a One flow from JSON payload |
-| one flows run | `one/flows/run` | mutating | yes | Run a One flow using a JSON payload |
-| one flows update | `one/flows/update` | mutating | yes | Update a One flow from JSON payload |
-| one flows validate | `one/flows/validate` | read-only | no | Validate a One flow |
 | one inventory | `one/inventory` | read-only | no | Summarize the current One API surface registry |
 | one jobs | `one/jobs` | read-only | no | Alteryx One Job Library — inspect jobs, their runs, and results |
 | one jobs cancel | `one/jobs/cancel` | mutating | yes | Cancel a Job Library entry |
@@ -249,7 +215,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one jobs profile-results | `one/jobs/profile-results` | read-only | no | Inspect aggregate job profiling results |
 | one jobs publications | `one/jobs/publications` | read-only | no | List publications for an aggregate job |
 | one jobs publish | `one/jobs/publish` | mutating | yes | Publish job results to a target |
-| one jobs runs | `one/jobs/runs` | read-only | no | List every child run record for an aggregate job |
+| one jobs runs | `one/jobs/runs` | read-only | no | List every child run record for an Alteryx One Job Group execution |
 | one jobs status | `one/jobs/status` | read-only | no | Inspect aggregate job status |
 | one login | `one/login` | mutating | yes | Authenticate with Alteryx One and store credentials |
 | one logout | `one/logout` | mutating | yes | Clear stored Alteryx One credentials from the active profile |
@@ -280,7 +246,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one plans detail | `one/plans/detail` | read-only | no | Inspect a One plan |
 | one plans export | `one/plans/export` | read-only | no | Fetch a One plan package |
 | one plans full | `one/plans/full` | read-only | no | Inspect a One plan with the full documented payload |
-| one plans import | `one/plans/import` | mutating | yes | Import a One plan package |
+| one plans import | `one/plans/import` | read-only | no | Import a One plan package (provider contract pending) |
 | one plans list | `one/plans/list` | read-only | no | List One plans |
 | one plans permissions | `one/plans/permissions` | mutating | yes | List plan permissions, or delete one when `--subject-id` is provided |
 | one plans run | `one/plans/run` | mutating | yes | Run a One plan |
@@ -323,53 +289,51 @@ cargo run -q -p xtask -- refresh-command-surface
 | one workflows dependencies | `one/workflows/dependencies` | read-only | no | List the connections, datasets, and macros a workflow depends on |
 | one workflows detail | `one/workflows/detail` | read-only | no | Inspect one cloud-native workflow |
 | one workflows engines | `one/workflows/engines` | read-only | no | Show which execution engines a workflow can run on |
+| one workflows graph | `one/workflows/graph` | read-only | no | Inspect the workflow graph when the asset response provides it. Raw provider data is retained under the normal response field |
 | one workflows list | `one/workflows/list` | read-only | no | List Alteryx One cloud-native workflows |
 | one workflows run | `one/workflows/run` | mutating | yes | Queue a cloud-native workflow run |
 | one workflows share | `one/workflows/share` | mutating | yes | Share a cloud-native workflow with people or groups |
 | one workflows tools | `one/workflows/tools` | read-only | no | List the tools available to cloud-native workflows |
 | one workflows upload | `one/workflows/upload` | unclassified |  | Upload a cloud-native workflow JSON file to Alteryx One |
 | one workspace | `one/workspace` | unclassified |  | Alteryx One workspace inspection and administration |
-| one workspace add-group-users | `one/workspace/add-group-users` | mutating | yes | Add users to a One workspace group |
-| one workspace admins | `one/workspace/admins` | read-only | no | List workspace admins |
-| one workspace cloud-configs | `one/workspace/cloud-configs` | read-only | no | Get workspace cloud configuration records |
-| one workspace configuration | `one/workspace/configuration` | read-only | no | Inspect a One workspace configuration by id |
-| one workspace configuration-schema | `one/workspace/configuration-schema` | read-only | no | Inspect the workspace configuration schema |
-| one workspace configuration-v4 | `one/workspace/configuration-v4` | read-only | no | Inspect a One workspace configuration by id |
+| one workspace cloud-configs | `one/workspace/cloud-configs` | unclassified |  | Manage cloud configuration records in the active workspace |
+| one workspace cloud-configs create | `one/workspace/cloud-configs/create` | mutating | yes | Create a cloud configuration from a JSON payload |
+| one workspace cloud-configs list | `one/workspace/cloud-configs/list` | read-only | no | List cloud configuration records |
+| one workspace cloud-configs update | `one/workspace/cloud-configs/update` | mutating | yes | Update a cloud configuration from a JSON payload |
+| one workspace config | `one/workspace/config` | unclassified |  | Read or change the active workspace configuration |
+| one workspace config get | `one/workspace/config/get` | read-only | no | Read the active workspace configuration |
+| one workspace config reset | `one/workspace/config/reset` | mutating | yes | Reset the active workspace configuration |
+| one workspace config schema | `one/workspace/config/schema` | read-only | no | Read the active workspace configuration schema |
+| one workspace config set | `one/workspace/config/set` | mutating | yes | Update the active workspace configuration from JSON payload |
 | one workspace create | `one/workspace/create` | mutating | yes | Create a One workspace from a JSON payload |
-| one workspace create-cloud-config | `one/workspace/create-cloud-config` | mutating | yes | Create workspace cloud configuration from a JSON payload |
-| one workspace create-group | `one/workspace/create-group` | mutating | yes | Create a group in a One workspace from a JSON payload |
 | one workspace current | `one/workspace/current` | read-only | no | Inspect the current One workspace posture |
-| one workspace current-configuration | `one/workspace/current-configuration` | read-only | no | Inspect the current One workspace configuration |
-| one workspace current-configuration-schema | `one/workspace/current-configuration-schema` | read-only | no | Inspect the current workspace configuration schema |
-| one workspace delete | `one/workspace/delete` | mutating | yes | Delete a One workspace |
-| one workspace delete-configuration | `one/workspace/delete-configuration` | mutating | yes | Reset a workspace configuration by workspace id |
-| one workspace delete-current-configuration | `one/workspace/delete-current-configuration` | mutating | yes | Reset the current workspace configuration |
-| one workspace delete-group | `one/workspace/delete-group` | mutating | yes | Delete a group from a One workspace |
-| one workspace detail | `one/workspace/detail` | read-only | no | Inspect a One workspace by numeric id (`GET /v4/workspaces/{workspaceId}`) |
-| one workspace groups | `one/workspace/groups` | read-only | no | List groups in a One workspace |
-| one workspace groups-global | `one/workspace/groups-global` | read-only | no | List groups visible to the current One user |
-| one workspace invitation-link | `one/workspace/invitation-link` | read-only | no | Get the invitation link for a person in a One workspace |
-| one workspace invite | `one/workspace/invite` | mutating | yes | Invite a single user to a One workspace from a JSON payload |
-| one workspace invite-list | `one/workspace/invite-list` | mutating | yes | Invite a list of users to a One workspace from a JSON payload |
-| one workspace invite-users | `one/workspace/invite-users` | mutating | yes | Invite users to a One workspace |
+| one workspace delete | `one/workspace/delete` | mutating | yes | Delete a One workspace by numeric id |
+| one workspace detail | `one/workspace/detail` | read-only | no | Inspect a One workspace by numeric id |
+| one workspace groups | `one/workspace/groups` | unclassified |  | Manage groups in the active workspace |
+| one workspace groups create | `one/workspace/groups/create` | mutating | yes | Create a group from a JSON payload |
+| one workspace groups delete | `one/workspace/groups/delete` | mutating | yes | Delete a group |
+| one workspace groups list | `one/workspace/groups/list` | read-only | no | List groups in the active workspace |
+| one workspace groups members | `one/workspace/groups/members` | unclassified |  | Manage group members |
+| one workspace groups members add | `one/workspace/groups/members/add` | mutating | yes | Add members to a group |
+| one workspace groups members remove | `one/workspace/groups/members/remove` | mutating | yes | Remove members from a group |
+| one workspace groups roles | `one/workspace/groups/roles` | unclassified |  | Set group roles from a JSON payload |
+| one workspace groups roles set | `one/workspace/groups/roles/set` | mutating | yes | Set roles for a group from a JSON payload |
+| one workspace groups update | `one/workspace/groups/update` | mutating | yes | Update a group from a JSON payload |
 | one workspace list | `one/workspace/list` | read-only | no | List accessible One workspaces |
-| one workspace patch-user | `one/workspace/patch-user` | mutating | yes | Patch a workspace user from a JSON payload |
-| one workspace people | `one/workspace/people` | read-only | no | List people in the current One workspace |
-| one workspace reinvite-users | `one/workspace/reinvite-users` | mutating | yes | Reinvite workspace users from a JSON payload |
-| one workspace remove-group-users | `one/workspace/remove-group-users` | mutating | yes | Remove users from a One workspace group |
-| one workspace remove-user | `one/workspace/remove-user` | mutating | yes | Remove a user from a One workspace |
-| one workspace save-configuration-v4 | `one/workspace/save-configuration-v4` | mutating | yes | Update a One workspace configuration by id from JSON payload |
-| one workspace save-current-configuration | `one/workspace/save-current-configuration` | mutating | yes | Update the current One workspace configuration from JSON payload |
-| one workspace set-group-roles | `one/workspace/set-group-roles` | mutating | yes | Set roles for a One workspace group from a JSON payload |
-| one workspace suspend-user | `one/workspace/suspend-user` | mutating | yes | Suspend one workspace user |
-| one workspace suspend-users | `one/workspace/suspend-users` | mutating | yes | Suspend users in a One workspace |
-| one workspace switch | `one/workspace/switch` | mutating | yes | Select which authenticated workspace is active for this profile |
-| one workspace transfer | `one/workspace/transfer` | mutating | yes | Start a transfer for a One workspace |
-| one workspace transfer-assets | `one/workspace/transfer-assets` | mutating | yes | Transfer assets from the current One workspace from JSON payload |
-| one workspace unsuspend-users | `one/workspace/unsuspend-users` | mutating | yes | Unsuspend users in a One workspace |
-| one workspace update-cloud-config | `one/workspace/update-cloud-config` | mutating | yes | Update workspace cloud configuration from a JSON payload |
-| one workspace update-group | `one/workspace/update-group` | mutating | yes | Update a One workspace group from a JSON payload |
-| one workspace update-user | `one/workspace/update-user` | mutating | yes | Replace a workspace user from a JSON payload |
+| one workspace members | `one/workspace/members` | unclassified |  | Manage members of the active workspace |
+| one workspace members admins | `one/workspace/members/admins` | read-only | no | List administrators of the active workspace |
+| one workspace members invitation-link | `one/workspace/members/invitation-link` | read-only | no | Get an invitation link for a member |
+| one workspace members invite | `one/workspace/members/invite` | mutating | yes | Invite a member with --email, or use --body for the batch/advanced API shape |
+| one workspace members list | `one/workspace/members/list` | read-only | no | List members of the active workspace |
+| one workspace members reinvite | `one/workspace/members/reinvite` | mutating | yes | Reinvite member(s) using a JSON payload |
+| one workspace members remove | `one/workspace/members/remove` | mutating | yes | Remove a member from the active workspace |
+| one workspace members suspend | `one/workspace/members/suspend` | mutating | yes | Suspend one member of the active workspace |
+| one workspace members unsuspend | `one/workspace/members/unsuspend` | mutating | yes | Unsuspend members in the active workspace |
+| one workspace members update | `one/workspace/members/update` | mutating | yes | Update one member from a JSON payload |
+| one workspace transfer | `one/workspace/transfer` | unclassified |  | Transfer the active workspace or its assets |
+| one workspace transfer assets | `one/workspace/transfer/assets` | mutating | yes | Transfer active-workspace assets from a JSON payload |
+| one workspace transfer start | `one/workspace/transfer/start` | mutating | yes | Start an active-workspace transfer |
+| one workspace use | `one/workspace/use` | mutating | yes | Select an already-authenticated workspace as active |
 | one write-settings | `one/write-settings` | unclassified |  | Alteryx One write settings — list, create, and manage |
 | one write-settings count | `one/write-settings/count` | read-only | no | Count One write settings |
 | one write-settings create | `one/write-settings/create` | mutating | yes | Create a One write setting from JSON payload |

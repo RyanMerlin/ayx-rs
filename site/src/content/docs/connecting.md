@@ -205,7 +205,7 @@ One profile can hold a separate token per workspace. Bind a login to a specific 
 
 ```bash
 ayx one login --workspace-id <id>   # store this workspace's token
-ayx one workspace switch <id>       # make it the active one
+ayx one workspace use <id|gid|saved-name> # make it the active one
 ```
 
 Each workspace keeps its own credential method and token pair. Switching

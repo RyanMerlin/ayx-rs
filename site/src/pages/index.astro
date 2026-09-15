@@ -16,12 +16,12 @@ const session = [
     kind: 'ok',
   },
   {
-    cmd: 'ayx one workspace current --output json',
+    cmd: 'ayx one workspace current -o json',
     out: ['{ "ok": true, "data": { … } }'],
     kind: 'json',
   },
   {
-    cmd: 'ayx one flows delete <flow-id>',
+    cmd: 'ayx one workflows delete <flow-id>',
     out: ['dry-run · no remote change · re-run with --apply'],
     kind: 'note',
   },
@@ -43,7 +43,7 @@ const capabilities = [
   },
   {
     name: 'Structured output',
-    body: 'Pass --output json for machine-readable envelopes — built for pipelines, agents, and scripts, not just humans at a terminal.',
+    body: 'Pass -o json for machine-readable envelopes — built for pipelines, agents, and scripts, not just humans at a terminal.',
   },
   {
     name: 'Profiles & environments',

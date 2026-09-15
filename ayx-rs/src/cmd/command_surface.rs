@@ -25,9 +25,9 @@ use crate::Cli;
 /// leaf/branch nodes alike (anything reachable and not hidden).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LiveCommand {
-    /// Canonical whitespace-joined identity, e.g. `"one flows list"`.
+    /// Canonical whitespace-joined identity, e.g. `"one workflows list"`.
     pub name: String,
-    /// Canonical slash-joined identity, e.g. `"one/flows/list"`.
+    /// Canonical slash-joined identity, e.g. `"one/workflows/list"`.
     pub path: String,
     /// The command's clap `about` text, verbatim.
     pub summary: String,

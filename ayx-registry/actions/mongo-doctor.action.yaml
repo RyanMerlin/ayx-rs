@@ -21,7 +21,7 @@ steps:
     cmd: "ayx mongo status --profile <profile>"
     why: "Confirm connectivity and embedded vs. managed posture."
   - kind: command
-    cmd: "ayx mongo doctor --profile <profile> --output json"
+    cmd: "ayx mongo doctor --profile <profile> -o json"
     why: "Run the registry of read-only diagnostic queries and emit a structured envelope."
   - kind: note
     text: "If `results` shows a non-empty failures array, treat each entry as an incident lead rather than truth — re-run the underlying query in mongosh for the full payload."

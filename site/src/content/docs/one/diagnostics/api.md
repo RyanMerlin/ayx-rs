@@ -23,14 +23,14 @@ limitations](#known-limitations) before relying on the latter two.
 
 ```bash
 ayx one api open-api-spec
-ayx --output json one api open-api-spec --profile prod
+ayx -o json one api open-api-spec --profile prod
 ```
 
 Returns the full OpenAPI document Alteryx One's gateway serves at `GET /v4/open-api-spec`. Save it
 to diff against later without a second network call:
 
 ```bash
-ayx --output json one api open-api-spec | jq '.data.response' > spec.json
+ayx -o json one api open-api-spec | jq '.data.response' > spec.json
 ```
 
 ## Coverage
@@ -40,7 +40,7 @@ against every endpoint the CLI's `one` surface actually dispatches, and reports 
 
 ```bash
 ayx one api coverage
-ayx --output json one api coverage | jq '{coverage_pct, missing: (.data.missing | length)}'
+ayx -o json one api coverage | jq '{coverage_pct, missing: (.data.missing | length)}'
 
 # Diff a saved spec instead of fetching live
 ayx one api coverage --spec spec.json

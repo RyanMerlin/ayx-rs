@@ -13,12 +13,12 @@ commands on this page are read-only.
 
 | Command | What it does |
 |---|---|
-| `ayx one jobs profile <JOB-ID>` | Inspect profile data for an aggregate job |
-| `ayx one jobs profile-results <JOB-ID>` | Retrieve profile result details |
-| `ayx one jobs pdf-results <JOB-ID>` | Retrieve PDF output for an aggregate job |
-| `ayx one jobs publications <JOB-ID>` | List publication records for an aggregate job |
+| `ayx one jobs profile <JOB-GROUP-ID>` | Inspect profile data for an aggregate Job Group |
+| `ayx one jobs profile-results <JOB-GROUP-ID>` | Retrieve profile result details |
+| `ayx one jobs pdf-results <JOB-GROUP-ID>` | Retrieve PDF output for an aggregate Job Group |
+| `ayx one jobs publications <JOB-GROUP-ID>` | List publication records for an aggregate Job Group |
 
-All commands accept `<JOB-ID>` as the positional argument and `--profile <profile-id>`.
+All commands accept `<JOB-GROUP-ID>` as the positional argument and `--profile <profile-id>`.
 
 ## Profile data
 
@@ -27,16 +27,16 @@ types, null rates, and similar statistics.
 
 ```bash
 # Summary profile
-ayx one jobs profile <JOB-ID>
+ayx one jobs profile <JOB-GROUP-ID>
 
 # Detailed profile results
-ayx one jobs profile-results <JOB-ID>
+ayx one jobs profile-results <JOB-GROUP-ID>
 
 # Scoped to a specific Alteryx One profile
-ayx one jobs profile <JOB-ID> --profile <profile-id>
+ayx one jobs profile <JOB-GROUP-ID> --profile <profile-id>
 
 # Machine-readable
-ayx --output json one jobs profile <JOB-ID>
+ayx -o json one jobs profile <JOB-GROUP-ID>
 ```
 
 `profile` returns a summary view. `profile-results` returns a more detailed breakdown. Use
@@ -47,9 +47,9 @@ ayx --output json one jobs profile <JOB-ID>
 Some Job Library entries produce PDF outputs when configured to do so.
 
 ```bash
-ayx one jobs pdf-results <JOB-ID>
+ayx one jobs pdf-results <JOB-GROUP-ID>
 
-ayx --output json one jobs pdf-results <JOB-ID>
+ayx -o json one jobs pdf-results <JOB-GROUP-ID>
 ```
 
 The response includes the PDF data or a reference to where it can be retrieved.
@@ -60,13 +60,13 @@ Publications are records of when and where job results were pushed to downstream
 
 ```bash
 # All publications for an aggregate job
-ayx one jobs publications <JOB-ID>
+ayx one jobs publications <JOB-GROUP-ID>
 
 # Scoped to a profile
-ayx one jobs publications <JOB-ID> --profile <profile-id>
+ayx one jobs publications <JOB-GROUP-ID> --profile <profile-id>
 
 # Machine-readable
-ayx --output json one jobs publications <JOB-ID>
+ayx -o json one jobs publications <JOB-GROUP-ID>
 ```
 
 To publish new results to a target, use `ayx one jobs publish` — see [Jobs](/one/jobs/).
@@ -76,24 +76,24 @@ To publish new results to a target, use `ayx one jobs publish` — see [Jobs](/o
 Check profile results for data quality after every run:
 
 ```bash
-PROFILE=$(ayx --output json one jobs profile-results <JOB-ID>)
+PROFILE=$(ayx -o json one jobs profile-results <JOB-GROUP-ID>)
 echo "$PROFILE" | jq '.data.response'
 ```
 
 Audit all publication targets for a job:
 
 ```bash
-ayx --output json one jobs publications <JOB-ID> \
+ayx -o json one jobs publications <JOB-GROUP-ID> \
   | jq -r '.data.response[] | [.target, .publishedAt, .status] | @tsv'
 ```
 
 List Job Library entries that have produced PDF results:
 
 ```bash
-ayx --output json one jobs list --all \
+ayx -o json one jobs list --all \
   | jq -r '.data.items[].id' \
   | while read -r id; do
-      COUNT=$(ayx --output json one jobs pdf-results "$id" \
+      COUNT=$(ayx -o json one jobs pdf-results "$id" \
                | jq '.data.response | length')
       [[ "$COUNT" -gt 0 ]] && echo "$id: $COUNT PDF result(s)"
     done

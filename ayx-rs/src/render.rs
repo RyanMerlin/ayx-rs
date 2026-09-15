@@ -83,6 +83,106 @@ pub fn render_text(envelope: &Envelope) -> String {
     out
 }
 
+/// Render a failed envelope as an explicit, bounded operator error block.
+///
+/// Unlike a successful resource view, failure data often contains a provider
+/// body and transport diagnostics.  Those are retained in recursively
+/// redacted JSON/YAML, but default text must not recurse into them: a nested
+/// provider `error_code` can visually impersonate the envelope field, and
+/// URLs, request ids and headers are diagnostic-only.  A partial pagination
+/// result is the one exception, supplied already projected by `output`.
+pub fn render_failure_text(envelope: &Envelope, partial: Option<&Value>) -> String {
+    let color = color_enabled(false);
+    let mut lines = vec![paint(
+        "Command failed",
+        Style::new()
+            .fg_color(Some(Color::Ansi(AnsiColor::Red)))
+            .bold(),
+        color,
+    )];
+    if let Some(command) = envelope.command.as_deref() {
+        lines.push(format!("Command: {}", escape_control(command)));
+    }
+    if let Some(code) = envelope.error_code {
+        lines.push(format!("Error code: {}", code.as_str()));
+    }
+    lines.push(format!(
+        "Summary: {}",
+        escape_control(&safe_error_summary(envelope))
+    ));
+    if let Some(retryable) = envelope.retryable {
+        lines.push(format!(
+            "Retryable: {}",
+            if retryable { "yes" } else { "no" }
+        ));
+    }
+    if let Some(remediation) = &envelope.remediation {
+        lines.push(format!(
+            "Remediation: {}",
+            escape_control(&remediation.summary)
+        ));
+        for command in &remediation.commands {
+            lines.push(format!("  {}", escape_control(command)));
+        }
+    }
+    if let Some(partial) = partial {
+        let count = partial
+            .get("shown_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        lines.push(format!(
+            "Partial results: incomplete; {count} record(s) recovered before failure"
+        ));
+        let rendered = render_data_text(partial);
+        if !rendered.is_empty() {
+            lines.push("Recovered records (incomplete):".to_string());
+            lines.push(rendered);
+        }
+    }
+    lines.join("\n")
+}
+
+/// Use the command's ordinary message unless a short, top-level error is
+/// available.  Provider dumps, URLs, request ids and headers are intentionally
+/// removed from text mode; canonical JSON/YAML retain their redacted form.
+fn safe_error_summary(envelope: &Envelope) -> String {
+    let candidate = envelope
+        .data
+        .get("error")
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .unwrap_or(&envelope.message);
+    let candidate_lower = candidate.to_ascii_lowercase();
+    let diagnostic_at = [" body=", " headers=", " request_id=", " url="]
+        .iter()
+        .filter_map(|marker| candidate_lower.find(marker))
+        .min();
+    let without_diagnostics = diagnostic_at
+        .map(|index| &candidate[..index])
+        .unwrap_or(candidate);
+    let words = without_diagnostics
+        .split_whitespace()
+        .map(|word| {
+            let lower = word.to_ascii_lowercase();
+            if lower.contains("http://") || lower.contains("https://") {
+                "[URL omitted]"
+            } else {
+                word
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut summary: String = words.chars().take(240).collect();
+    if words.chars().count() > summary.chars().count() {
+        summary.push('…');
+    }
+    if summary.is_empty() {
+        "command failed".to_string()
+    } else {
+        summary
+    }
+}
+
 /// The stream an envelope is written to: `main` prints successes to stdout
 /// and failure envelopes to stderr.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -233,15 +333,28 @@ fn format_doctor(data: &Value, color: bool) -> String {
 fn render_data_text(data: &Value) -> String {
     if data
         .get("unrecognized_collection")
+        .or_else(|| data.get("unsupported_response"))
         .is_some_and(|value| value.as_bool() == Some(true))
     {
-        return data
+        let mut message = data
             .get("hint")
             .and_then(Value::as_str)
             .unwrap_or(
                 "The service returned a collection shape this CLI version does not recognize.",
             )
             .to_string();
+        if let Some(keys) = data
+            .get("detected_safe_wrapper_keys")
+            .and_then(Value::as_array)
+        {
+            let keys = keys.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+            if !keys.is_empty() {
+                message.push_str(" Detected safe wrapper keys: ");
+                message.push_str(&keys.join(", "));
+                message.push('.');
+            }
+        }
+        return message;
     }
 
     // A response the command declared as several sibling collections, already

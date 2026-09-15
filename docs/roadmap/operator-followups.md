@@ -63,6 +63,49 @@ examples twice -- once for the flag, again for the rename. The order is a
 cost decision, not a priority ranking: a global item is not less important for
 sitting in Phase 5.
 
+## 0.22.0 integration status and remaining work (2026-09-15)
+
+The current implementation incorporates the recent command-surface and
+agent-experience work. The following are complete and covered by local tests:
+
+- `-o` is the documented short spelling for `--output`; the long spelling
+  remains compatible.
+- One payloads accept a file, inline JSON, or `--body -` from piped stdin,
+  with one-source validation, terminal-stdin refusal, bounded reads, and
+  parse-once behavior.
+- Workspace selectors, canonical `one workspace members invite --email`,
+  envelope-preserving JSON output, and structured remediation are aligned.
+- The legacy `one flows` family is removed from active code, catalogs, command
+  surfaces, fixtures, and guidance. Historical release/audit records remain
+  unchanged.
+- Cloud-native workflow execution remains `one workflows run`; cancellation
+  takes its returned `jobId`, while `one jobs runs` takes the returned
+  `jobgroupId` and reads `/v4/jobGroups/{id}/jobs`. There is no separate
+  `one workflows runs` command and the CLI does not synthesize history by
+  scanning jobs.
+- `one workflows graph` preserves the raw response and reports normalized graph
+  data only when the provider supplies it. Typed scheduling currently promotes
+  only the provider-verified workflow/daily form; other documented families
+  remain available through raw `--body`.
+- `one plans import` is explicitly provider-contract-gated and makes no network
+  request until its package-input and route contract is verified.
+
+Remaining release work is contract verification, not guessed implementation:
+
+1. Run an authorized, disposable live canary for workflow run → `jobId` /
+   `jobgroupId` → cancel and child-run listing; clean up every created asset and
+   record redacted evidence in the endpoint matrix.
+2. Verify additional scheduling target/trigger combinations before promoting
+   them from raw-body mode, including exact provider enum and temporal payload
+   shapes.
+3. Contract-discover plan package import and documented plan-node/edge mutation
+   routes, then add mocked tests and only afterward consider live canaries.
+4. Confirm authoritative graph field schemas and add fixtures for provider
+   responses with missing configuration, ports, or connections; do not claim
+   schemas that are absent from service data.
+5. Capture a non-empty Job Group child-run fixture and finish the remaining
+   active guidance sweep. Keep historical releases and audits immutable.
+
 **Where the 2026-09-10 intake lands.** The operator intake of that date
 (`docs/roadmap/intake/2026-09-10-merlin-issue-intake.md`, preserved verbatim)
 is transcribed into this file. Its *functional defects* -- commands that are
@@ -220,7 +263,7 @@ The global option list currently advertises controls on every command even
 when they belong only to one product or operation class. Windows review also
 found an internally inconsistent error-format option:
 
-- [x] Remove `--error-format` with the JSON consolidation. `--output json`
+- [x] Remove `--error-format` with the JSON consolidation. `-o json`
   now renders one complete recursively redacted envelope for success and
   failure; terminal projection remains human-only.
 - [ ] Keep `--no-input` global, but describe its actual process-wide contract:
@@ -298,8 +341,8 @@ implementation terms rather than an operator-facing resource.
     trees and inconsistent payload terms remain.
 - [x] Replace the `job-groups` user-facing namespace with the Jobs surface
   backed by the supported Job Library list/count contract. **Done 2026-09-11.**
-  - `ayx one jobs <JOB-ID>` retrieves the aggregate Job Library entry;
-    `ayx one jobs runs <JOB-ID>` returns the complete child-run collection;
+  - `ayx one jobs <JOB-GROUP-ID>` retrieves the aggregate Job Library entry;
+    `ayx one jobs runs <JOB-GROUP-ID>` returns the complete child-run collection;
     `ayx one jobs execute --body <FILE>` submits a Job Group. The old
     `job-groups` namespace is hidden but retained as a compatibility command,
     including its former mutating `run` verb.
@@ -307,7 +350,7 @@ implementation terms rather than an operator-facing resource.
     to `/v4/jobLibrary`; the current list/count already use Job Library, but
     detail/run/status operations retain job-group endpoints.
   - The live OpenAPI defines a Job Group as a job executed from a flow node and
-    `GET /v4/jobGroups/{JOB-ID}/jobs` as its batch-job collection. Its child
+    `GET /v4/jobGroups/{JOB-GROUP-ID}/jobs` as its batch-job collection. Its child
     records have their own numeric `RUN-ID` and a `jobGroup` parent reference.
     The only direct child route is status-only
     `GET /v4/jobs/{RUN-ID}/status`; no full child detail route exists. The
@@ -465,8 +508,9 @@ another.
   - `ayx designer ...`, XML, and desktop execution must carry explicit
     Designer/Desktop/local wording and must not be described as One workflow
     support.
-  - Designer Cloud/Trifacta-derived `/v4/flows` is an opt-in legacy surface,
-    never an example of cloud-native Alteryx One workflows.
+  - The removed Designer Cloud/Trifacta-derived `/v4/flows` surface is not an
+    Alteryx One workflow command or example. Any future support needs a new,
+    explicitly approved contract and namespace decision.
 - [ ] Audit ambiguous generic vocabulary — especially `workflow`, `flow`,
   `auth`, `connection`, `workspace`, `doctor`, `profile`, and `cloud` — and
   require an owning product in human-facing output whenever context is not
@@ -690,7 +734,7 @@ emit credentials. It intentionally does not attempt interactive OTP.
 
 ### Live sweep result, 2026-09-10
 
-Run on Windows against the `windows-otp` profile, `--output json`, release
+Run on Windows against the `windows-otp` profile, `-o json`, release
 binary built from this branch:
 
 **74 invocations: 72 passed, 2 expected-unprivileged, 0 failed. Exit 0.**
@@ -966,7 +1010,7 @@ Priority: high UX correctness
   is the author's worked example of what not to do: `summary:` and `login:`
   print single-line JSON, and `inline_secret_fields:`, `secret_refs:` and
   `warnings:` print as empty labels. Colour must respect `NO_COLOR` and a
-  non-terminal stdout, and must never reach `--output json`. The author also
+  non-terminal stdout, and must never reach `-o json`. The author also
   asked what is needed to pin down "visually clean and human readable": agree
   a reference -- a mock-up of three representative screens (a list, a detail,
   an error), approved before implementation -- rather than iterating on
@@ -977,7 +1021,7 @@ Priority: high UX correctness
 
 Priority: high — one machine contract, one human experience
 
-**Completed in Phase 3.** `--output json` is the single canonical,
+**Completed in Phase 3.** `-o json` is the single canonical,
 recursively redacted envelope. `json-full` and `--error-format` are retired;
 text/table remain the bounded human projection. Regression coverage pins
 redaction, upstream payload truth, schema validity, remediation, timestamps,
@@ -1073,21 +1117,11 @@ connections without guessing from a connector name.
   metadata in `detail` or an explicit governance/inventory command. Add
   fixtures for missing or partially populated fields.
 
-## Designer Cloud / Trifacta-derived flow surface
+## Retired legacy flow surface
 
-Priority: product-boundary decision
+Priority: complete
 
-`ayx one flows` is the integer-id `/v4/flows` Designer Cloud surface, not the
-ULID-keyed cloud-native Alteryx One `/svc-workflow` surface exposed as
-`ayx one workflows`.
-
-- [ ] Stop promoting `ayx one flows` in README quick-start examples. The
-  global `--output` help text does it too: its placement example is
-  `ayx one flows list --output json`, shown under every command's `--help`.
-- [ ] Decide support policy with product owners: remove the surface, or retain
-  it behind a non-default `legacy-flows` Cargo feature.
-  - A real feature gate must cover the Clap command and dispatch, catalog and
-    generated command surface, API inventory/helpers/types, tests, and feature
-    propagation from `ayx-rs` to `ayx-one-api`.
-  - Do not create a misleading one-file gate that leaves legacy routes or
-    commands compiled and documented by default.
+The old integer-id `/v4/flows` family was removed from the active CLI surface.
+`ayx one workflows` is now reserved for ULID-keyed cloud-native workflows on
+`/svc-workflow`. Historical release notes and audits intentionally retain the
+terminology needed to describe what was true at the time.

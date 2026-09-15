@@ -45,10 +45,23 @@ fn discovery_exposes_agent_crud_paths_from_live_tree() {
     let mut names = Vec::new();
     command_names(&value["data"]["tree"], "", &mut names);
     for expected in [
-        "one workspace admins",
-        "one workspace create-group",
-        "one workspace update-group",
-        "one workspace delete-group",
+        "one workspace config get",
+        "one workspace config set",
+        "one workspace config schema",
+        "one workspace config reset",
+        "one workspace members list",
+        "one workspace members admins",
+        "one workspace groups create",
+        "one workspace groups update",
+        "one workspace groups delete",
+        "one workspace groups members add",
+        "one workspace groups members remove",
+        "one workspace groups roles set",
+        "one workspace cloud-configs list",
+        "one workspace cloud-configs create",
+        "one workspace cloud-configs update",
+        "one workspace transfer start",
+        "one workspace transfer assets",
         "one workflows copy",
         "one workflows delete",
         "one plans create",
@@ -64,6 +77,21 @@ fn discovery_exposes_agent_crud_paths_from_live_tree() {
         assert!(
             names.iter().any(|name| name == expected),
             "missing {expected}"
+        );
+    }
+
+    for removed in [
+        "one workspace people",
+        "one workspace admins",
+        "one workspace current-configuration",
+        "one workspace current-configuration-schema",
+        "one workspace create-group",
+        "one workspace groups-global",
+        "one workspace switch",
+    ] {
+        assert!(
+            !names.iter().any(|name| name == removed),
+            "removed flat alias unexpectedly remains visible: {removed}"
         );
     }
 }

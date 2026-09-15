@@ -68,12 +68,6 @@ const SAFE_NON_MUTATING_ALLOWLIST: &[(&str, &str)] = &[
 /// and must still appear in the inventory — asserted separately below, so an
 /// allowlisted call is exempt from *parsing*, never from *being inventoried*.
 const DYNAMIC_ENDPOINTS: &[(&str, &str, &str)] = &[
-    // `flows parameters` appends `?outputObjectType=` when the flag is present.
-    ("cmd/one_flows.rs", "GET", "/v4/flows/{id}/recipeParameters"),
-    // library / folder listings append `?limit=&offset=` via a local helper.
-    ("cmd/one_flows.rs", "GET", "/v4/flowsLibrary"),
-    ("cmd/one_flows.rs", "GET", "/v4/folders"),
-    ("cmd/one_flows.rs", "GET", "/v4/folders/{id}/flows"),
     ("cmd/one_datasets.rs", "GET", "/v4/datasetLibrary"),
     ("cmd/one_datasets.rs", "GET", "/v4/wrangledDatasets"),
     // `workflows list --all` bypasses the shared cursor-paginator (this

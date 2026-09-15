@@ -4,6 +4,32 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.22.0 — 2026-09-15
+
+### Changed
+
+- Hardened the Alteryx One operator-output foundation for v0.22.0. Failed
+  text responses now use an envelope-owned error block (command, typed error
+  code, safe summary, retryability, remediation and explicit partial state)
+  before any recovered records. Nested provider payloads no longer print as
+  terminal `error_code` fields or expose diagnostic URLs, request ids and
+  headers; the complete recursively redacted envelope remains available in
+  JSON and YAML.
+- Unknown declared list/detail response shapes now identify safe wrapper keys
+  and explain that the installed CLI is not compatible with the shape instead
+  of appearing to be a valid empty response.
+- The Windows One read sweep accepts `-ExpectedVersion`, verifies the selected
+  binary before reading the fixture, and records its binary identity without
+  persisting profile/configuration paths.
+- **BREAKING:** `ayx one workspace` now uses the canonical operator hierarchy:
+  `config`, `members`, `groups`, `cloud-configs`, and `transfer`. The former
+  flat workspace verbs are removed rather than retained as aliases; use the
+  nested spelling shown by `ayx one workspace --help`. The command catalog,
+  generated command surface, endpoint matrix, site documentation, and sweep
+  use the same tree.
+- **BREAKING:** the retired `ayx one flows` namespace is removed. Use
+  `ayx one workflows` for cloud-native workflow operations.
+
 ## 0.21.0 — 2026-09-12
 
 Promoted unchanged from `v0.21.0-rc.1` after its live Alteryx One read sweep.

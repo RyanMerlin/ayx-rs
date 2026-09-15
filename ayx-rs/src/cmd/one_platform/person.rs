@@ -55,7 +55,7 @@ pub(crate) fn execute(
         Some(OnePersonCommand::Detail { profile, id }) => {
             let id = crate::cmd::select::resolve_selector(
                 "person id",
-                "ayx one person list --output json",
+                "ayx one person list -o json",
                 id,
                 crate::cmd::select::SelectPolicy::from_runtime(runtime.no_input),
                 || {

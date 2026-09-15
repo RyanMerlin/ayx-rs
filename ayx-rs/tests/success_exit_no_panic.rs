@@ -14,7 +14,7 @@
 //!   fatal runtime error: thread local panicked on drop, aborting
 //!
 //! This corrupted the exit code of every *successful* live command on
-//! Windows (`ayx one flows list/count`, etc.) even though the command's own
+//! Windows (`ayx one workflows list/count`, etc.) even though the command's own
 //! result was correct — a serious problem for any scripting/CI usage.
 //!
 //! Two things were tried here, in order — both are worth knowing about,
@@ -88,7 +88,7 @@ fn config_home_with_mock_profile(base_url: &str) -> TempDir {
 fn successful_live_command_exits_zero_without_thread_local_panic() {
     let server = MockServer::start();
     server.mock(|when, then| {
-        when.method(GET).path("/v4/flows/count");
+        when.method(GET).path("/v4/workflows");
         then.status(200)
             .header("content-type", "application/json")
             .body(r#"{"count": 0}"#);
@@ -103,7 +103,7 @@ fn successful_live_command_exits_zero_without_thread_local_panic() {
             "--output",
             "json",
             "one",
-            "flows",
+            "workflows",
             "count",
             "--profile",
             "mock",
@@ -139,8 +139,8 @@ fn successful_live_command_exits_zero_without_thread_local_panic() {
         "expected a successful envelope\nstdout:\n{stdout}"
     );
     assert!(
-        stdout.contains("\"surface\": \"flow\""),
-        "expected surface flow\nstdout:\n{stdout}"
+        stdout.contains("\"surface\": \"workflow\""),
+        "expected surface workflow\nstdout:\n{stdout}"
     );
     assert!(
         stdout.contains("\"operation\": \"count\""),

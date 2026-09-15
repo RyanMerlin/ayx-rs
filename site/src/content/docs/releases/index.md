@@ -18,6 +18,17 @@ the default for interactive onboarding and normal human sign-in. See
 [Connecting](/connecting/) and [Identity & auth](/one/identity/) for the full
 setup and recovery rules.
 
+## v0.22.0
+
+**BREAKING:** `ayx one workspace` now uses the nested `config`, `members`,
+`groups`, `cloud-configs`, and `transfer` hierarchy; flat workspace verbs are
+removed. The legacy `ayx one flows` namespace is also removed in favor of
+`ayx one workflows`.
+
+Text failures now present a bounded, redacted error block before any recovered
+partial records; JSON and YAML retain the complete recursively redacted
+envelope. See the [release notes](/releases/v0220/) for upgrade details.
+
 ## v0.21.0
 
 **`ayx one jobs` is the canonical Job Library command family.** `jobs <JOB-ID>`

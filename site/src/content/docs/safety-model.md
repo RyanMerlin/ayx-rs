@@ -24,10 +24,10 @@ Run a mutating command without `--apply` and ayx prints a structured **dry-run**
 
 ```bash
 # Dry-run — shows the request, deletes nothing
-ayx one flows delete <id>
+ayx one workflows delete <id>
 
 # Commit it
-ayx one flows delete <id> --apply
+ayx one workflows delete <id> --apply
 ```
 
 That's what makes ayx safe to wire into scripts: a pipeline can run the dry-run form against production and never change anything by accident.
@@ -35,7 +35,7 @@ That's what makes ayx safe to wire into scripts: a pipeline can run the dry-run 
 For non-interactive automation, add `--yes` to skip the confirmation prompt destructive commands show in a terminal:
 
 ```bash
-ayx one flows delete <id> --apply --yes
+ayx one workflows delete <id> --apply --yes
 ```
 
 ## Audit artifacts

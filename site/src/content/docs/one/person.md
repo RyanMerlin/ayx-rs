@@ -14,12 +14,12 @@ sidebar:
 | `person list` | List all users |
 | `person current` | Show the user tied to the active profile |
 | `person detail <id>` | Show detail for a specific user |
-| `person create --body <json>` | Create a new user |
-| `person update <id> --body <json>` | Replace a user record (PUT) |
-| `person patch <id> --body <json>` | Partially update a user record (PATCH) |
+| `person create --body <FILE|JSON|->` | Create a new user |
+| `person update <id> --body <FILE|JSON|->` | Replace a user record (PUT) |
+| `person patch <id> --body <FILE|JSON|->` | Partially update a user record (PATCH) |
 | `person delete <id>` | Delete a user |
-| `person update-password --body <json>` | Update the current user's password |
-| `person password-reset-request --body <json>` | Send a password reset email |
+| `person update-password --body <FILE|JSON|->` | Update the current user's password |
+| `person password-reset-request --body <FILE|JSON|->` | Send a password reset email |
 
 ## Listing and inspecting users
 
@@ -41,7 +41,7 @@ ayx one person current
 ayx one person detail <id>
 
 # Machine-readable
-ayx --output json one person list --all
+ayx -o json one person list --all
 ```
 
 `--profile <name>` switches the target environment on commands that support it. Use `--max-pages <n>` to cap auto-pagination.
@@ -102,12 +102,14 @@ ayx one person delete <id> --apply --yes
 ### Update current user's password
 
 ```bash
-# Preview
-ayx one person update-password --body '{"currentPassword":"...","newPassword":"..."}'
+# Preview (Bash: keep passwords out of command arguments)
+cat password-change.json | ayx one person update-password --body -
+# PowerShell equivalent:
+# Get-Content -Raw password-change.json | ayx one person update-password --body -
 
 # Commit
 ayx one person update-password \
-  --body '{"currentPassword":"...","newPassword":"..."}' \
+  --body password-change.json \
   --apply
 ```
 
@@ -123,20 +125,20 @@ ayx one person password-reset-request \
   --apply
 ```
 
-This sends the reset email to the user. No `--yes` is required — it is not considered a destructive operation.
+This sends the reset email to the user. No `--yes` is required — it is not considered a destructive operation. For every `--body` flag, use a file, inline non-secret JSON, or `-` for piped stdin; inline values are visible in shell history and process listings.
 
 ## Automation patterns
 
 ```bash
 # Export all users as JSON for auditing
-ayx --output json one person list --all | jq '.data'
+ayx -o json one person list --all | jq '.data'
 
 # Get a user's ID by email
-ayx --output json one person list --all \
+ayx -o json one person list --all \
   | jq -r '.data[] | select(.email == "<email>") | .id'
 
 # Bulk delete: pipe IDs into xargs (dry-run first)
-ayx --output json one person list --all \
+ayx -o json one person list --all \
   | jq -r '.data[] | select(.someField == "value") | .id' \
   | xargs -I{} ayx one person delete {}
 

@@ -6,13 +6,18 @@ sidebar:
 ---
 
 The Job Library is Alteryx One's executable-unit surface. A Job Library entry — a *Job Group*
-identified by `JOB-ID` — is a workflow or set of workflows that runs together and produces
+identified by `JOB-GROUP-ID` — is a workflow or set of workflows that runs together and produces
 outputs. You can list, execute, cancel, and inspect Job Library entries from the CLI. Mutating
 commands are dry-run by default — add `--apply` to commit.
 
-`ayx one jobs <JOB-ID>` (no verb) inspects that aggregate job. The provider exposes no full
+`ayx one jobs <JOB-GROUP-ID>` (no verb) inspects that aggregate job. The provider exposes no full
 child-run detail endpoint of its own — the complete child records are returned by
-`ayx one jobs runs <JOB-ID>`.
+`ayx one jobs runs <JOB-GROUP-ID>`.
+
+When `ayx one workflows run <WORKFLOW-ULID>` starts a cloud-native workflow, the response
+contains both a `jobId` and a `jobgroupId`. Use `jobId` with `one workflows cancel`; use
+`jobgroupId` with `one jobs runs` to inspect the child workflow runs. There is no separate
+`one workflows runs` command because Job Group is the provider's run-history boundary.
 
 :::note[`ayx one job-groups` compatibility]
 `ayx one jobs` is the canonical, documented command family. `ayx one job-groups` is a hidden
@@ -26,22 +31,22 @@ scripts and automation should use `ayx one jobs`.
 
 | Command | What it does |
 |---|---|
-| `ayx one jobs <JOB-ID>` | Inspect an aggregate job (no verb) |
+| `ayx one jobs <JOB-GROUP-ID>` | Inspect an aggregate Job Group (no verb) |
 | `ayx one jobs list` | List Job Library entries |
 | `ayx one jobs count` | Count Job Library entries |
-| `ayx one jobs status <JOB-ID>` | Check the execution status of an aggregate job |
-| `ayx one jobs inputs <JOB-ID>` | List aggregate job inputs |
-| `ayx one jobs outputs <JOB-ID>` | List aggregate job outputs |
-| `ayx one jobs runs <JOB-ID>` | List every child run record for an aggregate job |
+| `ayx one jobs status <JOB-GROUP-ID>` | Check the execution status of an aggregate Job Group |
+| `ayx one jobs inputs <JOB-GROUP-ID>` | List aggregate Job Group inputs |
+| `ayx one jobs outputs <JOB-GROUP-ID>` | List aggregate Job Group outputs |
+| `ayx one jobs runs <JOB-GROUP-ID>` | List every child run for a Job Group execution |
 | `ayx one jobs execute` | Submit a Job Group from a JSON request body |
-| `ayx one jobs publish <JOB-ID>` | Publish job results to a target |
-| `ayx one jobs cancel <JOB-ID>` | Cancel a Job Library entry |
+| `ayx one jobs publish <JOB-GROUP-ID>` | Publish job results to a target |
+| `ayx one jobs cancel <JOB-GROUP-ID>` | Cancel a Job Library entry |
 
-Because a bare `JOB-ID` and a verb subcommand are two different invocation shapes, they cannot be
+Because a bare `JOB-GROUP-ID` and a verb subcommand are two different invocation shapes, they cannot be
 combined — `ayx one jobs 42 list` is a usage error. Pick one: `ayx one jobs 42` (aggregate lookup)
 or `ayx one jobs list` (list all entries). `--profile` goes after the verb on subcommand
-invocations (`ayx one jobs runs <JOB-ID> --profile <profile-id>`), and directly on a bare lookup
-(`ayx one jobs <JOB-ID> --profile <profile-id>`).
+invocations (`ayx one jobs runs <JOB-GROUP-ID> --profile <profile-id>`), and directly on a bare lookup
+(`ayx one jobs <JOB-GROUP-ID> --profile <profile-id>`).
 
 ## Listing Job Library entries
 
@@ -59,26 +64,26 @@ ayx one jobs list --profile <profile-id>
 ayx one jobs list --limit 50
 
 # Machine-readable
-ayx --output json one jobs list --all
+ayx -o json one jobs list --all
 ```
 
 ## Inspecting an aggregate job
 
 ```bash
-# Aggregate-job lookup (bare JOB-ID)
-ayx one jobs <JOB-ID>
+# Aggregate-job lookup (bare JOB-GROUP-ID)
+ayx one jobs <JOB-GROUP-ID>
 
 # Execution status
-ayx one jobs status <JOB-ID>
+ayx one jobs status <JOB-GROUP-ID>
 
 # Input parameters (useful before submitting)
-ayx one jobs inputs <JOB-ID>
+ayx one jobs inputs <JOB-GROUP-ID>
 
 # Outputs produced by the last run
-ayx one jobs outputs <JOB-ID>
+ayx one jobs outputs <JOB-GROUP-ID>
 
-# Every child run record
-ayx one jobs runs <JOB-ID>
+# Every child run record for a Job Group execution
+ayx one jobs runs <JOB-GROUP-ID>
 ```
 
 `inputs` tells you which parameters a Job Group accepts so you can build the correct submission
@@ -88,7 +93,9 @@ dedicated endpoint for that.
 
 ## Submitting a job
 
-`--body <FILE>` is a path to a JSON body file, not inline JSON:
+`--body <FILE|JSON|->` accepts a JSON file, inline non-secret JSON, or `-` for
+piped stdin. Inline values are visible in shell history and process listings;
+prefer a file or stdin for sensitive payloads:
 
 ```bash
 # Write the request body to a file
@@ -111,7 +118,7 @@ ayx one jobs execute --body body-with-inputs.json --apply
 
 ## Publishing results
 
-`--body <FILE>` is likewise a path to a JSON body file:
+`--body <FILE|JSON|->` accepts the same file, inline, and stdin sources:
 
 ```bash
 cat > publish-body.json <<'EOF'
@@ -119,10 +126,10 @@ cat > publish-body.json <<'EOF'
 EOF
 
 # Dry-run
-ayx one jobs publish <JOB-ID> --body publish-body.json
+ayx one jobs publish <JOB-GROUP-ID> --body publish-body.json
 
 # Commit
-ayx one jobs publish <JOB-ID> --body publish-body.json --apply
+ayx one jobs publish <JOB-GROUP-ID> --body publish-body.json --apply
 ```
 
 For profile and publication queries see [Results & publications](/one/jobs/results/).
@@ -131,10 +138,10 @@ For profile and publication queries see [Results & publications](/one/jobs/resul
 
 ```bash
 # Dry-run
-ayx one jobs cancel <JOB-ID>
+ayx one jobs cancel <JOB-GROUP-ID>
 
 # Commit (skips TTY prompt in CI)
-ayx one jobs cancel <JOB-ID> --apply --yes
+ayx one jobs cancel <JOB-GROUP-ID> --apply --yes
 ```
 
 Cancel is a best-effort operation. Jobs that have already completed are not affected.
@@ -144,10 +151,10 @@ Cancel is a best-effort operation. Jobs that have already completed are not affe
 Find all Job Library entries and show their status in one pass:
 
 ```bash
-ayx --output json one jobs list --all \
+ayx -o json one jobs list --all \
   | jq -r '.data.items[].id' \
   | while read -r id; do
-      STATUS=$(ayx --output json one jobs status "$id" | jq -r '.data.response')
+      STATUS=$(ayx -o json one jobs status "$id" | jq -r '.data.response')
       printf '%s\t%s\n' "$id" "$STATUS"
     done
 ```
@@ -159,7 +166,7 @@ ayx one jobs execute --body body.json --apply
 
 # Poll status
 while true; do
-  STATUS=$(ayx --output json one jobs status <JOB-ID> | jq -r '.data.response')
+  STATUS=$(ayx -o json one jobs status <JOB-GROUP-ID> | jq -r '.data.response')
   echo "$STATUS"
   [[ "$STATUS" == "Completed" || "$STATUS" == "Failed" ]] && break
   sleep 10

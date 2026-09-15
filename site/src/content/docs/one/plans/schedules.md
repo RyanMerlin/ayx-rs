@@ -25,7 +25,7 @@ Returns all schedules attached to the plan. Each schedule entry includes the rec
 ## JSON output
 
 ```bash
-ayx --output json one plans schedules <plan-id>
+ayx -o json one plans schedules <plan-id>
 ```
 
 The response follows the standard envelope:
@@ -46,16 +46,16 @@ The response follows the standard envelope:
 ### Check whether a plan has any active schedules
 
 ```bash
-ayx --output json one plans schedules <plan-id> \
+ayx -o json one plans schedules <plan-id> \
   | jq '[.data.items[] | select(.enabled == true)] | length'
 ```
 
 ### List all plans with their next run times
 
 ```bash
-ayx --output json one plans list --all | jq -r '.data.items[].id' \
+ayx -o json one plans list --all | jq -r '.data.items[].id' \
   | while IFS= read -r id; do
-      ayx --output json one plans schedules "$id" \
+      ayx -o json one plans schedules "$id" \
         | jq -r --arg id "$id" '.data.items[] | [$id, .nextFireDate] | @tsv'
     done
 ```

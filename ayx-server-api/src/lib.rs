@@ -1707,14 +1707,17 @@ fn request_json(
             let code = ayx_core::envelope::ErrorCode::from_http_status(status)
                 .map(|c| c.as_str())
                 .unwrap_or("internal");
-            bail!(
-                "api request failed [{}] status={} code={} error_code={} url={} body={}",
-                method,
-                status,
-                status_error_code(status),
-                code,
-                ayx_core::observability::redact_url(url),
-                ayx_core::observability::redact_json(&body_json)
+            return Err(
+                anyhow::Error::new(ayx_core::envelope::HttpStatusError::new(status)).context(
+                    format!(
+                        "api request failed [{}] code={} error_code={} url={} body={}",
+                        method,
+                        status_error_code(status),
+                        code,
+                        ayx_core::observability::redact_url(url),
+                        ayx_core::observability::redact_json(&body_json)
+                    ),
+                ),
             );
         }
 

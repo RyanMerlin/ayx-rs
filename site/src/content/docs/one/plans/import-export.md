@@ -1,11 +1,11 @@
 ---
 title: Import & export
-description: Move Alteryx One plans between environments using import and export commands.
+description: Export Alteryx One plans and track the provider-gated import contract.
 sidebar:
   order: 3
 ---
 
-Plan import and export let you move plans between Alteryx One workspaces — for example, promoting from development to production. The exported format is portable and can be committed to version control.
+Plan export produces a portable package that can be committed to version control. Import is retained as a discoverable command, but remains provider-contract-gated until its package input and upload route are verified.
 
 Mutating commands are dry-run by default — add `--apply` to commit.
 
@@ -14,7 +14,7 @@ Mutating commands are dry-run by default — add `--apply` to commit.
 | Command | What it does |
 |---|---|
 | `ayx one plans export` | Export a plan to a portable file |
-| `ayx one plans import` | Import a plan into the workspace |
+| `ayx one plans import` | Provider-contract-gated plan import |
 
 ## Export
 
@@ -26,41 +26,32 @@ ayx one plans export <plan-id>
 ayx one plans export <plan-id> --apply
 ```
 
-Unlike flow export, `plans export` does not take an `--output` path flag — the server controls the output location or returns the content inline. Use `--output json` to capture the full response including any returned artifact data.
+Unlike flow export, `plans export` does not take an `--output` path flag — the server controls the output location or returns the content inline. Use `-o json` to capture the full response including any returned artifact data.
 
 ## Import
 
-```bash
-# Dry-run
-ayx one plans import
+`one plans import` is currently contract-gated. The provider's package input
+mechanism is undocumented and the route is not live-verified, so the CLI
+returns a structured validation response without making a network call. Do
+not use it for an applied migration until the contract is verified.
 
-# Commit
-ayx one plans import --apply
-
-# Non-interactive (CI / scripts)
-ayx one plans import --apply --yes
-
-# Target a specific profile
-ayx one plans import --profile <name> --apply
-```
-
-In this version, `ayx one plans import --help` shows only the standard flags (`--profile`, `--apply`, `--yes`, and the diagnostic flags) — there is no `--body` or `--input`. If you need to automate plan imports, confirm the expected input mechanism for your Alteryx One version before scripting it.
+Use `one plans export` to capture the source package while the import contract
+is being resolved.
 
 ## Promote a plan between environments
 
 ```bash
 # 1. Export from dev
-ayx --output json --profile dev one plans export <plan-id> --apply \
+ayx -o json --profile dev one plans export <plan-id> --apply \
   > plan-export.json
 
-# 2. Import to prod
-ayx one plans import --profile prod --apply --yes
+# 2. Stop here until a release documents and verifies the provider import contract.
+#    `one plans import` currently returns validation without making a request.
 ```
 
 ## Related
 
 - [Plans](/one/plans/)
 - [Plan schedules](/one/plans/schedules/)
-- [Flow import & export](/one/flows/import-export/)
 - [Safety model](/safety-model/)
 - [Output & automation](/output-automation/)

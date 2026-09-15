@@ -88,7 +88,7 @@ A single profile can carry a separate token per workspace under `workspace_crede
 
 ```bash
 ayx one login --workspace-id <id>          # store that workspace's token
-ayx one workspace switch <id>              # make it active
+ayx one workspace use <id|gid|saved-name>  # make it active
 ```
 
 The active workspace's token is used for every One command until you switch again. `expected_workspace_id` guards mutating commands against running on the wrong workspace.
@@ -98,7 +98,7 @@ The active workspace's token is used for every One command until you switch agai
 `environments.yaml` holds several named environments in one file — `workspace_name`, `active_environment`, and an `environments` map. Switch for a single run:
 
 ```bash
-ayx --environment prod one flows list
+ayx --environment prod one workflows list
 ```
 
 Like `--output`, `--environment` is a global flag, so it can appear before or after the subcommand.

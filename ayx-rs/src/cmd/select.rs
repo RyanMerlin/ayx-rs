@@ -176,14 +176,14 @@ mod tests {
         };
         let err = resolve_selector(
             "workflow id",
-            "ayx one workflows list --output json",
+            "ayx one workflows list -o json",
             None,
             policy,
             never_fetch,
         )
         .unwrap_err();
         let missing = err.downcast_ref::<MissingSelector>().expect("typed error");
-        assert_eq!(missing.list_command, "ayx one workflows list --output json");
+        assert_eq!(missing.list_command, "ayx one workflows list -o json");
         assert!(err.to_string().starts_with("validation:"));
     }
 
@@ -217,8 +217,14 @@ mod tests {
             interactive_terminal: true,
         };
         assert!(!policy.may_prompt());
-        let err = resolve_selector("flow id", "ayx one flows list", None, policy, never_fetch)
-            .unwrap_err();
+        let err = resolve_selector(
+            "flow id",
+            "ayx one workflows list",
+            None,
+            policy,
+            never_fetch,
+        )
+        .unwrap_err();
         assert!(err.downcast_ref::<MissingSelector>().is_some());
     }
 

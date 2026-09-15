@@ -395,7 +395,7 @@ pub(crate) fn execute(
         OneConnectionsCommand::Detail { profile, id } => {
             let id = crate::cmd::select::resolve_selector(
                 "connection id",
-                "ayx one connections list --output json",
+                "ayx one connections list -o json",
                 id,
                 crate::cmd::select::SelectPolicy::from_runtime(runtime.no_input),
                 || {

@@ -1,10 +1,9 @@
 //! Alteryx One cloud-native workflows.
 //!
-//! These are NOT `one flows`. `one flows` is the Designer Cloud (Trifacta-derived)
-//! `/v4/flows` family, keyed by integer ids. Cloud-native workflows are the
-//! Alteryx One canvas product (the `cloud-native/workflows/{id}` web path), keyed by
-//! ULIDs, and live on a separate service: `/svc-workflow/api/vN`. A workspace can
-//! hold 85 cloud-native workflows while `GET /v4/flows` returns zero items.
+//! These are the Alteryx One canvas workflows (the `cloud-native/workflows/{id}`
+//! web path), keyed by ULIDs, and live on a separate service:
+//! `/svc-workflow/api/vN`. They are distinct from the on-prem Designer/Server
+//! workflow package surface reached through `ayx designer workflow`.
 //!
 //! Two quirks of that service shape this module, both live-verified 2026-07-26:
 //!
@@ -330,6 +329,71 @@ fn resolve_workflow_detail(assets_envelope: Envelope, id: &str) -> Envelope {
     )
 }
 
+/// Normalize graph data already returned by the workflow asset service.
+/// The exact provider object remains under `data.response`; this stable view
+/// avoids inventing a field schema when the service did not provide one.
+pub(crate) fn normalize_workflow_graph(response: &Value) -> Value {
+    fn graph_object(value: &Value) -> Option<&serde_json::Map<String, Value>> {
+        let object = value.as_object()?;
+        if ["nodes", "configurations", "ports", "connections", "edges"]
+            .iter()
+            .any(|key| object.contains_key(*key))
+        {
+            return Some(object);
+        }
+        [
+            "graph",
+            "workflowGraph",
+            "workflow",
+            "definition",
+            "content",
+        ]
+        .iter()
+        .find_map(|key| object.get(*key).and_then(graph_object))
+    }
+
+    fn bucket(object: Option<&serde_json::Map<String, Value>>, names: &[&str]) -> Value {
+        names
+            .iter()
+            .find_map(|name| object.and_then(|object| object.get(*name)).cloned())
+            .unwrap_or_else(|| Value::Array(Vec::new()))
+    }
+
+    let object = graph_object(response);
+    let mut graph = serde_json::Map::new();
+    graph.insert("available".to_string(), Value::Bool(object.is_some()));
+    graph.insert("nodes".to_string(), bucket(object, &["nodes", "Nodes"]));
+    graph.insert(
+        "configurations".to_string(),
+        bucket(object, &["configurations", "configuration", "configs"]),
+    );
+    graph.insert(
+        "ports".to_string(),
+        bucket(object, &["ports", "inputPorts", "outputPorts"]),
+    );
+    graph.insert(
+        "connections".to_string(),
+        bucket(object, &["connections", "edges"]),
+    );
+    if let Some(schema) = object.and_then(|object| {
+        ["schema", "inputSchema", "outputSchema"]
+            .iter()
+            .find_map(|key| object.get(*key).cloned())
+    }) {
+        graph.insert("schema".to_string(), schema);
+        graph.insert(
+            "schema_source".to_string(),
+            Value::String("provider".to_string()),
+        );
+    } else {
+        graph.insert(
+            "schema_source".to_string(),
+            Value::String("not-provided".to_string()),
+        );
+    }
+    Value::Object(graph)
+}
+
 /// Body for `POST /svc-workflow/api/v2/workflows/{id}/share`.
 ///
 /// Recovered live from the service's own schema-validation errors — this shape
@@ -598,8 +662,12 @@ pub(crate) fn execute(
             if !envelope.ok {
                 return Ok(envelope);
             }
-            let (count, count_source) =
-                synthesize_workflow_count(envelope.data.get("response").unwrap_or(&Value::Null));
+            let response = envelope
+                .data
+                .get("response")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let (count, count_source) = synthesize_workflow_count(&response);
             Envelope::ok_with_data(
                 format!("workflow count ok ({count})"),
                 json!({
@@ -608,6 +676,7 @@ pub(crate) fn execute(
                     "count": count,
                     "count_source": count_source,
                     "detail_source": COUNT_SOURCE,
+                    "response": response,
                 }),
             )
         }
@@ -618,7 +687,7 @@ pub(crate) fn execute(
         } => {
             let id = crate::cmd::select::resolve_selector(
                 "workflow id",
-                "ayx one workflows list --output json",
+                "ayx one workflows list -o json",
                 id,
                 crate::cmd::select::SelectPolicy::from_runtime(runtime.no_input),
                 || {
@@ -645,6 +714,25 @@ pub(crate) fn execute(
         OneWorkflowsCommand::Dependencies { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
             fetch_dependencies(&config, &id)?
+        }
+        OneWorkflowsCommand::Graph { profile, id } => {
+            let config = runtime.load_profile_lenient(profile.as_deref())?;
+            let detail = resolve_workflow_detail(fetch_all_assets(&config)?, &id);
+            if !detail.ok {
+                return Ok(detail);
+            }
+            let response = detail.data.get("response").cloned().unwrap_or(Value::Null);
+            let mut data = detail.data;
+            data["operation"] = Value::String("graph".to_string());
+            let graph = normalize_workflow_graph(&response);
+            let available = graph["available"].as_bool().unwrap_or(false);
+            data["graph"] = graph;
+            let message = if available {
+                format!("workflow graph ok ({id})")
+            } else {
+                format!("workflow graph unavailable ({id}); provider did not supply graph data")
+            };
+            Envelope::ok_with_data(message, data)
         }
         OneWorkflowsCommand::Engines { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
@@ -742,7 +830,7 @@ pub(crate) fn execute(
         OneWorkflowsCommand::Delete { profile, id } => {
             let id = crate::cmd::select::resolve_selector(
                 "workflow id",
-                "ayx one workflows list --output json",
+                "ayx one workflows list -o json",
                 id,
                 crate::cmd::select::SelectPolicy::from_runtime(runtime.no_input),
                 || {
@@ -960,11 +1048,37 @@ fn resolve_workflow_version(config: &ayx_core::profile::Config, id: &str) -> Res
 mod tests {
     use super::{
         WORKFLOW_CANCEL_ENDPOINT, WORKFLOW_RUN_ENDPOINT, add_workflow_completeness,
-        enrich_workflows_with_governance, find_workflow_asset, resolve_workflow_detail,
-        synthesize_workflow_count,
+        enrich_workflows_with_governance, find_workflow_asset, normalize_workflow_graph,
+        resolve_workflow_detail, synthesize_workflow_count,
     };
     use ayx_core::envelope::{Envelope, ErrorCode};
     use serde_json::json;
+
+    #[test]
+    fn graph_normalization_keeps_raw_buckets_and_only_provider_schema() {
+        let graph = normalize_workflow_graph(&json!({
+            "workflow": {
+                "nodes": [{"id": "n1"}],
+                "configurations": [{"nodeId": "n1", "value": "x"}],
+                "ports": [{"id": "p1"}],
+                "edges": [{"from": "p1", "to": "p2"}],
+                "inputSchema": {"type": "object"}
+            }
+        }));
+        assert_eq!(graph["nodes"][0]["id"], "n1");
+        assert_eq!(graph["connections"][0]["from"], "p1");
+        assert_eq!(graph["schema_source"], "provider");
+        assert_eq!(graph["schema"]["type"], "object");
+
+        let without_schema = normalize_workflow_graph(&json!({"nodes": []}));
+        assert_eq!(without_schema["available"], true);
+        assert_eq!(without_schema["schema_source"], "not-provided");
+        assert!(without_schema.get("schema").is_none());
+
+        let unavailable = normalize_workflow_graph(&json!({"id": "workflow-1"}));
+        assert_eq!(unavailable["available"], false);
+        assert_eq!(unavailable["nodes"], serde_json::json!([]));
+    }
 
     #[test]
     fn workflow_lookup_is_an_exact_case_sensitive_match() {

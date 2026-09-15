@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-Schedules define when workflows, flows, plans, or Auto Insights tasks run automatically in Alteryx One. You can manage their full lifecycle from the CLI. Mutating commands are dry-run by default — add `--apply` to commit; applied schedule mutations also require confirmation or `--yes`.
+Schedules define when supported Alteryx One assets run automatically. You can manage their lifecycle from the CLI. Mutating commands are dry-run by default — add `--apply` to commit; applied schedule mutations also require confirmation or `--yes`.
 
 > **Enterprise tier required.** Scheduling endpoints return 404 on some workspace tiers. Commands are present in all builds but will only succeed on enterprise-tier accounts.
 
@@ -16,7 +16,8 @@ Schedules define when workflows, flows, plans, or Auto Insights tasks run automa
 | `ayx one scheduling list` | List all schedules |
 | `ayx one scheduling count` | Count schedules |
 | `ayx one scheduling detail` | Inspect a single schedule |
-| `ayx one scheduling create --body <file>` | Create a schedule from JSON |
+| `ayx one scheduling create workflow <workflow-id> daily --name <name>` | Create a provider-verified daily workflow schedule |
+| `ayx one scheduling create --body <file>` | Create a schedule from raw JSON |
 | `ayx one scheduling update <id> --body <file>` | Replace a schedule definition |
 | `ayx one scheduling enable` | Enable a schedule |
 | `ayx one scheduling disable` | Disable a schedule |
@@ -40,7 +41,7 @@ ayx one scheduling list --profile <profile-id>
 ayx one scheduling list --limit 50
 
 # Machine-readable
-ayx --output json one scheduling list --all
+ayx -o json one scheduling list --all
 ```
 
 ## Counting schedules
@@ -48,7 +49,7 @@ ayx --output json one scheduling list --all
 ```bash
 ayx one scheduling count
 
-ayx --output json one scheduling count
+ayx -o json one scheduling count
 ```
 
 Useful for a quick health check — verify the number of active schedules hasn't changed unexpectedly.
@@ -58,7 +59,7 @@ Useful for a quick health check — verify the number of active schedules hasn't
 ```bash
 ayx one scheduling detail <id>
 
-ayx --output json one scheduling detail <id>
+ayx -o json one scheduling detail <id>
 ```
 
 `detail` returns the full schedule record including the cron expression, target job group, enabled state, and last/next run times.
@@ -110,11 +111,20 @@ workflow task, the shape is:
 ```
 
 ```bash
+ayx one scheduling create workflow <workflow-ulid> daily \
+  --name "Daily workflow" --timezone America/Denver --hour 6 --minute 0
+
 ayx one scheduling create --body schedule.json
 ayx one scheduling create --body schedule.json --apply --yes
 ayx one scheduling update <id> --body schedule.json --apply --yes
 ayx one scheduling delete <id> --apply --yes
 ```
+
+The typed form currently promotes only the live-verified workflow-plus-daily
+combination. Weekly, monthly, one-time, plan, job-group, and legacy flow
+forms remain available through raw `--body` until an authorized disposable
+canary verifies their provider contracts. Use a file or stdin for sensitive
+payloads; inline JSON is visible in process arguments and shell history.
 
 Use a future validity window for disposable tests so the schedule cannot run during validation.
 
@@ -123,14 +133,14 @@ Use a future validity window for disposable tests so the schedule cannot run dur
 Audit all enabled schedules:
 
 ```bash
-ayx --output json one scheduling list --all \
+ayx -o json one scheduling list --all \
   | jq -r '.data.items[] | select(.enabled == true) | [.id, .name, .nextFireDate] | @tsv'
 ```
 
 Disable every schedule in a profile before a maintenance window:
 
 ```bash
-ayx --output json one scheduling list --all --profile <profile-id> \
+ayx -o json one scheduling list --all --profile <profile-id> \
   | jq -r '.data.items[] | select(.enabled == true) | .id' \
   | xargs -I{} ayx one scheduling disable {} --apply --yes
 ```
@@ -138,7 +148,7 @@ ayx --output json one scheduling list --all --profile <profile-id> \
 Re-enable them after maintenance:
 
 ```bash
-ayx --output json one scheduling list --all --profile <profile-id> \
+ayx -o json one scheduling list --all --profile <profile-id> \
   | jq -r '.data.items[] | select(.enabled == false) | .id' \
   | xargs -I{} ayx one scheduling enable {} --apply --yes
 ```
@@ -146,7 +156,7 @@ ayx --output json one scheduling list --all --profile <profile-id> \
 Count active vs inactive schedules for a status report:
 
 ```bash
-ayx --output json one scheduling list --all | jq '
+ayx -o json one scheduling list --all | jq '
   .data.items | {
     total: length,
     enabled: (map(select(.enabled == true)) | length),

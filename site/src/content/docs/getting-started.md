@@ -187,14 +187,14 @@ ayx whoami
 Want machine-readable output? Ask for JSON. `--output` is a global flag — it can appear anywhere on the command line, before or after the subcommand.
 
 ```bash
-ayx one workspace current --output json
+ayx one workspace current -o json
 ```
 
 ## Interactive helpers
 
 `ayx one open <kind> [id]` opens the relevant page in the Alteryx One web console — a workspace or a workflow — right from your terminal. Pass `--print` to get the URL instead of launching a browser, which is handy over SSH.
 
-When you omit the id on `ayx one workflows detail` or `ayx one workflows delete`, or on `detail` for flows, connections, person, or plans (or on the hidden `ayx one job-groups detail` compatibility alias — the canonical `ayx one jobs <JOB-ID>` requires the id), `ayx` opens an interactive picker over the matching list. Off a terminal, or with `--no-input`, the same omission is a `validation` error whose `remediation.commands` names the list command to run instead.
+When you omit the id on `ayx one workflows detail` or `ayx one workflows delete`, or on `detail` for connections, person, or plans (or on the hidden `ayx one job-groups detail` compatibility alias — the canonical `ayx one jobs <JOB-GROUP-ID>` requires the id), `ayx` opens an interactive picker over the matching list. Off a terminal, or with `--no-input`, the same omission is a `validation` error whose `remediation.commands` names the list command to run instead.
 
 ## Where to go next
 

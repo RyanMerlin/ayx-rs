@@ -118,7 +118,7 @@ fn ayx_version_renders() {
 #[test]
 fn ayx_apply_is_global_flag() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["one", "flows", "list", "--help"])
+        .args(["one", "workflows", "list", "--help"])
         .output()
         .expect("ayx binary should run");
     assert!(output.status.success());
@@ -182,7 +182,7 @@ fn catalog_surface_lists_core_one_commands() {
     assert!(names.contains(&"one doctor auth"));
     assert!(names.contains(&"one doctor discover"));
     assert!(names.contains(&"one plans list"));
-    assert!(names.contains(&"one flows list"));
+    assert!(names.contains(&"one workflows list"));
     assert!(names.contains(&"one connections list"));
     assert!(names.contains(&"discover"));
 }
@@ -320,12 +320,27 @@ fn one_workspace_help_renders_governance_actions() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("admins"));
-    assert!(stdout.contains("invite-users"));
-    assert!(stdout.contains("remove-user"));
-    assert!(stdout.contains("suspend-users"));
-    assert!(stdout.contains("unsuspend-users"));
+    assert!(stdout.contains("config"));
+    assert!(stdout.contains("members"));
+    assert!(stdout.contains("groups"));
+    assert!(stdout.contains("cloud-configs"));
     assert!(stdout.contains("transfer"));
+    assert!(stdout.contains("use"));
+    assert!(!stdout.contains("invite-users"));
+    assert!(!stdout.contains("remove-user"));
+    assert!(!stdout.contains("suspend-users"));
+
+    let members = Command::new(env!("CARGO_BIN_EXE_ayx"))
+        .args(["one", "workspace", "members", "--help"])
+        .output()
+        .expect("ayx binary should run");
+    assert!(members.status.success());
+    let members_stdout = String::from_utf8_lossy(&members.stdout);
+    assert!(members_stdout.contains("admins"));
+    assert!(members_stdout.contains("invite"));
+    assert!(members_stdout.contains("remove"));
+    assert!(members_stdout.contains("suspend"));
+    assert!(members_stdout.contains("unsuspend"));
 }
 
 #[test]
@@ -428,30 +443,16 @@ fn one_connections_connector_metadata_overrides_create_help_renders_connector_ar
 }
 
 #[test]
-fn one_flows_delete_help_renders_positional_id() {
+fn one_workflows_delete_help_renders_positional_id() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["one", "flows", "delete", "--help"])
+        .args(["one", "workflows", "delete", "--help"])
         .output()
         .expect("ayx binary should run");
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("<ID>"));
+    assert!(stdout.contains("[ID]"));
     assert!(!stdout.contains("--flow-id"));
-    assert!(stdout.contains("--apply"));
-}
-
-#[test]
-fn one_flows_folders_delete_help_renders_positional_id() {
-    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["one", "flows", "folders", "delete", "--help"])
-        .output()
-        .expect("ayx binary should run");
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("<ID>"));
-    assert!(!stdout.contains("--folder-id"));
     assert!(stdout.contains("--apply"));
 }
 
@@ -802,26 +803,23 @@ fn catalog_run_smoke() {
 // These four commands were renamed to `--output-file` / `--output-path` in the
 // v0.10.0 hardening pass. The tests verify the collision cannot silently regress.
 
-/// Guard: `one flows export` uses `--output-file`, not `--output`.
-/// The clap collision fires before network calls, so we only need `--help`.
+/// Guard that the current workflow surface parses the global output flag.
 #[test]
-fn flows_export_output_file_flag_no_clap_panic() {
-    assert_no_clap_panic(&["--output", "json", "one", "flows", "export", "--help"]);
+fn workflows_delete_output_flag_no_clap_panic() {
+    assert_no_clap_panic(&["--output", "json", "one", "workflows", "delete", "--help"]);
 }
 
 #[test]
-fn flows_export_help_shows_output_file_not_output() {
+fn retired_flows_command_is_rejected() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["one", "flows", "export", "--help"])
+        .args(["one", "flows", "list"])
         .output()
         .expect("ayx binary should run");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("--output-file"),
-        "`one flows export --help` must list --output-file"
-    );
-    // The local flag must not shadow the global --output flag id.
-    // If --output appears it must be the global flag description, not a local one.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(stdout.is_empty());
+    assert!(stderr.contains("flows"));
 }
 
 /// Guard: `server system-info` uses `--output-file`.
@@ -915,7 +913,7 @@ fn tools_workspace_init_creates_output_file() {
     assert!(out.exists(), "output file should have been written");
 }
 
-/// Functional smoke: `server system-info --output-file <tmp>` with global `--output json`.
+/// Functional smoke: `server system-info --output-file <tmp>` with global `-o json`.
 /// This command reads from the local runtime settings; it may fail if no Alteryx Server
 /// is present, but it MUST NOT panic.
 #[test]
@@ -1135,7 +1133,7 @@ fn canonical_error_envelope_carries_error_text_off_tty() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([
             "one",
-            "flows",
+            "workflows",
             "list",
             "--profile",
             "definitely-not-a-profile",
@@ -1158,7 +1156,7 @@ fn jq_applies_on_the_err_path() {
     let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
         .args([
             "one",
-            "flows",
+            "workflows",
             "list",
             "--profile",
             "definitely-not-a-profile",
@@ -1328,23 +1326,7 @@ fn omitted_workflow_id_off_tty_names_the_list_command() {
     assert_eq!(envelope["error_code"], "validation");
     assert_eq!(
         envelope["remediation"]["commands"][0],
-        "ayx one workflows list --output json"
-    );
-}
-
-#[test]
-fn omitted_flow_id_off_tty_names_the_list_command() {
-    let output = Command::new(env!("CARGO_BIN_EXE_ayx"))
-        .args(["one", "flows", "detail", "--no-input", "--output", "json"])
-        .output()
-        .expect("ayx binary should run");
-
-    assert_eq!(output.status.code(), Some(2));
-    let envelope: serde_json::Value =
-        serde_json::from_str(String::from_utf8_lossy(&output.stderr).trim()).unwrap();
-    assert_eq!(
-        envelope["remediation"]["commands"][0],
-        "ayx one flows list --output json"
+        "ayx one workflows list -o json"
     );
 }
 
@@ -1547,10 +1529,10 @@ fn jobs_bare_id_and_each_subcommand_still_parse_and_dispatch() {
 /// `Jobs` variant locked clap out of subcommand parsing as soon as ANY other
 /// arg was seen ahead of the verb -- including global flags (`--output`,
 /// `--no-input`, all `global = true`) that naturally appear between `jobs`
-/// and the verb. `ayx one jobs --output json list` silently became a detail
+/// and the verb. `ayx one jobs -o json list` silently became a detail
 /// lookup of JOB-ID `"list"` instead of dispatching to the `list`
-/// subcommand; `ayx one jobs --output json runs 42` and `ayx one jobs
-/// --output json execute --body <file>` became clap "unexpected argument"
+/// subcommand; `ayx one jobs -o json runs 42` and `ayx one jobs
+/// -o json execute --body <file>` became clap "unexpected argument"
 /// errors. These must all parse and dispatch to the correct subcommand,
 /// proven here by the envelope's `command` (or, if there is no live
 /// profile, by never seeing a clap usage error).

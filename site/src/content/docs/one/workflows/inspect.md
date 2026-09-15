@@ -17,7 +17,7 @@ The `ayx one workflows` inspection commands expose a cloud-native workflow and i
 | `ayx one workflows tools` | `--env` | List tools available to cloud-native workflows |
 | `ayx one workflows assets` | `--profile`, `--env`, `--limit`, `--page-token`, `--all`, `--max-pages` | List the richer workflow-asset projection |
 
-Every command on this page is read-only, so `--apply` is a no-op here. The global `--output`, `--verbose`, `--debug`, and `--no-verify-tls` flags all apply. Use `--output json` for automation, `--env <ENVIRONMENT_FLAG>` to select a named environment, and `--profile <name>` on the leaves that expose it.
+Every command on this page is read-only, so `--apply` is a no-op here. The global `--output`, `--verbose`, `--debug`, and `--no-verify-tls` flags all apply. Use `-o json` for automation, `--env <ENVIRONMENT_FLAG>` to select a named environment, and `--profile <name>` on the leaves that expose it.
 
 ## Workflow detail
 
@@ -67,21 +67,21 @@ Fetches the richer `/svc-workflow` asset projection used for detail resolution a
 
 ## Known limitations
 
-- In text mode, `tools`, `engines`, and `dependencies` render nested response data as one unformatted line. Use `--output json` for those three commands when you need to inspect or process the nested structure.
+- In text mode, `tools`, `engines`, and `dependencies` render nested response data as one unformatted line. Use `-o json` for those three commands when you need to inspect or process the nested structure.
 
 ## Automation patterns
 
 ```bash
 # Resolve a workflow id by name, then inspect it
-id=$(ayx --output json one workflows list --all \
+id=$(ayx -o json one workflows list --all \
   | jq -r '.data.items[] | select(.name == "Q3 Revenue Rollup") | .id')
-ayx --output json one workflows detail "$id" --include-dependencies | jq '.data'
+ayx -o json one workflows detail "$id" --include-dependencies | jq '.data'
 
 # Pull every name referenced in the dependency tree, whatever its nesting
-ayx --output json one workflows dependencies "$id" | jq -r '.data | .. | .name? // empty'
+ayx -o json one workflows dependencies "$id" | jq -r '.data | .. | .name? // empty'
 
 # Confirm whether detail came from a server route or a client-side synthesis
-ayx --output json one workflows detail "$id" | jq '.data.detail_source'
+ayx -o json one workflows detail "$id" | jq '.data.detail_source'
 ```
 
 ## Related

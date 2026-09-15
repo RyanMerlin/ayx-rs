@@ -22,6 +22,11 @@ param(
     [string]$ConnectorSlug = "gsheetsuser",
     [string]$LogDirectory = $env:TEMP,
 
+    # Refuse to run a release acceptance sweep against whichever `ayx` happens
+    # to be on PATH. The caller supplies the release/package version expected
+    # from the selected artifact (for example `0.22.0`).
+    [string]$ExpectedVersion,
+
     # Assert that the profile is an administrator. Permission-boundary
     # leniency is switched off: a 403 anywhere then counts as a real failure,
     # because an administrator should not be denied.
@@ -39,7 +44,7 @@ The JSON summary log contains only command labels, exit codes, and timing. API
 response bodies stay on the console for reviewer inspection unless `-Quiet` is
 used for an unattended status-only pass.
 
-Designer Cloud's legacy `ayx one flows` family is intentionally excluded from
+Designer Cloud's legacy `ayx one workflows` family is intentionally excluded from
 this acceptance sweep. Cloud-native `ayx one workflows` is the One workflow
 surface under test.
 #>
@@ -49,6 +54,14 @@ $ErrorActionPreference = "Stop"
 
 if (-not (Test-Path -LiteralPath $BinaryPath -PathType Leaf)) {
     throw "ayx binary not found: $BinaryPath"
+}
+$resolvedBinary = (Resolve-Path -LiteralPath $BinaryPath).Path
+$binaryIdentity = (& $resolvedBinary --version 2>&1 | Out-String).Trim()
+if ([string]::IsNullOrWhiteSpace($binaryIdentity)) {
+    throw "could not determine ayx binary identity from: $resolvedBinary"
+}
+if ($ExpectedVersion -and $binaryIdentity -notmatch "(?:^|\s)v?$([regex]::Escape($ExpectedVersion))(?:\s|$)") {
+    throw "ayx version mismatch: expected '$ExpectedVersion', selected '$binaryIdentity' at $resolvedBinary"
 }
 if (-not (Test-Path -LiteralPath $ConfigHome -PathType Container)) {
     throw "AYX_CONFIG_HOME does not exist: $ConfigHome"
@@ -60,7 +73,6 @@ if (-not (Test-Path -LiteralPath $LogDirectory -PathType Container)) {
     New-Item -ItemType Directory -Path $LogDirectory -Force | Out-Null
 }
 
-$resolvedBinary = (Resolve-Path -LiteralPath $BinaryPath).Path
 $env:AYX_CONFIG_HOME = (Resolve-Path -LiteralPath $ConfigHome).Path
 $runStarted = Get-Date
 $results = [System.Collections.Generic.List[object]]::new()
@@ -106,7 +118,7 @@ function Invoke-OneRead {
         # Network AND Upstream all to 6, so accepting exit 6 to allow an
         # expected not-found silently also accepts a connection reset, a 502
         # and a 429. The error_code is exact and is reported in both --output
-        # text and --output json.
+        # text (`Error code: not_found`) and -o json.
         [string]$ExpectedErrorCode,
 
         # This command reads a resource the sweep profile may legitimately not
@@ -138,7 +150,7 @@ function Invoke-OneRead {
     }
 
     # The CLI reports its classification as `error_code` in every output mode:
-    # `"error_code": "not_found"` under --output json, `error_code: not_found`
+    # `"error_code": "not_found"` under -o json, `Error code: not_found`
     # under --output text. That is the exact signal; read it first.
     #
     # Prefer parsing the envelope. A substring search sees decoys: a nested
@@ -157,12 +169,10 @@ function Invoke-OneRead {
         # "  key: value" lines, so an upstream body echoed under `body_preview`
         # sorts BEFORE the envelope's own `error_code`. A substring search finds
         # that decoy first: a 502 whose body happens to contain
-        # `"error_code": "permission_denied"` was read as a denial. Anchor to the
-        # start of a line so only the CLI's own field can match -- the decoy is
-        # always mid-line, after `body_preview:`. That holds because text mode
-        # escapes control characters in provider strings (a newline prints as
-        # `\n`), so a body cannot start a line of its own.
-        if ($outputText -match '(?m)^\s*error_code:\s*([a-z_]+)\s*$') {
+        # `"error_code": "permission_denied"` was read as a denial. Match the
+        # fixed top-level error-block label exactly. Provider values cannot
+        # impersonate this line because nested output is indented or escaped.
+        if ($outputText -match '(?m)^Error code:\s*([a-z_]+)\s*$') {
             $reportedErrorCode = $Matches[1]
         }
     }
@@ -262,7 +272,7 @@ Invoke-OneRead "One doctor auth" (OneArgs @("doctor", "auth"))
 Invoke-OneRead "One doctor identity" (OneArgs @("doctor", "identity"))
 Invoke-OneRead "One doctor discovery" (OneArgs @("doctor", "discover"))
 
-# Workspace and membership. `person list` and `workspace people` are both
+# Workspace and membership. `person list` and `workspace members list` are both
 # deliberately run while their duplication/consolidation is tracked.
 Invoke-OneRead "workspace current" (OneArgs @("workspace", "current"))
 Invoke-OneRead "workspace current via GID selector" (OneArgs @("workspace", "current", "--workspace", $WorkspaceGid))
@@ -271,13 +281,12 @@ Invoke-OneRead "workspace list" (OneArgs @("workspace", "list"))
 # detail record is an administrator entitlement. Re-run the sweep with
 # -AdministratorFixture to require it to succeed instead.
 Invoke-OneRead "workspace detail" (OneArgs @("workspace", "detail", $WorkspaceId)) -PermissionBoundary
-Invoke-OneRead "workspace current configuration" (OneArgs @("workspace", "current-configuration"))
-Invoke-OneRead "workspace configuration schema" (OneArgs @("workspace", "current-configuration-schema"))
-Invoke-OneRead "workspace people" (OneArgs @("workspace", "people"))
-Invoke-OneRead "workspace admins" (OneArgs @("workspace", "admins"))
-Invoke-OneRead "workspace groups" (OneArgs @("workspace", "groups"))
-Invoke-OneRead "workspace global groups" (OneArgs @("workspace", "groups-global"))
-Invoke-OneRead "workspace cloud configs" (OneArgs @("workspace", "cloud-configs", $WorkspaceId))
+Invoke-OneRead "workspace configuration" (OneArgs @("workspace", "config", "get"))
+Invoke-OneRead "workspace configuration schema" (OneArgs @("workspace", "config", "schema"))
+Invoke-OneRead "workspace members" (OneArgs @("workspace", "members", "list"))
+Invoke-OneRead "workspace admins" (OneArgs @("workspace", "members", "admins"))
+Invoke-OneRead "workspace groups" (OneArgs @("workspace", "groups", "list"))
+Invoke-OneRead "workspace cloud configs" (OneArgs @("workspace", "cloud-configs", "list"))
 Invoke-OneRead "person current" (OneArgs @("person", "current"))
 Invoke-OneRead "person list" (OneArgs @("person", "list", "--all", "--output-limit", "5"))
 Invoke-OneRead "managed IAM roles" (OneArgs @("role", "list"))
@@ -364,12 +373,12 @@ $passedCount = @($results | Where-Object { $_.status -eq "passed" }).Count
 $boundaryCount = @($results | Where-Object { $_.status -eq "expected_unprivileged" }).Count
 $failedCount = @($results | Where-Object { $_.status -eq "failed" }).Count
 $summary = [pscustomobject]@{
-    schema = "ayx.one-read-sweep.v2"
+    schema = "ayx.one-read-sweep.v3"
     started_at = $runStarted.ToString("o")
     finished_at = $runFinished.ToString("o")
     binary = $resolvedBinary
-    config_home = $env:AYX_CONFIG_HOME
-    profile = $Profile
+    binary_identity = $binaryIdentity
+    expected_version = if ($ExpectedVersion) { $ExpectedVersion } else { $null }
     output = $Output
     administrator_fixture = [bool]$AdministratorFixture
     total = $results.Count

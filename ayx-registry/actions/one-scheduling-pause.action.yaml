@@ -17,7 +17,7 @@ trigger:
     - change-management
 steps:
   - kind: command
-    cmd: "ayx one scheduling list --all --output json"
+    cmd: "ayx one scheduling list --all -o json"
     why: "Snapshot of every schedule before we touch state. Save the envelope as the rollback ledger."
   - kind: note
     text: "Save the JSON above to ./schedules-pre-pause.json before continuing. Do this even if --apply is set — the executor's per-step audit artifact is a backup, not a substitute."
@@ -31,7 +31,7 @@ steps:
       the gate fires per call.
 validations:
   - describe: "Every schedule referenced in the snapshot reports paused=true (or equivalent) in a follow-up list."
-    check_cmd: "ayx one scheduling list --all --output json"
+    check_cmd: "ayx one scheduling list --all -o json"
 rollback: |
   Use the snapshot file ./schedules-pre-pause.json to identify which
   schedules were active. Run `one.scheduling.resume` against those ids

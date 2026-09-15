@@ -36,10 +36,10 @@ ayx one connections list --profile <profile-id>
 ayx one connections list --limit 25
 
 # Machine-readable output
-ayx --output json one connections list --all
+ayx -o json one connections list --all
 ```
 
-The `--all` flag follows pagination automatically and returns every record. For large environments pair it with `--output json` and pipe into `jq`.
+The `--all` flag follows pagination automatically and returns every record. For large environments pair it with `-o json` and pipe into `jq`.
 
 ## Inspecting a connection
 
@@ -71,18 +71,22 @@ ayx one connections create --body '{"name":"My DB","type":"SQLServer","...":{}}'
 ayx one connections create --body '{"name":"My DB","type":"SQLServer","...":"{}"}' --apply
 ```
 
-The `--body` value is a JSON string. For larger payloads use a file and process substitution:
+`--body` accepts a JSON file, inline JSON, or `-` for piped stdin. Inline JSON is
+visible in shell history and process listings; keep credentials in a protected
+file or pipe the file through stdin:
 
 ```bash
-ayx one connections create --body "$(cat connection.json)" --apply
+ayx one connections create --body connection.json --apply
+# Or, without placing the payload in argv:
+cat connection.json | ayx one connections create --body - --apply
 ```
 
 To generate a starting body for a connector type, use `connector-metadata template`:
 
 ```bash
-ayx one connections connector-metadata template <slug> --output json > body.json
+ayx one connections connector-metadata template <slug> -o json > body.json
 # edit body.json, then:
-ayx one connections create --body "$(cat body.json)" --apply
+ayx one connections create --body body.json --apply
 ```
 
 See [Connector metadata](/one/connections/connector-metadata/) for details.
@@ -114,16 +118,16 @@ ayx one connections delete <id> --apply --yes
 Parse the connection ID from a list to use in downstream commands:
 
 ```bash
-ayx --output json one connections list --all \
+ayx -o json one connections list --all \
   | jq -r '.data[] | select(.name == "My DB") | .id'
 ```
 
 Audit connection health across all connections:
 
 ```bash
-ayx --output json one connections list --all \
+ayx -o json one connections list --all \
   | jq -r '.data[].id' \
-  | xargs -I{} ayx --output json one connections status {}
+  | xargs -I{} ayx -o json one connections status {}
 ```
 
 ## Related

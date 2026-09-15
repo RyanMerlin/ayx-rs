@@ -19,16 +19,16 @@ trigger:
     - diagnose
 steps:
   - kind: command
-    cmd: "ayx server auth status --profile <profile> --output json"
+    cmd: "ayx server auth status --profile <profile> -o json"
     why: "Snapshot of the configured auth mode + posture."
   - kind: command
-    cmd: "ayx server auth diagnose saml --metadata-url <idp-metadata-url> --output json"
+    cmd: "ayx server auth diagnose saml --metadata-url <idp-metadata-url> -o json"
     why: "Fetch and validate IdP metadata against Server's expectations."
   - kind: command
-    cmd: "ayx server auth diagnose certificate --profile <profile> --output json"
+    cmd: "ayx server auth diagnose certificate --profile <profile> -o json"
     why: "Validate the cert chain and expiry of the SAML signing cert."
   - kind: command
-    cmd: "ayx server auth simulate saml --metadata-file ./idp-metadata.xml --output json"
+    cmd: "ayx server auth simulate saml --metadata-file ./idp-metadata.xml -o json"
     why: "When the IdP exposes a static metadata file, simulate an assertion locally to spot binding/encoding mismatches."
 validations:
   - describe: "Every diagnose envelope returns ok=true and no error_code."

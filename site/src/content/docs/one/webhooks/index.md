@@ -67,7 +67,7 @@ ayx one webhook-flow-tasks delete <id> --apply --yes
 ## JSON output
 
 ```bash
-ayx --output json one webhook-flow-tasks detail <id>
+ayx -o json one webhook-flow-tasks detail <id>
 ```
 
 The envelope is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`.

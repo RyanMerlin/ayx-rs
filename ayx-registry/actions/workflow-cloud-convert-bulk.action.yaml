@@ -18,10 +18,10 @@ trigger:
     - cloud
 steps:
   - kind: command
-    cmd: "ayx designer workflow scan --root <workflow_dir> --output json"
+    cmd: "ayx designer workflow scan --root <workflow_dir> -o json"
     why: "Inventory every .yxmd in the tree. Surfaces macros + dependencies before conversion."
   - kind: command
-    cmd: "ayx designer workflow inspect --path <workflow_path> --output json"
+    cmd: "ayx designer workflow inspect --path <workflow_path> -o json"
     why: "Inspect one workflow's structure + tool inventory. The Cloud-convert action `designer workflow convert-cloud` is registered as a subcommand (see `ayx designer workflow --help`); aim it at the same path to produce the converted payload."
   - kind: note
     text: |

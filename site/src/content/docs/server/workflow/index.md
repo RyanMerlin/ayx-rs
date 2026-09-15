@@ -191,18 +191,18 @@ Export to CSV:
 ayx designer workflow yxdb --input output.yxdb --csv output.csv
 ```
 
-For machine-readable output, use the global `--output json` flag:
+For machine-readable output, use the global `-o json` flag:
 
 ```sh
-ayx --output json designer workflow yxdb --input output.yxdb
+ayx -o json designer workflow yxdb --input output.yxdb
 ```
 
 ## JSON output
 
-All commands accept `--output json` as a global flag:
+All commands accept `-o json` as a global flag:
 
 ```sh
-ayx --output json designer workflow inspect --input reports.yxzp
+ayx -o json designer workflow inspect --input reports.yxzp
 ```
 
 ## Related

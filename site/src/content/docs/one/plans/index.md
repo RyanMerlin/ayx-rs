@@ -120,7 +120,9 @@ ayx one plans create --body plan.json --apply --yes
 ayx one plans update <plan-id> --body patch.json --apply --yes
 ```
 
-Both commands require `--body` with a path to a JSON file containing the plan definition or patch.
+Both commands accept `--body <FILE|JSON|->`: a JSON file, inline non-secret JSON,
+or `-` for piped stdin. Inline values are visible in shell history and process
+listings, so prefer a file or stdin for sensitive payloads.
 
 ## Share
 
@@ -153,34 +155,33 @@ ayx one plans delete <plan-id> --apply --yes
 ### List all plans as JSON
 
 ```bash
-ayx --output json one plans list --all \
+ayx -o json one plans list --all \
   | jq '.data.items[]'
 ```
 
 ### Find a plan by name
 
 ```bash
-ayx --output json one plans list --all \
+ayx -o json one plans list --all \
   | jq -r '.data.items[] | select(.name == "Daily ETL") | .id'
 ```
 
 ### Run a plan and check success
 
 ```bash
-result=$(ayx --output json one plans run <plan-id> --apply)
+result=$(ayx -o json one plans run <plan-id> --apply)
 echo "$result" | jq -e '.ok'
 ```
 
 ### Run plans in a specific environment
 
 ```bash
-ayx --output json --environment prod one plans list --all
+ayx -o json --environment prod one plans list --all
 ```
 
 ## Related
 
 - [Plan schedules](/one/plans/schedules/)
 - [Plans import & export](/one/plans/import-export/)
-- [Flows](/one/flows/)
 - [Safety model](/safety-model/)
 - [Output & automation](/output-automation/)

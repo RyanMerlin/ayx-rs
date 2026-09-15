@@ -1040,6 +1040,7 @@ fn redact_json_value(value: &Value) -> Value {
                 .collect(),
         ),
         Value::Array(array) => Value::Array(array.iter().map(redact_json_value).collect()),
+        Value::String(text) => Value::String(redact_text(text)),
         _ => value.clone(),
     }
 }

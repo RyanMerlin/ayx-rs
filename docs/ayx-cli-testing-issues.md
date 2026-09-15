@@ -1,7 +1,7 @@
 # AYX CLI Testing Issues
 
 This log tracks issues found while exercising the AYX CLI through its live
-discovery surface. `--output json` is the complete recursively redacted
+discovery surface. `-o json` is the complete recursively redacted
 canonical envelope.
 
 ## Test context
@@ -21,7 +21,7 @@ Status: Fixed 2026-08-31 (live re-verification pending)
 1. Discover the command:
 
    ```text
-   ayx discover one --deep --output json
+   ayx discover one --deep -o json
    ```
 
    Discovery identifies `ayx one workspace admins` with the description
@@ -30,13 +30,13 @@ Status: Fixed 2026-08-31 (live re-verification pending)
 2. Run the discovered command:
 
    ```text
-   ayx one workspace admins --output json
+   ayx one workspace admins -o json
    ```
 
 3. Compare it with the neighboring people command:
 
    ```text
-   ayx one workspace people --output json
+   ayx one workspace people -o json
    ```
 
 ### Observed
@@ -120,7 +120,7 @@ excludes the current (`isAdmin: false`) user.
 
 ## Testing notes
 
-- Use `ayx discover --deep --output json` before selecting unfamiliar commands.
+- Use `ayx discover --deep -o json` before selecting unfamiliar commands.
 - Prefer read-only commands while investigating.
 - Standard command envelopes place the upstream payload under
   `data.response`; paginated CLI-normalized results may place records under
@@ -137,13 +137,13 @@ Status: Open / permission boundary confirmed
 1. Discover the role commands:
 
    ```text
-   ayx discover one --deep --output json
+   ayx discover one --deep -o json
    ```
 
 2. List roles and identify the workspace-admin role:
 
    ```text
-   ayx one role list --output json
+   ayx one role list -o json
    ```
 
    The active workspace has a `workspace_admin` role with policy ID `25703770`.
@@ -151,7 +151,7 @@ Status: Open / permission boundary confirmed
 3. Request its assignments:
 
    ```text
-   ayx one role list-assignments 25703770 --output json
+   ayx one role list-assignments 25703770 -o json
    ```
 
 ### Observed
@@ -175,7 +175,7 @@ Status: Documented / agent guidance updated
 ### Reproduction
 
 ```text
-ayx discover one --deep --output json
+ayx discover one --deep -o json
 ```
 
 ### Observed
@@ -184,7 +184,7 @@ The historical compact-output issue is resolved. The command returns the
 complete canonical envelope, including the command tree:
 
 ```text
-ayx discover one --deep --output json
+ayx discover one --deep -o json
 ```
 
 ### Resolution

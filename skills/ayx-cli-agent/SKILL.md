@@ -14,7 +14,7 @@ Start unfamiliar work by discovering the live command tree. Put structured outpu
 last in every command:
 
 ```text
-ayx discover one --deep --output json
+ayx discover one --deep -o json
 ```
 
 Walk the returned `data.tree`; do not guess command names, flags, positional
@@ -24,10 +24,10 @@ discovery identifies the command.
 For ordinary agent-readable command results, use this shape:
 
 ```text
-ayx one <family> <command> ... --output json
+ayx one <family> <command> ... -o json
 ```
 
-Use `--output json` for discovery; the canonical envelope includes the command
+Use `-o json` for discovery; the canonical envelope includes the command
 tree.
 
 Read the standard envelope carefully:

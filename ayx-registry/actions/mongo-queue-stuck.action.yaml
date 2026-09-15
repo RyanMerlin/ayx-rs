@@ -20,13 +20,13 @@ trigger:
     - incident
 steps:
   - kind: command
-    cmd: "ayx mongo query --profile <profile> --database AlteryxService --collection AS_Queue --filter '{}' --output json"
+    cmd: "ayx mongo query --profile <profile> --database AlteryxService --collection AS_Queue --filter '{}' -o json"
     why: "Total queue depth + per-state counts. Confirms the queue is non-empty."
   - kind: command
-    cmd: "ayx mongo query --profile <profile> --database AlteryxService --collection AS_Queue --filter '{\"State\":\"Running\"}' --output json"
+    cmd: "ayx mongo query --profile <profile> --database AlteryxService --collection AS_Queue --filter '{\"State\":\"Running\"}' -o json"
     why: "Surface jobs that have been Running too long — likely the actual culprits."
   - kind: command
-    cmd: "ayx mongo doctor --profile <profile> --output json"
+    cmd: "ayx mongo doctor --profile <profile> -o json"
     why: "Cross-references the queue against worker registration, license posture, and orphan detection in one shot."
   - kind: note
     text: |

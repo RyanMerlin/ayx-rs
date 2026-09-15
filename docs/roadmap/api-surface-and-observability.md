@@ -76,7 +76,7 @@ evidence):
   equivalent at all (removed, not repointed). The correct follow-up is to **re-probe** the
   repointed `/v4/plans` and `/v4/schedules` rows live and then *tighten* the live-smoke allowlist
   once real evidence exists, not widen it further on the old diagnosis.
-- ~~**Teach `one_flows_folders_list_page_boundary_live` to accept the genuine empty-result shape.**~~ Delivered: the live gate now asserts the genuine bounded request shape for `GET /v4/folders?limit=1`, which returns raw `{ "data": [] }` rather than a normalized pagination envelope.
+- ~~**Teach the legacy folder-list page-boundary check to accept the genuine empty-result shape.**~~ Delivered: the live gate now asserts the genuine bounded request shape for `GET /v4/folders?limit=1`, which returns raw `{ "data": [] }` rather than a normalized pagination envelope.
 - ~~**Make `one_job_groups_inspection_live_real_object` tolerate data-dependent inputs behavior.**~~ Delivered: the live gate accepts only the documented non-JDBC `400 DataServiceInvalidRequest` for `inputs`, while retaining hard failures for every other error.
 - **Implement `--output table` separately or document the alias deliberately.** The live UX pass confirmed that it is currently byte-identical to `--output text`.
 - **Add workflow-aware entries to `render_object_array`'s `PREFERRED` column list.** The generic picker exposes `contentChecksum`, a truncated hash, ahead of more useful workflow fields in the default demo table.
@@ -87,7 +87,7 @@ evidence):
 - **Unify and document the One API base-URL configuration precedence.** `AYX_ONE_BASE_URL` and `AYX_ONE_API_BASE_URL` are similarly named but resolved in different layers, and a second `.env` lookup beside the resolved central profile can override the working-directory file.
 - ~~**Investigate and wire cloud-native workflow DELETE.**~~ Wired and now fully live-verified:
   `ayx one workflows delete` (`DELETE /svc-workflow/api/v2/workflows/{id}`, gated behind `--apply`
-  + TTY confirmation, mirrors `one flows delete`). The residual this item used to carry — a live
+  + TTY confirmation, mirrors `one workflows delete`). The residual this item used to carry — a live
   call against a real id — is satisfied: duplicated a real workflow (`201`), deleted the copy
   (`200 {}`), and confirmed removal three ways (absent from `list --all`, count dropped by one,
   `detail` → `not_found`). The unknown-id guard was also verified live, rejecting before any

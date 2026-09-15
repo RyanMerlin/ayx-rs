@@ -41,8 +41,8 @@ These require new subcommands or corrected endpoint targets.
 - [x] **`connections connector-metadata list` — gap documented** — DONE v0.9.12  
   `/v4/connectors` returns 404 — no enumeration endpoint exists in the Alteryx One v4 API. The `connector-metadata` help text now documents this gap and lists known working slugs (`gsheetsuser`, `remotefile`, etc.). A `list` subcommand is deferred until the API adds enumeration support.
 
-- [x] **`flows permissions` — add a read command** — DONE v0.9.13  
-  Added `ayx one flows permissions-get <ID>` that hits `GET /v4/flows/{id}/permissions`. The endpoint returns 403 via PAT (permission_denied error code). The command exists and surfaces a clean `permission_denied` error — not a gap in the CLI, a limitation in the API's PAT scope. Documented in `site/src/content/docs/one/flows/permissions.md`.
+- [x] **`flows permissions` — historical read command** — DONE v0.9.13
+  The former `ayx one flows permissions-get <ID>` hit `GET /v4/flows/{id}/permissions` and exposed the PAT scope limitation as `permission_denied`. The entire legacy `one flows` surface and its site pages were removed in v0.22.0; use the current `one workflows` documentation for supported cloud-native workflow operations.
 
 - [x] **`platform workspace people/admins` — fixed correct endpoints** — DONE v0.9.12  
   `people` → `GET /v4/people` (workspace context via `x-alteryx-workspace-gid` header — live-verified 200, 9 members returned).  
@@ -64,8 +64,8 @@ Connection create is broken in practice because the required body schema is undi
 - [~] **`connections create` — end-to-end test** — PARTIAL  
   `POST /v4/connections/dryRun` returns `AccessControlException` (403) via the current PAT — same scope wall as flows permissions/recipeParameters/roles. A full `create --apply` needs valid connector credentials (OAuth token for gsheets, service-account key for bigquery) that aren't available in this environment. The template generator unblocks the body-construction half; the credential half is environment-gated.
 
-- [x] **`flows update` — FIXED: PUT → PATCH** — DONE v0.9.12  
-  Root cause: CLI was using `PUT /v4/flows/{id}` (403) instead of `PATCH /v4/flows/{id}` (200). Live-verified: PATCH returns 200, PUT returns 403. One-line fix in `one_flows.rs`. `flows create`/`update`/`delete` all now work end-to-end.
+- [x] **`flows update` — historical endpoint correction** — DONE v0.9.12
+  The former legacy flow client used `PATCH /v4/flows/{id}` rather than `PUT`. That client was removed with the legacy `one flows` namespace in v0.22.0.
 
 ---
 

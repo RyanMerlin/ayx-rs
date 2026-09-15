@@ -136,7 +136,7 @@ fn render_command_surface(catalog: &Value) -> Result<String> {
     lines.push("# AYX Command Surface".to_string());
     lines.push(String::new());
     lines.push(format!(
-        "_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all --output json` _on {}._",
+        "_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all -o json` _on {}._",
         generated_utc
     ));
     lines.push(String::new());

@@ -19,11 +19,12 @@ use crate::{
     OneAgentAssetsCommand, OneAgentDatasetsCommand, OneAgentWorkflowsCommand, OneAgentsCommand,
     OneApiCommand, OneAuthCommand, OneCommand, OneConnectionPermissionCommand,
     OneConnectionsCommand, OneConnectorMetadataCommand, OneConnectorMetadataOverridesCommand,
-    OneDatasetsCommand, OneDatasetsImportedCommand, OneDatasetsWrangledCommand,
-    OneFlowFolderFlowsCommand, OneFlowFoldersCommand, OneFlowLibraryCommand, OneFlowsCommand,
-    OneJobGroupCommand, OneJobsCommand, OneOutputObjectCommand, OnePersonCommand, OnePlansCommand,
-    OneRoleCommand, OneSchedulingCommand, OneTokenCommand, OneWebhookFlowTaskCommand,
-    OneWorkflowsCommand, OneWorkspaceCommand, OneWriteSettingCommand,
+    OneDatasetsCommand, OneDatasetsImportedCommand, OneDatasetsWrangledCommand, OneJobGroupCommand,
+    OneJobsCommand, OneOutputObjectCommand, OnePersonCommand, OnePlansCommand, OneRoleCommand,
+    OneSchedulingCommand, OneTokenCommand, OneWebhookFlowTaskCommand, OneWorkflowsCommand,
+    OneWorkspaceCloudConfigsCommand, OneWorkspaceCommand, OneWorkspaceConfigCommand,
+    OneWorkspaceGroupMembersCommand, OneWorkspaceGroupRolesCommand, OneWorkspaceGroupsCommand,
+    OneWorkspaceMembersCommand, OneWorkspaceTransferCommand, OneWriteSettingCommand,
 };
 
 use crate::output::{OutputDescriptor, ViewKind};
@@ -112,7 +113,6 @@ fn result(command: &'static str) -> OutputDescriptor {
 /// inference in the outer CLI.
 pub(crate) fn output_descriptor(command: &OneCommand) -> OutputDescriptor {
     match command {
-        OneCommand::Flows { command } => flows_descriptor(command),
         OneCommand::Workflows { command } => workflows_descriptor(command),
         OneCommand::Connections { command } => connections_descriptor(command),
         OneCommand::Plans { command } => plans_descriptor(command),
@@ -156,13 +156,6 @@ pub(crate) fn output_descriptor(command: &OneCommand) -> OutputDescriptor {
 fn workspace_descriptor(command: &OneWorkspaceCommand) -> OutputDescriptor {
     match command {
         OneWorkspaceCommand::List { .. } => list("one.workspace.list"),
-        OneWorkspaceCommand::People => list_with("one.workspace.people", PEOPLE_LIST_FIELDS),
-        OneWorkspaceCommand::Admins => {
-            list_with("one.workspace.admins", WORKSPACE_ADMIN_LIST_FIELDS)
-        }
-        OneWorkspaceCommand::Groups { .. } => group_list("one.workspace.groups"),
-        OneWorkspaceCommand::GroupsGlobal => group_list("one.workspace.groups-global"),
-        OneWorkspaceCommand::CloudConfigs { .. } => list("one.workspace.cloud-configs"),
         OneWorkspaceCommand::Current => {
             detail_with("one.workspace.current", WORKSPACE_CURRENT_FIELDS)
         }
@@ -174,55 +167,64 @@ fn workspace_descriptor(command: &OneWorkspaceCommand) -> OutputDescriptor {
         OneWorkspaceCommand::Detail { .. } => {
             detail_with("one.workspace.detail", WORKSPACE_CURRENT_FIELDS)
         }
-        OneWorkspaceCommand::CurrentConfiguration => detail("one.workspace.current-configuration"),
-        OneWorkspaceCommand::ConfigurationV4 { .. } => detail("one.workspace.configuration-v4"),
-        OneWorkspaceCommand::Configuration { .. } => detail("one.workspace.configuration"),
-        OneWorkspaceCommand::ConfigurationSchema { .. } => {
-            detail("one.workspace.configuration-schema")
-        }
-        OneWorkspaceCommand::CurrentConfigurationSchema => {
-            detail("one.workspace.current-configuration-schema")
-        }
-        OneWorkspaceCommand::InvitationLink { .. } => detail("one.workspace.invitation-link"),
         OneWorkspaceCommand::Create { .. } => result("one.workspace.create"),
         OneWorkspaceCommand::Delete { .. } => result("one.workspace.delete"),
-        OneWorkspaceCommand::SaveCurrentConfiguration { .. } => {
-            result("one.workspace.save-current-configuration")
-        }
-        OneWorkspaceCommand::SaveConfigurationV4 { .. } => {
-            result("one.workspace.save-configuration-v4")
-        }
-        OneWorkspaceCommand::DeleteCurrentConfiguration { .. } => {
-            result("one.workspace.delete-current-configuration")
-        }
-        OneWorkspaceCommand::DeleteConfiguration { .. } => {
-            result("one.workspace.delete-configuration")
-        }
-        OneWorkspaceCommand::CreateGroup { .. } => result("one.workspace.create-group"),
-        OneWorkspaceCommand::DeleteGroup { .. } => result("one.workspace.delete-group"),
-        OneWorkspaceCommand::UpdateGroup { .. } => result("one.workspace.update-group"),
-        OneWorkspaceCommand::SetGroupRoles { .. } => result("one.workspace.set-group-roles"),
-        OneWorkspaceCommand::AddGroupUsers { .. } => result("one.workspace.add-group-users"),
-        OneWorkspaceCommand::RemoveGroupUsers { .. } => result("one.workspace.remove-group-users"),
-        OneWorkspaceCommand::Switch { .. } => result("one.workspace.switch"),
-        OneWorkspaceCommand::InviteUsers { .. } => result("one.workspace.invite-users"),
-        OneWorkspaceCommand::Invite { .. } => result("one.workspace.invite"),
-        OneWorkspaceCommand::InviteList { .. } => result("one.workspace.invite-list"),
-        OneWorkspaceCommand::ReinviteUsers { .. } => result("one.workspace.reinvite-users"),
-        OneWorkspaceCommand::RemoveUser { .. } => result("one.workspace.remove-user"),
-        OneWorkspaceCommand::SuspendUsers { .. } => result("one.workspace.suspend-users"),
-        OneWorkspaceCommand::UnsuspendUsers { .. } => result("one.workspace.unsuspend-users"),
-        OneWorkspaceCommand::SuspendUser { .. } => result("one.workspace.suspend-user"),
-        OneWorkspaceCommand::Transfer { .. } => result("one.workspace.transfer"),
-        OneWorkspaceCommand::TransferAssets { .. } => result("one.workspace.transfer-assets"),
-        OneWorkspaceCommand::CreateCloudConfig { .. } => {
-            result("one.workspace.create-cloud-config")
-        }
-        OneWorkspaceCommand::UpdateCloudConfig { .. } => {
-            result("one.workspace.update-cloud-config")
-        }
-        OneWorkspaceCommand::PatchUser { .. } => result("one.workspace.patch-user"),
-        OneWorkspaceCommand::UpdateUser { .. } => result("one.workspace.update-user"),
+        OneWorkspaceCommand::Use { .. } => result("one.workspace.use"),
+        OneWorkspaceCommand::Config { command } => match command {
+            OneWorkspaceConfigCommand::Get => detail("one.workspace.config.get"),
+            OneWorkspaceConfigCommand::Set { .. } => result("one.workspace.config.set"),
+            OneWorkspaceConfigCommand::Schema => detail("one.workspace.config.schema"),
+            OneWorkspaceConfigCommand::Reset { .. } => result("one.workspace.config.reset"),
+        },
+        OneWorkspaceCommand::Members { command } => match command {
+            OneWorkspaceMembersCommand::List => {
+                list_with("one.workspace.members.list", PEOPLE_LIST_FIELDS)
+            }
+            OneWorkspaceMembersCommand::Admins => {
+                list_with("one.workspace.members.admins", WORKSPACE_ADMIN_LIST_FIELDS)
+            }
+            OneWorkspaceMembersCommand::InvitationLink { .. } => {
+                detail("one.workspace.members.invitation-link")
+            }
+            OneWorkspaceMembersCommand::Invite { .. } => result("one.workspace.members.invite"),
+            OneWorkspaceMembersCommand::Reinvite { .. } => result("one.workspace.members.reinvite"),
+            OneWorkspaceMembersCommand::Remove { .. } => result("one.workspace.members.remove"),
+            OneWorkspaceMembersCommand::Suspend { .. } => result("one.workspace.members.suspend"),
+            OneWorkspaceMembersCommand::Unsuspend => result("one.workspace.members.unsuspend"),
+            OneWorkspaceMembersCommand::Update { .. } => result("one.workspace.members.update"),
+        },
+        OneWorkspaceCommand::Groups { command } => match command {
+            OneWorkspaceGroupsCommand::List => group_list("one.workspace.groups.list"),
+            OneWorkspaceGroupsCommand::Create { .. } => result("one.workspace.groups.create"),
+            OneWorkspaceGroupsCommand::Update { .. } => result("one.workspace.groups.update"),
+            OneWorkspaceGroupsCommand::Delete { .. } => result("one.workspace.groups.delete"),
+            OneWorkspaceGroupsCommand::Members { command } => match command {
+                OneWorkspaceGroupMembersCommand::Add { .. } => {
+                    result("one.workspace.groups.members.add")
+                }
+                OneWorkspaceGroupMembersCommand::Remove { .. } => {
+                    result("one.workspace.groups.members.remove")
+                }
+            },
+            OneWorkspaceGroupsCommand::Roles { command } => match command {
+                OneWorkspaceGroupRolesCommand::Set { .. } => {
+                    result("one.workspace.groups.roles.set")
+                }
+            },
+        },
+        OneWorkspaceCommand::CloudConfigs { command } => match command {
+            OneWorkspaceCloudConfigsCommand::List => list("one.workspace.cloud-configs.list"),
+            OneWorkspaceCloudConfigsCommand::Create { .. } => {
+                result("one.workspace.cloud-configs.create")
+            }
+            OneWorkspaceCloudConfigsCommand::Update { .. } => {
+                result("one.workspace.cloud-configs.update")
+            }
+        },
+        OneWorkspaceCommand::Transfer { command } => match command {
+            OneWorkspaceTransferCommand::Start => result("one.workspace.transfer.start"),
+            OneWorkspaceTransferCommand::Assets { .. } => result("one.workspace.transfer.assets"),
+        },
     }
 }
 
@@ -285,49 +287,6 @@ fn auth_descriptor(command: &OneAuthCommand) -> OutputDescriptor {
     OutputDescriptor::new(name, ViewKind::Diagnostic)
 }
 
-fn flows_descriptor(command: &OneFlowsCommand) -> OutputDescriptor {
-    match command {
-        OneFlowsCommand::List { .. } => list("one.flows.list"),
-        OneFlowsCommand::Count { .. } => detail("one.flows.count"),
-        OneFlowsCommand::Library { command } => match command {
-            OneFlowLibraryCommand::List { .. } => list("one.flows.library.list"),
-            OneFlowLibraryCommand::Count { .. } => detail("one.flows.library.count"),
-        },
-        OneFlowsCommand::Folders { command } => match command {
-            OneFlowFoldersCommand::List { .. } => list("one.flows.folders.list"),
-            OneFlowFoldersCommand::Count { .. } => detail("one.flows.folders.count"),
-            OneFlowFoldersCommand::Detail { .. } => detail("one.flows.folders.detail"),
-            OneFlowFoldersCommand::Create { .. } => result("one.flows.folders.create"),
-            OneFlowFoldersCommand::Update { .. } => result("one.flows.folders.update"),
-            OneFlowFoldersCommand::Delete { .. } => result("one.flows.folders.delete"),
-            OneFlowFoldersCommand::Flows { command } => match command {
-                OneFlowFolderFlowsCommand::List { .. } => list("one.flows.folders.flows.list"),
-                OneFlowFolderFlowsCommand::Count { .. } => detail("one.flows.folders.flows.count"),
-            },
-        },
-        OneFlowsCommand::Detail { .. } => detail("one.flows.detail"),
-        OneFlowsCommand::Inputs { .. } => list("one.flows.inputs"),
-        OneFlowsCommand::Outputs { .. } => list("one.flows.outputs"),
-        OneFlowsCommand::PermissionsGet { .. } => list("one.flows.permissions-get"),
-        OneFlowsCommand::Export { .. } => {
-            OutputDescriptor::new("one.flows.export", ViewKind::Export)
-        }
-        OneFlowsCommand::Create { .. } => result("one.flows.create"),
-        OneFlowsCommand::Update { .. } => result("one.flows.update"),
-        OneFlowsCommand::Delete { .. } => result("one.flows.delete"),
-        OneFlowsCommand::Copy { .. } => result("one.flows.copy"),
-        OneFlowsCommand::Run { .. } => result("one.flows.run"),
-        OneFlowsCommand::Validate { .. } => result("one.flows.validate"),
-        OneFlowsCommand::Parameters { .. } => detail("one.flows.parameters"),
-        OneFlowsCommand::Permissions { .. } => result("one.flows.permissions"),
-        OneFlowsCommand::Move { .. } => result("one.flows.move"),
-        OneFlowsCommand::ReplaceDataset { .. } => result("one.flows.replace-dataset"),
-        OneFlowsCommand::Import { .. } => result("one.flows.import"),
-        OneFlowsCommand::ImportDryRun { .. } => result("one.flows.import-dry-run"),
-        OneFlowsCommand::ExportDryRun { .. } => result("one.flows.export-dry-run"),
-    }
-}
-
 fn workflows_descriptor(command: &OneWorkflowsCommand) -> OutputDescriptor {
     match command {
         OneWorkflowsCommand::List { .. } => {
@@ -345,6 +304,7 @@ fn workflows_descriptor(command: &OneWorkflowsCommand) -> OutputDescriptor {
         OneWorkflowsCommand::Dependencies { .. } => list("one.workflows.dependencies"),
         OneWorkflowsCommand::Count { .. } => detail("one.workflows.count"),
         OneWorkflowsCommand::Detail { .. } => detail("one.workflows.detail"),
+        OneWorkflowsCommand::Graph { .. } => detail("one.workflows.graph"),
         OneWorkflowsCommand::Engines { .. } => detail("one.workflows.engines"),
         OneWorkflowsCommand::Run { .. } => result("one.workflows.run"),
         OneWorkflowsCommand::Cancel { .. } => result("one.workflows.cancel"),
@@ -732,7 +692,7 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
         OneCommand::Whoami => super::one_platform::person::current(&runtime, None)?,
         OneCommand::Auth { command } => super::one_platform::auth::execute(&runtime, command)?,
         OneCommand::Workspace { command } => {
-            super::one_platform::workspace::execute(&runtime, cli.apply, cli.yes, command)?
+            super::one_platform::workspace::execute(&runtime, cli.apply, cli.yes, command.into())?
         }
         OneCommand::Role { command } => {
             super::one_platform::role::execute(&runtime, cli.apply, cli.yes, command)?
@@ -767,8 +727,8 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             // this is a caller mistake, not `internal`.
             (Some(_), Some(_)) => {
                 return Err(anyhow::Error::new(super::UsageError(
-                    "give either a JOB-ID or a subcommand, not both: `ayx one jobs <JOB-ID>` \
-                     or `ayx one jobs <VERB> ...` (for example `ayx one jobs runs <JOB-ID>`)"
+                    "give either a JOB-GROUP-ID or a subcommand, not both: `ayx one jobs <JOB-GROUP-ID>` \
+                     or `ayx one jobs <VERB> ...` (for example `ayx one jobs runs <JOB-GROUP-ID>`)"
                         .to_string(),
                 )));
             }
@@ -783,12 +743,12 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             // variant itself, not to the subcommand's own `--profile` field
             // (the documented position). Each `OneJobsCommand` variant
             // carries its own `profile` field for the documented `ayx one
-            // jobs <VERB> <JOB-ID> --profile <PROFILE>` form; catch the
+            // jobs <VERB> <JOB-GROUP-ID> --profile <PROFILE>` form; catch the
             // wrong-position case here rather than silently discarding it.
             (None, Some(_)) if profile.is_some() => {
                 return Err(anyhow::Error::new(super::UsageError(
                     "put --profile after the jobs verb and its arguments, e.g. \
-                     `ayx one jobs runs <JOB-ID> --profile <PROFILE>`"
+                     `ayx one jobs runs <JOB-GROUP-ID> --profile <PROFILE>`"
                         .to_string(),
                 )));
             }
@@ -801,8 +761,8 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
             // keyword.
             (None, None) => {
                 return Err(anyhow::Error::new(super::UsageError(
-                    "`ayx one jobs` needs a JOB-ID or a subcommand, e.g. `ayx one jobs <JOB-ID>` \
-                     or `ayx one jobs runs <JOB-ID>`; see `ayx one jobs --help`"
+                    "`ayx one jobs` needs a JOB-GROUP-ID or a subcommand, e.g. `ayx one jobs <JOB-GROUP-ID>` \
+                     or `ayx one jobs runs <JOB-GROUP-ID>`; see `ayx one jobs --help`"
                         .to_string(),
                 )));
             }
@@ -827,9 +787,6 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
         OneCommand::AgentAssets { command } => {
             super::one_agent_assets::execute(&runtime, cli.apply, cli.yes, command)?
         }
-        OneCommand::Flows { command } => {
-            super::one_flows::execute(&runtime, cli.apply, cli.yes, command)?
-        }
         OneCommand::Plans { command } => {
             super::one_plans::execute(&runtime, cli.apply, cli.yes, command)?
         }
@@ -844,7 +801,7 @@ pub fn execute(cli: Ctx<'_>, command: OneCommand) -> Result<Envelope> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{OneFlowsCommand, OnePlansCommand, OneWorkflowsCommand};
+    use crate::{OnePlansCommand, OneWorkflowsCommand};
 
     /// The same defect class in the other families that had it. Kept as a
     /// separate test so a regression names the family it broke.
@@ -1026,7 +983,7 @@ mod tests {
     /// view. The generic detail projection (`title`, `displayName`,
     /// `description`) matches nothing a job group carries except `id` and
     /// `status`, so who ran it, what triggered it, and in which workspace were
-    /// all hidden behind `--output json`. The parent references are nested
+    /// all hidden behind `-o json`. The parent references are nested
     /// objects -- and a list row's `creator` is a whole person record -- so the
     /// view names the reference ids rather than expanding the objects.
     #[test]
@@ -1084,7 +1041,7 @@ mod tests {
             !text.contains("person@example.invalid") && !text.contains("maximalPrivileges"),
             "a parent reference shows its id, not the embedded record:\n{text}"
         );
-        assert!(!text.contains("use --output json"), "{text}");
+        assert!(!text.contains("use -o json"), "{text}");
     }
 
     /// Job Library rows often carry `name: null`. The table must show one name
@@ -1166,12 +1123,6 @@ mod tests {
 
     #[test]
     fn descriptors_name_one_leaf_commands_and_views() {
-        let flow = output_descriptor(&OneCommand::Flows {
-            command: OneFlowsCommand::Count { profile: None },
-        });
-        assert_eq!(flow.command, "one.flows.count");
-        assert_eq!(flow.kind, ViewKind::Detail);
-
         let workflow = output_descriptor(&OneCommand::Workflows {
             command: OneWorkflowsCommand::List {
                 profile: None,
@@ -1198,9 +1149,11 @@ mod tests {
         );
 
         let groups = output_descriptor(&OneCommand::Workspace {
-            command: OneWorkspaceCommand::Groups { workspace_id: None },
+            command: OneWorkspaceCommand::Groups {
+                command: OneWorkspaceGroupsCommand::List,
+            },
         });
-        assert_eq!(groups.command, "one.workspace.groups");
+        assert_eq!(groups.command, "one.workspace.groups.list");
         assert_eq!(groups.collection_keys, &["groups"]);
 
         let plan = output_descriptor(&OneCommand::Plans {
@@ -1214,9 +1167,11 @@ mod tests {
         assert!(plan.fields.contains(&"dry_run"));
 
         let people = output_descriptor(&OneCommand::Workspace {
-            command: OneWorkspaceCommand::People,
+            command: OneWorkspaceCommand::Members {
+                command: OneWorkspaceMembersCommand::List,
+            },
         });
-        assert_eq!(people.command, "one.workspace.people");
+        assert_eq!(people.command, "one.workspace.members.list");
         assert!(people.fields.contains(&"email"));
         // `/v4/people` decorates only the caller's own record with `isAdmin`, so
         // projecting it rendered blank for everyone else and disagreed with
@@ -1229,9 +1184,11 @@ mod tests {
         assert!(!people.fields.contains(&"isDisabled"));
 
         let admins = output_descriptor(&OneCommand::Workspace {
-            command: OneWorkspaceCommand::Admins,
+            command: OneWorkspaceCommand::Members {
+                command: OneWorkspaceMembersCommand::Admins,
+            },
         });
-        assert_eq!(admins.command, "one.workspace.admins");
+        assert_eq!(admins.command, "one.workspace.members.admins");
         assert!(admins.fields.contains(&"email"));
         assert!(!admins.fields.contains(&"isAdmin"));
 

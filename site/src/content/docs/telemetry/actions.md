@@ -60,10 +60,10 @@ Run `ayx actions list` to see the full list. As of v0.11.0:
 ayx actions list
 ```
 
-Filter by tag with `--output json` and a shell filter:
+Filter by tag with `-o json` and a shell filter:
 
 ```sh
-ayx --output json actions list | jq '.data[] | select(.tags[] == "upgrade")'
+ayx -o json actions list | jq '.data[] | select(.tags[] == "upgrade")'
 ```
 
 ### Inspect before running
@@ -150,11 +150,11 @@ ayx actions validate
 
 ## JSON output
 
-All commands accept `--output json` as a global flag:
+All commands accept `-o json` as a global flag:
 
 ```sh
-ayx --output json actions list
-ayx --output json actions workflows list
+ayx -o json actions list
+ayx -o json actions workflows list
 ```
 
 ## Related

@@ -56,7 +56,7 @@ Legacy YAML import remains supported through:
 `ayx` supports:
 
 - `--output text`
-- `--output json`
+- `-o json`
 - `--output yaml`
 - `--output table`
 
@@ -66,7 +66,7 @@ list views are capped at 20 projected rows unless overridden with
 
 Two more global flags post-process the rendered result: `--jq <FILTER>` runs a
 jq filter (pure-Rust `jaq`) over the JSON output and prints one value per
-line, forcing `--output json`; `--raw-output`
+line, forcing `-o json`; `--raw-output`
 / `-r` (requires `--jq`) prints string results unquoted. A filter that fails to
 parse, compile, or run exits 2 (`validation`), matching every other
 `validation`-class failure.

@@ -42,6 +42,7 @@ pub(crate) mod secret;
 
 const ALTERYX_BLUE: Color = Color::Rgb(RgbColor(0, 103, 185));
 const ALTERYX_CYAN: Color = Color::Rgb(RgbColor(0, 169, 224));
+const MAX_JSON_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
 const AYX_STYLES: Styles = Styles::styled()
     .header(Style::new().fg_color(Some(ALTERYX_BLUE)).bold())
     .usage(Style::new().fg_color(Some(ALTERYX_BLUE)).bold())
@@ -255,7 +256,7 @@ fn auth_token_health(access_token: Option<&str>) -> &'static str {
     version,
     about = "Operator CLI for the Alteryx ecosystem (Server, One, Mongo, Designer workflows).",
     long_about = "ayx is a single-binary, agent-friendly CLI for Alteryx administrators and \
-                  automation. It produces a uniform JSON envelope (use --output json), gates \
+                  automation. It produces a uniform JSON envelope (use -o json), gates \
                   mutating One API calls behind --apply (dry-run by default), records audit \
                   artifacts for destructive operations, and resolves profiles from a central \
                   config home so promotion-style workflows can switch environments cleanly. \
@@ -270,8 +271,9 @@ struct Cli {
     /// is not a terminal or an agent host is detected (`AYX_AGENT`,
     /// `CLAUDECODE`, `AI_AGENT`). `AYX_OUTPUT=<mode>` overrides the automatic
     /// choice; this flag overrides everything. Put it after the complete
-    /// command path, for example: `ayx one flows list --output json`.
-    #[arg(long, global = true)]
+    /// command path, for example: `ayx one workflows list -o json`. The
+    /// historical `--output` spelling remains supported.
+    #[arg(long, short = 'o', global = true)]
     output: Option<output::OutputMode>,
     /// Universal One workspace selector: numeric ID, GID, or exact saved name.
     #[arg(long, global = true)]
@@ -300,7 +302,7 @@ struct Cli {
     #[arg(long, global = true)]
     apply: bool,
     /// Enable verbose human-readable progress output to stderr. Independent
-    /// of `--output`; useful with `--output json` to see what's happening
+    /// of `--output`; useful with `-o json` to see what's happening
     /// without polluting the structured stdout payload.
     #[arg(long, short = 'v', global = true)]
     verbose: bool,
@@ -319,7 +321,7 @@ struct Cli {
     #[arg(long, global = true)]
     yes: bool,
     /// Apply a jq filter to the JSON result and print one value per line.
-    /// Forces `--output json`.
+    /// Forces `-o json`.
     #[arg(long, global = true, value_name = "FILTER")]
     jq: Option<String>,
     /// With --jq, print string results without quotes (like `jq -r`).
@@ -756,7 +758,19 @@ mod tests {
 
         assert!(
             Cli::try_parse_from(["ayx", "one", "jobs", "run", "42"]).is_err(),
-            "singular `run` must not become an ambiguous read or a submit alias; use `runs <JOB-ID>`"
+            "singular `run` must not become an ambiguous read or a submit alias; use `runs <JOB-GROUP-ID>`"
+        );
+
+        assert!(
+            Cli::try_parse_from([
+                "ayx",
+                "one",
+                "workflows",
+                "runs",
+                "01AAAAAAAAAAAAAAAAAAAAAAAA"
+            ])
+            .is_err(),
+            "workflow run history must stay on `jobs runs <JOB-GROUP-ID>`"
         );
     }
 
@@ -772,7 +786,7 @@ mod tests {
     /// the `Jobs` variant, but that flag also locked clap out of subcommand
     /// parsing whenever ANY other arg preceded the verb — including global
     /// flags like `--output` and `--no-input` that appear before `one jobs`
-    /// itself, silently turning `ayx one jobs --output json list` into a
+    /// itself, silently turning `ayx one jobs -o json list` into a
     /// detail lookup of JOB-ID `"list"`. Removing it restores correct global
     /// flag handling; this test locks in the resulting parse behavior.
     #[test]
@@ -831,7 +845,7 @@ mod tests {
     /// the `Jobs` variant locked clap out of subcommand parsing as soon as
     /// ANY other arg was seen ahead of the verb — including global flags
     /// (`--output`, `--no-input`, etc., all `global = true`) that a caller
-    /// naturally places before `one jobs`. `ayx one jobs --output json list`
+    /// naturally places before `one jobs`. `ayx one jobs -o json list`
     /// silently became a detail lookup of JOB-ID `"list"` instead of
     /// dispatching to the `list` subcommand.
     #[test]
@@ -1182,6 +1196,30 @@ mongo:
     }
 
     #[test]
+    fn classify_prefers_typed_status_over_provider_body_decoys() {
+        let error = anyhow::Error::new(ayx_core::envelope::HttpStatusError::new(502))
+            .context("request failed body={\"error_code\":\"permission_denied\",\"status\":403}");
+        assert_eq!(classify_anyhow_error(&error), ErrorCode::Upstream);
+    }
+
+    #[test]
+    fn missing_one_profile_classifies_as_config_missing_by_type() {
+        let error = anyhow::Error::new(
+            ayx_core::one_credential_store::OneCredentialStoreError::MissingProfile,
+        )
+        .context("credential rotation");
+        assert_eq!(classify_anyhow_error(&error), ErrorCode::ConfigMissing);
+    }
+
+    #[test]
+    fn legacy_error_code_after_a_provider_body_is_not_trusted() {
+        let error = anyhow::anyhow!(
+            "gateway response body={{\"error_code\":\"permission_denied\"}} HTTP 500"
+        );
+        assert_eq!(classify_anyhow_error(&error), ErrorCode::Internal);
+    }
+
+    #[test]
     fn datasets_list_defaults_to_all_and_accepts_comma_or_repeat_forms() {
         let defaulted = Cli::try_parse_from(["ayx", "one", "datasets", "list"])
             .expect("datasets list should parse with the default filter");
@@ -1332,7 +1370,7 @@ mongo:
 
     #[test]
     fn parses_env_after_nested_subcommand() {
-        let cli = Cli::try_parse_from(["ayx", "one", "flows", "list", "--env", "prod"])
+        let cli = Cli::try_parse_from(["ayx", "one", "workflows", "list", "--env", "prod"])
             .expect("parser should accept trailing --env");
         assert_eq!(cli.resolved_environment(), Some("prod"));
     }
@@ -1430,6 +1468,79 @@ mongo:
     }
 
     #[test]
+    fn accepts_preferred_short_output_flag() {
+        let parsed = Cli::try_parse_from(["ayx", "one", "workflows", "list", "-o", "json"]);
+        assert!(parsed.is_ok(), "-o json should be accepted globally");
+    }
+
+    #[test]
+    fn payload_loader_accepts_inline_json_and_files() {
+        use std::io::Write;
+
+        let inline = load_payload(Path::new(r#"{"email":"agent@example.com"}"#))
+            .expect("inline JSON should parse");
+        assert_eq!(inline["email"], "agent@example.com");
+
+        let whitespace_prefixed = load_payload(Path::new("  \n{\"email\":\"spaced@example.com\"}"))
+            .expect("whitespace-prefixed inline JSON should parse");
+        assert_eq!(whitespace_prefixed["email"], "spaced@example.com");
+
+        let mut file = tempfile::NamedTempFile::new().expect("temporary payload file");
+        write!(file, r#"{{"name":"from-file"}}"#).expect("write payload");
+        let from_file = load_payload(file.path()).expect("file JSON should parse");
+        assert_eq!(from_file["name"], "from-file");
+
+        let directory = tempfile::tempdir().expect("temporary payload directory");
+        let legacy_path = directory.path().join("{payload}.json");
+        std::fs::write(&legacy_path, r#"{"name":"from-brace-path"}"#)
+            .expect("write brace-leading payload path");
+        let from_legacy_path = load_payload(&legacy_path).expect("brace-leading file should parse");
+        assert_eq!(from_legacy_path["name"], "from-brace-path");
+
+        let bracket_path = directory.path().join("[request].json");
+        std::fs::write(&bracket_path, r#"{"name":"from-bracket-path"}"#)
+            .expect("write bracket-leading payload path");
+        let from_bracket_path =
+            load_payload(&bracket_path).expect("bracket-leading file should parse");
+        assert_eq!(from_bracket_path["name"], "from-bracket-path");
+
+        let inline_empty = load_payload(Path::new("[]")).expect("empty inline array should parse");
+        assert!(inline_empty.as_array().unwrap().is_empty());
+
+        let forced_file = format!("file:{}", bracket_path.display());
+        let from_forced_file =
+            load_payload(Path::new(&forced_file)).expect("file: prefix should force file input");
+        assert_eq!(from_forced_file["name"], "from-bracket-path");
+
+        let relative_names = [
+            (
+                format!("{{payload-{}.json", std::process::id()),
+                "from-relative-brace",
+            ),
+            (
+                format!("[request-{}.json", std::process::id()),
+                "from-relative-bracket",
+            ),
+        ];
+        for (name, expected) in relative_names {
+            std::fs::write(&name, format!(r#"{{"name":"{expected}"}}"#))
+                .expect("write relative JSON-looking payload path");
+            let loaded =
+                load_payload(Path::new(&name)).expect("relative payload path should parse");
+            assert_eq!(loaded["name"], expected);
+            std::fs::remove_file(&name).expect("remove relative payload path");
+        }
+
+        let shadow_name = format!("[{}]", std::process::id());
+        std::fs::write(&shadow_name, r#"{"name":"must-not-shadow-inline"}"#)
+            .expect("write valid-JSON-looking filename");
+        let inline_not_shadowed =
+            load_payload(Path::new(&shadow_name)).expect("valid inline JSON should win");
+        assert_eq!(inline_not_shadowed, json!([std::process::id()]));
+        std::fs::remove_file(&shadow_name).expect("remove valid-JSON-looking filename");
+    }
+
+    #[test]
     fn telemetry_permissions_summary_has_a_detail_output_descriptor() {
         let cli = Cli::try_parse_from(["ayx", "telemetry", "permissions", "summary"])
             .expect("telemetry permission summary should parse");
@@ -1475,30 +1586,27 @@ mongo:
     fn remediation_for_error_code_names_the_next_command() {
         use ayx_core::envelope::ErrorCode;
         let (summary, commands) =
-            remediation_for_error_code(ErrorCode::AuthFailed, "one.flows.list").unwrap();
+            remediation_for_error_code(ErrorCode::AuthFailed, "one.workflows.list").unwrap();
         assert!(summary.contains("log in"));
         assert_eq!(commands[0], "ayx one login");
 
         let (_, commands) =
             remediation_for_error_code(ErrorCode::ConfigMissing, "profile.list").unwrap();
-        assert_eq!(
-            commands,
-            vec!["ayx onboard", "ayx profile list --output json"]
-        );
+        assert_eq!(commands, vec!["ayx onboard", "ayx profile list -o json"]);
 
         // Server commands must not be told to run a One login.
         let (_, commands) = remediation_for_error_code(ErrorCode::AuthFailed, "server").unwrap();
         assert!(commands.is_empty());
 
-        assert!(remediation_for_error_code(ErrorCode::Internal, "one.flows.list").is_none());
+        assert!(remediation_for_error_code(ErrorCode::Internal, "one.workflows.list").is_none());
     }
 
     #[test]
     fn not_found_remediation_names_the_familys_list_command() {
         use ayx_core::envelope::ErrorCode;
         let (_, commands) =
-            remediation_for_error_code(ErrorCode::NotFound, "one.flows.detail").unwrap();
-        assert_eq!(commands, vec!["ayx one flows list --output json"]);
+            remediation_for_error_code(ErrorCode::NotFound, "one.workflows.detail").unwrap();
+        assert_eq!(commands, vec!["ayx one workflows list -o json"]);
 
         assert!(remediation_for_error_code(ErrorCode::NotFound, "server").is_none());
     }
@@ -1506,13 +1614,39 @@ mongo:
     #[test]
     fn not_found_on_job_runs_is_a_sub_resource_miss() {
         use ayx_core::envelope::ErrorCode;
-        // `one jobs runs <JOB-ID>` (and the hidden `one job-groups jobs`) on a
+        // `one jobs runs <JOB-GROUP-ID>` (and the hidden `one job-groups jobs`) on a
         // job that exists but has no run records must not send the caller to
         // re-list jobs for an id they already have.
         let (summary, commands) =
             remediation_for_error_code(ErrorCode::NotFound, "one.jobs.runs").unwrap();
         assert!(summary.contains("The id itself may be valid"), "{summary}");
         assert!(commands.is_empty(), "{commands:?}");
+    }
+
+    #[test]
+    fn role_assignment_denial_does_not_suggest_membership_fallback() {
+        use ayx_core::envelope::ErrorCode;
+        let (summary, commands) =
+            remediation_for_error_code(ErrorCode::PermissionDenied, "one.role.assign")
+                .expect("role assignment has structured remediation");
+        assert!(summary.contains("role-assignment permission"));
+        assert!(summary.contains("do not fall back"));
+        assert!(
+            commands
+                .iter()
+                .all(|command| !command.contains("members invite"))
+        );
+
+        let (summary, commands) =
+            remediation_for_error_code(ErrorCode::PermissionDenied, "one.role.unassign")
+                .expect("role unassignment has structured remediation");
+        assert!(summary.contains("role-assignment permission"));
+        assert!(summary.contains("do not fall back"));
+        assert!(
+            commands
+                .iter()
+                .all(|command| !command.contains("members invite"))
+        );
     }
 }
 
@@ -2012,7 +2146,7 @@ pub(crate) enum WorkflowCommand {
         validate: bool,
     },
     #[command(
-        about = "Read and export .yxdb data; use --csv for export and top-level --output json for machine-readable envelopes"
+        about = "Read and export .yxdb data; use --csv for export and top-level -o json for machine-readable envelopes"
     )]
     Yxdb {
         #[arg(long)]
@@ -2484,14 +2618,6 @@ pub(crate) enum OneCommand {
         command: OnePlansCommand,
     },
     #[command(
-        about = "Alteryx One flows — list, run, import, and export",
-        arg_required_else_help = true
-    )]
-    Flows {
-        #[command(subcommand)]
-        command: OneFlowsCommand,
-    },
-    #[command(
         about = "Create and read datasets from the Alteryx One dataset APIs",
         arg_required_else_help = true
     )]
@@ -2526,9 +2652,8 @@ pub(crate) enum OneCommand {
         long_about = "Alteryx One cloud-native workflows — inspect, run, cancel, copy, share, and delete.\n\n\
                       These are the Alteryx One canvas workflows (the \
                       cloud-native/workflows/{id} web path), identified by ULIDs and served \
-                      by /svc-workflow. They are NOT `one flows`, which is the Designer \
-                      Cloud /v4/flows family keyed by integer ids — a workspace can hold \
-                      dozens of cloud-native workflows while `one flows list` returns none.",
+                      by /svc-workflow. They are distinct from the on-prem Designer/Server \
+                      workflow package surface, which is reached through `ayx designer workflow`.",
         arg_required_else_help = true
     )]
     Workflows {
@@ -2538,9 +2663,10 @@ pub(crate) enum OneCommand {
     #[command(
         about = "Alteryx One Job Library — inspect jobs, their runs, and results",
         long_about = "Alteryx One Job Library — inspect jobs, their runs, and results.\n\n\
-                      A Job Library entry is a Job Group identified by JOB-ID. Use `ayx one jobs \
-                      <JOB-ID>` to inspect that aggregate job and `ayx one jobs runs <JOB-ID>` \
-                      to see every child run record. The provider exposes no full child-run detail \
+                      A Job Library entry is a Job Group identified by JOB-GROUP-ID. Use `ayx one jobs \
+                      <JOB-GROUP-ID>` to inspect that aggregate job and `ayx one jobs runs <JOB-GROUP-ID>` \
+                      to see every child run record. A cloud-native workflow run returns `jobId` \
+                      for cancellation and `jobgroupId` for this child-run collection. The provider exposes no full child-run detail \
                       endpoint; the complete child records are returned by `runs`.",
         arg_required_else_help = true
     )]
@@ -2617,7 +2743,11 @@ pub(crate) enum OneTokenCommand {
     Create {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Inspect a One API access token by id.
@@ -2665,7 +2795,11 @@ pub(crate) enum OnePersonCommand {
     Create {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Replace a One person record from JSON payload.
@@ -2674,7 +2808,11 @@ pub(crate) enum OnePersonCommand {
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Patch a One person record from JSON payload.
@@ -2683,7 +2821,11 @@ pub(crate) enum OnePersonCommand {
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Delete a One person record.
@@ -2697,19 +2839,32 @@ pub(crate) enum OnePersonCommand {
     UpdatePassword {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Request a One password reset from JSON payload.
     PasswordResetRequest {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
 }
 
-#[derive(Subcommand, Debug)]
+/// Canonical, operator-facing Alteryx One workspace hierarchy.
+///
+/// This is intentionally a breaking surface: the prior flat verbs are not
+/// aliases. Endpoint/version details stay in the dispatcher rather than
+/// leaking into the CLI vocabulary.
+#[derive(Subcommand, Debug, Clone)]
 pub(crate) enum OneWorkspaceCommand {
     /// List accessible One workspaces.
     List {
@@ -2728,7 +2883,469 @@ pub(crate) enum OneWorkspaceCommand {
     Create {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
+        body: PathBuf,
+    },
+    /// Delete a One workspace by numeric id.
+    Delete {
+        #[arg(value_name = "ID")]
+        id: String,
+    },
+    /// Inspect the current One workspace posture.
+    Current,
+    /// Inspect a One workspace by numeric id.
+    Detail {
+        #[arg(value_name = "ID")]
+        id: String,
+    },
+    /// Select an already-authenticated workspace as active.
+    Use {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "TARGET")]
+        id: Option<String>,
+    },
+    /// Read or change the active workspace configuration.
+    #[command(arg_required_else_help = true)]
+    Config {
+        #[command(subcommand)]
+        command: OneWorkspaceConfigCommand,
+    },
+    /// Manage members of the active workspace.
+    #[command(arg_required_else_help = true)]
+    Members {
+        #[command(subcommand)]
+        command: OneWorkspaceMembersCommand,
+    },
+    /// Manage groups in the active workspace.
+    #[command(arg_required_else_help = true)]
+    Groups {
+        #[command(subcommand)]
+        command: OneWorkspaceGroupsCommand,
+    },
+    /// Manage cloud configuration records in the active workspace.
+    #[command(name = "cloud-configs", arg_required_else_help = true)]
+    CloudConfigs {
+        #[command(subcommand)]
+        command: OneWorkspaceCloudConfigsCommand,
+    },
+    /// Transfer the active workspace or its assets.
+    #[command(arg_required_else_help = true)]
+    Transfer {
+        #[command(subcommand)]
+        command: OneWorkspaceTransferCommand,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub(crate) enum OneWorkspaceConfigCommand {
+    /// Read the active workspace configuration.
+    Get,
+    /// Update the active workspace configuration from JSON payload.
+    Set {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
+        body: PathBuf,
+    },
+    /// Read the active workspace configuration schema.
+    Schema,
+    /// Reset the active workspace configuration.
+    Reset {
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub(crate) enum OneWorkspaceMembersCommand {
+    /// List members of the active workspace.
+    List,
+    /// List administrators of the active workspace.
+    Admins,
+    /// Invite a member with --email, or use --body for the batch/advanced API shape.
+    Invite {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long, value_name = "ADDRESS", conflicts_with = "body")]
+        email: Option<String>,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history",
+            conflicts_with = "email"
+        )]
+        body: Option<PathBuf>,
+    },
+    /// Reinvite member(s) using a JSON payload.
+    Reinvite {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
+        body: PathBuf,
+    },
+    /// Remove a member from the active workspace.
+    Remove {
+        #[arg(value_name = "PERSON-ID")]
+        id: String,
+    },
+    /// Suspend one member of the active workspace.
+    Suspend {
+        #[arg(value_name = "PERSON-ID")]
+        person_id: String,
+    },
+    /// Unsuspend members in the active workspace.
+    Unsuspend,
+    /// Update one member from a JSON payload.
+    Update {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "PERSON-ID")]
+        person_id: String,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
+        body: PathBuf,
+    },
+    /// Get an invitation link for a member.
+    #[command(name = "invitation-link")]
+    InvitationLink {
+        #[arg(long, value_name = "PERSON-ID")]
+        person_id: String,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub(crate) enum OneWorkspaceGroupsCommand {
+    /// List groups in the active workspace.
+    List,
+    /// Create a group from a JSON payload.
+    Create {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
+        body: PathBuf,
+    },
+    /// Update a group from a JSON payload.
+    Update {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "GROUP-ID")]
+        group_id: String,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
+        body: PathBuf,
+    },
+    /// Delete a group.
+    Delete {
+        #[arg(value_name = "GROUP-ID")]
+        group_id: String,
+    },
+    /// Manage group members.
+    #[command(arg_required_else_help = true)]
+    Members {
+        #[command(subcommand)]
+        command: OneWorkspaceGroupMembersCommand,
+    },
+    /// Set group roles from a JSON payload.
+    Roles {
+        #[command(subcommand)]
+        command: OneWorkspaceGroupRolesCommand,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub(crate) enum OneWorkspaceGroupMembersCommand {
+    /// Add members to a group.
+    Add {
+        #[arg(value_name = "GROUP-ID")]
+        group_id: String,
+        #[arg(long = "user-id", value_name = "USER-ID", required = true)]
+        user_ids: Vec<String>,
+    },
+    /// Remove members from a group.
+    Remove {
+        #[arg(value_name = "GROUP-ID")]
+        group_id: String,
+        #[arg(long = "user-id", value_name = "USER-ID", required = true)]
+        user_ids: Vec<String>,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub(crate) enum OneWorkspaceGroupRolesCommand {
+    /// Set roles for a group from a JSON payload.
+    Set {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "GROUP-ID")]
+        group_id: String,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
+        body: PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub(crate) enum OneWorkspaceCloudConfigsCommand {
+    /// List cloud configuration records.
+    List,
+    /// Create a cloud configuration from a JSON payload.
+    Create {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "CLOUD-PROVIDER")]
+        cloud_provider: String,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
+        body: PathBuf,
+    },
+    /// Update a cloud configuration from a JSON payload.
+    Update {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "CLOUD-PROVIDER")]
+        cloud_provider: String,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
+        body: PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub(crate) enum OneWorkspaceTransferCommand {
+    /// Start an active-workspace transfer.
+    Start,
+    /// Transfer active-workspace assets from a JSON payload.
+    Assets {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
+        body: PathBuf,
+    },
+}
+
+/// Translate the public, intentionally small workspace vocabulary to the
+/// implementation actions.  This is deliberately one-way: none of the old
+/// flat spellings are accepted by clap.
+impl From<OneWorkspaceCommand> for WorkspaceAction {
+    fn from(command: OneWorkspaceCommand) -> Self {
+        match command {
+            OneWorkspaceCommand::List {
+                profile,
+                limit,
+                page_token,
+                all,
+                max_pages,
+            } => Self::List {
+                profile,
+                limit,
+                page_token,
+                all,
+                max_pages,
+            },
+            OneWorkspaceCommand::Create { profile, body } => Self::Create { profile, body },
+            OneWorkspaceCommand::Delete { id } => Self::Delete { id },
+            OneWorkspaceCommand::Current => Self::Current,
+            OneWorkspaceCommand::Detail { id } => Self::Detail { id },
+            OneWorkspaceCommand::Use { profile, id } => Self::Switch { profile, id },
+            OneWorkspaceCommand::Config { command } => match command {
+                OneWorkspaceConfigCommand::Get => Self::CurrentConfiguration,
+                OneWorkspaceConfigCommand::Set { profile, body } => {
+                    Self::SaveCurrentConfiguration { profile, body }
+                }
+                OneWorkspaceConfigCommand::Schema => Self::CurrentConfigurationSchema,
+                OneWorkspaceConfigCommand::Reset { profile } => {
+                    Self::DeleteCurrentConfiguration { profile }
+                }
+            },
+            OneWorkspaceCommand::Members { command } => match command {
+                OneWorkspaceMembersCommand::List => Self::People,
+                OneWorkspaceMembersCommand::Admins => Self::Admins,
+                OneWorkspaceMembersCommand::Invite {
+                    profile,
+                    email,
+                    body,
+                } => Self::Invite {
+                    profile,
+                    workspace_id: None,
+                    email,
+                    body,
+                },
+                OneWorkspaceMembersCommand::Reinvite { profile, body } => Self::ReinviteUsers {
+                    profile,
+                    workspace_id: None,
+                    body,
+                },
+                OneWorkspaceMembersCommand::Remove { id } => Self::RemoveUser {
+                    workspace_id: None,
+                    id,
+                },
+                OneWorkspaceMembersCommand::Suspend { person_id } => Self::SuspendUser {
+                    workspace_id: None,
+                    person_id,
+                },
+                OneWorkspaceMembersCommand::Unsuspend => {
+                    Self::UnsuspendUsers { workspace_id: None }
+                }
+                OneWorkspaceMembersCommand::Update {
+                    profile,
+                    person_id,
+                    body,
+                } => Self::PatchUser {
+                    profile,
+                    workspace_id: None,
+                    person_id,
+                    body,
+                },
+                OneWorkspaceMembersCommand::InvitationLink { person_id } => Self::InvitationLink {
+                    workspace_id: None,
+                    person_id,
+                },
+            },
+            OneWorkspaceCommand::Groups { command } => match command {
+                OneWorkspaceGroupsCommand::List => Self::Groups { workspace_id: None },
+                OneWorkspaceGroupsCommand::Create { profile, body } => Self::CreateGroup {
+                    profile,
+                    workspace_id: None,
+                    body,
+                },
+                OneWorkspaceGroupsCommand::Update {
+                    profile,
+                    group_id,
+                    body,
+                } => Self::UpdateGroup {
+                    profile,
+                    workspace_id: None,
+                    group_id,
+                    body,
+                },
+                OneWorkspaceGroupsCommand::Delete { group_id } => Self::DeleteGroup {
+                    workspace_id: None,
+                    group_id,
+                },
+                OneWorkspaceGroupsCommand::Members { command } => match command {
+                    OneWorkspaceGroupMembersCommand::Add { group_id, user_ids } => {
+                        Self::AddGroupUsers {
+                            workspace_id: None,
+                            group_id,
+                            user_ids,
+                        }
+                    }
+                    OneWorkspaceGroupMembersCommand::Remove { group_id, user_ids } => {
+                        Self::RemoveGroupUsers {
+                            workspace_id: None,
+                            group_id,
+                            user_ids,
+                        }
+                    }
+                },
+                OneWorkspaceGroupsCommand::Roles { command } => match command {
+                    OneWorkspaceGroupRolesCommand::Set {
+                        profile,
+                        group_id,
+                        body,
+                    } => Self::SetGroupRoles {
+                        profile,
+                        workspace_id: None,
+                        group_id,
+                        body,
+                    },
+                },
+            },
+            OneWorkspaceCommand::CloudConfigs { command } => match command {
+                OneWorkspaceCloudConfigsCommand::List => Self::CloudConfigs { workspace_id: None },
+                OneWorkspaceCloudConfigsCommand::Create {
+                    profile,
+                    cloud_provider,
+                    body,
+                } => Self::CreateCloudConfig {
+                    profile,
+                    workspace_id: None,
+                    cloud_provider,
+                    body,
+                },
+                OneWorkspaceCloudConfigsCommand::Update {
+                    profile,
+                    cloud_provider,
+                    body,
+                } => Self::UpdateCloudConfig {
+                    profile,
+                    workspace_id: None,
+                    cloud_provider,
+                    body,
+                },
+            },
+            OneWorkspaceCommand::Transfer { command } => match command {
+                OneWorkspaceTransferCommand::Start => Self::Transfer { workspace_id: None },
+                OneWorkspaceTransferCommand::Assets { profile, body } => {
+                    Self::TransferAssets { profile, body }
+                }
+            },
+        }
+    }
+}
+
+/// Internal implementation actions retained while the public clap hierarchy
+/// migrates. This type is never parsed directly.
+#[derive(Subcommand, Debug)]
+pub(crate) enum WorkspaceAction {
+    /// List accessible One workspaces.
+    List {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        limit: Option<u32>,
+        #[arg(long)]
+        page_token: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        max_pages: Option<u32>,
+    },
+    /// Create a One workspace from a JSON payload.
+    Create {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Delete a One workspace.
@@ -2745,36 +3362,16 @@ pub(crate) enum OneWorkspaceCommand {
     },
     /// Inspect the current One workspace configuration.
     CurrentConfiguration,
-    /// Inspect a One workspace configuration by id.
-    ConfigurationV4 {
-        #[arg(value_name = "ID")]
-        id: String,
-    },
     /// Update the current One workspace configuration from JSON payload.
     SaveCurrentConfiguration {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
-    },
-    /// Update a One workspace configuration by id from JSON payload.
-    SaveConfigurationV4 {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
-    },
-    /// Inspect a One workspace configuration by id.
-    Configuration {
-        #[arg(value_name = "ID")]
-        id: String,
-    },
-    /// Inspect the workspace configuration schema.
-    ConfigurationSchema {
-        #[arg(value_name = "ID")]
-        id: String,
     },
     /// Inspect the current workspace configuration schema.
     CurrentConfigurationSchema,
@@ -2782,11 +3379,6 @@ pub(crate) enum OneWorkspaceCommand {
     DeleteCurrentConfiguration {
         #[arg(long)]
         profile: Option<String>,
-    },
-    /// Reset a workspace configuration by workspace id.
-    DeleteConfiguration {
-        #[arg(value_name = "ID")]
-        id: String,
     },
     /// List people in the current One workspace.
     People,
@@ -2797,21 +3389,23 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(value_name = "WORKSPACE-ID")]
         workspace_id: Option<String>,
     },
-    /// List groups visible to the current One user.
-    GroupsGlobal,
     /// Create a group in a One workspace from a JSON payload.
     CreateGroup {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        workspace_id: Option<String>,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Delete a group from a One workspace.
     DeleteGroup {
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
+        workspace_id: Option<String>,
         #[arg(value_name = "GROUP-ID")]
         group_id: String,
     },
@@ -2820,10 +3414,14 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
+        workspace_id: Option<String>,
         #[arg(value_name = "GROUP-ID")]
         group_id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Set roles for a One workspace group from a JSON payload.
@@ -2831,16 +3429,20 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
+        workspace_id: Option<String>,
         #[arg(value_name = "GROUP-ID")]
         group_id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Add users to a One workspace group.
     AddGroupUsers {
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
+        workspace_id: Option<String>,
         #[arg(value_name = "GROUP-ID")]
         group_id: String,
         #[arg(long = "user-id", value_name = "USER-ID", required = true)]
@@ -2849,7 +3451,7 @@ pub(crate) enum OneWorkspaceCommand {
     /// Remove users from a One workspace group.
     RemoveGroupUsers {
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
+        workspace_id: Option<String>,
         #[arg(value_name = "GROUP-ID")]
         group_id: String,
         #[arg(long = "user-id", value_name = "USER-ID", required = true)]
@@ -2858,14 +3460,14 @@ pub(crate) enum OneWorkspaceCommand {
     /// Get the invitation link for a person in a One workspace.
     InvitationLink {
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
+        workspace_id: Option<String>,
         #[arg(long, value_name = "PERSON-ID")]
         person_id: String,
     },
     /// Get workspace cloud configuration records.
     CloudConfigs {
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
+        workspace_id: Option<String>,
     },
     /// Select which authenticated workspace is active for this profile.
     Switch {
@@ -2874,36 +3476,32 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(value_name = "TARGET")]
         id: Option<String>,
     },
-    /// Invite users to a One workspace.
-    InviteUsers {
-        #[arg(long)]
-        workspace_id: Option<String>,
-    },
-    /// Invite a single user to a One workspace from a JSON payload.
+    /// Invite a single user to a One workspace, or submit a batch JSON payload.
     Invite {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
-    },
-    /// Invite a list of users to a One workspace from a JSON payload.
-    InviteList {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
+        workspace_id: Option<String>,
+        #[arg(long, value_name = "EMAIL")]
+        email: Option<String>,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
+        body: Option<PathBuf>,
     },
     /// Reinvite workspace users from a JSON payload.
     ReinviteUsers {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        workspace_id: Option<String>,
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Remove a user from a One workspace.
@@ -2912,11 +3510,6 @@ pub(crate) enum OneWorkspaceCommand {
         workspace_id: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
-    },
-    /// Suspend users in a One workspace.
-    SuspendUsers {
-        #[arg(long)]
-        workspace_id: Option<String>,
     },
     /// Unsuspend users in a One workspace.
     UnsuspendUsers {
@@ -2939,7 +3532,11 @@ pub(crate) enum OneWorkspaceCommand {
     TransferAssets {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Create workspace cloud configuration from a JSON payload.
@@ -2947,10 +3544,14 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
+        workspace_id: Option<String>,
         #[arg(value_name = "CLOUD-PROVIDER")]
         cloud_provider: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Update workspace cloud configuration from a JSON payload.
@@ -2958,10 +3559,14 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
+        workspace_id: Option<String>,
         #[arg(value_name = "CLOUD-PROVIDER")]
         cloud_provider: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Patch a workspace user from a JSON payload.
@@ -2969,21 +3574,14 @@ pub(crate) enum OneWorkspaceCommand {
         #[arg(long)]
         profile: Option<String>,
         #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
+        workspace_id: Option<String>,
         #[arg(value_name = "PERSON-ID")]
         person_id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
-    },
-    /// Replace a workspace user from a JSON payload.
-    UpdateUser {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "WORKSPACE-ID")]
-        workspace_id: String,
-        #[arg(value_name = "PERSON-ID")]
-        person_id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
 }
@@ -3087,7 +3685,11 @@ pub(crate) enum OnePlansCommand {
     Create {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Inspect a One plan.
@@ -3144,7 +3746,11 @@ pub(crate) enum OnePlansCommand {
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Delete a One plan.
@@ -3160,10 +3766,14 @@ pub(crate) enum OnePlansCommand {
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
-    /// Import a One plan package.
+    /// Import a One plan package (provider contract pending).
     Import {
         #[arg(long)]
         profile: Option<String>,
@@ -3180,213 +3790,16 @@ pub(crate) enum OnePlansCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub(crate) enum OneFlowsCommand {
-    /// List One flows (flat — no folder structure; see `flows library` for a folder-aware view).
-    List {
-        #[arg(long)]
-        profile: Option<String>,
-        /// Cap results per page (server-side limit). Default is the server's
-        /// own page size (typically 100 for /v4/flows).
-        #[arg(long)]
-        limit: Option<u32>,
-        /// Fetch a specific page; pass the `nextPageToken` returned by a
-        /// previous call.
-        #[arg(long)]
-        page_token: Option<String>,
-        /// Automatically follow `nextPageToken` until all pages are fetched.
-        /// Capped by `--max-pages` (default 50).
-        #[arg(long)]
-        all: bool,
-        /// Hard cap on pages when `--all` is set. Prevents runaway loops
-        /// against very large tenants.
-        #[arg(long)]
-        max_pages: Option<u32>,
-    },
-    /// Count One flows (flat — see `flows library count` for a breakdown that includes folders).
-    Count {
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    #[command(arg_required_else_help = true)]
-    /// Browse the One flow library: flows AND their containing folders together, unlike the flat `flows list`/`flows count` (list, count).
-    Library {
-        #[command(subcommand)]
-        command: OneFlowLibraryCommand,
-    },
-    #[command(arg_required_else_help = true)]
-    /// Manage One flow folders (list, create, update, delete, nested flows).
-    Folders {
-        #[command(subcommand)]
-        command: OneFlowFoldersCommand,
-    },
-    /// Create a One flow from JSON payload.
-    Create {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
-    },
-    /// Inspect a One flow by id.
-    Detail {
-        #[arg(long)]
-        profile: Option<String>,
-        /// Resource id. Omit on a terminal to pick from the list.
-        #[arg(value_name = "ID")]
-        id: Option<String>,
-    },
-    /// Update a One flow from JSON payload.
-    Update {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
-    },
-    /// Delete a One flow.
-    Delete {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-    },
-    /// Copy a One flow using a JSON payload.
-    Copy {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-        #[arg(long)]
-        body: Option<PathBuf>,
-    },
-    /// Run a One flow using a JSON payload.
-    Run {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-        #[arg(long)]
-        body: Option<PathBuf>,
-    },
-    /// Validate a One flow.
-    Validate {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-    },
-    /// Inspect flow-level parameters and overrides.
-    Parameters {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-        #[arg(long)]
-        output_object_type: Option<String>,
-    },
-    /// List inputs for a One flow.
-    Inputs {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-    },
-    /// List outputs for a One flow.
-    Outputs {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-    },
-    /// List permissions for a One flow.
-    PermissionsGet {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-    },
-    /// Share a flow from JSON payload.
-    Permissions {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
-    },
-    /// Move a One flow from JSON payload.
-    Move {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
-    },
-    /// Replace a dataset in a One flow from JSON payload.
-    ReplaceDataset {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
-    },
-    /// Import a flow package.
-    Import {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "INPUT")]
-        input: PathBuf,
-        #[arg(long)]
-        folder_id: Option<String>,
-        #[arg(long)]
-        from_ui: bool,
-        #[arg(long)]
-        override_js_udfs: bool,
-    },
-    /// Dry-run import of a flow package.
-    ImportDryRun {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "INPUT")]
-        input: PathBuf,
-        #[arg(long)]
-        folder_id: Option<String>,
-        #[arg(long)]
-        from_ui: bool,
-        #[arg(long)]
-        override_js_udfs: bool,
-    },
-    /// Export a flow package to disk.
-    Export {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-        #[arg(
-            long = "output-file",
-            value_name = "FILE",
-            help = "path to write the exported .yxzp package"
-        )]
-        output_file: PathBuf,
-    },
-    /// Dry-run export of a flow package.
-    ExportDryRun {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
 pub(crate) enum OneDatasetsCommand {
     /// Create an imported dataset reference from a JSON payload.
     Create {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// List datasets in the user-facing One dataset library.
@@ -3469,100 +3882,6 @@ pub(crate) enum OneDatasetsImportedCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub(crate) enum OneFlowLibraryCommand {
-    /// List the One flow library — a folder-aware view combining flows and folders, unlike the flat `flows list`.
-    List {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(long)]
-        limit: Option<u32>,
-        #[arg(long)]
-        offset: Option<u32>,
-    },
-    /// Count the One flow library — returns separate flow/folder/total counts, unlike the flat `flows count`.
-    Count {
-        #[arg(long)]
-        profile: Option<String>,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub(crate) enum OneFlowFoldersCommand {
-    /// List flow folders.
-    List {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(long)]
-        limit: Option<u32>,
-        #[arg(long)]
-        offset: Option<u32>,
-    },
-    /// Count flow folders.
-    Count {
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Inspect a flow folder by id.
-    Detail {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-    },
-    /// Create a flow folder from JSON payload.
-    Create {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
-    },
-    /// Update a flow folder from JSON payload.
-    Update {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
-    },
-    /// Delete a flow folder.
-    Delete {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-    },
-    #[command(arg_required_else_help = true)]
-    /// List or count flows within a folder.
-    Flows {
-        #[command(subcommand)]
-        command: OneFlowFolderFlowsCommand,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub(crate) enum OneFlowFolderFlowsCommand {
-    /// List flows in a folder.
-    List {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-        #[arg(long)]
-        limit: Option<u32>,
-        #[arg(long)]
-        offset: Option<u32>,
-    },
-    /// Count flows in a folder.
-    Count {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(value_name = "ID")]
-        id: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
 pub(crate) enum OneConnectionsCommand {
     /// List One connections.
     List {
@@ -3586,14 +3905,22 @@ pub(crate) enum OneConnectionsCommand {
     Create {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Dry-run creation of a One connection.
     DryRun {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Inspect a One connection.
@@ -3617,7 +3944,11 @@ pub(crate) enum OneConnectionsCommand {
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Delete a One connection.
@@ -3697,7 +4028,11 @@ pub(crate) enum OneConnectorMetadataOverridesCommand {
         profile: Option<String>,
         #[arg(value_name = "CONNECTOR")]
         connector: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Inspect connector metadata overrides.
@@ -3743,8 +4078,8 @@ pub(crate) enum OneConnectionPermissionCommand {
         to_group: Vec<String>,
         #[arg(
             long,
-            value_name = "FILE",
-            help = "path to JSON body file",
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; inline JSON is visible in shell history",
             conflicts_with_all = ["policy", "to_person", "to_group"]
         )]
         body: Option<PathBuf>,
@@ -3834,7 +4169,11 @@ pub(crate) enum OneAgentsCommand {
     Create {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Update an Agent Studio agent from a JSON payload.
@@ -3843,7 +4182,11 @@ pub(crate) enum OneAgentsCommand {
         profile: Option<String>,
         #[arg(value_name = "AGENT-ID")]
         id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Delete an Agent Studio agent.
@@ -3953,6 +4296,14 @@ pub(crate) enum OneWorkflowsCommand {
         #[arg(long)]
         include_dependencies: bool,
     },
+    /// Inspect the workflow graph when the asset response provides it.
+    /// Raw provider data is retained under the normal response field.
+    Graph {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(value_name = "ULID")]
+        id: String,
+    },
     /// List the connections, datasets, and macros a workflow depends on.
     #[command(alias = "deps")]
     Dependencies {
@@ -3988,7 +4339,11 @@ pub(crate) enum OneWorkflowsCommand {
         #[arg(value_name = "WORKFLOW-ID")]
         id: String,
         /// Optional JSON body containing runtime overrides or input parameters.
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: Option<PathBuf>,
     },
     /// Cancel a queued or running cloud-native workflow run.
@@ -3999,7 +4354,7 @@ pub(crate) enum OneWorkflowsCommand {
     Cancel {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "RUN-ID")]
+        #[arg(value_name = "JOB-ID")]
         run_id: String,
     },
     /// List the tools available to cloud-native workflows.
@@ -4066,8 +4421,8 @@ pub(crate) enum OneWorkflowsCommand {
         no_resolve_emails: bool,
         #[arg(
             long,
-            value_name = "FILE",
-            help = "path to JSON body file",
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; inline JSON is visible in shell history",
             conflicts_with_all = [
                 "to_person", "to_group", "privilege", "include_dependencies",
                 "send_email", "message", "no_resolve_emails",
@@ -4188,79 +4543,90 @@ pub(crate) enum OneJobsCommand {
     Execute {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Publish job results to a target.
     Publish {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "JOB-ID")]
+        #[arg(value_name = "JOB-GROUP-ID")]
         id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Cancel a Job Library entry.
     Cancel {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "JOB-ID")]
+        #[arg(value_name = "JOB-GROUP-ID")]
         id: String,
     },
     /// Inspect aggregate job status.
     Status {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "JOB-ID")]
+        #[arg(value_name = "JOB-GROUP-ID")]
         id: String,
     },
-    /// List every child run record for an aggregate job.
+    /// List every child run record for an Alteryx One Job Group execution.
+    ///
+    /// For a cloud-native workflow run, pass the `jobgroupId` returned by
+    /// `one workflows run`. The separate `jobId` is used by `workflows cancel`.
     Runs {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "JOB-ID")]
+        #[arg(value_name = "JOB-GROUP-ID")]
         id: String,
     },
     /// List aggregate job inputs.
     Inputs {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "JOB-ID")]
+        #[arg(value_name = "JOB-GROUP-ID")]
         id: String,
     },
     /// List aggregate job outputs.
     Outputs {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "JOB-ID")]
+        #[arg(value_name = "JOB-GROUP-ID")]
         id: String,
     },
     /// List publications for an aggregate job.
     Publications {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "JOB-ID")]
+        #[arg(value_name = "JOB-GROUP-ID")]
         id: String,
     },
     /// Inspect aggregate job profiling metadata.
     Profile {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "JOB-ID")]
+        #[arg(value_name = "JOB-GROUP-ID")]
         id: String,
     },
     /// Inspect aggregate job profiling results.
     ProfileResults {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "JOB-ID")]
+        #[arg(value_name = "JOB-GROUP-ID")]
         id: String,
     },
     /// Inspect aggregate job PDF results.
     PdfResults {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "JOB-ID")]
+        #[arg(value_name = "JOB-GROUP-ID")]
         id: String,
     },
 }
@@ -4289,7 +4655,11 @@ pub(crate) enum OneJobGroupCommand {
     Run {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Publish job-group results to a target.
@@ -4298,7 +4668,11 @@ pub(crate) enum OneJobGroupCommand {
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Inspect a One job group.
@@ -4337,11 +4711,11 @@ pub(crate) enum OneJobGroupCommand {
         #[arg(value_name = "ID")]
         id: String,
     },
-    /// List jobs for a One job group.
+    /// List child runs for a One Job Group execution.
     Jobs {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "ID")]
+        #[arg(value_name = "JOB-GROUP-ID")]
         id: String,
     },
     /// List publications for a One job group.
@@ -4430,7 +4804,11 @@ pub(crate) enum OneOutputObjectCommand {
     Create {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Inspect a One output object.
@@ -4446,7 +4824,11 @@ pub(crate) enum OneOutputObjectCommand {
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Delete a One output object.
@@ -4480,7 +4862,11 @@ pub(crate) enum OneWebhookFlowTaskCommand {
     Create {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Inspect a webhook flow task.
@@ -4501,7 +4887,11 @@ pub(crate) enum OneWebhookFlowTaskCommand {
     Test {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
 }
@@ -4530,7 +4920,11 @@ pub(crate) enum OneWriteSettingCommand {
     Create {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Inspect a One write setting.
@@ -4546,7 +4940,11 @@ pub(crate) enum OneWriteSettingCommand {
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Delete a One write setting.
@@ -4577,8 +4975,39 @@ pub(crate) enum OneSchedulingCommand {
     Create {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
-        body: PathBuf,
+        /// Typed target kind. Omit all typed positionals to use raw --body.
+        #[arg(value_name = "TARGET-KIND")]
+        target_kind: Option<ScheduleTargetKind>,
+        /// ID of the workflow, flow, plan, or job group to schedule.
+        #[arg(value_name = "TARGET-ID")]
+        target_id: Option<String>,
+        /// Typed trigger kind.
+        #[arg(value_name = "TRIGGER-KIND")]
+        trigger_kind: Option<ScheduleTriggerKind>,
+        /// Display name for a typed schedule.
+        #[arg(long)]
+        name: Option<String>,
+        /// IANA time zone used by the typed trigger.
+        #[arg(long)]
+        timezone: Option<String>,
+        /// Hour in the target time zone (0-23).
+        #[arg(long)]
+        hour: Option<u8>,
+        /// Minute in the target time zone (0-59).
+        #[arg(long)]
+        minute: Option<u8>,
+        /// ISO weekday numbers for a weekly trigger (1=Monday..7=Sunday).
+        #[arg(long, value_delimiter = ',')]
+        weekday: Vec<u8>,
+        /// Day of month for a monthly trigger (1-31).
+        #[arg(long)]
+        day_of_month: Option<u8>,
+        /// RFC3339 timestamp for a one-time trigger.
+        #[arg(long)]
+        at: Option<String>,
+        /// JSON file, inline non-secret JSON, or - for stdin. Inline values are visible in shell history; use a file or stdin for secrets. Mutually exclusive with typed positionals.
+        #[arg(long, value_name = "FILE|JSON|-", conflicts_with_all = ["target_kind", "target_id", "trigger_kind", "name", "timezone", "hour", "minute", "weekday", "day_of_month", "at"])]
+        body: Option<PathBuf>,
     },
     /// Inspect a One schedule by id.
     Detail {
@@ -4593,7 +5022,11 @@ pub(crate) enum OneSchedulingCommand {
         profile: Option<String>,
         #[arg(value_name = "ID")]
         id: String,
-        #[arg(long, value_name = "FILE", help = "path to JSON body file")]
+        #[arg(
+            long,
+            value_name = "FILE|JSON|-",
+            help = "JSON file, inline JSON, or - for stdin; use file:... for JSON-looking filenames; inline JSON is visible in shell history"
+        )]
         body: PathBuf,
     },
     /// Enable a One schedule.
@@ -4622,6 +5055,22 @@ pub(crate) enum OneSchedulingCommand {
         #[arg(long)]
         profile: Option<String>,
     },
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy)]
+pub(crate) enum ScheduleTargetKind {
+    Workflow,
+    Flow,
+    Plan,
+    JobGroup,
+}
+
+#[derive(clap::ValueEnum, Debug, Clone, Copy)]
+pub(crate) enum ScheduleTriggerKind {
+    Daily,
+    Weekly,
+    Monthly,
+    OneTime,
 }
 
 #[derive(Subcommand, Debug)]
@@ -5054,11 +5503,103 @@ pub(crate) enum UpgradeCommand {
     },
 }
 
-pub(crate) fn load_payload(path: &Path) -> Result<Value> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("failed to read payload file '{}'", path.display()))?;
-    let value = serde_json::from_str(&content)
-        .with_context(|| format!("failed to parse JSON payload from '{}'", path.display()))?;
+pub(crate) fn load_payload(source: &Path) -> Result<Value> {
+    use std::io::Read;
+
+    let source_text = source.to_string_lossy();
+    let explicit_file = source_text.strip_prefix("file:");
+    let explicit_inline = source_text.strip_prefix("json:");
+    let inline_source = explicit_inline.unwrap_or(&source_text);
+    let inline_json = inline_source.trim_start();
+    let file_source = explicit_file.map(Path::new).unwrap_or(source);
+    // Direct JSON wins over a same-named file, so an untrusted checkout cannot
+    // shadow `--body []` or another inline body. An existing invalid JSON path
+    // such as `{payload}.json` still falls through to the legacy file behavior;
+    // `file:<path>` is the explicit escape hatch for a JSON-looking filename.
+    let inline_candidate = explicit_inline.is_some()
+        || (explicit_file.is_none()
+            && matches!(inline_json.chars().next(), Some('{') | Some('['))
+            && (!source.is_file() || serde_json::from_str::<Value>(inline_source).is_ok()));
+    let mut inline_value = None;
+    let content = if source_text == "-" {
+        if io::stdin().is_terminal() {
+            anyhow::bail!("--body - requires piped stdin; refusing to read from a terminal")
+        }
+        let mut bytes = Vec::new();
+        io::stdin()
+            .take((MAX_JSON_PAYLOAD_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .context("failed to read JSON payload from stdin")?;
+        if bytes.len() > MAX_JSON_PAYLOAD_BYTES {
+            bail!(
+                "validation: JSON payload from stdin exceeds the {} MiB safety limit",
+                MAX_JSON_PAYLOAD_BYTES / (1024 * 1024)
+            );
+        }
+        String::from_utf8(bytes).context("JSON payload from stdin is not valid UTF-8")?
+    } else if inline_candidate {
+        // Inline JSON keeps the existing --body spelling while avoiding a
+        // second mutually-exclusive flag. It is visible in process listings
+        // and shell history: use a file or stdin for secrets. Prefix with
+        // `json:` when the body is not an object/array, and `file:` to force a
+        // JSON-looking filename to be read as a file.
+        if inline_source.len() > MAX_JSON_PAYLOAD_BYTES {
+            bail!(
+                "validation: inline JSON payload exceeds the {} MiB safety limit; use a file or stdin",
+                MAX_JSON_PAYLOAD_BYTES / (1024 * 1024)
+            );
+        }
+        if explicit_inline.is_some() {
+            inline_value = Some(
+                serde_json::from_str(inline_source)
+                    .context("failed to parse inline JSON payload after json: prefix")?,
+            );
+        }
+        inline_source.to_string()
+    } else {
+        let file = fs::File::open(file_source)
+            .with_context(|| format!("failed to read payload file '{}'", file_source.display()))?;
+        let size = file
+            .metadata()
+            .with_context(|| format!("failed to inspect payload file '{}'", file_source.display()))?
+            .len();
+        if size > MAX_JSON_PAYLOAD_BYTES as u64 {
+            bail!(
+                "validation: JSON payload file '{}' exceeds the {} MiB safety limit",
+                file_source.display(),
+                MAX_JSON_PAYLOAD_BYTES / (1024 * 1024)
+            );
+        }
+        let mut bytes = Vec::with_capacity(size as usize);
+        file.take((MAX_JSON_PAYLOAD_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .with_context(|| format!("failed to read payload file '{}'", file_source.display()))?;
+        if bytes.len() > MAX_JSON_PAYLOAD_BYTES {
+            bail!(
+                "validation: JSON payload file '{}' exceeds the {} MiB safety limit",
+                file_source.display(),
+                MAX_JSON_PAYLOAD_BYTES / (1024 * 1024)
+            );
+        }
+        String::from_utf8(bytes).with_context(|| {
+            format!(
+                "JSON payload file '{}' is not valid UTF-8",
+                file_source.display()
+            )
+        })?
+    };
+    let value = match inline_value {
+        Some(value) => value,
+        None => serde_json::from_str(&content).with_context(|| {
+            if source_text == "-" {
+                "failed to parse JSON payload from stdin".to_string()
+            } else if inline_candidate {
+                "failed to parse inline JSON payload; quote the JSON passed to --body; use a file or stdin for secrets".to_string()
+            } else {
+                format!("failed to parse JSON payload from '{}'", file_source.display())
+            }
+        })?,
+    };
     Ok(value)
 }
 
@@ -5394,7 +5935,7 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
         }
         Command::Whoami { profile } => {
             // Identity in one shot. No network — purely what the local
-            // profile + state knows. The operator can append `--output json`
+            // profile + state knows. The operator can append `-o json`
             // for a structured payload or pipe through `ayx one
             // workspace current` for the live workspace.
             let resolution = resolve_runtime_profile(profile.as_deref()).ok();
@@ -5775,7 +6316,7 @@ pub(crate) fn one_doctor_identity_envelope(config: &Config) -> Result<Envelope> 
                 workspace.data,
             ],
             "recommendations": [
-                "Use one workspace people/admins to drill into workspace scope",
+                "Use one workspace members list/admins to drill into workspace scope",
                 "Route deeper symptom handling to the workflow guidance layer",
             ]
         }),
@@ -7582,9 +8123,7 @@ fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static s
         Incomplete => Some(
             "The response is partial. Resume with the returned next_page_token or raise --max-pages.",
         ),
-        OutputClassification => {
-            Some("Use --output json to inspect the sanitized upstream envelope.")
-        }
+        OutputClassification => Some("Use -o json to inspect the sanitized upstream envelope."),
         Internal => None,
     }
 }
@@ -7619,7 +8158,7 @@ const SUB_RESOURCE_VERBS: &[&str] = &[
 ];
 
 /// Structured remediation for dispatcher-classified failures. `command` is the
-/// descriptor's dotted command id (e.g. `one.flows.list`) so product-specific
+/// descriptor's dotted command id (e.g. `one.workflows.list`) so product-specific
 /// advice is only given to the product it applies to.
 fn remediation_for_error_code(
     code: ayx_core::envelope::ErrorCode,
@@ -7630,7 +8169,7 @@ fn remediation_for_error_code(
     let cmds = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
 
     if code == NotFound {
-        // `command` is the descriptor's dotted id, e.g. `one.flows.detail`.
+        // `command` is the descriptor's dotted id, e.g. `one.workflows.detail`.
         // Only name a `<family> list` command when the live command tree
         // still exposes one at `one/<family>/list` -- never fabricate a
         // command that doesn't exist.
@@ -7659,7 +8198,7 @@ fn remediation_for_error_code(
                 return Some((
                     "The id was not found in this workspace; list the family to find a valid one."
                         .to_string(),
-                    vec![format!("ayx one {family} list --output json")],
+                    vec![format!("ayx one {family} list -o json")],
                 ));
             }
         }
@@ -7669,21 +8208,25 @@ fn remediation_for_error_code(
     Some(match code {
         ConfigMissing => (
             "No usable profile was found; onboard or select an existing one.".to_string(),
-            cmds(&["ayx onboard", "ayx profile list --output json"]),
+            cmds(&["ayx onboard", "ayx profile list -o json"]),
         ),
         AuthFailed if is_one => (
             "The stored One credential was rejected; log in again.".to_string(),
-            cmds(&["ayx one login", "ayx one auth status --output json"]),
+            cmds(&["ayx one login", "ayx one auth status -o json"]),
         ),
         AuthFailed => (
             "The stored credential was rejected; refresh it for this product.".to_string(),
             Vec::new(),
         ),
+        PermissionDenied if matches!(command, "one.role.assign" | "one.role.unassign") => (
+            "Role assignment change was denied by the authorization service. The caller lacks the required role-assignment permission; do not fall back to workspace membership changes.".to_string(),
+            cmds(&["ayx one role detail <role-id>", "ayx one role list-assignments <role-id>"]),
+        ),
         WorkspaceMismatch => (
             "The token belongs to a different workspace than the profile expects.".to_string(),
             cmds(&[
-                "ayx one workspace current --output json",
-                "ayx one workspace switch",
+                "ayx one workspace current -o json",
+                "ayx one workspace use",
             ]),
         ),
         _ => return None,
@@ -7698,6 +8241,31 @@ fn remediation_for_error_code(
 /// future code paths should build typed errors using `ErrorCode::*` directly
 /// rather than relying on this fallback.
 fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
+    // Typed causes always win.  In particular, never let a provider body that
+    // happened to echo `error_code=permission_denied` override a typed 5xx.
+    for cause in err.chain() {
+        if let Some(coded) = cause.downcast_ref::<ayx_core::envelope::CodedError>() {
+            return coded.code;
+        }
+        if let Some(status) = cause.downcast_ref::<ayx_core::envelope::HttpStatusError>() {
+            return status.error_code();
+        }
+        if matches!(
+            cause.downcast_ref::<ayx_core::one_credential_store::OneCredentialStoreError>(),
+            Some(ayx_core::one_credential_store::OneCredentialStoreError::MissingProfile)
+        ) {
+            return ErrorCode::ConfigMissing;
+        }
+        if let Some(profile) = cause.downcast_ref::<ayx_core::profile::ProfileError>()
+            && matches!(
+                profile,
+                ayx_core::profile::ProfileError::Parse { .. }
+                    | ayx_core::profile::ProfileError::Invalid(_)
+            )
+        {
+            return ErrorCode::ConfigMissing;
+        }
+    }
     if err
         .chain()
         .any(|cause| cause.is::<ayx_one_api::OneLoginExpired>())
@@ -7713,21 +8281,15 @@ fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
         .collect::<Vec<_>>()
         .join("\n")
         .to_ascii_lowercase();
-    // Prefer a classification that was already computed over re-guessing it
-    // from prose. `ayx-server-api` bails with `... error_code=<code> ...`,
-    // derived from `ErrorCode::from_http_status`, and its comment says the
-    // outer dispatcher picks that up. Nothing did: the scan below looks for
-    // `"not found"` with a space while the embedded token is `not_found` with
-    // an underscore. A Server-side 404 was classified only when the body
-    // prose happened to say "not found"; a 410 scream test now carries `gone`
-    // and should stay distinct from `not_found`.
-    if let Some(code) = chain
-        .split("error_code=")
-        .nth(1)
-        .and_then(|rest| rest.split_whitespace().next())
-        .and_then(ErrorCode::parse_code)
-    {
+    // Compatibility only for older clients that embedded their already-known
+    // code in an error string.  Read the first anchored token, not arbitrary
+    // provider prose nested after a `body=` field. New callers use the typed
+    // causes above.
+    if let Some(code) = legacy_embedded_error_code(err) {
         return code;
+    }
+    if let Some(status) = legacy_http_status(err) {
+        return ErrorCode::from_http_status(status).unwrap_or(ErrorCode::Internal);
     }
     if chain.contains("workspace mismatch") {
         return ErrorCode::WorkspaceMismatch;
@@ -7740,29 +8302,25 @@ fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
         return ErrorCode::ConfigMissing;
     }
     if chain.contains("unauthorized")
-        || chain.contains("401")
         || chain.contains("invalid_grant")
         || chain.contains("token")
             && (chain.contains("expired") || chain.contains("missing") || chain.contains("invalid"))
     {
         return ErrorCode::AuthFailed;
     }
-    if chain.contains("forbidden") || chain.contains("403") || chain.contains("permission denied") {
+    if chain.contains("forbidden") || chain.contains("permission denied") {
         return ErrorCode::PermissionDenied;
     }
-    if chain.contains("gone") || chain.contains("410") {
+    if chain.contains("gone") {
         return ErrorCode::Gone;
     }
-    if chain.contains("gone") || chain.contains("410") {
-        return ErrorCode::Gone;
-    }
-    if chain.contains("not found") || chain.contains("404") {
+    if chain.contains("not found") {
         return ErrorCode::NotFound;
     }
-    if chain.contains("conflict") || chain.contains("409") {
+    if chain.contains("conflict") {
         return ErrorCode::Conflict;
     }
-    if chain.contains("rate limit") || chain.contains("429") {
+    if chain.contains("rate limit") {
         return ErrorCode::RateLimited;
     }
     if chain.contains("timed out")
@@ -7774,16 +8332,6 @@ fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
         || chain.contains("network")
     {
         return ErrorCode::Network;
-    }
-    // Status-code signals win over body-keyword heuristics: a 5xx whose body
-    // happens to contain a validation phrase (e.g. "client_id is required") is
-    // an upstream fault, not a client-side validation error.
-    if chain.contains("500")
-        || chain.contains("502")
-        || chain.contains("503")
-        || chain.contains("504")
-    {
-        return ErrorCode::Upstream;
     }
     if chain.contains("validation")
         || chain.contains("invalid value")
@@ -7801,6 +8349,39 @@ fn classify_anyhow_error(err: &anyhow::Error) -> ErrorCode {
         return ErrorCode::Validation;
     }
     ErrorCode::Internal
+}
+
+/// Read the legacy `error_code=<wire-code>` token only when it occurs before
+/// an upstream `body=` dump in an individual error cause.  This retains
+/// compatibility with pre-typed HTTP clients without allowing nested provider
+/// JSON to impersonate the envelope classification.
+fn legacy_embedded_error_code(err: &anyhow::Error) -> Option<ErrorCode> {
+    err.chain().find_map(|cause| {
+        let text = cause.to_string();
+        let prefix = text
+            .split_once(" body=")
+            .map_or(text.as_str(), |(head, _)| head);
+        let (_, value) = prefix.split_once("error_code=")?;
+        let code: String = value
+            .chars()
+            .take_while(|character| character.is_ascii_lowercase() || *character == '_')
+            .collect();
+        ErrorCode::parse_code(&code)
+    })
+}
+
+/// Narrow fallback for old clients that did not retain a typed status cause.
+/// A status is accepted only at the beginning of a cause, where it is client
+/// framing rather than a number from an echoed response body.
+fn legacy_http_status(err: &anyhow::Error) -> Option<u16> {
+    err.chain().find_map(|cause| {
+        let text = cause.to_string().to_ascii_lowercase();
+        let value = text
+            .strip_prefix("http status ")
+            .or_else(|| text.strip_prefix("http "))?;
+        let digits: String = value.chars().take_while(char::is_ascii_digit).collect();
+        digits.parse().ok()
+    })
 }
 
 #[cfg(feature = "ui")]

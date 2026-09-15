@@ -318,10 +318,12 @@ mod tests {
 
     #[test]
     fn param_name_drift_is_covered_not_missing() {
-        // Inventory has GET /v4/flows/{id}; spec exposes GET /v4/flows/{flowId}.
-        let spec = spec_with(json!({ "/v4/flows/{flowId}": { "get": { "summary": "Get flow" } } }));
+        // Inventory has GET /v4/workspaces/{workspaceId}; the spec may name
+        // that same path parameter differently.
+        let spec =
+            spec_with(json!({ "/v4/workspaces/{id}": { "get": { "summary": "Get workspace" } } }));
         let r = coverage(&spec);
-        assert!(r.missing.iter().all(|m| m.path != "/v4/flows/{flowId}"));
+        assert!(r.missing.iter().all(|m| m.path != "/v4/workspaces/{id}"));
     }
 
     #[test]
@@ -387,14 +389,14 @@ mod tests {
         // servers URL carries /v4; paths are relative.
         let spec = json!({
             "servers": [{ "url": "https://host/v4" }],
-            "paths": { "/flows/{id}": { "get": {} } }
+            "paths": { "/workspaces/{id}": { "get": {} } }
         });
         let r = coverage(&spec);
         assert!(
             r.unmatched_spec_paths.is_empty(),
-            "relative /flows must anchor to /v4/flows"
+            "relative /workspaces must anchor to /v4/workspaces"
         );
-        assert!(r.missing.iter().all(|m| m.path != "/flows/{id}"));
+        assert!(r.missing.iter().all(|m| m.path != "/workspaces/{id}"));
     }
 
     /// The inventory-side mirror of `non_v4_path_is_unmatched_not_dropped`.

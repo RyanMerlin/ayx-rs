@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
+use std::error::Error;
+use std::fmt;
 
 /// Machine-readable error classification.
 ///
@@ -39,6 +41,58 @@ pub enum ErrorCode {
     /// Generic internal error / unexpected condition.
     Internal,
 }
+
+/// A typed classification carried through an `anyhow` chain.
+///
+/// Do not encode a classification in provider prose when the code is already
+/// known.  The CLI dispatcher can downcast this value without being confused
+/// by an upstream body that happens to contain strings such as `error_code`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodedError {
+    pub code: ErrorCode,
+}
+
+impl CodedError {
+    pub const fn new(code: ErrorCode) -> Self {
+        Self { code }
+    }
+}
+
+impl fmt::Display for CodedError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "classified error: {}", self.code.as_str())
+    }
+}
+
+impl Error for CodedError {}
+
+/// A typed HTTP failure retained as an error cause.
+///
+/// HTTP clients should attach this instead of relying on a status number in a
+/// formatted error string.  It makes status classification stable even when a
+/// provider response contains contradictory prose or numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HttpStatusError {
+    pub status: u16,
+}
+
+impl HttpStatusError {
+    pub const fn new(status: u16) -> Self {
+        Self { status }
+    }
+
+    pub fn error_code(self) -> ErrorCode {
+        ErrorCode::from_http_status(self.status).unwrap_or(ErrorCode::Internal)
+    }
+}
+
+impl fmt::Display for HttpStatusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "HTTP status {}", self.status)
+    }
+}
+
+impl Error for HttpStatusError {}
 
 /// Upstream exception types that mean "this object exists, the data you asked
 /// for does not". Each entry must have been observed against a live tenant.
@@ -692,10 +746,11 @@ mod tests {
         assert_eq!(v["remediation"]["commands"][0], "ayx one login");
 
         let next = serde_json::to_value(
-            Envelope::ok("page").with_next(vec!["ayx one flows list --page-token abc".to_string()]),
+            Envelope::ok("page")
+                .with_next(vec!["ayx one workflows list --page-token abc".to_string()]),
         )
         .unwrap();
-        assert_eq!(next["next"][0], "ayx one flows list --page-token abc");
+        assert_eq!(next["next"][0], "ayx one workflows list --page-token abc");
     }
 
     #[test]
@@ -729,7 +784,7 @@ mod tests {
             Envelope::err_coded(ErrorCode::NotFound, "missing", Value::Null)
                 .with_remediation(
                     "List first",
-                    vec!["ayx one workflows list --output json".to_string()],
+                    vec!["ayx one workflows list -o json".to_string()],
                 )
                 .finalize_retryable(),
         )

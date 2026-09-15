@@ -236,7 +236,7 @@ not working!!
 
 PS C:\code\worktrees\ayx-rs\integration-phase-1> ayx one job-groups outputs 4087544
 jobGroup outputs ok
-The service returned a collection shape this CLI version does not recognize. Use --output json-full to inspect it.
+The service returned a collection shape this CLI version does not recognize. Use -o json-full to inspect it.
 PS C:\code\worktrees\ayx-rs\integration-phase-1>
 
 

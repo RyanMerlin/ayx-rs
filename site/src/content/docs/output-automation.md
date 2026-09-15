@@ -9,10 +9,10 @@ ayx is built to be driven by scripts and agents, not just typed at a prompt. Two
 
 ## JSON output
 
-Add `--output json` for machine-readable output. It's a global flag, so it can appear before or after the subcommand:
+Add `-o json` for machine-readable output. It's a global flag, so it can appear before or after the subcommand:
 
 ```bash
-ayx --output json one flows list
+ayx -o json one workflows list
 ```
 
 Every JSON response uses the same envelope:
@@ -20,7 +20,7 @@ Every JSON response uses the same envelope:
 ```json
 {
   "ok": true,
-  "command": "one.flows.list",
+  "command": "one.workflows.list",
   "message": "…",
   "timestamp_utc": "…",
   "data": {}
@@ -35,10 +35,10 @@ Mutating commands print what they *would* do and exit `0` unless you pass `--app
 
 ```bash
 # Preview — no changes; capture the planned request
-ayx --output json one flows delete <id>
+ayx -o json one workflows delete <id>
 
 # Commit, non-interactively
-ayx one flows delete <id> --apply --yes
+ayx one workflows delete <id> --apply --yes
 ```
 
 `--yes` skips the confirmation prompt that destructive commands show in a terminal — required for CI and pipes.

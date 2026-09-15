@@ -70,10 +70,10 @@ ayx one datasets imported detail <id>
 
 ## JSON output
 
-Pass `--output json` for structured output. `--output` is a global flag, so it can appear before or after the subcommand:
+Pass `-o json` for structured output. `--output` is a global flag, so it can appear before or after the subcommand:
 
 ```bash
-ayx --output json one datasets list
+ayx -o json one datasets list
 ```
 
 The envelope is `{ ok, message, timestamp_utc, data }` on success; failures also include `error_code`.

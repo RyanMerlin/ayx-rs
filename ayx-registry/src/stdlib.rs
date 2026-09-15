@@ -31,10 +31,6 @@ const ACTIONS: &[Bundled] = &[
         body: include_str!("../actions/server-auth-saml-diagnose.action.yaml"),
     },
     Bundled {
-        path: "bundled:actions/one-flow-promote.action.yaml",
-        body: include_str!("../actions/one-flow-promote.action.yaml"),
-    },
-    Bundled {
         path: "bundled:actions/one-scheduling-pause.action.yaml",
         body: include_str!("../actions/one-scheduling-pause.action.yaml"),
     },
