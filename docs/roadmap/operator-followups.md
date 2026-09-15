@@ -1050,6 +1050,19 @@ separate concerns.
   positive metadata cases and negative secret-leak cases in text and JSON.
 - [ ] Apply one redaction policy before every output renderer and audit writer;
   no output format may be an escape hatch for real credentials.
+- [ ] Inventory and migrate every egress path to that policy: CLI text/JSON and
+  query output, errors and remediation, structured logs/telemetry, and durable
+  audit artifacts. Classify sensitive values at typed ingress boundaries; do
+  not make arbitrary public upstream JSON non-serializable.
+- [ ] Build an adversarial redaction corpus and sink-level invariants. Cover
+  nested objects and arrays, Unicode, authorization headers and cookies,
+  credential-bearing URLs and query parameters, embedded Bearer/JWT values,
+  remediation text, and serialized audit artifacts. Every sink must exclude a
+  planted secret while retaining approved operational metadata.
+- [ ] Require an independent adversarial security review before rollout. Migrate
+  endpoint families incrementally, keep compatibility tests for their safe
+  metadata, and remove the legacy substring heuristic and its exception list
+  only after the shared policy covers every egress path.
 
 ## Multi-environment configuration is undocumented/incomplete
 
