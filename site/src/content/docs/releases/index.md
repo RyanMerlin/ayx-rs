@@ -18,6 +18,12 @@ the default for interactive onboarding and normal human sign-in. See
 [Connecting](/connecting/) and [Identity & auth](/one/identity/) for the full
 setup and recovery rules.
 
+## v0.22.1
+
+Security-only patch: upgrades the locked `rustls` TLS dependency to resolve
+`RUSTSEC-2026-0285`. No command-surface or configuration behavior changes.
+See the [release notes](/releases/v0221/).
+
 ## v0.22.0
 
 **BREAKING:** `ayx one workspace` now uses the nested `config`, `members`,

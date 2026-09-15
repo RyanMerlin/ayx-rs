@@ -4,6 +4,13 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.22.1 — 2026-09-15
+
+### Security
+
+- Updated the locked TLS dependency graph to `rustls` 0.23.45 (and compatible
+  transitive packages), resolving RustSec advisory `RUSTSEC-2026-0285`.
+
 ## 0.22.0 — 2026-09-15
 
 ### Changed
