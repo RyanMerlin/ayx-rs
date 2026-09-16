@@ -901,6 +901,7 @@ fn is_sensitive_key(key: &str) -> bool {
         "accountkey",
         "sharedkey",
         "signature",
+        "hmac",
         "csrf",
     ]
     .iter()
@@ -2216,6 +2217,24 @@ mod tests {
         let clean = redacted_envelope(&env);
         assert_eq!(clean.data["tokenInfo"]["tokenId"], "12345");
         assert_eq!(clean.data["tokenValue"], "[REDACTED]");
+    }
+
+    #[test]
+    fn redacts_session_and_hmac_fields_but_keeps_operational_metadata() {
+        let env = Envelope::ok_with_data(
+            "ok",
+            json!({
+                "intercomHmac": "user-linked-hmac",
+                "browserSessionCookie": "session-secret",
+                "requestId": "safe-request-id",
+                "token_expires_at": "2030-01-01T00:00:00Z"
+            }),
+        );
+        let clean = redacted_envelope(&env);
+        assert_eq!(clean.data["intercomHmac"], "[REDACTED]");
+        assert_eq!(clean.data["browserSessionCookie"], "[REDACTED]");
+        assert_eq!(clean.data["requestId"], "safe-request-id");
+        assert_eq!(clean.data["token_expires_at"], "2030-01-01T00:00:00Z");
     }
 
     #[test]

@@ -4,6 +4,27 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.22.2 — 2026-09-16
+
+### Changed
+
+- Kept `ayx one person delete` as the stable, explicitly applied global-person
+  administrative operation. Provider-disabled deletion is now reported as
+  `gone` with scope-safe remediation rather than being confused with
+  workspace-member removal.
+- Agent Studio’s browser-session prerequisite is reported as the structured,
+  non-retryable `capability_unavailable` error across agents, datasets,
+  workflow shortcuts, and prompt calls.
+- Schedule creation now preserves explicit enabled/disabled intent, verifies
+  the provider’s effective state, and retains creation evidence if
+  reconciliation cannot complete.
+- Clarified Job Library scope and cloud-native workflow-run handoff/output
+  ownership in command help and operator documentation.
+
+### Removed
+
+- Removed the obsolete internal-rollout announcement document.
+
 ## 0.22.1 — 2026-09-15
 
 ### Security

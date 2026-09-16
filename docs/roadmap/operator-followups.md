@@ -966,6 +966,10 @@ rather than a quick fix, which is why none was rushed. Product: shared CLI.
 
 Priority: high UX correctness
 
+- [x] Treat private-preview capability failures as first-class structured outcomes. Agent Studio requires a browser session and reports `capability_unavailable`, not a successful empty collection; it does not import browser cookies or automate browser login.
+- [x] Keep Job Library reporting explicitly scoped to Job Library entries. Cloud-native workflow runs hand off `jobId`/`jobgroupId` for direct inspection but are not a complete enumerable history source.
+- [x] Schedule creation verifies an explicit requested enabled state and reconciles it with the provider enable/disable endpoint when the create response ignores that state.
+
 - [ ] Do not redact operational expiry metadata merely because its key contains
   `token`.
   - `access_token_expires_at` and `token_expires_at` are safe status metadata;

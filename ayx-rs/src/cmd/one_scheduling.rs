@@ -131,6 +131,165 @@ fn confirm_schedule_mutation(apply: bool, yes: bool, message: &str) -> Result<()
     Ok(())
 }
 
+fn requested_enabled(enabled: bool, disabled: bool) -> Result<Option<bool>> {
+    if enabled && disabled {
+        bail!("validation: --enabled and --disabled cannot be combined");
+    }
+    Ok(if enabled {
+        Some(true)
+    } else if disabled {
+        Some(false)
+    } else {
+        None
+    })
+}
+
+fn schedule_id(envelope: &Envelope) -> Option<String> {
+    let response = envelope.data.get("response")?;
+    response
+        .get("id")
+        .or_else(|| response.get("data")?.get("id"))
+        .and_then(Value::as_i64)
+        .map(|id| id.to_string())
+        .or_else(|| {
+            response
+                .get("id")
+                .or_else(|| response.get("data")?.get("id"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+}
+
+fn schedule_enabled(envelope: &Envelope) -> Option<bool> {
+    envelope
+        .data
+        .get("response")?
+        .get("enabled")
+        .or_else(|| envelope.data.get("response")?.get("data")?.get("enabled"))
+        .and_then(Value::as_bool)
+}
+
+fn add_requested_state(payload: &mut Value, requested: Option<bool>) -> Result<()> {
+    let Some(requested) = requested else {
+        return Ok(());
+    };
+    payload
+        .as_object_mut()
+        .ok_or_else(|| {
+            anyhow::anyhow!("validation: --enabled/--disabled requires an object schedule payload")
+        })?
+        .insert("enabled".to_string(), Value::Bool(requested));
+    Ok(())
+}
+
+fn reconcile_created_schedule(
+    config: &ayx_core::profile::Config,
+    create: Envelope,
+    requested: Option<bool>,
+) -> Result<Envelope> {
+    let Some(requested) = requested else {
+        return Ok(create);
+    };
+    if !create.ok || create.data.get("dry_run") == Some(&Value::Bool(true)) {
+        return Ok(create);
+    }
+    let Some(id) = schedule_id(&create) else {
+        return Ok(Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::OutputClassification,
+            "schedule was created but its id was not returned; cannot verify requested enabled state",
+            json!({"create": create.data, "requested_enabled": requested}),
+        ));
+    };
+    let detail = one_api_live_request(
+        config,
+        "scheduling",
+        "detail",
+        "GET",
+        "/v4/schedules/{id}",
+        false,
+        &[("id", id.as_str())],
+    )?;
+    if !detail.ok {
+        return Ok(Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::Incomplete,
+            "schedule was created but its enabled state could not be verified",
+            json!({"schedule_id": id, "requested_enabled": requested, "create": create.data, "verification": detail.data}),
+        ));
+    }
+    let before = schedule_enabled(&detail);
+    let reconciliation = if before == Some(requested) {
+        None
+    } else {
+        let (operation, path) = if requested {
+            ("enable", "/v4/schedules/{id}/enable")
+        } else {
+            ("disable", "/v4/schedules/{id}/disable")
+        };
+        let result = one_api_live_request(
+            config,
+            "scheduling",
+            operation,
+            "POST",
+            path,
+            true,
+            &[("id", id.as_str())],
+        )?;
+        if !result.ok {
+            return Ok(Envelope::err_coded(
+                ayx_core::envelope::ErrorCode::Incomplete,
+                "schedule was created but enabled-state reconciliation failed",
+                json!({
+                    "schedule_id": id,
+                    "requested_enabled": requested,
+                    "create": create.data,
+                    "reconciliation": { "operation": operation, "result": result.data },
+                }),
+            ));
+        }
+        Some(operation)
+    };
+    let verified = if reconciliation.is_some() {
+        one_api_live_request(
+            config,
+            "scheduling",
+            "detail",
+            "GET",
+            "/v4/schedules/{id}",
+            false,
+            &[("id", id.as_str())],
+        )?
+    } else {
+        detail
+    };
+    if !verified.ok {
+        return Ok(Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::Incomplete,
+            "schedule was created but its reconciled enabled state could not be verified",
+            json!({
+                "schedule_id": id,
+                "requested_enabled": requested,
+                "create": create.data,
+                "reconciliation": reconciliation,
+                "verification": verified.data,
+            }),
+        ));
+    }
+    let effective = schedule_enabled(&verified);
+    if effective != Some(requested) {
+        return Ok(Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::Incomplete,
+            "schedule enabled-state reconciliation did not reach the requested state",
+            json!({"schedule_id": id, "requested_enabled": requested, "effective_enabled": effective, "reconciliation": reconciliation, "create": create.data}),
+        ));
+    }
+    let mut create = create;
+    create.data["requested_enabled"] = Value::Bool(requested);
+    create.data["effective_enabled"] = Value::Bool(requested);
+    create.data["reconciled"] = Value::Bool(reconciliation.is_some());
+    create.data["schedule_id"] = Value::String(id);
+    Ok(create)
+}
+
 pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
     apply: bool,
@@ -172,10 +331,13 @@ pub(crate) fn execute(
             weekday,
             day_of_month,
             at,
+            enabled,
+            disabled,
             body,
         } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
-            let (payload, source) = typed_schedule_payload(
+            let requested = requested_enabled(enabled, disabled)?;
+            let (mut payload, source) = typed_schedule_payload(
                 target_kind,
                 target_id,
                 trigger_kind,
@@ -188,6 +350,7 @@ pub(crate) fn execute(
                 at,
                 body.as_deref(),
             )?;
+            add_requested_state(&mut payload, requested)?;
             confirm_schedule_mutation(
                 apply,
                 yes,
@@ -196,7 +359,7 @@ pub(crate) fn execute(
                     config.profile_name
                 ),
             )?;
-            one_api_live_request_with_body(
+            let created = one_api_live_request_with_body(
                 &config,
                 "scheduling",
                 "create",
@@ -205,7 +368,8 @@ pub(crate) fn execute(
                 true,
                 &[],
                 Some(payload),
-            )?
+            )?;
+            reconcile_created_schedule(&config, created, requested)?
         }
         OneSchedulingCommand::Detail { profile, id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;

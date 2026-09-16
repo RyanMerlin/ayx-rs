@@ -43,7 +43,7 @@ research behind them is in
 | --- | --- | --- | --- |
 | 0 | Subtraction and agent hygiene: remove the TUI, `one workspace detail`, output auto-detection, `remediation`/`retryable`/`next` in the envelope, `--jq`, `one open`, pickers, a `--watch` stretch | spec written | `docs/superpowers/specs/2026-09-04-wave0-tui-removal-and-agent-hygiene-design.md` |
 | 1 | Governance primitives for Alteryx One: `one access matrix\|explain\|review\|graph`, `one token audit`, `one snapshot take\|diff\|list` | design spec written; live re-verification checklist open | `docs/superpowers/specs/2026-09-04-wave1-one-access-governance-primitives-design.md` |
-| 2 | Agent packaging: `ayx agent init` (host config for product MCP, generated `SKILL.md` installed per the Agent Skills spec), `ayx mcp serve` per ADR 0005, `one capabilities` (cached probe of what the current token and tier can reach) | decided (ADR 0005); spec to follow | — |
+| 2 | Agent packaging: `ayx agent init` (host config for product MCP, generated `SKILL.md` installed per the Agent Skills spec), `ayx mcp serve` per ADR 0005, `one capabilities` (cached probe of what the current token and tier can reach, including private-preview availability without browser-cookie import) | decided (ADR 0005); spec to follow | — |
 | 3 | Plans, policy, receipts: `--plan-out` on every mutating command and `ayx apply <plan>` with idempotency keys, `ayx policy check --rules`, a receipts ledger behind `ayx audit last\|since\|failed`; then curated `ayx.*` MCP tools over these | tracked; spec to follow | — |
 
 The product-MCP client track is described by ADR 0003 and the integration

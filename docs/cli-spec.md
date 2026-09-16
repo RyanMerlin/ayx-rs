@@ -81,7 +81,7 @@ The full envelope contract is:
 - `timestamp_utc`
 - `data`
 - `remediation`, `retryable`, and `next` where they apply
-- `error_code` on failures (`snake_case`: `config_missing`, `auth_failed`, `permission_denied`, `not_found`, `gone`, `validation`, `conflict`, `rate_limited`, `network`, `upstream`, `workspace_mismatch`, `incomplete`, `output_classification`, `internal`)
+- `error_code` on failures (`snake_case`: `config_missing`, `auth_failed`, `permission_denied`, `not_found`, `gone`, `validation`, `conflict`, `rate_limited`, `network`, `upstream`, `workspace_mismatch`, `incomplete`, `output_classification`, `capability_unavailable`, `internal`). `capability_unavailable` means an optional provider surface is unavailable for the current authentication, session, workspace, or tier; it is non-retryable until that prerequisite changes.
 
 ### Process exit codes
 
@@ -96,7 +96,7 @@ happened.
 | 2 | `validation` |
 | 3 | `config_missing`, `workspace_mismatch` |
 | 4 | `auth_failed` |
-| 5 | `permission_denied` |
+| 5 | `permission_denied`, `capability_unavailable` |
 | 6 | `not_found`, `gone`, `conflict`, `rate_limited`, `network`, `upstream` |
 | 7 | `incomplete` |
 | 70 | `output_classification`, `internal` |

@@ -185,7 +185,9 @@ Endpoints the CLI fully dispatches for this surface (`inventory.rs` `SURFACES`).
 > Agent Studio asset registration and prompt routes recovered from authenticated
 > Agent Studio UI traffic. These routes are not part of the public One OpenAPI
 > specification; all rows remain unverified until a fresh live credential is
-> available.
+> available. The private-preview service requires an existing browser session;
+> its exact missing-session response is normalized to non-retryable
+> `capability_unavailable` before any follow-on Agent Studio request.
 
 | Method | Path | Live status | Verified (UTC) | ayx command(s) | Response shape | Error-body flavor | Notes |
 |---|---|---|---|---|---|---|---|
@@ -361,7 +363,7 @@ CLI needs it (`inventory.rs` `PARTIAL_SURFACES`).
 | POST | `/v4/people` | unverified | not probed this session | `one person create` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Mutating — not probed. |
 | PUT | `/v4/people/{id}` | unverified | not probed this session | `one person update` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Mutating — not probed. |
 | PATCH | `/v4/people/{id}` | unverified | not probed this session | `one person patch` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Mutating — not probed. |
-| DELETE | `/v4/people/{id}` | unverified | not probed this session | `one person delete` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Mutating — not probed. |
+| DELETE | `/v4/people/{id}` | provider-gated 410 | 2026-09-16 | `one person delete` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | `IAM_ENDPOINT_SCREAM_TEST` is normalized to `gone`; other `/v4` gateway errors retain their provider shape | Global-person deletion remains a stable command. A provider-disabled endpoint is not substituted with workspace-member removal because that operation has different scope. |
 | PATCH | `/v4/people/current/updatePassword` | unverified | not probed this session | `one person update-password` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Mutating — not probed. |
 | POST | `/v4/passwordresetrequest` | unverified | not probed this session | `one person password-reset-request` | object: mutation result / dry-run shape (`{ dry_run, mutating, would_send }` when not `--apply`) | json:ApiValidationFailed / json:RouteNotFoundException / json:AccessControlException (Alteryx One `/v4` gateway shape) | Mutating and side-effecting (sends a real email) — not probed. |
 

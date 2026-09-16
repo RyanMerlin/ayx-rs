@@ -765,7 +765,7 @@ const PARTIAL_SURFACES: &[SurfaceSpec] = &[
             },
         ],
         notes: &[
-            "Current lookup plus person list/detail/create/update/patch/delete/password workflows are wired; remaining person families stay documented-only.",
+            "Current lookup plus person list/detail/create/update/patch/delete/password workflows are wired. Global deletion may be provider-gated; workspace membership removal is the separately scoped `one workspace members remove`.",
         ],
     },
     SurfaceSpec {

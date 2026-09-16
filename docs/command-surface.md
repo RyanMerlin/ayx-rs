@@ -1,6 +1,6 @@
 # AYX Command Surface
 
-_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all -o json` _on 2026-09-15 21:25:06 UTC._
+_Generated from_ `cargo run -q -p ayx-rs -- catalog list --format full --scope all -o json` _on 2026-09-16 16:57:19 UTC._
 
 This is the full, flattened **catalog** index — every visible node in the live `clap` command tree, one row per command, plus every registered capability. Command identity (`name`, `path`) and `summary` are derived live from the clap tree at generation time, so a command can never be silently missing here. `Safety`/`Mutating` reflect catalog metadata: commands with a curated metadata entry show that classification; every other command is honestly marked `unclassified` (blank `Mutating`) rather than borrowing a value that would misrepresent it — see `ayx catalog list --scope curated` for the fully annotated compatibility view.
 
@@ -208,7 +208,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one jobs count | `one/jobs/count` | read-only | no | Count Job Library entries |
 | one jobs execute | `one/jobs/execute` | mutating | yes | Submit a Job Group from a JSON request body |
 | one jobs inputs | `one/jobs/inputs` | read-only | no | List aggregate job inputs |
-| one jobs list | `one/jobs/list` | read-only | no | List Job Library entries |
+| one jobs list | `one/jobs/list` | read-only | no | List Job Library entries. This is not a complete cloud-native workflow-run history |
 | one jobs outputs | `one/jobs/outputs` | read-only | no | List aggregate job outputs |
 | one jobs pdf-results | `one/jobs/pdf-results` | read-only | no | Inspect aggregate job PDF results |
 | one jobs profile | `one/jobs/profile` | read-only | no | Inspect aggregate job profiling metadata |
@@ -232,7 +232,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one person | `one/person` | unclassified |  | Alteryx One person (user) management |
 | one person create | `one/person/create` | mutating | yes | Create a One person from JSON payload |
 | one person current | `one/person/current` | read-only | no | Inspect the current One person record |
-| one person delete | `one/person/delete` | mutating | yes | Delete a One person record |
+| one person delete | `one/person/delete` | mutating | yes | Delete a One person record globally. This is distinct from workspace membership removal |
 | one person detail | `one/person/detail` | read-only | no | Inspect a One person record by id |
 | one person list | `one/person/list` | read-only | no | List One people |
 | one person password-reset-request | `one/person/password-reset-request` | mutating | yes | Request a One password reset from JSON payload |
@@ -274,7 +274,7 @@ cargo run -q -p xtask -- refresh-command-surface
 | one token delete | `one/token/delete` | mutating | yes | Delete a One API access token by id |
 | one token detail | `one/token/detail` | read-only | no | Inspect a One API access token by id |
 | one token list | `one/token/list` | read-only | no | List One API access tokens |
-| one webhook-flow-tasks | `one/webhook-flow-tasks` | unclassified |  | Alteryx One webhook flow tasks — create, inspect, and test |
+| one webhook-flow-tasks | `one/webhook-flow-tasks` | unclassified |  | Alteryx One webhook flow tasks — create, inspect, and test. The provider exposes no list endpoint; operations require a known task id. |
 | one webhook-flow-tasks create | `one/webhook-flow-tasks/create` | mutating | yes | Create a webhook flow task from JSON payload |
 | one webhook-flow-tasks delete | `one/webhook-flow-tasks/delete` | mutating | yes | Delete a webhook flow task |
 | one webhook-flow-tasks detail | `one/webhook-flow-tasks/detail` | read-only | no | Inspect a webhook flow task |

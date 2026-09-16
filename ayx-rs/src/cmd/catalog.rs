@@ -484,8 +484,14 @@ const CATALOG_METADATA: &[CatalogMetadata] = &[
         output: "one person delete envelope",
         safety: "mutating",
         mutating: true,
-        prerequisites: &["central runtime profile", "alteryx_one.access_token"],
-        notes: &["Maps to DELETE /v4/people/{id} in the One API docs."],
+        prerequisites: &[
+            "central runtime profile",
+            "alteryx_one.access_token",
+            "--apply",
+        ],
+        notes: &[
+            "Global-person deletion. Provider-disabled responses are reported as gone; this is not workspace-member removal.",
+        ],
     },
     CatalogMetadata {
         path: "one/person/update-password",
