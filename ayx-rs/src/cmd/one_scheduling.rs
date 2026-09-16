@@ -187,6 +187,46 @@ fn reconcile_created_schedule(
     create: Envelope,
     requested: Option<bool>,
 ) -> Result<Envelope> {
+    reconcile_created_schedule_with(create, requested, |operation, id| match operation {
+        "detail" => one_api_live_request(
+            config,
+            "scheduling",
+            "detail",
+            "GET",
+            "/v4/schedules/{id}",
+            false,
+            &[("id", id)],
+        ),
+        "enable" => one_api_live_request(
+            config,
+            "scheduling",
+            "enable",
+            "POST",
+            "/v4/schedules/{id}/enable",
+            true,
+            &[("id", id)],
+        ),
+        "disable" => one_api_live_request(
+            config,
+            "scheduling",
+            "disable",
+            "POST",
+            "/v4/schedules/{id}/disable",
+            true,
+            &[("id", id)],
+        ),
+        _ => bail!("internal error: unsupported schedule reconciliation operation {operation}"),
+    })
+}
+
+fn reconcile_created_schedule_with<F>(
+    create: Envelope,
+    requested: Option<bool>,
+    mut request: F,
+) -> Result<Envelope>
+where
+    F: FnMut(&str, &str) -> Result<Envelope>,
+{
     let Some(requested) = requested else {
         return Ok(create);
     };
@@ -200,15 +240,7 @@ fn reconcile_created_schedule(
             json!({"create": create.data, "requested_enabled": requested}),
         ));
     };
-    let detail = one_api_live_request(
-        config,
-        "scheduling",
-        "detail",
-        "GET",
-        "/v4/schedules/{id}",
-        false,
-        &[("id", id.as_str())],
-    )?;
+    let detail = request("detail", id.as_str())?;
     if !detail.ok {
         return Ok(Envelope::err_coded(
             ayx_core::envelope::ErrorCode::Incomplete,
@@ -220,20 +252,8 @@ fn reconcile_created_schedule(
     let reconciliation = if before == Some(requested) {
         None
     } else {
-        let (operation, path) = if requested {
-            ("enable", "/v4/schedules/{id}/enable")
-        } else {
-            ("disable", "/v4/schedules/{id}/disable")
-        };
-        let result = one_api_live_request(
-            config,
-            "scheduling",
-            operation,
-            "POST",
-            path,
-            true,
-            &[("id", id.as_str())],
-        )?;
+        let operation = if requested { "enable" } else { "disable" };
+        let result = request(operation, id.as_str())?;
         if !result.ok {
             return Ok(Envelope::err_coded(
                 ayx_core::envelope::ErrorCode::Incomplete,
@@ -249,15 +269,7 @@ fn reconcile_created_schedule(
         Some(operation)
     };
     let verified = if reconciliation.is_some() {
-        one_api_live_request(
-            config,
-            "scheduling",
-            "detail",
-            "GET",
-            "/v4/schedules/{id}",
-            false,
-            &[("id", id.as_str())],
-        )?
+        request("detail", id.as_str())?
     } else {
         detail
     };
@@ -482,9 +494,15 @@ pub(crate) fn execute(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::io::IsTerminal;
 
-    use super::{confirm_schedule_mutation, typed_schedule_payload};
+    use ayx_core::envelope::{Envelope, ErrorCode};
+    use serde_json::json;
+
+    use super::{
+        confirm_schedule_mutation, reconcile_created_schedule_with, typed_schedule_payload,
+    };
     use crate::{ScheduleTargetKind, ScheduleTriggerKind};
 
     #[test]
@@ -597,5 +615,127 @@ mod tests {
         )
         .expect_err("invalid hour must fail");
         assert!(invalid_hour.to_string().contains("--hour"));
+    }
+
+    fn created(id: Option<&str>) -> Envelope {
+        Envelope::ok_with_data("created", json!({"response": {"id": id}}))
+    }
+
+    fn detail(enabled: bool) -> Envelope {
+        Envelope::ok_with_data("detail", json!({"response": {"enabled": enabled}}))
+    }
+
+    fn failed(message: &str) -> Envelope {
+        Envelope::err_coded(
+            ErrorCode::Upstream,
+            message,
+            json!({"response": {"message": message}}),
+        )
+    }
+
+    fn reconcile_with(
+        create: Envelope,
+        requested: bool,
+        responses: Vec<Envelope>,
+    ) -> (Envelope, Vec<(String, String)>) {
+        let mut responses = VecDeque::from(responses);
+        let mut calls = Vec::new();
+        let result = reconcile_created_schedule_with(create, Some(requested), |operation, _id| {
+            calls.push((operation.to_string(), String::new()));
+            Ok(responses.pop_front().expect("unexpected transport request"))
+        })
+        .expect("transport fixture should not fail");
+        (result, calls)
+    }
+
+    #[test]
+    fn schedule_reconciliation_accepts_matching_provider_state() {
+        let (result, calls) = reconcile_with(created(Some("sched-1")), true, vec![detail(true)]);
+        assert!(result.ok);
+        assert_eq!(result.data["schedule_id"], "sched-1");
+        assert_eq!(result.data["reconciled"], false);
+        assert_eq!(calls, vec![("detail".to_string(), String::new())]);
+    }
+
+    #[test]
+    fn schedule_reconciliation_corrects_ignored_disabled_create_state() {
+        let (result, calls) = reconcile_with(
+            created(Some("sched-2")),
+            false,
+            vec![detail(true), Envelope::ok("disabled"), detail(false)],
+        );
+        assert!(result.ok);
+        assert_eq!(result.data["effective_enabled"], false);
+        assert_eq!(result.data["reconciled"], true);
+        assert_eq!(
+            calls,
+            vec![
+                ("detail".to_string(), String::new()),
+                ("disable".to_string(), String::new()),
+                ("detail".to_string(), String::new()),
+            ]
+        );
+    }
+
+    #[test]
+    fn schedule_reconciliation_preserves_create_evidence_without_an_id() {
+        let (result, calls) = reconcile_with(created(None), false, vec![]);
+        assert_eq!(result.error_code, Some(ErrorCode::OutputClassification));
+        assert_eq!(
+            result.data["create"]["response"]["id"],
+            serde_json::Value::Null
+        );
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn schedule_reconciliation_preserves_evidence_when_detail_fails() {
+        let (result, _) =
+            reconcile_with(created(Some("sched-3")), true, vec![failed("detail down")]);
+        assert_eq!(result.error_code, Some(ErrorCode::Incomplete));
+        assert_eq!(result.data["schedule_id"], "sched-3");
+        assert_eq!(result.data["create"]["response"]["id"], "sched-3");
+        assert_eq!(
+            result.data["verification"]["response"]["message"],
+            "detail down"
+        );
+    }
+
+    #[test]
+    fn schedule_reconciliation_preserves_evidence_when_enable_or_disable_fails() {
+        for (requested, operation) in [(true, "enable"), (false, "disable")] {
+            let initial = detail(!requested);
+            let (result, calls) = reconcile_with(
+                created(Some("sched-4")),
+                requested,
+                vec![initial, failed("toggle down")],
+            );
+            assert_eq!(result.error_code, Some(ErrorCode::Incomplete));
+            assert_eq!(result.data["schedule_id"], "sched-4");
+            assert_eq!(result.data["reconciliation"]["operation"], operation);
+            assert_eq!(result.data["create"]["response"]["id"], "sched-4");
+            assert_eq!(calls[1].0, operation);
+        }
+    }
+
+    #[test]
+    fn schedule_reconciliation_preserves_evidence_when_final_verification_fails() {
+        let (result, calls) = reconcile_with(
+            created(Some("sched-5")),
+            false,
+            vec![
+                detail(true),
+                Envelope::ok("disabled"),
+                failed("verify down"),
+            ],
+        );
+        assert_eq!(result.error_code, Some(ErrorCode::Incomplete));
+        assert_eq!(result.data["schedule_id"], "sched-5");
+        assert_eq!(result.data["create"]["response"]["id"], "sched-5");
+        assert_eq!(
+            result.data["verification"]["response"]["message"],
+            "verify down"
+        );
+        assert_eq!(calls.len(), 3);
     }
 }

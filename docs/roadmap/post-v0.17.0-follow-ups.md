@@ -22,8 +22,8 @@ and documentation sweep.
 
 ## Documentation and behavior
 
-- [ ] Update or archive `docs/announcements/v0.17.0-internal-rollout.md`,
-  which still describes the RC3 internal rollout.
+- [x] Removed the obsolete `docs/announcements/v0.17.0-internal-rollout.md`
+  after the internal rollout concluded.
 - [ ] Resolve the known `env:`-backed secret reference load/save limitation:
   loading a profile and saving it can materialize the resolved value instead
   of preserving the `env:` reference.
