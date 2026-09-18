@@ -1040,6 +1040,7 @@ mod tests {
     use std::time::Duration;
 
     use super::OtpAction;
+    use super::PatMintRejected;
     use super::email_otp_login_pure_http;
     use super::is_workspace_password_rejection_status;
     use super::retry_transient;
@@ -1090,11 +1091,15 @@ mod tests {
         }
 
         fn start_with_otp_rejections_and_status(failure_count: usize, failure_status: u16) -> Self {
-            Self::start_with_failures(failure_count, failure_status, 0, 401)
+            Self::start_with_failures(failure_count, failure_status, 0, 401, None)
         }
 
         fn start_with_password_rejections(failure_count: usize, failure_status: u16) -> Self {
-            Self::start_with_failures(0, 401, failure_count, failure_status)
+            Self::start_with_failures(0, 401, failure_count, failure_status, None)
+        }
+
+        fn start_with_mint_response(status: u16, body: &'static str) -> Self {
+            Self::start_with_failures(0, 401, 0, 401, Some((status, body)))
         }
 
         fn start_with_failures(
@@ -1102,6 +1107,7 @@ mod tests {
             otp_failure_status: u16,
             password_failure_count: usize,
             password_failure_status: u16,
+            mint_response: Option<(u16, &'static str)>,
         ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").expect("bind recorder");
             listener
@@ -1143,6 +1149,15 @@ mod tests {
                                     password_failure_status,
                                     vec![("Content-Type", "text/plain".to_string())],
                                     "workspace password rejected".to_string(),
+                                )
+                            } else if request.method == "POST"
+                                && request.target.starts_with("/v4/apiAccessTokens")
+                                && let Some((status, body)) = mint_response
+                            {
+                                (
+                                    status,
+                                    vec![("Content-Type", "application/json".to_string())],
+                                    body.to_string(),
                                 )
                             } else {
                                 response_for_request(&request)
@@ -2276,6 +2291,116 @@ mod tests {
             Some("Bearer bearer-secret"),
             "Wizard must use the decoded access token, not the opaque cookie"
         );
+    }
+
+    fn mint_requests(server: &RecordingServer) -> usize {
+        server
+            .requests()
+            .iter()
+            .filter(|request| {
+                request.method == "POST" && request.target.starts_with("/v4/apiAccessTokens")
+            })
+            .count()
+    }
+
+    fn wizard_login_error(server: &RecordingServer) -> anyhow::Error {
+        match crate::WizardOtpAdapter.login(
+            &server.base_url,
+            "person@example.com",
+            "gid-1",
+            Some("workspace-secret".to_string()),
+            || Ok("123456".to_string()),
+        ) {
+            Ok(_) => panic!("a failed token mint must not produce a login"),
+            Err(err) => err,
+        }
+    }
+
+    #[test]
+    fn wizard_reports_a_refused_mint_as_a_typed_rejection_and_sends_it_once() {
+        let server = RecordingServer::start_with_mint_response(
+            403,
+            r#"{"exception":{"name":"AccessControlException","message":"Permission denied","details":"API access tokens are disabled for this workspace."}}"#,
+        );
+        let err = wizard_login_error(&server);
+        let rejected = err
+            .downcast_ref::<PatMintRejected>()
+            .expect("a refused mint is a typed rejection at the top of the chain");
+        assert_eq!(rejected.status, 403);
+        assert!(rejected.suggests_oauth_api_token());
+        let message = err.to_string();
+        assert!(
+            message.contains("API access tokens are disabled"),
+            "{message}"
+        );
+        assert!(
+            message.contains("ayx one login --oauth-api-token"),
+            "{message}"
+        );
+        assert!(!message.contains("unknown"), "{message}");
+        assert_eq!(
+            mint_requests(&server),
+            1,
+            "a sent mint must never be replayed"
+        );
+    }
+
+    #[test]
+    fn wizard_advises_retrying_login_when_the_session_expired_before_the_mint() {
+        let server = RecordingServer::start_with_mint_response(
+            401,
+            r#"{"exception":{"message":"Unauthorized"}}"#,
+        );
+        let err = wizard_login_error(&server);
+        let rejected = err
+            .downcast_ref::<PatMintRejected>()
+            .expect("typed rejection");
+        assert_eq!(rejected.status, 401);
+        assert!(!rejected.suggests_oauth_api_token());
+        assert!(
+            err.to_string().contains("run `ayx one login` again"),
+            "{err}"
+        );
+        assert_eq!(mint_requests(&server), 1);
+    }
+
+    #[test]
+    fn wizard_keeps_a_server_error_mint_unknown_with_its_cause_and_sends_it_once() {
+        let server =
+            RecordingServer::start_with_mint_response(503, r#"{"message":"upstream unavailable"}"#);
+        let err = wizard_login_error(&server);
+        assert!(err.downcast_ref::<PatMintRejected>().is_none());
+        let message = err.to_string();
+        assert!(message.contains("unknown"), "{message}");
+        assert!(message.contains("503"), "{message}");
+        assert_eq!(
+            mint_requests(&server),
+            1,
+            "a sent mint must never be replayed"
+        );
+    }
+
+    #[test]
+    fn legacy_lane_reports_a_refused_mint_as_a_typed_rejection() {
+        let server = RecordingServer::start_with_mint_response(
+            403,
+            r#"{"exception":{"details":"API access tokens are disabled for this workspace."}}"#,
+        );
+        let err = match crate::email_otp_login(
+            &server.base_url,
+            "person@example.com",
+            "gid-1",
+            Some("workspace-secret".to_string()),
+            || Ok("123456".to_string()),
+        ) {
+            Ok(_) => panic!("a refused mint must not produce a login"),
+            Err(err) => err,
+        };
+        assert!(
+            err.chain().any(|cause| cause.is::<PatMintRejected>()),
+            "legacy lane must surface the typed rejection: {err:#}"
+        );
+        assert_eq!(mint_requests(&server), 1);
     }
 
     #[test]
