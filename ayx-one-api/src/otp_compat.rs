@@ -209,10 +209,14 @@ impl WizardOtpAdapter {
         let reference = match session.send_otp() {
             Ok(reference) => reference,
             Err(err) => {
-                return Err(err.context(
+                // The CLI renders only the outermost message, so the cause is
+                // folded into it; `context` keeps the typed chain for
+                // error classification.
+                let message = format!(
                     "Wizard OTP-send outcome is unknown; do not retry automatically. \
-                     Inspect/reconcile the attempted login before retrying.",
-                ));
+                     Inspect/reconcile the attempted login before retrying. Cause: {err:#}"
+                );
+                return Err(err.context(message));
             }
         };
         if engine.record(OperationOutcome::Accepted)? != WizardAction::PromptOtp {
@@ -276,15 +280,7 @@ impl WizardOtpAdapter {
             engine.record(OperationOutcome::Accepted)?,
             WizardStep::MintPat,
         )?;
-        let result = match session.mint_pat() {
-            Ok(result) => result,
-            Err(err) => {
-                return Err(err.context(
-                    "Wizard PAT-mint outcome is unknown; do not retry automatically. \
-                     Inspect/reconcile the recent PAT inventory before retrying.",
-                ));
-            }
-        };
+        let result = session.mint_pat().map_err(pat_mint_failure)?;
         expect(
             engine.record(OperationOutcome::Accepted)?,
             WizardStep::Persist,
@@ -292,6 +288,23 @@ impl WizardOtpAdapter {
         let _ = engine.record(OperationOutcome::Accepted)?;
         Ok((result, password))
     }
+}
+
+/// A rejected PAT mint is a known outcome and keeps its actionable message;
+/// anything else may have created a token, so it stays "unknown" but carries
+/// its cause (the CLI prints only the outermost message).
+fn pat_mint_failure(err: anyhow::Error) -> anyhow::Error {
+    if err
+        .chain()
+        .any(|cause| cause.is::<crate::email_otp::PatMintRejected>())
+    {
+        return err;
+    }
+    let message = format!(
+        "Wizard PAT-mint outcome is unknown; do not retry automatically. \
+         Inspect/reconcile the recent PAT inventory before retrying. Cause: {err:#}"
+    );
+    err.context(message)
 }
 
 fn expect(action: WizardAction, step: WizardStep) -> Result<()> {
@@ -340,6 +353,45 @@ impl LegacyOtpAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejected_pat_mint_keeps_its_actionable_message() {
+        let err = pat_mint_failure(
+            crate::email_otp::PatMintRejected {
+                status: 403,
+                server_message: Some("User is not authorised to access this API.".into()),
+            }
+            .into(),
+        );
+        let message = err.to_string();
+        assert!(!message.contains("unknown"), "{message}");
+        assert!(message.contains("--oauth-api-token"), "{message}");
+        assert!(
+            err.downcast_ref::<crate::email_otp::PatMintRejected>()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn unclassified_pat_mint_failure_is_unknown_and_carries_its_cause() {
+        let err = pat_mint_failure(
+            anyhow::anyhow!("connection reset by peer").context("apiAccessTokens request failed"),
+        );
+        let message = err.to_string();
+        assert!(message.contains("unknown"), "{message}");
+        assert!(message.contains("connection reset by peer"), "{message}");
+    }
+
+    #[test]
+    fn unknown_pat_mint_failure_keeps_the_typed_cause_for_classification() {
+        let typed = ayx_core::envelope::HttpStatusError::new(502);
+        let err = pat_mint_failure(anyhow::Error::new(typed));
+        assert!(
+            err.chain()
+                .any(|cause| cause.is::<ayx_core::envelope::HttpStatusError>()),
+            "the typed cause must survive so the CLI classifies it as upstream, not internal"
+        );
+    }
 
     #[test]
     fn legacy_contract_is_self_consistent() {

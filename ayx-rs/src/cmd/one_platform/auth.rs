@@ -419,7 +419,7 @@ pub(crate) fn login(
         .alteryx_one
         .as_ref()
         .and_then(|o| o.effective_token_endpoint_url())
-        .unwrap_or_else(|| "https://pingauth.alteryxcloud.com/as/token".to_string());
+        .unwrap_or_else(|| ayx_core::profile::DEFAULT_ALTERYX_ONE_TOKEN_ENDPOINT.to_string());
     let token_endpoint = ayx_core::one_endpoint::OneEndpoint::parse(&token_endpoint)
         .context("configured token endpoint failed Alteryx One trust validation")?
         .into_string();

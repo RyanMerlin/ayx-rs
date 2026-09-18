@@ -1075,7 +1075,37 @@ impl AlteryxOneProfile {
             .filter(|v| !v.trim().is_empty())
     }
 
+    /// Where OAuth token requests (refresh, code exchange) are sent.
     pub fn effective_token_endpoint_url_for_workspace(
+        &self,
+        workspace_id: Option<&str>,
+    ) -> Option<String> {
+        self.explicit_token_endpoint_url_for_workspace(workspace_id)
+            .or_else(|| self.default_token_endpoint_url())
+    }
+
+    /// Where OAuth token requests are sent when no workspace is selected.
+    pub fn effective_token_endpoint_url(&self) -> Option<String> {
+        self.explicit_token_endpoint_url()
+            .or_else(|| self.default_token_endpoint_url())
+    }
+
+    /// The issuer recorded in keyring credential bindings.
+    ///
+    /// This is an identity, not a request target: it feeds the binding
+    /// fingerprint that names every `keyring:v1/...` account, so it must stay
+    /// byte-for-byte stable across releases or saved credentials stop
+    /// matching. It therefore keeps the historical `<base_url>/as/token`
+    /// derivation even though that URL is not where token requests go.
+    pub fn binding_issuer_url_for_workspace(&self, workspace_id: Option<&str>) -> Option<String> {
+        self.explicit_token_endpoint_url_for_workspace(workspace_id)
+            .or_else(|| {
+                self.normalized_base_url()
+                    .map(|base_url| derive_alteryx_one_token_endpoint(&base_url))
+            })
+    }
+
+    fn explicit_token_endpoint_url_for_workspace(
         &self,
         workspace_id: Option<&str>,
     ) -> Option<String> {
@@ -1088,20 +1118,30 @@ impl AlteryxOneProfile {
         {
             return Some(normalize_alteryx_one_token_endpoint(url));
         }
-        self.effective_token_endpoint_url()
+        self.explicit_token_endpoint_url()
     }
 
-    pub fn effective_token_endpoint_url(&self) -> Option<String> {
-        if let Some(url) = self
-            .token_endpoint_url
+    fn explicit_token_endpoint_url(&self) -> Option<String> {
+        self.token_endpoint_url
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-        {
-            return Some(normalize_alteryx_one_token_endpoint(url));
-        }
-        self.normalized_base_url()
-            .map(|base_url| derive_alteryx_one_token_endpoint(&base_url))
+            .map(normalize_alteryx_one_token_endpoint)
+    }
+
+    /// A regional API host (`us1`, `eu1`, `au1` ... `.alteryxcloud.com`) is
+    /// not the OAuth issuer: its `/as/token` answers with a platform
+    /// exception, not an OAuth response. Such a profile uses the default Ping
+    /// issuer. Any other host (a Ping issuer, localhost, a lab host) keeps the
+    /// historical `<base_url>/as/token` derivation.
+    fn default_token_endpoint_url(&self) -> Option<String> {
+        self.normalized_base_url().map(|base_url| {
+            if is_regional_api_base_url(&base_url) {
+                DEFAULT_ALTERYX_ONE_TOKEN_ENDPOINT.to_string()
+            } else {
+                derive_alteryx_one_token_endpoint(&base_url)
+            }
+        })
     }
 
     pub fn canonicalize(&mut self) {
@@ -1942,6 +1982,29 @@ pub fn normalize_alteryx_base_url(raw: &str) -> String {
 pub fn normalize_alteryx_one_base_url(raw: &str) -> Option<String> {
     let trimmed = raw.trim().trim_end_matches('/');
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+/// The Alteryx One OAuth issuer used when a profile names no token endpoint.
+pub const DEFAULT_ALTERYX_ONE_TOKEN_ENDPOINT: &str = "https://pingauth.alteryxcloud.com/as/token";
+
+/// `us1.alteryxcloud.com`-style regional API hosts: a single label of ASCII
+/// letters and digits ending in a digit, and not a Ping issuer.
+fn is_regional_api_base_url(base_url: &str) -> bool {
+    url::Url::parse(base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .and_then(|host| {
+            host.strip_suffix(".alteryxcloud.com").map(|label| {
+                !label.is_empty()
+                    && !label.starts_with("pingauth")
+                    && label.bytes().all(|byte| byte.is_ascii_alphanumeric())
+                    && label
+                        .bytes()
+                        .last()
+                        .is_some_and(|byte| byte.is_ascii_digit())
+            })
+        })
+        .unwrap_or(false)
 }
 
 pub fn derive_alteryx_one_token_endpoint(base_url: &str) -> String {
@@ -3845,6 +3908,85 @@ alteryx_one:
             profile.effective_token_endpoint_url().as_deref(),
             Some("https://pingauth.alteryxcloud.com/as/token")
         );
+    }
+
+    /// A regional API host such as `us1.alteryxcloud.com` is not the OAuth
+    /// issuer: its `/as/token` answers with a platform exception, not an OAuth
+    /// response. A freshly onboarded profile (base URL only) must refresh
+    /// against the Ping issuer, or `--oauth-api-token` and every later refresh
+    /// fail.
+    #[test]
+    fn one_token_endpoint_uses_the_ping_issuer_for_a_regional_api_base_url() {
+        let profile = AlteryxOneProfile {
+            schema_version: CURRENT_PROFILE_SCHEMA_VERSION,
+            account_email: "user@example.com".to_string(),
+            base_url: Some("https://us1.alteryxcloud.com".to_string()),
+            oauth_client_id: None,
+            client_secret: None,
+            client_secret_ref: None,
+            sp_client_secret: None,
+            sp_client_secret_ref: None,
+            token_endpoint_url: None,
+            access_token: None,
+            access_token_ref: None,
+            refresh_token: None,
+            refresh_token_ref: None,
+            workspace_password: None,
+            workspace_password_ref: None,
+            workspace_credentials: Default::default(),
+            active_workspace_id: None,
+            auth_rollout: None,
+            expected_workspace_id: None,
+            sp_client_id: None,
+            sp_token_endpoint_url: None,
+            workspace_gid: None,
+            auth_mode: AuthMode::default(),
+        };
+
+        assert_eq!(
+            profile.effective_token_endpoint_url().as_deref(),
+            Some("https://pingauth.alteryxcloud.com/as/token")
+        );
+        assert_eq!(
+            profile.normalized_base_url().as_deref(),
+            Some("https://us1.alteryxcloud.com")
+        );
+        // The binding issuer is an identity baked into keyring account names;
+        // it must keep the released derivation.
+        assert_eq!(
+            profile.binding_issuer_url_for_workspace(None).as_deref(),
+            Some("https://us1.alteryxcloud.com/as/token")
+        );
+    }
+
+    #[test]
+    fn one_token_endpoint_keeps_the_derivation_for_non_regional_hosts() {
+        for (base_url, expected) in [
+            (
+                "https://eu1.alteryxcloud.com",
+                "https://pingauth.alteryxcloud.com/as/token",
+            ),
+            (
+                "https://pingauth-us1-4.alteryxcloud.com",
+                "https://pingauth-us1-4.alteryxcloud.com/as/token",
+            ),
+            ("http://127.0.0.1:8080", "http://127.0.0.1:8080/as/token"),
+            (
+                "https://alteryxcloud.com.evil.example",
+                "https://alteryxcloud.com.evil.example/as/token",
+            ),
+        ] {
+            let profile = AlteryxOneProfile {
+                account_email: "user@example.com".to_string(),
+                base_url: Some(base_url.to_string()),
+                ..AlteryxOneProfile::default()
+            };
+            assert_eq!(
+                profile.effective_token_endpoint_url().as_deref(),
+                Some(expected),
+                "{base_url}"
+            );
+        }
     }
 
     #[test]

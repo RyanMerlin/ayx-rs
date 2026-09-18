@@ -5838,7 +5838,7 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
                 non_interactive,
                 environments,
             )?;
-            Envelope::ok_with_data("onboarding completed", detail)
+            Envelope::ok_with_data(onboard::onboarding_message(&detail), detail)
         }
         Command::Tui => Envelope::err_coded(
             ayx_core::envelope::ErrorCode::Validation,
@@ -8235,7 +8235,7 @@ fn remediation_for_error_code(
             cmds(&["ayx onboard", "ayx profile list -o json"]),
         ),
         AuthFailed if is_one => (
-            "The stored One credential was rejected; log in again.".to_string(),
+            "No usable One credential: it is missing, expired, or was rejected; log in again.".to_string(),
             cmds(&["ayx one login", "ayx one auth status -o json"]),
         ),
         AuthFailed => (

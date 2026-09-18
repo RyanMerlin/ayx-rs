@@ -313,7 +313,7 @@ fn credential_binding_for_one(
         OneCredentialStoreError::Profile("alteryx_one.base_url is required".into())
     })?;
     let issuer = one
-        .effective_token_endpoint_url_for_workspace(workspace_id)
+        .binding_issuer_url_for_workspace(workspace_id)
         .unwrap_or_else(|| base_url.clone());
     let region = url::Url::parse(&base_url)
         .ok()
@@ -359,6 +359,31 @@ mod tests {
             sqlserver: None,
             upgrade: None,
         }
+    }
+
+    /// Keyring account names are derived from the binding fingerprint, which
+    /// includes the issuer. A profile saved by v0.22.2 with only a regional
+    /// base URL was bound to `<base_url>/as/token`; if that ever changes,
+    /// every saved credential stops matching after an upgrade.
+    #[test]
+    fn binding_for_a_base_url_only_profile_matches_the_released_keyring_account() {
+        let config = test_config();
+        let released = CredentialBinding::new(
+            "user@example.com",
+            "https://us1.alteryxcloud.com/as/token",
+            "us1",
+            "https://us1.alteryxcloud.com",
+            None,
+            None,
+        )
+        .expect("released binding");
+
+        let binding = credential_binding_for_one(&config, None).expect("binding");
+
+        assert_eq!(
+            binding.keyring_account("alteryx_one.refresh_token"),
+            released.keyring_account("alteryx_one.refresh_token")
+        );
     }
 
     #[test]
