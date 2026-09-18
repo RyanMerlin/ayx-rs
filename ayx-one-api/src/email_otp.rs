@@ -2317,6 +2317,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn wizard_reports_a_refused_mint_as_a_typed_rejection_and_sends_it_once() {
         let server = RecordingServer::start_with_mint_response(
             403,
@@ -2328,6 +2329,10 @@ mod tests {
             .expect("a refused mint is a typed rejection at the top of the chain");
         assert_eq!(rejected.status, 403);
         assert!(rejected.suggests_oauth_api_token());
+        assert!(
+            err.chain().next().expect("error").is::<PatMintRejected>(),
+            "the rejection is the outermost error"
+        );
         let message = err.to_string();
         assert!(
             message.contains("API access tokens are disabled"),
@@ -2346,6 +2351,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn wizard_advises_retrying_login_when_the_session_expired_before_the_mint() {
         let server = RecordingServer::start_with_mint_response(
             401,
@@ -2358,6 +2364,10 @@ mod tests {
         assert_eq!(rejected.status, 401);
         assert!(!rejected.suggests_oauth_api_token());
         assert!(
+            err.chain().next().expect("error").is::<PatMintRejected>(),
+            "the rejection is the outermost error"
+        );
+        assert!(
             err.to_string().contains("run `ayx one login` again"),
             "{err}"
         );
@@ -2365,6 +2375,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn wizard_keeps_a_server_error_mint_unknown_with_its_cause_and_sends_it_once() {
         let server =
             RecordingServer::start_with_mint_response(503, r#"{"message":"upstream unavailable"}"#);
@@ -2373,6 +2384,48 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("unknown"), "{message}");
         assert!(message.contains("503"), "{message}");
+        assert!(message.contains("upstream unavailable"), "{message}");
+        assert_eq!(
+            mint_requests(&server),
+            1,
+            "a sent mint must never be replayed"
+        );
+    }
+
+    fn legacy_login_error(server: &RecordingServer) -> anyhow::Error {
+        match crate::email_otp_login(
+            &server.base_url,
+            "person@example.com",
+            "gid-1",
+            Some("workspace-secret".to_string()),
+            || Ok("123456".to_string()),
+        ) {
+            Ok(_) => panic!("a failed token mint must not produce a login"),
+            Err(err) => err,
+        }
+    }
+
+    fn mint_rejection(err: &anyhow::Error) -> Option<&PatMintRejected> {
+        err.chain()
+            .find_map(|cause| cause.downcast_ref::<PatMintRejected>())
+    }
+
+    #[test]
+    #[serial]
+    fn legacy_lane_reports_a_refused_mint_as_a_typed_rejection() {
+        let server = RecordingServer::start_with_mint_response(
+            403,
+            r#"{"exception":{"details":"API access tokens are disabled for this workspace."}}"#,
+        );
+        let err = legacy_login_error(&server);
+        let rejected = mint_rejection(&err)
+            .unwrap_or_else(|| panic!("legacy lane must surface the typed rejection: {err:#}"));
+        assert_eq!(rejected.status, 403);
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("API access tokens are disabled"),
+            "{message}"
+        );
         assert_eq!(
             mint_requests(&server),
             1,
@@ -2381,26 +2434,38 @@ mod tests {
     }
 
     #[test]
-    fn legacy_lane_reports_a_refused_mint_as_a_typed_rejection() {
+    #[serial]
+    fn legacy_lane_reports_an_expired_session_mint_as_a_typed_rejection() {
         let server = RecordingServer::start_with_mint_response(
-            403,
-            r#"{"exception":{"details":"API access tokens are disabled for this workspace."}}"#,
+            401,
+            r#"{"exception":{"message":"Unauthorized"}}"#,
         );
-        let err = match crate::email_otp_login(
-            &server.base_url,
-            "person@example.com",
-            "gid-1",
-            Some("workspace-secret".to_string()),
-            || Ok("123456".to_string()),
-        ) {
-            Ok(_) => panic!("a refused mint must not produce a login"),
-            Err(err) => err,
-        };
-        assert!(
-            err.chain().any(|cause| cause.is::<PatMintRejected>()),
-            "legacy lane must surface the typed rejection: {err:#}"
+        let err = legacy_login_error(&server);
+        let rejected = mint_rejection(&err)
+            .unwrap_or_else(|| panic!("legacy lane must surface the typed rejection: {err:#}"));
+        assert_eq!(rejected.status, 401);
+        assert!(!rejected.suggests_oauth_api_token());
+        assert_eq!(
+            mint_requests(&server),
+            1,
+            "a sent mint must never be replayed"
         );
-        assert_eq!(mint_requests(&server), 1);
+    }
+
+    #[test]
+    #[serial]
+    fn legacy_lane_reports_a_server_error_mint_without_a_rejection() {
+        let server =
+            RecordingServer::start_with_mint_response(503, r#"{"message":"upstream unavailable"}"#);
+        let err = legacy_login_error(&server);
+        assert!(mint_rejection(&err).is_none(), "{err:#}");
+        let message = format!("{err:#}");
+        assert!(message.contains("503"), "{message}");
+        assert_eq!(
+            mint_requests(&server),
+            1,
+            "a sent mint must never be replayed"
+        );
     }
 
     #[test]

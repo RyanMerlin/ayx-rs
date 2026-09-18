@@ -12,14 +12,16 @@
   can and otherwise prints without color.
 - `ayx doctor auth` now tells a profile with no Alteryx One credential that it
   is not signed in and to run `ayx one login` (or `--oauth-api-token`),
-  instead of reporting `guidance: -`.
+  instead of reporting `guidance: -`. When a credential is stored in secure
+  storage but cannot be read, doctor now says so and asks you to check the
+  operating-system credential store, instead of reporting "Not signed in".
 
 ### Changed
 
-- Added end-to-end email-OTP login scenarios for refused (403), expired-session
-  (401) and server-error (503) token mints, in both the Wizard and legacy
-  flows. They verify what the user is told and that the mint request is never
-  replayed.
+- Test coverage only (no runtime change): end-to-end email-OTP login
+  scenarios for refused (403), expired-session (401) and server-error (503)
+  token mints in both the Wizard and legacy flows, verifying what the user is
+  told and that the mint request is never replayed.
 
 ## 0.22.3 — 2026-09-18
 
