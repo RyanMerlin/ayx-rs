@@ -202,7 +202,7 @@ fn color_enabled(ok: bool) -> bool {
             Stream::Stderr => std::io::stderr().is_terminal(),
         },
         env::var_os("NO_COLOR").is_some(),
-        console_accepts_ansi(),
+        console_accepts_ansi,
     )
 }
 
@@ -210,27 +210,26 @@ fn color_for(
     ok: bool,
     is_terminal: impl Fn(Stream) -> bool,
     no_color: bool,
-    ansi_supported: bool,
+    ansi_supported: impl FnOnce() -> bool,
 ) -> bool {
     let stream = if ok { Stream::Stdout } else { Stream::Stderr };
-    !no_color && ansi_supported && is_terminal(stream)
+    !no_color && is_terminal(stream) && ansi_supported()
 }
 
 /// A Windows console prints ANSI escape codes literally unless virtual-terminal
 /// processing is on (Windows PowerShell 5.1 in the classic console host leaves
-/// it off). Try to turn it on; if that fails, render without color.
+/// it off). The first call turns VT processing on for both the stdout and the
+/// stderr handles, and the answer is cached for the life of the process.
 ///
-/// Known limitation: crossterm probes and enables VT processing on the
-/// *stdout* handle only, and caches the answer for the life of the process.
-/// So when stdout is redirected (`ayx ... > out.log`), this reports `false`
-/// for the rest of the run, and a failure envelope written to an interactive
-/// stderr also prints without color even though that console could render
-/// it. This fails closed: escape codes are never written to a console that
-/// cannot render them, at the cost of an interactive stderr occasionally
-/// losing color it could have had.
+/// If either handle is not a console (for example, stdout redirected to a
+/// file) or enabling VT processing fails, this returns `false` and the CLI
+/// prints without color. This fails closed: escape codes are never written to
+/// a console that cannot render them. The accepted cost is that on Windows,
+/// output loses color whenever stdout is redirected.
 #[cfg(windows)]
 fn console_accepts_ansi() -> bool {
-    crossterm::ansi_support::supports_ansi()
+    static ACCEPTS_ANSI: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ACCEPTS_ANSI.get_or_init(|| anstyle_query::windows::enable_ansi_colors() == Some(true))
 }
 
 #[cfg(not(windows))]
@@ -881,23 +880,24 @@ mod tests {
         let stderr_only = |stream: Stream| stream == Stream::Stderr;
 
         assert!(
-            color_for(true, stdout_only, false, true),
+            color_for(true, stdout_only, false, || true),
             "success on a TTY stdout"
         );
         assert!(
-            !color_for(false, stdout_only, false, true),
+            !color_for(false, stdout_only, false, || true),
             "a failure goes to the redirected stderr, so no escapes"
         );
         assert!(
-            color_for(false, stderr_only, false, true),
+            color_for(false, stderr_only, false, || true),
             "failure on a TTY stderr"
         );
         assert!(
-            !color_for(true, stderr_only, false, true),
+            !color_for(true, stderr_only, false, || true),
             "a success goes to the redirected stdout, so no escapes"
         );
         assert!(
-            !color_for(true, stdout_only, true, true) && !color_for(false, stderr_only, true, true),
+            !color_for(true, stdout_only, true, || true)
+                && !color_for(false, stderr_only, true, || true),
             "NO_COLOR always wins"
         );
     }
@@ -906,18 +906,43 @@ mod tests {
     fn no_color_when_the_console_cannot_interpret_escape_codes() {
         let stdout_only = |stream: Stream| stream == Stream::Stdout;
         assert!(
-            !color_for(true, stdout_only, false, false),
+            !color_for(true, stdout_only, false, || false),
             "a console without VT processing prints escape codes literally"
         );
-        assert!(color_for(true, stdout_only, false, true));
+        assert!(color_for(true, stdout_only, false, || true));
 
         let stderr_only = |stream: Stream| stream == Stream::Stderr;
         assert!(
-            !color_for(false, stderr_only, false, false),
-            "the cached stdout-only ANSI check also withholds color from an \
-             interactive stderr, since crossterm never probed stderr"
+            !color_for(false, stderr_only, false, || false),
+            "a failed VT probe (stdout or stderr not a console, or enabling \
+             failed) also withholds color from an interactive stderr"
         );
-        assert!(color_for(false, stderr_only, false, true));
+        assert!(color_for(false, stderr_only, false, || true));
+    }
+
+    /// The console probe mutates console modes, so it must only run when color
+    /// is otherwise possible: never under NO_COLOR, never for a redirected
+    /// stream.
+    #[test]
+    fn the_console_probe_is_not_called_when_color_is_already_ruled_out() {
+        let calls = std::cell::Cell::new(0u32);
+        let probe = || {
+            calls.set(calls.get() + 1);
+            true
+        };
+        let any_terminal = |_: Stream| true;
+        let no_terminal = |_: Stream| false;
+
+        assert!(!color_for(true, any_terminal, true, probe));
+        assert!(!color_for(false, any_terminal, true, probe));
+        assert_eq!(calls.get(), 0, "NO_COLOR must skip the probe");
+
+        assert!(!color_for(true, no_terminal, false, probe));
+        assert!(!color_for(false, no_terminal, false, probe));
+        assert_eq!(calls.get(), 0, "a non-terminal stream must skip the probe");
+
+        assert!(color_for(true, any_terminal, false, probe));
+        assert_eq!(calls.get(), 1, "the probe runs when color is possible");
     }
 
     #[test]
