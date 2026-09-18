@@ -4,6 +4,24 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+## 0.22.3 — 2026-09-18
+
+### Fixed
+
+- First-run sign-in no longer dead-ends. When Alteryx One refuses to create
+  the CLI's API access token, `ayx one login` and `ayx onboard` now report the
+  HTTP status and the server's reason instead of "PAT-mint outcome is
+  unknown", with guidance per status. Onboarding offers the OAuth API-token
+  login on the spot and no longer reports "onboarding completed" when sign-in
+  failed.
+- `ayx one login --oauth-api-token` and access-token refresh now reach the
+  Alteryx One OAuth issuer for profiles that only set a regional base URL
+  (`us1`, `eu1`, ...). Previously they were sent to the regional API host,
+  which is not the issuer. Saved credentials keep their existing keyring
+  binding.
+- A profile with no One credentials now fails as `auth_failed` with
+  `ayx one login` guidance instead of `internal`.
+
 ## 0.22.2 — 2026-09-16
 
 ### Changed
