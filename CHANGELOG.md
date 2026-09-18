@@ -10,6 +10,9 @@
   consoles that do not interpret them, such as Windows PowerShell 5.1 in the
   classic console host. The CLI turns on virtual-terminal processing where it
   can and otherwise prints without color.
+- `ayx doctor auth` now tells a profile with no Alteryx One credential that it
+  is not signed in and to run `ayx one login` (or `--oauth-api-token`),
+  instead of reporting `guidance: -`.
 
 ## 0.22.3 — 2026-09-18
 

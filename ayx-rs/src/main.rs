@@ -943,6 +943,57 @@ mongo:
         assert_eq!(auth_product_status(false, false), "not_configured");
     }
 
+    #[test]
+    fn one_auth_guidance_tells_a_profile_without_credentials_to_sign_in() {
+        let guidance = one_auth_guidance(true, None, false, false, false, false)
+            .expect("a configured profile with no credentials needs guidance");
+        assert!(guidance.contains("Not signed in"), "{guidance}");
+        assert!(guidance.contains("ayx one login"), "{guidance}");
+        assert!(guidance.contains("--oauth-api-token"), "{guidance}");
+    }
+
+    #[test]
+    fn one_auth_guidance_keeps_the_existing_credential_messages() {
+        use ayx_core::profile::OneCredentialKind;
+        let otp = one_auth_guidance(
+            true,
+            Some(OneCredentialKind::EmailOtp),
+            true,
+            false,
+            false,
+            false,
+        )
+        .expect("OTP guidance");
+        assert!(otp.contains("30 days"), "{otp}");
+        let expired_otp = one_auth_guidance(
+            true,
+            Some(OneCredentialKind::EmailOtp),
+            true,
+            false,
+            true,
+            false,
+        )
+        .expect("expired OTP guidance");
+        assert!(expired_otp.contains("passed its"), "{expired_otp}");
+        let renewing = one_auth_guidance(
+            true,
+            Some(OneCredentialKind::OAuthRefresh),
+            true,
+            true,
+            false,
+            true,
+        )
+        .expect("renewing guidance");
+        assert!(
+            renewing.contains("renews access tokens automatically"),
+            "{renewing}"
+        );
+        assert_eq!(
+            one_auth_guidance(false, None, false, false, false, false),
+            None
+        );
+    }
+
     /// Finding 1: the `one` row's own status chain was not credential-kind
     /// aware. An email-OTP profile has neither a refresh token nor a client id
     /// **by design**, so it hit the "refresh token and client id missing"
@@ -6713,6 +6764,59 @@ fn doctor_config_envelope(profile: Option<&str>, fix: bool) -> Result<Envelope> 
     ))
 }
 
+/// What `ayx doctor auth` tells the user to do about their Alteryx One
+/// credential. A profile with no credential at all comes first: it is the
+/// state a failed first sign-in leaves behind, and it needs a next step.
+///
+/// An OTP credential that is present and unexpired is the flow working as
+/// designed, so this is phrased as an upgrade to a credential that renews
+/// silently — never as a repair to something broken. Once the expiry has
+/// passed the present tense would be a lie, so the wording changes to name
+/// the lapse and the remedy. Alteryx One only; the Server row below carries
+/// no such guidance.
+fn one_auth_guidance(
+    configured: bool,
+    kind: Option<ayx_core::profile::OneCredentialKind>,
+    access_token_present: bool,
+    refresh_token_present: bool,
+    access_token_expired: bool,
+    renews_automatically: bool,
+) -> Option<&'static str> {
+    if configured && !access_token_present && !refresh_token_present {
+        return Some(
+            "Not signed in to Alteryx One for this profile. Run `ayx one login`, or set up the \
+             durable credential with `ayx one login --oauth-api-token` (Client ID and refresh \
+             token from Alteryx One: profile menu > API Tokens).",
+        );
+    }
+    if kind == Some(ayx_core::profile::OneCredentialKind::EmailOtp) {
+        return if access_token_expired {
+            Some(
+                "Email OTP is a time-limited login and this access token has passed its \
+                 expiry. Sign in again with `ayx one login`, or set up the durable \
+                 credential once with `ayx one login --oauth-api-token` so access renews \
+                 on its own.",
+            )
+        } else {
+            Some(
+                "Email OTP is a time-limited login: this access token lasts 30 days and will \
+                 not renew on its own. To stop signing in again on that cycle, upgrade to the \
+                 durable credential with `ayx one login --oauth-api-token`.",
+            )
+        };
+    }
+    if configured && renews_automatically {
+        Some("This credential renews access tokens automatically; no periodic sign-in.")
+    } else if configured && access_token_expired {
+        Some(
+            "This access token has passed its expiry and this credential cannot renew it. \
+             Sign in again with `ayx one login`.",
+        )
+    } else {
+        None
+    }
+}
+
 fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Result<Envelope> {
     let config = load_profile_with_env(profile, environment)?;
     let one = config.alteryx_one.as_ref();
@@ -6742,38 +6846,14 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
         && one_refresh_token_present
         && one_oauth_client_id_present;
     let one_access_token_expired = one_access_token_expired(one_access_token_expires_at);
-    // An OTP credential that is present and unexpired is the flow working as
-    // designed, so this is phrased as an upgrade to a credential that renews
-    // silently — never as a repair to something broken. Once the expiry has
-    // passed the present tense would be a lie, so the wording changes to name
-    // the lapse and the remedy. Alteryx One only; the Server row below carries
-    // no such guidance.
-    let one_guidance: Option<&str> =
-        if one_credential_kind == Some(ayx_core::profile::OneCredentialKind::EmailOtp) {
-            if one_access_token_expired {
-                Some(
-                    "Email OTP is a time-limited login and this access token has passed its \
-                     expiry. Sign in again with `ayx one login`, or set up the durable \
-                     credential once with `ayx one login --oauth-api-token` so access renews \
-                     on its own.",
-                )
-            } else {
-                Some(
-                    "Email OTP is a time-limited login: this access token lasts 30 days and will \
-                     not renew on its own. To stop signing in again on that cycle, upgrade to the \
-                     durable credential with `ayx one login --oauth-api-token`.",
-                )
-            }
-        } else if one_configured && one_renews_automatically {
-            Some("This credential renews access tokens automatically; no periodic sign-in.")
-        } else if one_configured && one_access_token_expired {
-            Some(
-                "This access token has passed its expiry and this credential cannot renew it. \
-                 Sign in again with `ayx one login`.",
-            )
-        } else {
-            None
-        };
+    let one_guidance = one_auth_guidance(
+        one_configured,
+        one_credential_kind,
+        one_access_token_present,
+        one_refresh_token_present,
+        one_access_token_expired,
+        one_renews_automatically,
+    );
     let server_configured = server.is_some();
     let server_api_key_present = server.is_some_and(|v| !v.curator_api_key.trim().is_empty());
     let server_api_secret_present = server.is_some_and(|v| !v.curator_api_secret.trim().is_empty());
