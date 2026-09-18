@@ -4,6 +4,13 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+### Fixed
+
+- Terminal output no longer shows raw escape codes (`←[1m…`) in Windows
+  consoles that do not interpret them, such as Windows PowerShell 5.1 in the
+  classic console host. The CLI turns on virtual-terminal processing where it
+  can and otherwise prints without color.
+
 ## 0.22.3 — 2026-09-18
 
 ### Fixed

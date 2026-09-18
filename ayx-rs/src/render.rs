@@ -191,8 +191,9 @@ enum Stream {
     Stderr,
 }
 
-/// Color only when the stream this envelope goes to is a terminal. Checking
-/// stdout for a failure wrote ANSI escapes into a redirected stderr log.
+/// Color only when the stream this envelope goes to is a terminal that will
+/// interpret escape codes. Checking stdout for a failure wrote ANSI escapes
+/// into a redirected stderr log.
 fn color_enabled(ok: bool) -> bool {
     color_for(
         ok,
@@ -201,12 +202,31 @@ fn color_enabled(ok: bool) -> bool {
             Stream::Stderr => std::io::stderr().is_terminal(),
         },
         env::var_os("NO_COLOR").is_some(),
+        console_accepts_ansi(),
     )
 }
 
-fn color_for(ok: bool, is_terminal: impl Fn(Stream) -> bool, no_color: bool) -> bool {
+fn color_for(
+    ok: bool,
+    is_terminal: impl Fn(Stream) -> bool,
+    no_color: bool,
+    ansi_supported: bool,
+) -> bool {
     let stream = if ok { Stream::Stdout } else { Stream::Stderr };
-    !no_color && is_terminal(stream)
+    !no_color && ansi_supported && is_terminal(stream)
+}
+
+/// A Windows console prints ANSI escape codes literally unless virtual-terminal
+/// processing is on (Windows PowerShell 5.1 in the classic console host leaves
+/// it off). Try to turn it on; if that fails, render without color.
+#[cfg(windows)]
+fn console_accepts_ansi() -> bool {
+    crossterm::ansi_support::supports_ansi()
+}
+
+#[cfg(not(windows))]
+fn console_accepts_ansi() -> bool {
+    true
 }
 
 fn is_doctor_shape(data: &Value) -> bool {
@@ -852,25 +872,35 @@ mod tests {
         let stderr_only = |stream: Stream| stream == Stream::Stderr;
 
         assert!(
-            color_for(true, stdout_only, false),
+            color_for(true, stdout_only, false, true),
             "success on a TTY stdout"
         );
         assert!(
-            !color_for(false, stdout_only, false),
+            !color_for(false, stdout_only, false, true),
             "a failure goes to the redirected stderr, so no escapes"
         );
         assert!(
-            color_for(false, stderr_only, false),
+            color_for(false, stderr_only, false, true),
             "failure on a TTY stderr"
         );
         assert!(
-            !color_for(true, stderr_only, false),
+            !color_for(true, stderr_only, false, true),
             "a success goes to the redirected stdout, so no escapes"
         );
         assert!(
-            !color_for(true, stdout_only, true) && !color_for(false, stderr_only, true),
+            !color_for(true, stdout_only, true, true) && !color_for(false, stderr_only, true, true),
             "NO_COLOR always wins"
         );
+    }
+
+    #[test]
+    fn no_color_when_the_console_cannot_interpret_escape_codes() {
+        let stdout_only = |stream: Stream| stream == Stream::Stdout;
+        assert!(
+            !color_for(true, stdout_only, false, false),
+            "a console without VT processing prints escape codes literally"
+        );
+        assert!(color_for(true, stdout_only, false, true));
     }
 
     #[test]
