@@ -945,7 +945,7 @@ mongo:
 
     #[test]
     fn one_auth_guidance_tells_a_profile_without_credentials_to_sign_in() {
-        let guidance = one_auth_guidance(true, None, false, false, false, false)
+        let guidance = one_auth_guidance(true, None, false, false, false, false, false)
             .expect("a configured profile with no credentials needs guidance");
         assert!(guidance.contains("Not signed in"), "{guidance}");
         assert!(guidance.contains("ayx one login"), "{guidance}");
@@ -962,6 +962,7 @@ mongo:
             false,
             false,
             false,
+            false,
         )
         .expect("OTP guidance");
         assert!(otp.contains("30 days"), "{otp}");
@@ -969,6 +970,7 @@ mongo:
             true,
             Some(OneCredentialKind::EmailOtp),
             true,
+            false,
             false,
             true,
             false,
@@ -981,6 +983,7 @@ mongo:
             true,
             true,
             false,
+            false,
             true,
         )
         .expect("renewing guidance");
@@ -989,8 +992,76 @@ mongo:
             "{renewing}"
         );
         assert_eq!(
-            one_auth_guidance(false, None, false, false, false, false),
+            one_auth_guidance(false, None, false, false, false, false, false),
             None
+        );
+    }
+
+    /// A keyring read error leaves the secret `None` while its `*_ref` stays
+    /// set. Saying "Not signed in" there sent users off to mint more tokens
+    /// when the credential exists and only secure storage is unreadable.
+    #[test]
+    fn one_auth_guidance_distinguishes_unreadable_storage_from_signed_out() {
+        use ayx_core::profile::OneCredentialKind;
+        // (kind, access, refresh, ref, expired, renews, expected substring)
+        type Case = (
+            Option<OneCredentialKind>,
+            bool,
+            bool,
+            bool,
+            bool,
+            bool,
+            Option<&'static str>,
+        );
+        let cases: [Case; 4] = [
+            (
+                None,
+                false,
+                false,
+                true,
+                false,
+                false,
+                Some("stored in secure storage but could not be read"),
+            ),
+            (
+                Some(OneCredentialKind::OAuthRefresh),
+                true,
+                false,
+                false,
+                true,
+                false,
+                Some("passed its expiry and this credential cannot renew it"),
+            ),
+            (None, true, false, false, false, false, None),
+            (
+                Some(OneCredentialKind::EmailOtp),
+                false,
+                false,
+                false,
+                false,
+                false,
+                Some("Not signed in"),
+            ),
+        ];
+        for (kind, access, refresh, reference, expired, renews, expected) in cases {
+            let guidance =
+                one_auth_guidance(true, kind, access, refresh, reference, expired, renews);
+            match expected {
+                Some(needle) => {
+                    let text = guidance.unwrap_or_else(|| panic!("guidance for {needle:?}"));
+                    assert!(text.contains(needle), "{text}");
+                }
+                None => assert_eq!(guidance, None),
+            }
+        }
+        assert_eq!(
+            one_auth_guidance(true, None, false, false, true, false, false),
+            Some(
+                "A credential for this profile is stored in secure storage but could not be \
+                 read. Check that the operating-system credential store (Windows Credential \
+                 Manager, macOS Keychain, or Secret Service) is available, then rerun \
+                 `ayx doctor auth`."
+            )
         );
     }
 
@@ -6765,8 +6836,11 @@ fn doctor_config_envelope(profile: Option<&str>, fix: bool) -> Result<Envelope> 
 }
 
 /// What `ayx doctor auth` tells the user to do about their Alteryx One
-/// credential. A profile with no credential at all comes first: it is the
-/// state a failed first sign-in leaves behind, and it needs a next step.
+/// credential. A credential whose secure-storage reference is set but whose
+/// secret could not be read comes first, so an unreadable keyring is not
+/// mistaken for a signed-out profile. A profile with no credential at all
+/// comes next: it is the state a failed first sign-in leaves behind, and it
+/// needs a next step.
 ///
 /// An OTP credential that is present and unexpired is the flow working as
 /// designed, so this is phrased as an upgrade to a credential that renews
@@ -6779,9 +6853,17 @@ fn one_auth_guidance(
     kind: Option<ayx_core::profile::OneCredentialKind>,
     access_token_present: bool,
     refresh_token_present: bool,
+    credential_ref_present: bool,
     access_token_expired: bool,
     renews_automatically: bool,
 ) -> Option<&'static str> {
+    if configured && !access_token_present && !refresh_token_present && credential_ref_present {
+        return Some(
+            "A credential for this profile is stored in secure storage but could not be read. \
+             Check that the operating-system credential store (Windows Credential Manager, \
+             macOS Keychain, or Secret Service) is available, then rerun `ayx doctor auth`.",
+        );
+    }
     if configured && !access_token_present && !refresh_token_present {
         return Some(
             "Not signed in to Alteryx One for this profile. Run `ayx one login`, or set up the \
@@ -6846,11 +6928,21 @@ fn doctor_auth_envelope(profile: Option<&str>, environment: Option<&str>) -> Res
         && one_refresh_token_present
         && one_oauth_client_id_present;
     let one_access_token_expired = one_access_token_expired(one_access_token_expires_at);
+    // A keyring read error resolves the secret to `None` but leaves its
+    // `*_ref` set, so a ref with no token means storage is unreadable, not
+    // that the user never signed in.
+    let non_empty = |v: Option<&String>| v.is_some_and(|v| !v.trim().is_empty());
+    let one_credential_ref_present = one_credential.is_some_and(|c| {
+        non_empty(c.access_token_ref.as_ref()) || non_empty(c.refresh_token_ref.as_ref())
+    }) || one.is_some_and(|v| {
+        non_empty(v.access_token_ref.as_ref()) || non_empty(v.refresh_token_ref.as_ref())
+    });
     let one_guidance = one_auth_guidance(
         one_configured,
         one_credential_kind,
         one_access_token_present,
         one_refresh_token_present,
+        one_credential_ref_present,
         one_access_token_expired,
         one_renews_automatically,
     );
