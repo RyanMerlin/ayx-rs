@@ -219,6 +219,15 @@ fn color_for(
 /// A Windows console prints ANSI escape codes literally unless virtual-terminal
 /// processing is on (Windows PowerShell 5.1 in the classic console host leaves
 /// it off). Try to turn it on; if that fails, render without color.
+///
+/// Known limitation: crossterm probes and enables VT processing on the
+/// *stdout* handle only, and caches the answer for the life of the process.
+/// So when stdout is redirected (`ayx ... > out.log`), this reports `false`
+/// for the rest of the run, and a failure envelope written to an interactive
+/// stderr also prints without color even though that console could render
+/// it. This fails closed: escape codes are never written to a console that
+/// cannot render them, at the cost of an interactive stderr occasionally
+/// losing color it could have had.
 #[cfg(windows)]
 fn console_accepts_ansi() -> bool {
     crossterm::ansi_support::supports_ansi()
@@ -901,6 +910,14 @@ mod tests {
             "a console without VT processing prints escape codes literally"
         );
         assert!(color_for(true, stdout_only, false, true));
+
+        let stderr_only = |stream: Stream| stream == Stream::Stderr;
+        assert!(
+            !color_for(false, stderr_only, false, false),
+            "the cached stdout-only ANSI check also withholds color from an \
+             interactive stderr, since crossterm never probed stderr"
+        );
+        assert!(color_for(false, stderr_only, false, true));
     }
 
     #[test]
