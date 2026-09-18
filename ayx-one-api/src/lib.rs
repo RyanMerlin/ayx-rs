@@ -171,7 +171,8 @@ pub mod types;
 
 pub use coverage::{CoverageReport, MissingEndpoint, StaleEndpoint, coverage};
 pub use email_otp::{
-    OtpAuthResult, WizardOtpSession, email_otp_login, email_otp_login_with_password,
+    OtpAuthResult, PatMintRejected, WizardOtpSession, email_otp_login,
+    email_otp_login_with_password,
 };
 pub use otp_compat::{
     LEGACY_OTP_COMPATIBILITY_VERSION, LegacyOtpAdapter, LegacyOtpCompatibilityContract,
@@ -2440,9 +2441,17 @@ fn resolve_one_access_token(config: &Config, client: &Client) -> Result<String> 
         return refresh_one_access_token_for_request(config, client);
     }
 
-    Err(anyhow::anyhow!(
-        "no Alteryx One credentials configured — set alteryx_one.access_token / refresh_token for user auth, or set alteryx_one.auth_mode: service-principal with sp_client_id + client_secret + sp_token_endpoint_url for SP auth"
-    ))
+    // Classified as auth_failed so the envelope's remediation points at
+    // `ayx one login`, not at `ayx onboard`, which would repeat the setup the
+    // user has usually just finished.
+    Err(
+        anyhow::Error::new(ayx_core::envelope::CodedError::new(
+            ayx_core::envelope::ErrorCode::AuthFailed,
+        ))
+        .context(
+            "not signed in to Alteryx One for this profile — run `ayx one login`, or `ayx one login --oauth-api-token` for the durable credential (for service-principal auth, set alteryx_one.auth_mode: service-principal with sp_client_id + client_secret + sp_token_endpoint_url)",
+        ),
+    )
 }
 
 /// Confirm the token's current workspace matches `expected_workspace_id`.
@@ -2702,7 +2711,7 @@ fn auth_binding_for_workspace(
         .normalized_base_url()
         .context("alteryx_one.base_url is required for credential binding")?;
     let issuer = one
-        .effective_token_endpoint_url_for_workspace(workspace_id)
+        .binding_issuer_url_for_workspace(workspace_id)
         .unwrap_or_else(|| base_url.clone());
     let region = url::Url::parse(&base_url)
         .ok()
@@ -3414,6 +3423,25 @@ mongo:
             auth_mode: AuthMode::default(),
         });
         config
+    }
+
+    #[test]
+    fn a_profile_without_credentials_is_an_actionable_auth_failure() {
+        let _lock = test_env_lock();
+        let mut config = one_profile("https://us1.example.test");
+        let one = config.alteryx_one.as_mut().expect("one profile");
+        one.access_token = None;
+        one.client_secret = None;
+
+        let err = resolve_one_access_token(&config, &Client::new()).unwrap_err();
+        let coded = err
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<ayx_core::envelope::CodedError>())
+            .expect("a missing credential must carry a classified error code");
+        assert_eq!(coded.code, ayx_core::envelope::ErrorCode::AuthFailed);
+        let message = err.to_string();
+        assert!(message.contains("ayx one login"), "{message}");
+        assert!(message.contains("--oauth-api-token"), "{message}");
     }
 
     #[test]

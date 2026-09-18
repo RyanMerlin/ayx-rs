@@ -619,6 +619,21 @@ pub(crate) fn run_otp_login(
     )
 }
 
+/// Run `ayx one login --oauth-api-token` for `profile`: prompt for the Client
+/// ID and refresh token from the Alteryx One UI, verify them, and store them.
+/// `onboard` uses this when the email-OTP login cannot mint its API access
+/// token in the user's workspace.
+pub(crate) fn run_oauth_api_token_login(
+    environment: Option<&str>,
+    profile: Option<String>,
+) -> Result<Envelope> {
+    let runtime = crate::cmd::RuntimeCtx::new(environment);
+    super::one_platform::auth::login(
+        &runtime, profile, None, false, false, None, None, None, None, None, None, None, false,
+        None, true, None, None, false, None, false, true,
+    )
+}
+
 /// Borrow Cli's apply + yes for the TTY confirm prompts inside delete arms.
 pub struct Ctx<'a> {
     pub apply: bool,

@@ -8,6 +8,32 @@ use crate::{
     load_payload,
 };
 
+fn normalize_provider_disabled_delete(id: &str, envelope: Envelope) -> Envelope {
+    if envelope.error_code == Some(ayx_core::envelope::ErrorCode::Gone)
+        && envelope
+            .data
+            .pointer("/response/exception/code")
+            .and_then(serde_json::Value::as_str)
+            == Some("IAM_ENDPOINT_SCREAM_TEST")
+    {
+        Envelope::err_coded(
+            ayx_core::envelope::ErrorCode::Gone,
+            "global person deletion is temporarily unavailable because the provider disabled this endpoint",
+            serde_json::json!({
+                "person_id": id,
+                "provider_code": "IAM_ENDPOINT_SCREAM_TEST",
+                "provider_response": envelope.data.get("response").cloned().unwrap_or(serde_json::Value::Null),
+            }),
+        )
+        .with_remediation(
+            "The provider has temporarily disabled global-person deletion. Use workspace-member removal only when the intended operation is to remove workspace membership.",
+            vec![],
+        )
+    } else {
+        envelope
+    }
+}
+
 pub(crate) fn execute(
     runtime: &RuntimeCtx<'_>,
     apply: bool,
@@ -128,15 +154,16 @@ pub(crate) fn execute(
                     ),
                 )?;
             }
-            one_api_live_request(
+            let envelope = one_api_live_request(
                 &config,
                 "person",
                 "person-delete",
                 "DELETE",
                 "/v4/people/{id}",
                 true,
-                &[("id", &id)],
-            )?
+                &[("id", id.as_str())],
+            )?;
+            normalize_provider_disabled_delete(&id, envelope)
         }
         Some(OnePersonCommand::Create { profile, body }) => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
@@ -194,4 +221,25 @@ pub(crate) fn current(runtime: &RuntimeCtx<'_>, profile: Option<&str>) -> Result
         false,
         &[],
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use ayx_core::envelope::ErrorCode;
+    use serde_json::json;
+
+    use super::normalize_provider_disabled_delete;
+
+    #[test]
+    fn provider_disabled_global_delete_is_gone_not_not_found() {
+        let source = ayx_core::envelope::Envelope::err_coded(
+            ErrorCode::Gone,
+            "request failed",
+            json!({"response": {"exception": {"code": "IAM_ENDPOINT_SCREAM_TEST"}}}),
+        );
+        let result = normalize_provider_disabled_delete("person-1", source);
+        assert_eq!(result.error_code, Some(ErrorCode::Gone));
+        assert_eq!(result.data["person_id"], "person-1");
+        assert!(result.remediation.unwrap().commands.is_empty());
+    }
 }

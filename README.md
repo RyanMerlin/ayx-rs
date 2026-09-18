@@ -325,6 +325,8 @@ npm run build  # or: npm run dev  (for live reload)
 On push to `main` the site is automatically deployed to Cloudflare Pages via `.github/workflows/docs-deploy.yml`.
 
 For the One surface specifically, the live validation plan is documented in `docs/one-live-validation.md`.
+The copy-paste chat demo and governance protocol is documented in
+`docs/one-chat-demo-protocol.md`.
 
 ## Fixtures
 

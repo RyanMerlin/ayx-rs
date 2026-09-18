@@ -1602,6 +1602,21 @@ mongo:
     }
 
     #[test]
+    fn capability_unavailable_has_current_guidance_and_permission_exit_code() {
+        use ayx_core::envelope::ErrorCode;
+
+        let hint = hint_for_error_code(ErrorCode::CapabilityUnavailable).unwrap();
+        assert!(hint.contains("prerequisites"));
+        assert!(!hint.contains("one capabilities"));
+        let envelope = Envelope::err_coded(
+            ErrorCode::CapabilityUnavailable,
+            "missing session",
+            json!({}),
+        );
+        assert_eq!(exit_code_for_envelope(&envelope), 5);
+    }
+
+    #[test]
     fn not_found_remediation_names_the_familys_list_command() {
         use ayx_core::envelope::ErrorCode;
         let (_, commands) =
@@ -2627,7 +2642,7 @@ pub(crate) enum OneCommand {
     },
     #[command(
         about = "Manage Agent Studio MCP asset registration",
-        long_about = "Manage Agent Studio agents and MCP registration state for One datasets and cloud-native workflows.\n\nThese operations use the Agent Studio service surface, not the public One OpenAPI surface. Dataset registration enables Insights; workflow registration creates an Apps shortcut.",
+        long_about = "Manage Agent Studio agents and MCP registration state for One datasets and cloud-native workflows.\n\nThese operations use the Agent Studio service surface, not the public One OpenAPI surface. Dataset registration enables Insights; workflow registration creates an Apps shortcut. Agent Studio is private-preview and requires an existing browser session; when absent, commands return capability_unavailable without attempting a follow-on operation.",
         arg_required_else_help = true,
         // The vendor surface rejects both supported bearer credential kinds.
         // Retain the implementation only as a preview seam until a supported
@@ -2698,7 +2713,7 @@ pub(crate) enum OneCommand {
         command: OneOutputObjectCommand,
     },
     #[command(
-        about = "Alteryx One webhook flow tasks — create, inspect, and test",
+        about = "Alteryx One webhook flow tasks — create, inspect, and test. The provider exposes no list endpoint; operations require a known task id.",
         arg_required_else_help = true
     )]
     WebhookFlowTasks {
@@ -2828,11 +2843,11 @@ pub(crate) enum OnePersonCommand {
         )]
         body: PathBuf,
     },
-    /// Delete a One person record.
+    /// Delete a One person record globally. This is distinct from workspace membership removal.
     Delete {
         #[arg(long)]
         profile: Option<String>,
-        #[arg(value_name = "ID")]
+        #[arg(value_name = "PERSON-ID")]
         id: String,
     },
     /// Update the current One person's password from JSON payload.
@@ -4521,7 +4536,7 @@ impl DatasetFilter {
 
 #[derive(Subcommand, Debug)]
 pub(crate) enum OneJobsCommand {
-    /// List Job Library entries.
+    /// List Job Library entries. This is not a complete cloud-native workflow-run history.
     List {
         #[arg(long)]
         profile: Option<String>,
@@ -5005,6 +5020,12 @@ pub(crate) enum OneSchedulingCommand {
         /// RFC3339 timestamp for a one-time trigger.
         #[arg(long)]
         at: Option<String>,
+        /// Require the newly-created schedule to be enabled after creation.
+        #[arg(long, conflicts_with = "disabled")]
+        enabled: bool,
+        /// Require the newly-created schedule to be disabled after creation.
+        #[arg(long, conflicts_with = "enabled")]
+        disabled: bool,
         /// JSON file, inline non-secret JSON, or - for stdin. Inline values are visible in shell history; use a file or stdin for secrets. Mutually exclusive with typed positionals.
         #[arg(long, value_name = "FILE|JSON|-", conflicts_with_all = ["target_kind", "target_id", "trigger_kind", "name", "timezone", "hour", "minute", "weekday", "day_of_month", "at"])]
         body: Option<PathBuf>,
@@ -5817,7 +5838,7 @@ fn execute(cli: Cli, output_mode: output::OutputMode) -> Result<Envelope> {
                 non_interactive,
                 environments,
             )?;
-            Envelope::ok_with_data("onboarding completed", detail)
+            Envelope::ok_with_data(onboard::onboarding_message(&detail), detail)
         }
         Command::Tui => Envelope::err_coded(
             ayx_core::envelope::ErrorCode::Validation,
@@ -7958,7 +7979,7 @@ fn exit_code_for_envelope(envelope: &Envelope) -> i32 {
         Validation => 2,
         ConfigMissing | WorkspaceMismatch => 3,
         AuthFailed => 4,
-        PermissionDenied => 5,
+        PermissionDenied | CapabilityUnavailable => 5,
         NotFound | Gone | Conflict | RateLimited | Network | Upstream => 6,
         Incomplete => 7,
         OutputClassification | Internal => 70,
@@ -8096,6 +8117,9 @@ fn hint_for_error_code(code: ayx_core::envelope::ErrorCode) -> Option<&'static s
         PermissionDenied => Some(
             "Check that the active profile's token has the required role/scope for this resource.",
         ),
+        CapabilityUnavailable => Some(
+            "This optional service is unavailable to the current authentication or workspace tier; use a profile and workspace that meet its prerequisites.",
+        ),
         NotFound => Some(
             "Verify the id is correct. Use 'ayx <surface> list' to enumerate available resources.",
         ),
@@ -8211,7 +8235,7 @@ fn remediation_for_error_code(
             cmds(&["ayx onboard", "ayx profile list -o json"]),
         ),
         AuthFailed if is_one => (
-            "The stored One credential was rejected; log in again.".to_string(),
+            "No usable One credential: it is missing, expired, or was rejected; log in again.".to_string(),
             cmds(&["ayx one login", "ayx one auth status -o json"]),
         ),
         AuthFailed => (

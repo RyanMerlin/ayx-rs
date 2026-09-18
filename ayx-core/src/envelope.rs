@@ -18,6 +18,8 @@ pub enum ErrorCode {
     AuthFailed,
     /// Caller lacks permission for the requested resource.
     PermissionDenied,
+    /// The configured authentication method cannot reach this optional service.
+    CapabilityUnavailable,
     /// Resource (workflow, plan, person, …) was not found.
     NotFound,
     /// Resource or endpoint was removed upstream.
@@ -142,6 +144,7 @@ impl ErrorCode {
             ErrorCode::ConfigMissing => "config_missing",
             ErrorCode::AuthFailed => "auth_failed",
             ErrorCode::PermissionDenied => "permission_denied",
+            ErrorCode::CapabilityUnavailable => "capability_unavailable",
             ErrorCode::NotFound => "not_found",
             ErrorCode::Gone => "gone",
             ErrorCode::Validation => "validation",
@@ -166,6 +169,7 @@ impl ErrorCode {
             "config_missing" => ErrorCode::ConfigMissing,
             "auth_failed" => ErrorCode::AuthFailed,
             "permission_denied" => ErrorCode::PermissionDenied,
+            "capability_unavailable" => ErrorCode::CapabilityUnavailable,
             "not_found" => ErrorCode::NotFound,
             "gone" => ErrorCode::Gone,
             "validation" => ErrorCode::Validation,
@@ -669,6 +673,7 @@ mod tests {
             ErrorCode::ConfigMissing,
             ErrorCode::AuthFailed,
             ErrorCode::PermissionDenied,
+            ErrorCode::CapabilityUnavailable,
             ErrorCode::NotFound,
             ErrorCode::Gone,
             ErrorCode::Validation,
@@ -718,6 +723,7 @@ mod tests {
             ErrorCode::ConfigMissing,
             ErrorCode::AuthFailed,
             ErrorCode::PermissionDenied,
+            ErrorCode::CapabilityUnavailable,
             ErrorCode::NotFound,
             ErrorCode::Gone,
             ErrorCode::Validation,

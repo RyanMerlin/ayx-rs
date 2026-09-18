@@ -308,11 +308,8 @@ impl WizardOtpSession {
                     .send()
             },
         )
-        .context("apiAccessTokens request failed")?
-        .error_for_status()
-        .context("apiAccessTokens returned an error status")?
-        .json()
-        .context("apiAccessTokens response was not JSON")?;
+        .context("apiAccessTokens request failed")
+        .and_then(pat_response_value)?;
         Ok(OtpAuthResult {
             access_token: pat["tokenValue"]
                 .as_str()
@@ -670,11 +667,8 @@ where
                 .send()
         },
     )
-    .context("apiAccessTokens request failed")?
-    .error_for_status()
-    .context("apiAccessTokens returned an error status")?
-    .json()
-    .context("apiAccessTokens response was not JSON")?;
+    .context("apiAccessTokens request failed")
+    .and_then(pat_response_value)?;
 
     let access_token = pat["tokenValue"]
         .as_str()
@@ -2474,5 +2468,224 @@ mod tests {
                 .count(),
             4
         );
+    }
+}
+
+/// Alteryx One answered the CLI's API-access-token request with a 4xx, so no
+/// token was created. Unlike a transport failure, the outcome is known and the
+/// caller can safely offer another sign-in method.
+#[derive(Debug)]
+pub struct PatMintRejected {
+    pub status: u16,
+    pub server_message: Option<String>,
+}
+
+impl std::fmt::Display for PatMintRejected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Alteryx One refused to create the CLI's API access token (HTTP {}",
+            self.status
+        )?;
+        if let Some(message) = &self.server_message {
+            write!(f, ": {message}")?;
+        }
+        f.write_str("), so no token was created. ")?;
+        match self.status {
+            401 => f.write_str(
+                "The sign-in session expired before the token could be created; run \
+                 `ayx one login` again.",
+            ),
+            429 => f.write_str(
+                "Alteryx One is rate-limiting requests; wait a minute, then run `ayx one login` \
+                 again.",
+            ),
+            403 => write!(
+                f,
+                "This workspace probably has API access tokens turned off or restricted, so \
+                 {OAUTH_API_TOKEN_GUIDANCE}"
+            ),
+            _ => write!(f, "If this persists, {OAUTH_API_TOKEN_GUIDANCE}"),
+        }
+    }
+}
+
+impl std::error::Error for PatMintRejected {}
+
+impl PatMintRejected {
+    /// Whether the OAuth API-token login is the right next step. A 401 or 429
+    /// is transient, so retrying the same login is the better advice.
+    pub fn suggests_oauth_api_token(&self) -> bool {
+        !matches!(self.status, 401 | 429)
+    }
+}
+
+const OAUTH_API_TOKEN_GUIDANCE: &str = "connect with an OAuth API token instead: run \
+    `ayx one login --oauth-api-token` and paste the Client ID and refresh token from Alteryx \
+    One (profile menu > API Tokens), or ask a workspace admin to enable API access tokens.";
+
+/// Read the `/v4/apiAccessTokens` response: the token JSON on success, a
+/// typed [`PatMintRejected`] on a 4xx, and an error naming the status and the
+/// server's message otherwise.
+fn pat_response_value(response: Response) -> Result<Value> {
+    let status = response.status();
+    if status.is_success() {
+        return response
+            .json()
+            .context("apiAccessTokens response was not JSON");
+    }
+    let server_message = pat_error_message(&response.text().unwrap_or_default());
+    if status.is_client_error() {
+        return Err(PatMintRejected {
+            status: status.as_u16(),
+            server_message,
+        }
+        .into());
+    }
+    match server_message {
+        Some(message) => bail!(
+            "apiAccessTokens returned HTTP {}: {message}",
+            status.as_u16()
+        ),
+        None => bail!("apiAccessTokens returned HTTP {}", status.as_u16()),
+    }
+}
+
+/// The most specific human-readable message in an error body, redacted and
+/// kept short enough for a terminal line.
+fn pat_error_message(body: &str) -> Option<String> {
+    let parsed: Option<Value> = serde_json::from_str(body).ok();
+    let message = parsed
+        .as_ref()
+        .and_then(|value| {
+            [
+                "/exception/details",
+                "/exception/message",
+                "/message",
+                "/error_description",
+                "/error",
+            ]
+            .iter()
+            .find_map(|pointer| value.pointer(pointer).and_then(Value::as_str))
+            .map(str::to_string)
+        })
+        .unwrap_or_else(|| body.to_string());
+    let message = redact_text(message.trim());
+    (!message.is_empty()).then(|| message.chars().take(300).collect())
+}
+
+#[cfg(test)]
+mod pat_mint_tests {
+    use super::*;
+    use httpmock::prelude::*;
+
+    fn post(server: &MockServer) -> Response {
+        Client::new()
+            .post(server.url("/v4/apiAccessTokens"))
+            .send()
+            .expect("mock request")
+    }
+
+    #[test]
+    fn success_returns_the_token_json() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path("/v4/apiAccessTokens");
+            then.status(201)
+                .header("Content-Type", "application/json")
+                .body(r#"{"tokenValue":"pat-secret","tokenInfo":{"tokenId":"t1"}}"#);
+        });
+        let value = pat_response_value(post(&server)).unwrap();
+        assert_eq!(value["tokenValue"], "pat-secret");
+    }
+
+    #[test]
+    fn a_4xx_is_a_typed_rejection_with_the_server_message_and_next_step() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path("/v4/apiAccessTokens");
+            then.status(403).header("Content-Type", "application/json").body(
+                r#"{"exception":{"name":"AccessControlException","message":"Permission denied","details":"User is not authorised to access this API."}}"#,
+            );
+        });
+        let err = pat_response_value(post(&server)).unwrap_err();
+        let rejected = err
+            .downcast_ref::<PatMintRejected>()
+            .expect("a 4xx must be a PatMintRejected at the top of the chain");
+        assert_eq!(rejected.status, 403);
+        let message = err.to_string();
+        assert!(message.contains("403"), "{message}");
+        assert!(message.contains("not authorised"), "{message}");
+        assert!(message.contains("no token was created"), "{message}");
+        assert!(
+            message.contains("ayx one login --oauth-api-token"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_4xx_without_a_json_body_still_reports_the_status() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path("/v4/apiAccessTokens");
+            then.status(400).body("lifetime exceeds workspace maximum");
+        });
+        let err = pat_response_value(post(&server)).unwrap_err();
+        assert!(err.downcast_ref::<PatMintRejected>().is_some());
+        let message = err.to_string();
+        assert!(
+            message.contains("400") && message.contains("lifetime exceeds"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_5xx_is_not_a_rejection_and_names_the_status() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path("/v4/apiAccessTokens");
+            then.status(503).body("upstream unavailable");
+        });
+        let err = pat_response_value(post(&server)).unwrap_err();
+        assert!(err.downcast_ref::<PatMintRejected>().is_none());
+        let message = format!("{err:#}");
+        assert!(message.contains("503"), "{message}");
+    }
+
+    #[test]
+    fn transient_rejections_advise_retrying_login_not_switching_credentials() {
+        for (status, needle) in [(401, "session expired"), (429, "rate-limiting")] {
+            let rejected = PatMintRejected {
+                status,
+                server_message: None,
+            };
+            let message = rejected.to_string();
+            assert!(message.contains(needle), "{message}");
+            assert!(message.contains("run `ayx one login` again"), "{message}");
+            assert!(!message.contains("--oauth-api-token"), "{message}");
+            assert!(!rejected.suggests_oauth_api_token());
+        }
+        let forbidden = PatMintRejected {
+            status: 403,
+            server_message: None,
+        };
+        assert!(forbidden.suggests_oauth_api_token());
+        assert!(
+            !forbidden.to_string().contains("  "),
+            "no stray spaces: {forbidden}"
+        );
+    }
+
+    #[test]
+    fn a_rejection_body_that_echoes_a_bearer_token_is_redacted() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path("/v4/apiAccessTokens");
+            then.status(400).body(
+                r#"{"message":"bad header Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"}"#,
+            );
+        });
+        let message = pat_response_value(post(&server)).unwrap_err().to_string();
+        assert!(!message.contains("eyJhbGciOiJIUzI1NiJ9"), "{message}");
     }
 }

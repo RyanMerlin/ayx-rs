@@ -28,7 +28,7 @@
       "enum": [
         "config_missing", "auth_failed", "permission_denied", "not_found", "gone",
         "validation", "conflict", "rate_limited", "network", "upstream",
-        "workspace_mismatch", "incomplete", "output_classification", "internal"
+        "workspace_mismatch", "incomplete", "output_classification", "capability_unavailable", "internal"
       ]
     },
     "Remediation": {

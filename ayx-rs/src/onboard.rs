@@ -1383,11 +1383,87 @@ fn offer_login_now(config: &Config, saved_path: &Path, environment: Option<&str>
             );
             Ok(json!({ "offered": true, "ran": true, "ok": true }))
         }
-        Err(err) => {
-            eprintln!("\nLogin didn't complete: {err}");
-            eprintln!("Your profile is saved — retry with `{NEXT_STEP}`.");
-            Ok(json!({ "offered": true, "ran": true, "ok": false, "error": err.to_string() }))
+        Err(err) if should_offer_oauth_fallback(&err) => {
+            eprintln!("\nLogin didn't complete: {err:#}");
+            offer_oauth_api_token_login(config, environment, &err)
         }
+        Err(err) => {
+            eprintln!("\nLogin didn't complete: {err:#}");
+            eprintln!("Your profile is saved — retry with `{NEXT_STEP}`.");
+            Ok(json!({ "offered": true, "ran": true, "ok": false, "error": format!("{err:#}") }))
+        }
+    }
+}
+
+/// The email-OTP login was refused its API access token, so retrying it would
+/// fail the same way. Offer the OAuth API-token login, which does not depend
+/// on API access tokens being enabled, while the user is still here.
+fn offer_oauth_api_token_login(
+    config: &Config,
+    environment: Option<&str>,
+    otp_err: &anyhow::Error,
+) -> Result<Value> {
+    const OAUTH_NEXT_STEP: &str = "ayx one login --oauth-api-token";
+    let otp_error = format!("{otp_err:#}");
+    eprintln!(
+        "\nYou can still connect now with an OAuth API token. In Alteryx One, open your\n\
+         profile menu > API Tokens, generate a token, and keep the Client ID and refresh\n\
+         token ready to paste."
+    );
+    if !prompt_yes_no("Connect with an OAuth API token now", true)? {
+        eprintln!("Skipped. Your profile is saved — connect any time with `{OAUTH_NEXT_STEP}`.");
+        return Ok(json!({
+            "offered": true, "ran": true, "ok": false, "error": otp_error,
+            "fallback": { "method": "oauth_api_token", "offered": true, "ran": false },
+        }));
+    }
+    match crate::cmd::one::run_oauth_api_token_login(environment, Some(config.profile_name.clone()))
+    {
+        Ok(_) => {
+            eprintln!("\nConnected. Verify any time with:");
+            eprintln!("  ayx one auth status");
+            eprintln!("  ayx one workspace current");
+            eprintln!(
+                "\nAccess tokens now renew automatically; there is nothing to redo in 30 days."
+            );
+            Ok(json!({
+                "offered": true, "ran": true, "ok": true, "method": "oauth_api_token",
+                "otp_error": otp_error,
+            }))
+        }
+        Err(err) => {
+            eprintln!("\nOAuth API-token login didn't complete: {err:#}");
+            eprintln!("Your profile is saved — retry with `{OAUTH_NEXT_STEP}`.");
+            Ok(json!({
+                "offered": true, "ran": true, "ok": false, "error": otp_error,
+                "fallback": {
+                    "method": "oauth_api_token", "offered": true, "ran": true, "ok": false,
+                    "error": format!("{err:#}"),
+                },
+            }))
+        }
+    }
+}
+
+/// A rejected API-access-token request means the email-OTP login can never
+/// succeed in this workspace as configured, so onboarding offers the OAuth
+/// API-token login instead of a retry that would fail the same way.
+fn should_offer_oauth_fallback(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<ayx_one_api::PatMintRejected>()
+            .is_some_and(ayx_one_api::PatMintRejected::suggests_oauth_api_token)
+    })
+}
+
+/// The top-line message for `ayx onboard`: it must not say "completed" when
+/// the profile was saved but sign-in failed.
+pub(crate) fn onboarding_message(detail: &Value) -> &'static str {
+    let login = &detail["login"];
+    if login["ran"].as_bool() == Some(true) && login["ok"].as_bool() == Some(false) {
+        "profile saved, but sign-in did not complete; see login.error"
+    } else {
+        "onboarding completed"
     }
 }
 
@@ -1788,7 +1864,7 @@ pub(crate) fn binding_for_auth_config(
         "alteryx_one.base_url is required for credential binding; set it in the profile or export AYX_ONE_BASE_URL",
     )?;
     let issuer = one
-        .effective_token_endpoint_url_for_workspace(workspace_id)
+        .binding_issuer_url_for_workspace(workspace_id)
         .unwrap_or_else(|| base_url.clone());
     let region = url::Url::parse(&base_url)
         .ok()
@@ -2309,6 +2385,48 @@ fn detect_alteryx_service_path(runtime_settings_path: Option<&Path>) -> Option<P
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oauth_fallback_is_offered_only_for_a_rejected_token_request() {
+        let rejected: anyhow::Error = ayx_one_api::PatMintRejected {
+            status: 403,
+            server_message: None,
+        }
+        .into();
+        assert!(should_offer_oauth_fallback(&rejected));
+        assert!(should_offer_oauth_fallback(
+            &rejected.context("login failed")
+        ));
+        assert!(!should_offer_oauth_fallback(&anyhow::anyhow!(
+            "Wizard PAT-mint outcome is unknown"
+        )));
+        // An expired session or rate limit is transient: retrying the same
+        // login is the right advice, not switching credential types.
+        for status in [401, 429] {
+            let transient: anyhow::Error = ayx_one_api::PatMintRejected {
+                status,
+                server_message: None,
+            }
+            .into();
+            assert!(!should_offer_oauth_fallback(&transient), "{status}");
+        }
+    }
+
+    #[test]
+    fn onboarding_message_does_not_claim_success_when_login_failed() {
+        assert_eq!(
+            onboarding_message(&json!({"login": {"ran": true, "ok": false}})),
+            "profile saved, but sign-in did not complete; see login.error"
+        );
+        assert_eq!(
+            onboarding_message(&json!({"login": {"ran": true, "ok": true}})),
+            "onboarding completed"
+        );
+        assert_eq!(
+            onboarding_message(&json!({"login": {"offered": true, "ran": false}})),
+            "onboarding completed"
+        );
+    }
     use ayx_core::profile::{
         ApiAuth, ApiAuthMode, ApiProfile, Config, MongoDatabases, MongoEmbedded, MongoMode,
         MongoProfile, ServerApiProfile, ServerProfile, SqlServerConnectionProfile,

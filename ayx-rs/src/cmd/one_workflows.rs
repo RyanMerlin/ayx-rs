@@ -760,7 +760,7 @@ pub(crate) fn execute(
                     ),
                 )?;
             }
-            one_api_live_request_with_body(
+            let mut run = one_api_live_request_with_body(
                 &config,
                 "workflow",
                 "run",
@@ -769,7 +769,17 @@ pub(crate) fn execute(
                 true,
                 &[("id", id.as_str())],
                 payload,
-            )?
+            )?;
+            run.data["job_handoff"] = json!({
+                "job_id": run.data.get("response").and_then(|response| response.get("jobId")).cloned(),
+                "job_group_id": run.data.get("response").and_then(|response| response.get("jobgroupId")).cloned(),
+                "status_command": "ayx one jobs status <jobgroupId>",
+                "runs_command": "ayx one jobs runs <jobgroupId>",
+            });
+            run.data["external_output_lifecycle"] = Value::String(
+                "Workflow outputs may be persisted by the configured storage provider. They are not Alteryx One output objects and are not deleted with the workflow.".to_string(),
+            );
+            run
         }
         OneWorkflowsCommand::Cancel { profile, run_id } => {
             let config = runtime.load_profile_lenient(profile.as_deref())?;
@@ -864,7 +874,7 @@ pub(crate) fn execute(
                     ),
                 )?;
             }
-            one_api_live_request(
+            let mut deleted = one_api_live_request(
                 &config,
                 "workflow",
                 "delete",
@@ -872,7 +882,11 @@ pub(crate) fn execute(
                 "/svc-workflow/api/v2/workflows/{id}",
                 true,
                 &[("id", id.as_str())],
-            )?
+            )?;
+            deleted.data["external_output_lifecycle"] = Value::String(
+                "Deleting a workflow does not delete externally persisted run outputs; storage retention and access policies own their lifecycle.".to_string(),
+            );
+            deleted
         }
         OneWorkflowsCommand::Copy {
             profile,

@@ -31,6 +31,37 @@ fn response_body(envelope: &Envelope) -> &Value {
     envelope.data.get("response").unwrap_or(&Value::Null)
 }
 
+fn is_missing_browser_session(envelope: &Envelope) -> bool {
+    response_body(envelope)
+        .get("message")
+        .and_then(Value::as_str)
+        .is_some_and(|message| message.contains("No Alteryx session cookies found"))
+}
+
+fn capability_unavailable(envelope: Envelope) -> Envelope {
+    Envelope::err_coded(
+        ErrorCode::CapabilityUnavailable,
+        "Agent Studio is unavailable to this profile: the private preview service requires an existing browser session",
+        json!({
+            "surface": "agent-assets",
+            "auth_requirement": "browser_session",
+            "provider_response": envelope.data.get("response").cloned().unwrap_or(Value::Null),
+        }),
+    )
+    .with_remediation(
+        "Use a profile with a supported Agent Studio browser session, or use public Alteryx One APIs.",
+        vec![],
+    )
+}
+
+fn normalize_agent_envelope(envelope: Envelope) -> Envelope {
+    if is_missing_browser_session(&envelope) {
+        capability_unavailable(envelope)
+    } else {
+        envelope
+    }
+}
+
 fn query<'a>(
     page: u32,
     page_size: u32,
@@ -79,7 +110,7 @@ fn list_datasets(
         .iter()
         .map(|(key, value)| (*key, value.as_str()))
         .collect();
-    one_api_live_request_with_query(
+    Ok(normalize_agent_envelope(one_api_live_request_with_query(
         config,
         "agent-assets",
         "datasets-list",
@@ -88,7 +119,7 @@ fn list_datasets(
         false,
         &[],
         &refs,
-    )
+    )?))
 }
 
 fn datasets_from(envelope: &Envelope) -> Vec<Value> {
@@ -180,7 +211,7 @@ fn prompt_agent(
     agent_id: &str,
     prompt: &str,
 ) -> Result<Envelope> {
-    let conversation = one_api_live_request_with_body(
+    let conversation = normalize_agent_envelope(one_api_live_request_with_body(
         config,
         "agent-assets",
         "agents-prompt-conversation",
@@ -189,7 +220,7 @@ fn prompt_agent(
         true,
         &[],
         Some(prompt_payload(agent_id, prompt)?),
-    )?;
+    )?);
     if !conversation.ok || conversation.data.get("dry_run") == Some(&Value::Bool(true)) {
         return Ok(conversation);
     }
@@ -200,7 +231,7 @@ fn prompt_agent(
             json!({ "conversation": response_body(&conversation) }),
         ));
     };
-    let mut chat = one_api_live_request_with_body(
+    let mut chat = normalize_agent_envelope(one_api_live_request_with_body(
         config,
         "agent-assets",
         "agents-prompt-chat",
@@ -209,7 +240,7 @@ fn prompt_agent(
         true,
         &[],
         Some(chat_payload(&conversation_id, prompt)),
-    )?;
+    )?);
     if let Value::Object(data) = &mut chat.data {
         data.insert(
             "conversation_id".to_string(),
@@ -224,7 +255,7 @@ fn workflow_tools(
     workflow_limit: u32,
 ) -> Result<(Envelope, Envelope, Envelope)> {
     let workflow_limit = workflow_limit.clamp(1, 1000).to_string();
-    let workflows = one_api_live_request_with_query(
+    let workflows = normalize_agent_envelope(one_api_live_request_with_query(
         config,
         "agent-assets",
         "workflows-list",
@@ -233,7 +264,7 @@ fn workflow_tools(
         false,
         &[],
         &[("limit", workflow_limit.as_str())],
-    )?;
+    )?);
     if !workflows.ok {
         return Ok((
             workflows,
@@ -241,7 +272,7 @@ fn workflow_tools(
             Envelope::ok("not requested"),
         ));
     }
-    let tools = one_api_live_request_with_query(
+    let tools = normalize_agent_envelope(one_api_live_request_with_query(
         config,
         "agent-assets",
         "tools-list",
@@ -250,8 +281,8 @@ fn workflow_tools(
         false,
         &[],
         &[("limit", "1000")],
-    )?;
-    let creations = one_api_live_request_with_query(
+    )?);
+    let creations = normalize_agent_envelope(one_api_live_request_with_query(
         config,
         "agent-assets",
         "tool-creations-list",
@@ -260,7 +291,7 @@ fn workflow_tools(
         false,
         &[],
         &[("showArchived", "false")],
-    )?;
+    )?);
     Ok((workflows, tools, creations))
 }
 
@@ -292,7 +323,7 @@ fn poll_tool_creation(
     let started = Instant::now();
     let timeout = Duration::from_secs(timeout_seconds);
     loop {
-        let status = one_api_live_request(
+        let status = normalize_agent_envelope(one_api_live_request(
             config,
             "agent-assets",
             "tool-creation-status",
@@ -300,7 +331,7 @@ fn poll_tool_creation(
             "/ai-agents/backend/agentyx/toolCreations/{id}",
             false,
             &[("id", job_id)],
-        )?;
+        )?);
         if !status.ok {
             return Ok(status);
         }
@@ -367,7 +398,7 @@ pub(crate) fn execute(
                     .iter()
                     .map(|(key, value)| (*key, value.as_str()))
                     .collect();
-                Ok(one_api_live_request_with_query(
+                Ok(normalize_agent_envelope(one_api_live_request_with_query(
                     &config,
                     "agent-assets",
                     "agents-list",
@@ -376,11 +407,11 @@ pub(crate) fn execute(
                     false,
                     &[],
                     &refs,
-                )?)
+                )?))
             }
             OneAgentsCommand::Detail { profile, id } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
-                Ok(one_api_live_request(
+                Ok(normalize_agent_envelope(one_api_live_request(
                     &config,
                     "agent-assets",
                     "agents-detail",
@@ -388,7 +419,7 @@ pub(crate) fn execute(
                     "/ai-agents/backend/agents/{id}",
                     false,
                     &[("id", id.as_str())],
-                )?)
+                )?))
             }
             OneAgentsCommand::Prompt {
                 profile,
@@ -421,7 +452,7 @@ pub(crate) fn execute(
                         ),
                     )?;
                 }
-                Ok(one_api_live_request_with_body(
+                Ok(normalize_agent_envelope(one_api_live_request_with_body(
                     &config,
                     "agent-assets",
                     "agents-create",
@@ -430,7 +461,7 @@ pub(crate) fn execute(
                     true,
                     &[],
                     Some(payload),
-                )?)
+                )?))
             }
             OneAgentsCommand::Update { profile, id, body } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
@@ -445,7 +476,7 @@ pub(crate) fn execute(
                         ),
                     )?;
                 }
-                Ok(one_api_live_request_with_body(
+                Ok(normalize_agent_envelope(one_api_live_request_with_body(
                     &config,
                     "agent-assets",
                     "agents-update",
@@ -454,7 +485,7 @@ pub(crate) fn execute(
                     true,
                     &[("id", id.as_str())],
                     Some(payload),
-                )?)
+                )?))
             }
             OneAgentsCommand::Delete { profile, id } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
@@ -468,7 +499,7 @@ pub(crate) fn execute(
                         ),
                     )?;
                 }
-                Ok(one_api_live_request(
+                Ok(normalize_agent_envelope(one_api_live_request(
                     &config,
                     "agent-assets",
                     "agents-delete",
@@ -476,7 +507,7 @@ pub(crate) fn execute(
                     "/ai-agents/backend/agents/{id}",
                     true,
                     &[("id", id.as_str())],
-                )?)
+                )?))
             }
         },
         OneAgentAssetsCommand::Datasets { command } => match command {
@@ -541,7 +572,7 @@ pub(crate) fn execute(
                         ),
                     )?;
                 }
-                Ok(one_api_live_request_with_body(
+                Ok(normalize_agent_envelope(one_api_live_request_with_body(
                     &config,
                     "agent-assets",
                     "datasets-set",
@@ -550,7 +581,7 @@ pub(crate) fn execute(
                     true,
                     &[("id", id.as_str())],
                     Some(json!({ "dataset": dataset, "isMcpEnabled": enable })),
-                )?)
+                )?))
             }
         },
         OneAgentAssetsCommand::Workflows { command } => match command {
@@ -591,7 +622,7 @@ pub(crate) fn execute(
                         ),
                     )?;
                 }
-                let creation = one_api_live_request_with_body(
+                let creation = normalize_agent_envelope(one_api_live_request_with_body(
                     &config,
                     "agent-assets",
                     "workflows-enable",
@@ -600,7 +631,7 @@ pub(crate) fn execute(
                     true,
                     &[],
                     Some(json!({ "workflowId": id })),
-                )?;
+                )?);
                 if !creation.ok || creation.data.get("dry_run") == Some(&Value::Bool(true)) {
                     return Ok(creation);
                 }
@@ -625,7 +656,7 @@ pub(crate) fn execute(
             }
             OneAgentWorkflowsCommand::Disable { profile, id } => {
                 let config = runtime.load_profile_lenient(profile.as_deref())?;
-                let tools = one_api_live_request_with_query(
+                let tools = normalize_agent_envelope(one_api_live_request_with_query(
                     &config,
                     "agent-assets",
                     "tools-list",
@@ -634,7 +665,7 @@ pub(crate) fn execute(
                     false,
                     &[],
                     &[("limit", "1000")],
-                )?;
+                )?);
                 if !tools.ok {
                     return Ok(tools);
                 }
@@ -667,7 +698,7 @@ pub(crate) fn execute(
                         ),
                     )?;
                 }
-                Ok(one_api_live_request(
+                Ok(normalize_agent_envelope(one_api_live_request(
                     &config,
                     "agent-assets",
                     "workflows-disable",
@@ -675,7 +706,7 @@ pub(crate) fn execute(
                     "/ai-agents/backend/agentyx/tools/{id}",
                     true,
                     &[("id", tool_id.as_str())],
-                )?)
+                )?))
             }
         },
     }
@@ -684,11 +715,24 @@ pub(crate) fn execute(
 #[cfg(test)]
 mod tests {
     use super::{
-        agent_payload, chat_payload, creation_status, datasets_from, find_dataset, prompt_payload,
-        query, terminal_creation_envelope,
+        agent_payload, chat_payload, creation_status, datasets_from, find_dataset,
+        normalize_agent_envelope, prompt_payload, query, terminal_creation_envelope,
     };
     use ayx_core::envelope::{Envelope, ErrorCode};
     use serde_json::json;
+
+    #[test]
+    fn missing_browser_session_is_capability_unavailable_and_not_retryable() {
+        let source = Envelope::err_coded(
+            ErrorCode::AuthFailed,
+            "request failed",
+            json!({"response": {"message": "No Alteryx session cookies found in the browser"}}),
+        );
+        let result = normalize_agent_envelope(source).finalize_retryable();
+        assert_eq!(result.error_code, Some(ErrorCode::CapabilityUnavailable));
+        assert_eq!(result.retryable, Some(false));
+        assert_eq!(result.data["auth_requirement"], "browser_session");
+    }
 
     #[test]
     fn dataset_query_matches_agent_studio_wire_names() {
