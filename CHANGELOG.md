@@ -4,6 +4,25 @@
 
 <!-- Keep unreleased changes above the next versioned section. -->
 
+### Fixed
+
+- Terminal output no longer shows raw escape codes (`←[1m…`) in Windows
+  consoles that do not interpret them, such as Windows PowerShell 5.1 in the
+  classic console host. The CLI turns on virtual-terminal processing where it
+  can and otherwise prints without color.
+- `ayx doctor auth` now tells a profile with no Alteryx One credential that it
+  is not signed in and to run `ayx one login` (or `--oauth-api-token`),
+  instead of reporting `guidance: -`. When a credential is stored in secure
+  storage but cannot be read, doctor now says so and asks you to check the
+  operating-system credential store, instead of reporting "Not signed in".
+
+### Changed
+
+- Test coverage only (no runtime change): end-to-end email-OTP login
+  scenarios for refused (403), expired-session (401) and server-error (503)
+  token mints in both the Wizard and legacy flows, verifying what the user is
+  told and that the mint request is never replayed.
+
 ## 0.22.3 — 2026-09-18
 
 ### Fixed

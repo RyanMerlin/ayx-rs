@@ -13,6 +13,7 @@ ui = []
 
 [dependencies]
 anyhow.workspace = true
+anstyle-query.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 clap.workspace = true
